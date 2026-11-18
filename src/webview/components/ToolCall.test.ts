@@ -2073,7 +2073,7 @@ describe('ToolCall', () => {
             'The subagent is working in the background.'
           ),
           metadata: { sessionID: 'subagent-session-1' },
-          time: { start: 1_000, end: 3_000 },
+          time: { start: background ? 1_000 : 1_001, end: 3_000 },
         },
       };
       cleanup = render(() => ToolCall({ part }), container!);
@@ -2132,6 +2132,10 @@ describe('ToolCall', () => {
       expect(container?.querySelector('.tool-invocation-retry-label')).toBeNull();
       expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('2s');
       expect(part.state.status).toBe('completed');
+      cleanup();
+      resetToolCallExpansionState();
+      cleanup = render(() => ToolCall({ part: structuredClone(part) }), container!);
+      expect(icon()?.getAttribute('aria-label')).toBe('Completed');
     }
   );
 
@@ -2185,7 +2189,12 @@ describe('ToolCall', () => {
         time: { start: 1_000, end: 2_000 },
       },
     };
-    const result = (id: string, created: number, backgroundPending?: boolean) => ({
+    const result = (
+      id: string,
+      created: number,
+      backgroundPending?: boolean,
+      state: 'error' | 'completed' = 'completed'
+    ) => ({
       info: {
         id,
         sessionID: part.sessionID,
@@ -2202,7 +2211,7 @@ describe('ToolCall', () => {
           type: 'text' as const,
           text: 'Review complete',
           synthetic: true,
-          subagentResult: { sessionID: childID, state: 'completed' as const, backgroundPending },
+          subagentResult: { sessionID: childID, state, backgroundPending },
         },
       ],
     });
@@ -2231,6 +2240,40 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-status-completed')?.getAttribute('aria-label')).toBe(
       'Completed'
     );
+
+    // Resume the same child in a different call. Its busy status and failure
+    // belong to the follow-up, even after both cards remount from history.
+    const followup: ToolPart = {
+      ...part,
+      id: 'tool-2',
+      callID: 'call-2',
+      messageID: 'message-2',
+      state: {
+        ...completedState({ sessionID: childID }),
+        metadata: { status: 'running' },
+        time: { start: 3_000, end: 3_001 },
+      },
+    };
+    const history = [
+      { info: assistantMessage(part.messageID), parts: [part] },
+      result('final-result', 2_200),
+      {
+        info: assistantMessage(followup.messageID, { time: { created: 3_000 } }),
+        parts: [followup],
+      },
+    ];
+    setState('messages', history);
+    setState('sessionStatus', childID, { type: 'busy' });
+    expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
+      'tool-status-completed'
+    );
+    setState('messages', [...history, result('followup-failed', 3_100, false, 'error')]);
+    setState('sessionStatus', childID, { type: 'idle' });
+    cleanup();
+    cleanup = render(() => [ToolCall({ part }), ToolCall({ part: followup })], container!);
+    const icons = container!.querySelectorAll('.tool-call-icon-task');
+    expect(icons[0]?.classList).toContain('tool-status-completed');
+    expect(icons[1]?.classList).toContain('tool-status-error');
   });
 
   it.each(['completed', 'error'] as const)(

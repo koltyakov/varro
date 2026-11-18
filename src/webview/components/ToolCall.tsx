@@ -39,9 +39,13 @@ import { formatCost, formatDuration, formatNumber } from '../lib/message-metrics
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import { prepareForMessageBlockRemoval, trackInlineDiffLoad } from '../lib/message-list-layout';
 import type { FileChange } from '../lib/tool-file-change';
-import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
+import {
+  getToolCallExpanded,
+  hasObservedTaskWork,
+  setToolCallExpanded,
+} from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
-import { resolveTaskSessionId } from '../lib/task-session';
+import { nextTaskLaunchStart, resolveTaskSessionId } from '../lib/task-session';
 import { observeSubagentCard } from '../lib/subagent-visibility';
 import { getToolKind, isApplyPatchTool, normalizeToolName } from '../lib/tool-normalization';
 import type { ToolKind } from '../lib/tool-normalization';
@@ -1551,7 +1555,17 @@ function GenericToolCall(props: {
       isBackgroundLaunch() && state.status === 'completed' && state.metadata.status === 'running'
     );
   };
+  const nextLaunch = createMemo(() => {
+    const childID = taskSessionId();
+    if (!childID || props.state.status !== 'completed') return Infinity;
+    return nextTaskLaunchStart(
+      props.tool,
+      childID,
+      getMessageLookup().bySessionId.get(props.tool.sessionID) ?? []
+    );
+  });
   const childWorking = createMemo(() => {
+    if (nextLaunch() !== Infinity) return false;
     if (isSessionStatusWorking(taskChildStatus())) return true;
     const sessionId = taskSessionId();
     return (
@@ -1560,13 +1574,14 @@ function GenericToolCall(props: {
       getSessionTreeIds(sessionId).some((id) => isSessionStatusWorking(appState.sessionStatus[id]))
     );
   });
-  const observedChildWork = createMemo<string | null>((previous) => {
+  const observedChildWork = createMemo(() => {
     const sessionId = taskSessionId();
     const state = props.state;
     if (!sessionId || (state.status !== 'running' && state.status !== 'completed')) return null;
-    const run = `${sessionId}:${state.time.start}`;
-    return childWorking() || previous === run ? run : null;
-  }, null);
+    const server = appState.serverStatus;
+    const run = `${server.state === 'running' ? server.url : ''}\u0000${getToolCallExpansionKey(props.tool)}\u0000${sessionId}:${state.time.start}`;
+    return hasObservedTaskWork(run, childWorking());
+  });
   const taskResultNotice = createMemo(() => {
     if (!isBackgroundLaunch() || childWorking()) return undefined;
     const state = props.state;
@@ -1576,7 +1591,12 @@ function GenericToolCall(props: {
     const entries = getMessageLookup().bySessionId.get(props.tool.sessionID) ?? [];
     for (let i = entries.length - 1; i >= 0; i--) {
       const { info, parts } = entries[i]!;
-      if (info.role !== 'user' || info.time.created < state.time.start) continue;
+      if (
+        info.role !== 'user' ||
+        info.time.created < state.time.start ||
+        info.time.created >= nextLaunch()
+      )
+        continue;
       for (const part of parts) {
         if (part.type === 'text' && part.synthetic && part.subagentResult?.sessionID === sessionId)
           return part.subagentResult;
@@ -1595,7 +1615,9 @@ function GenericToolCall(props: {
       !!notice?.backgroundPending ||
       (isBackgroundLaunch() &&
         !notice &&
-        (isNativeBackgroundLaunch() || taskChildStatus()?.type !== 'idle' || !observedChildWork()))
+        (isNativeBackgroundLaunch() ||
+          (nextLaunch() === Infinity &&
+            (taskChildStatus()?.type !== 'idle' || !observedChildWork()))))
     );
   });
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
@@ -1711,14 +1733,14 @@ function GenericToolCall(props: {
     return entries;
   });
   const taskRetryStatus = () => {
-    if (!isRunning()) return null;
+    if (!isRunning() || nextLaunch() !== Infinity) return null;
     const sessionId = taskSessionId();
     if (!sessionId) return null;
     const status = appState.sessionStatus[sessionId];
     return status?.type === 'retry' ? status : null;
   };
   const taskPermissionPending = createMemo(() => {
-    if (!isRunning()) return false;
+    if (!isRunning() || nextLaunch() !== Infinity) return false;
     const sessionId = taskSessionId();
     if (!sessionId) return false;
     const sessionIds = new Set(getSessionTreeIds(sessionId));

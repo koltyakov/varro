@@ -33,6 +33,13 @@ const toolDiffPreviewState = new Map<
   string,
   { expanded: boolean; scrollTop: number; scrollLeft: number }
 >();
+// Execution evidence is not disclosure state and survives navigation as well as row remounts.
+const observedTaskWork = new Map<string, boolean>();
+
+export function hasObservedTaskWork(key: string, working: boolean) {
+  if (working) writeEntry(observedTaskWork, key, true);
+  return readEntry(observedTaskWork, key) ?? false;
+}
 
 export function getToolCallExpanded(key: string) {
   return readEntry(toolCallExpansionState, key) ?? false;

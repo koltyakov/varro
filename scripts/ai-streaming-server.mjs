@@ -78,6 +78,7 @@ export async function createStreamingServer({
   directory,
   checkpoints = [],
   heartbeatMs = HEARTBEAT_MS,
+  onMessagePage,
 }) {
   if (!isAbsolute(directory ?? '')) throw new Error('directory must be an absolute path');
   const sourceID = capture?.session?.id;
@@ -390,6 +391,7 @@ export async function createStreamingServer({
       if (path === `${base}/todo`) return send(state.todos);
       if (path === `${base}/diff`) return send(state.diff);
       if (path === `${base}/message`) {
+        const started = Date.now();
         const limit = url.searchParams.has('limit')
           ? Number(url.searchParams.get('limit'))
           : undefined;
@@ -417,6 +419,21 @@ export async function createStreamingServer({
           response.setHeader(
             'link',
             `<${base}/message?limit=${limit}&before=${token}>; rel="next"`
+          );
+        }
+        if (onMessagePage && before !== null) {
+          // Record server-side IDs before the bootstrap proxy streams the response.
+          const messageIds = page.map(({ info }) => info.id);
+          response.once('finish', () =>
+            onMessagePage({
+              started,
+              finished: Date.now(),
+              status: response.statusCode,
+              before,
+              limit,
+              cursor: response.getHeader('x-next-cursor') ?? null,
+              messageIds,
+            })
           );
         }
         return send(page);

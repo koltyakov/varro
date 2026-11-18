@@ -1593,11 +1593,7 @@ function InlineAttachmentText(props: {
   agentParts: AgentPart[];
   onOpenImagePreview: (index: number) => void;
 }) {
-  createEffect(() => {
-    void state.serverStatus;
-    void state.editorContext.workspacePath;
-    lookupSessionReferences(props.content);
-  });
+  createEffect(() => lookupSessionReferences(props.content));
   const segments = createMemo(() =>
     buildInlineTextSegments(
       props.content,

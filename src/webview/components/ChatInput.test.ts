@@ -86,6 +86,7 @@ import {
   readChatAnnotation,
 } from '../../shared/chat-annotation';
 import { pastedTextDataUrl } from '../../shared/pasted-text';
+import { resetSessionStatusSnapshotTracking, sessionStore } from '../lib/stores/session-store';
 
 describe('composer dictation integration', () => {
   it('places the mic immediately before Attach and focuses the composer on activation', async () => {
@@ -388,6 +389,7 @@ afterEach(() => {
   setState('providerLimits', {});
   setState('mcpStatus', {});
   setState('sessionStatus', reconcile({}));
+  resetSessionStatusSnapshotTracking();
   setState('failedSessionIds', []);
   setState('sessionUsageLimits', {});
   setState('sessionPermissionModes', {});
@@ -6516,7 +6518,7 @@ describe('ChatInput', () => {
   });
 
   it.each(['snapshot', 'local', 'both'])(
-    'keeps an inactive parent queue blocked by a busy descendant in %s status',
+    'releases an inactive parent queue after a fresh snapshot settles a descendant seen in %s status',
     async (observedBy) => {
       vi.useFakeTimers();
       setState('activeSessionId', 'session-2');
@@ -6532,15 +6534,18 @@ describe('ChatInput', () => {
         { id: 'q2', sessionId: 'session-1', text: 'After the child settles' },
       ]);
       sendMessageMock.mockResolvedValue(true);
+      let resolveFirstStatus!: (
+        statuses: Awaited<ReturnType<typeof client.session.status>>
+      ) => void;
       vi.mocked(client.session.status)
-        .mockResolvedValueOnce(
-          observedBy === 'local'
-            ? { 'session-1': { type: 'idle' } }
-            : { 'session-1': { type: 'idle' }, grandchild: { type: 'busy' } }
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFirstStatus = resolve;
+            })
         )
         .mockResolvedValue({
           'session-1': { type: 'idle' },
-          grandchild: { type: 'idle' },
           'session-2': { type: 'busy' },
         });
 
@@ -6548,17 +6553,24 @@ describe('ChatInput', () => {
       await vi.advanceTimersByTimeAsync(300);
       expect(sendMessageMock).toHaveBeenCalledOnce();
       postQueuedSessionStatus('session-1', 'busy');
-      if (observedBy !== 'snapshot') setState('sessionStatus', 'grandchild', { type: 'busy' });
 
       await vi.advanceTimersByTimeAsync(5_000);
       expect(client.session.status).toHaveBeenCalledOnce();
+      if (observedBy !== 'snapshot')
+        sessionStore.setSessionStatusEntry('grandchild', { type: 'busy' });
+      resolveFirstStatus(
+        observedBy === 'local'
+          ? { 'session-1': { type: 'idle' } }
+          : { 'session-1': { type: 'idle' }, grandchild: { type: 'busy' } }
+      );
+      await flushAsyncWork();
       expect(sendMessageMock).toHaveBeenCalledOnce();
       expect(state.queuedMessages.map(({ id }) => id)).toEqual(['q2']);
       postQueuedSessionStatus('session-1', 'idle');
       await vi.advanceTimersByTimeAsync(300);
       expect(sendMessageMock).toHaveBeenCalledOnce();
 
-      setState('sessionStatus', 'grandchild', { type: 'idle' });
+      // No descendant idle event. The newer snapshot must override the old busy entry.
       await vi.advanceTimersByTimeAsync(5_000);
       expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
         'First prompt',
@@ -6652,6 +6664,44 @@ describe('ChatInput', () => {
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
       'First prompt',
       'Exactly once',
+    ]);
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('does not release an inactive queue when an older idle snapshot follows a retry event', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-2');
+    setState('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+      { id: 'q2', sessionId: 'session-1', text: 'After the retry' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+    let resolveStatus!: (statuses: Record<string, { type: 'idle' }>) => void;
+    vi.mocked(client.session.status).mockImplementationOnce(
+      () => new Promise((resolve) => (resolveStatus = resolve))
+    );
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    postQueuedSessionStatus('session-1', 'busy');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(client.session.status).toHaveBeenCalledOnce();
+
+    const retry = { type: 'retry' as const, attempt: 1, message: 'Retrying', next: 8_000 };
+    setState('sessionStatus', 'session-1', retry);
+    emitServerEvent('session.status', { sessionID: 'session-1', status: retry });
+    resolveStatus({ 'session-1': { type: 'idle' } });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
+    expect(state.queuedMessages.map(({ id }) => id)).toEqual(['q2']);
+
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    emitServerEvent('session.status', { sessionID: 'session-1', status: { type: 'idle' } });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'First prompt',
+      'After the retry',
     ]);
     expect(state.queuedMessages).toEqual([]);
   });

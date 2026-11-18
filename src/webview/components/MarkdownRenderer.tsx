@@ -2383,12 +2383,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     postMessage({ type: 'vscode/mermaid-preview', payload: { open: false } });
   }
 
-  createEffect(() => {
-    const content = props.content || '';
-    void state.serverStatus;
-    void state.editorContext.workspacePath;
-    lookupSessionReferences(content);
-  });
+  createEffect(() => lookupSessionReferences(props.content || ''));
 
   let pendingContent: string | null = null;
   let rafId: number | null = null;

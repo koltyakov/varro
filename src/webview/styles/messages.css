@@ -2383,14 +2383,33 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   text-decoration-skip-ink: none;
 }
 
-.external-link-icon {
+.external-link-icon,
+.file-path-icon,
+.session-reference-icon {
   display: inline-block;
-  width: 12px;
-  height: 12px;
+  width: 0.875em;
+  height: 0.875em;
   margin-right: 2px;
-  vertical-align: -2px;
-  color: var(--color-vscode-muted);
+  /* An integer offset keeps the image and the text baseline snapping together. */
+  vertical-align: round(nearest, -0.11em, 1px);
   object-fit: contain;
+}
+
+.file-path-icon.low-ink-icon {
+  /* Low-drawn ink lands between whole pixels at 1x, so either integer offset reads a pixel off.
+     The box stays on the baseline to snap with the text; the transform moves only the paint. */
+  vertical-align: baseline;
+  transform: translateY(calc((1 - var(--file-icon-ink-bottom)) * 0.875em));
+}
+
+.external-link-icon,
+.session-reference-icon {
+  color: var(--color-vscode-muted);
+}
+
+.rendered-markdown :is(.file-path-icon, .session-reference-icon, .external-link-icon) {
+  /* The icon artwork and the first glyph already leave some space. */
+  margin-right: 0.5px;
 }
 
 .rendered-markdown a.file-path-link,
@@ -2438,15 +2457,6 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   outline: none;
 }
 
-.file-path-icon {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 2px;
-  vertical-align: -2px;
-  object-fit: contain;
-}
-
 .rendered-markdown a.session-reference-link {
   display: inline;
   overflow-wrap: normal;
@@ -2456,16 +2466,6 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
 .session-reference-folder {
   color: var(--color-vscode-muted);
   font-size: 0.9em;
-}
-
-.session-reference-icon {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 2px;
-  vertical-align: -2px;
-  color: var(--color-vscode-muted);
-  object-fit: contain;
 }
 
 .rendered-markdown img {

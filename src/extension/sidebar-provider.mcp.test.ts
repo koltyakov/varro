@@ -111,6 +111,44 @@ describe('MCP defaults configuration', () => {
     expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
   });
 
+  it('does not write MCP defaults while another location has a running session', async () => {
+    const path = '/repo/opencode.json';
+    const contents = '{"mcp":{"servers":{"docs":{"type":"local","command":["docs"]}}}}';
+    const files = new Map([[path, contents]]);
+    mockConfigFiles(files);
+    const server = createServer({ apiVersion: 2 });
+    server.readRestartBlockers.mockResolvedValueOnce({
+      totalSessionCount: 1,
+      directories: [{ directory: '/other', sessionCount: 1 }],
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const change = {
+      method: 'POST',
+      path: endpoint,
+      body: {
+        name: 'docs',
+        scope: 'project',
+        enabled: false,
+      },
+    };
+
+    await provider.handleMessage({ type: 'api/request', payload: { id: 91, ...change } });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 91, error: expect.stringContaining('running sessions finish') },
+    });
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+    expect(files.get(path)).toBe(contents);
+
+    await provider.handleMessage({ type: 'api/request', payload: { id: 92, ...change } });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 92, data: expect.objectContaining({ effective: { docs: false } }) },
+    });
+    expect(vscodeMock.workspace.fs.writeFile).toHaveBeenCalledOnce();
+  });
+
   it('persists global on-demand mode while preserving comments and project overrides', async () => {
     const globalPath = getOpenCodeConfigPaths()[1]!;
     const files = new Map([

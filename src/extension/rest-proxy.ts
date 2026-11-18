@@ -321,7 +321,10 @@ export interface RestProxyCallbacks {
     info: Record<string, unknown>,
     parts: Record<string, unknown>[]
   ): Record<string, unknown>[];
-  server: Pick<OpenCodeServer, 'apiVersion' | 'getWorkspaceCwd' | 'request'> &
+  server: Pick<
+    OpenCodeServer,
+    'apiVersion' | 'getWorkspaceCwd' | 'request' | 'readRestartBlockers'
+  > &
     Partial<Pick<OpenCodeServer, 'isAttachOnly' | 'url'>>;
   contextProvider: Pick<
     ContextProvider,
@@ -336,6 +339,8 @@ export interface RestProxyCallbacks {
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<
     SessionStateManager,
+    | 'busy'
+    | 'pending'
     | 'handleServerEvent'
     | 'getSessionWorkspaceMatch'
     | 'isSessionInWorkspace'

@@ -883,7 +883,7 @@ describe('SessionStateManager notifications', () => {
   });
 
   it.each(['assistant completion', 'terminal step end', 'server idle'])(
-    'accepts the first busy status after %s without a new prompt',
+    'updates busy after %s without announcing the same turn twice',
     (completionKind) => {
       const manager = createManager();
       manager.handleServerEvent({
@@ -937,6 +937,17 @@ describe('SessionStateManager notifications', () => {
       });
 
       expect(manager.completed.has('session-1')).toBe(true);
+      expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(1);
+
+      manager.handleServerEvent({
+        type: 'session.next.prompt.admitted',
+        properties: { sessionID: 'session-1', messageID: 'next-user', timestamp: 3 },
+      });
+      markBusy(manager, 'session-1');
+      manager.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      });
       expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(2);
     }
   );

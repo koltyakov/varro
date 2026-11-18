@@ -39,10 +39,42 @@ export function glyphContinuity(image, rect, reference, tolerance = 2) {
         }).map(([x, y]) => `${x},${y}`)
       );
       const matched = reference.filter(([x, y]) => points.has(`${x},${y}`)).length;
-      best = Math.max(best, matched / reference.length);
+      // Intersection over union penalizes extra bright pixels covering the glyph gaps.
+      best = Math.max(best, matched / (reference.length + points.size - matched));
     }
   }
   return best;
+}
+
+export function firstAppliedPage(samples, pages, initial) {
+  let previous = initial;
+  for (const sample of samples) {
+    if (sample.epoch <= initial.epoch) continue;
+    const id = sample.firstLoadedMessageId;
+    if (id && previous.firstLoadedMessageId && id !== previous.firstLoadedMessageId) {
+      // Mounted rows are insufficient: scrolling can remount an already-applied page.
+      const page = pages.find(
+        (entry) =>
+          entry.before &&
+          entry.status === 200 &&
+          entry.finished <= sample.epoch &&
+          entry.messageIds?.includes(id) &&
+          !entry.messageIds.includes(previous.firstLoadedMessageId)
+      );
+      if (page) {
+        return {
+          epoch: sample.epoch,
+          referenceDeadline: previous.epoch,
+          finished: page.finished,
+          before: page.before,
+          row: id,
+          prefetched: page.finished < initial.epoch,
+        };
+      }
+    }
+    previous = sample;
+  }
+  return null;
 }
 
 export function topTargeting(action, samples, pages, firstMessageId) {

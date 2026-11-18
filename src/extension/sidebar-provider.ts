@@ -836,6 +836,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       get isAttachOnly() {
         return server.isAttachOnly;
       },
+      readRestartBlockers: (signal?: AbortSignal) => server.readRestartBlockers(signal),
       getWorkspaceCwd: () =>
         endpointRef.endpoint
           ? (endpointRef.endpoint.workspacePath ?? undefined)
@@ -2411,6 +2412,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       sessionId = event.properties?.sessionID;
       const statusType = event.properties?.status?.type;
       if (statusType === 'busy' || statusType === 'idle') status = statusType;
+      else if (statusType === 'retry') status = 'busy';
     } else if (event.type === 'session.idle') {
       sessionId = event.properties?.sessionID;
       status = 'idle';

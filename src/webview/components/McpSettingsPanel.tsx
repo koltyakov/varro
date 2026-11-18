@@ -16,6 +16,7 @@ import { isBoolean } from '../lib/runtime-values';
 import {
   getAvailableMcpNames,
   getEffectiveComposerSessionId,
+  isSessionStatusWorking,
   requestComposerFocus,
   setMcpDefaults,
   setShowMcpSettings,
@@ -71,8 +72,13 @@ export function McpSettingsPanel() {
   const activeScope = () => (state.mcpDefaults?.editable ? scope() : 'project');
   const canEditConfig = () =>
     ready() && !loading() && !saving() && state.mcpDefaults?.editable === true;
+  const sessionsWorking = createMemo(() =>
+    Object.values(state.sessionStatus).some(isSessionStatusWorking)
+  );
   const canChangeDefault = (name: string, target: McpScope) =>
-    canEditConfig() && (target !== 'global' || isBoolean(state.mcpDefaults?.global[name]));
+    canEditConfig() &&
+    !sessionsWorking() &&
+    (target !== 'global' || isBoolean(state.mcpDefaults?.global[name]));
 
   const configPreview = createMemo(() => {
     if (!configJson().trim()) return null;
@@ -313,6 +319,11 @@ export function McpSettingsPanel() {
               </p>
             </Show>
             <Show when={state.mcpDefaults?.editable}>
+              <Show when={sessionsWorking()}>
+                <p class="mcp-settings-notice" role="status">
+                  You can change MCP defaults when running sessions finish.
+                </p>
+              </Show>
               <div
                 ref={(element) => {
                   tabList = element;

@@ -979,7 +979,7 @@ async function recoverLaunch(workspace, output) {
   });
 }
 
-export async function runCapture(options) {
+export async function runCapture(options, { onMessagePage } = {}) {
   const output = path.resolve(options.output);
   await mkdir(path.dirname(output), { recursive: true });
   await mkdir(output, { mode: 0o700 });
@@ -1042,6 +1042,7 @@ export async function runCapture(options) {
       timeline,
       directory: workspace,
       checkpoints: options.checkpoints,
+      onMessagePage,
     });
     metadata.checkpoints = options.checkpoints ?? [];
     metadata.timingMode = metadata.checkpoints.length ? 'checkpointed' : 'continuous';

@@ -605,6 +605,29 @@ describe('managed runtime Ask recovery', () => {
     }
   );
 
+  it('attaches to the existing server when the surviving runtime owner file cannot be read', async () => {
+    const { server, state, needed, wire, idle, claim, stop, launch } = fixture();
+    state._status = { state: 'stopped' };
+    vi.mocked(state.processManager.refreshStartupRegistration).mockResolvedValue(true);
+    const stream = vi.spyOn(state, 'startEventStream').mockResolvedValue(undefined);
+    needed.mockRejectedValueOnce(
+      Object.assign(new Error('EACCES: cannot read runtime owner.json'), { code: 'EACCES' })
+    );
+
+    try {
+      await expect(server.start()).resolves.toBe(server.url);
+      expect(server.status).toMatchObject({ state: 'running', url: server.url });
+      expect(stream).toHaveBeenCalledOnce();
+      expect(wire).not.toHaveBeenCalled();
+      expect(idle).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
+      expect(launch).not.toHaveBeenCalled();
+    } finally {
+      await server.disconnect();
+    }
+  });
+
   it('propagates caller cancellation during optional Ask catalog recovery', async () => {
     const { state, wire, claim, stop, launch } = fixture();
     const catalog = deferred<Array<{ name: string }>>();

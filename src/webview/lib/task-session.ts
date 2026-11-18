@@ -33,6 +33,37 @@ function getTaskSessionIdFromInput(input: UnknownRecord | undefined) {
   return isString(input?.task_id) ? input.task_id : null;
 }
 
+// A resumed child keeps its session ID. Only the newest call owns its live
+// status, and each call owns notices up to the next launch for that child.
+export function nextTaskLaunchStart(
+  tool: ToolPart,
+  childID: string,
+  entries: readonly MessageEntry[]
+) {
+  if (tool.state.status === 'pending') return Infinity;
+  const start = tool.state.time.start;
+  let passedTool = false;
+  let end = Infinity;
+  for (const entry of entries) {
+    if (entry.info.role !== 'assistant') continue;
+    for (const part of entry.parts) {
+      if (part.type !== 'tool' || getToolKind(part.tool) !== 'task') continue;
+      if (part.messageID === tool.messageID && part.callID === tool.callID) {
+        passedTool = true;
+        continue;
+      }
+      if (part.state.status === 'pending') continue;
+      const time = part.state.time.start;
+      if (time < start || (time === start && !passedTool) || time >= end) continue;
+      const id =
+        getTaskSessionIdFromMetadata(part.state.metadata) ??
+        getTaskSessionIdFromInput(part.state.input);
+      if (id === childID) end = time;
+    }
+  }
+  return end;
+}
+
 function normalizeTaskMatchLabel(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }

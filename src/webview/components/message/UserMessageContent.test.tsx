@@ -1507,6 +1507,36 @@ describe('UserMessageContent', () => {
       expect(warn).not.toHaveBeenCalled();
     });
 
+    it('updates mounted links when the referenced project joins or leaves the workspace', async () => {
+      const { lookup, open } = installSessionLookups();
+      lookup
+        .mockResolvedValueOnce(external)
+        .mockResolvedValueOnce({ ...external, external: false });
+      setAppState('editorContext', 'workspacePath', '/repo');
+      const currentFolder = { name: 'repo', path: '/repo' };
+      setAppState('editorContext', 'workspaceFolders', [currentFolder]);
+      renderUserContent([textPart('text-1', 'Check ses_external123 too')]);
+      await waitForExternalLink();
+
+      setAppState('editorContext', 'workspaceFolders', [
+        currentFolder,
+        { name: 'other project', path: external.directory },
+      ]);
+      const link = () => container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
+      await vi.waitFor(() => expect(link()?.title).toBe(`Open session ${external.id}`));
+      link()?.click();
+      expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith(external.id, {
+        directory: external.directory,
+      });
+      expect(open).not.toHaveBeenCalled();
+
+      setAppState('editorContext', 'workspaceFolders', [currentFolder]);
+      await waitForExternalLink();
+      link()?.click();
+      expect(open).toHaveBeenCalledExactlyOnceWith(external.id);
+      expect(lookup).toHaveBeenCalledTimes(3);
+    });
+
     it('keeps unknown IDs as plain text beside a resolved reference', async () => {
       const { lookup } = installSessionLookups();
       renderUserContent([

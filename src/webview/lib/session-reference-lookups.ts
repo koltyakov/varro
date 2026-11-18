@@ -2,6 +2,7 @@ import { untrack } from 'solid-js';
 import { produce, reconcile } from 'solid-js/store';
 import type { SessionLookup } from '../../shared/protocol';
 import { isMissingWorkspaceDirectoryMessage } from '../../shared/workspace-directory-error';
+import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { client } from './client';
 import { SESSION_ID_RE } from './session-reference';
 import { setState, state } from './state';
@@ -19,26 +20,53 @@ let active = 0;
 let scope = '';
 let generation = 0;
 
+function getLookupScope(): string | null {
+  const server = state.serverStatus;
+  if (server.state !== 'running') return null;
+  const roots = (state.editorContext.workspaceFolders ?? []).map((folder) =>
+    normalizeWorkspaceIdentity(folder.path)
+  );
+  return JSON.stringify([
+    server.url,
+    normalizeWorkspaceIdentity(state.editorContext.workspacePath),
+    [...new Set(roots.filter((root) => root !== null))].toSorted(),
+  ]);
+}
+
+function syncLookupScope(nextScope: string | null) {
+  if (scope === (nextScope ?? '')) return;
+  scope = nextScope ?? '';
+  generation += 1;
+  pending.clear();
+  settled.clear();
+  setState('sessionLookups', reconcile({}));
+}
+
 export function lookupSessionReferences(content: string): void {
+  const matches = content.matchAll(SESSION_ID_RE);
+  const first = matches.next();
+  if (first.done) return;
+  const nextScope = getLookupScope();
   untrack(() => {
-    if (state.serverStatus.state !== 'running') return;
-    for (const match of content.matchAll(SESSION_ID_RE)) {
-      void lookupSessionReference(match[1] || match[2]!);
+    syncLookupScope(nextScope);
+    if (nextScope === null) return;
+    void lookupSessionReferenceInScope(first.value[1] || first.value[2]!, nextScope);
+    for (const match of matches) {
+      void lookupSessionReferenceInScope(match[1] || match[2]!, nextScope);
     }
   });
 }
 
 export function lookupSessionReference(id: string): Promise<SessionLookup | null> {
-  const server = state.serverStatus;
-  if (server.state !== 'running') return Promise.resolve(null);
-  const nextScope = `${server.url}\u0000${state.editorContext.workspacePath ?? ''}`;
-  if (scope !== nextScope) {
-    scope = nextScope;
-    generation += 1;
-    pending.clear();
-    settled.clear();
-    setState('sessionLookups', reconcile({}));
-  }
+  const nextScope = getLookupScope();
+  syncLookupScope(nextScope);
+  return nextScope === null ? Promise.resolve(null) : lookupSessionReferenceInScope(id, nextScope);
+}
+
+function lookupSessionReferenceInScope(
+  id: string,
+  nextScope: string
+): Promise<SessionLookup | null> {
   const loaded = state.sessions.find((session) => session.id === id);
   if (loaded) return Promise.resolve({ ...loaded, external: false });
   const existing = pending.get(id);
@@ -52,10 +80,7 @@ export function lookupSessionReference(id: string): Promise<SessionLookup | null
   // Bound queued work as well as cached metadata for arbitrary pasted transcripts.
   if (pending.size >= CACHE_LIMIT) return Promise.resolve(null);
   const currentGeneration = generation;
-  const isCurrent = () =>
-    generation === currentGeneration &&
-    state.serverStatus.state === 'running' &&
-    `${state.serverStatus.url}\u0000${state.editorContext.workspacePath ?? ''}` === nextScope;
+  const isCurrent = () => generation === currentGeneration && getLookupScope() === nextScope;
   const request = (async () => {
     // Let the pending map own the request even if a transport throws synchronously.
     await Promise.resolve();

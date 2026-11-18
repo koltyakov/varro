@@ -23,11 +23,16 @@ contain private text; do not commit these artifacts.
 - **Cold body:** keep native workbench compositor frames from the initial grab through
   movement, the one-second destination hold, and another second after release. A verified
   bright baseline precedes the blank-body oracle. The body crop excludes scrollbar,
-  sticky top chrome, and composer. Every blank frame stays in the result.
+  sticky top chrome, and composer. Both solid bright and solid dark frames count as blank.
+  Every blank frame stays in the result.
 - **Retained text:** learn a glyph mask only from a painted paragraph before prepend.
   Compare the same message and exact paragraph text at stable, fully visible bounds, with at most
   2 CSS px displacement. Correct DOM text does not clear missing painted glyphs.
-  Record DOM replacements but never learn a replacement glyph mask after prepend.
+  The mask comparison penalizes extra bright pixels as well as missing glyphs.
+  Record message IDs at the replay server, before the bootstrap proxy streams the page.
+  Mark prepend when the oldest loaded message first changes to an ID from a completed page,
+  even if that page was fetched before recording or the banner stays visible.
+  Learn references only before the last sample that still showed the old loaded boundary.
   Missing pre-prepend references or no qualifying post-prepend frames cannot establish a pass.
 - **Top targeting:** distinguish reaching the currently loaded top from complete history.
   Use actual replay-server pagination response headers, cursor exhaustion, and the first

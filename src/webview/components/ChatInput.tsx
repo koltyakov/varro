@@ -262,7 +262,7 @@ import {
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
 import { BackgroundServices } from './chat-input/BackgroundServices';
-import { sessionStore } from '../lib/stores/session-store';
+import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
 import { ProviderQuotaWarning } from './chat-input/ProviderQuotaWarning';
@@ -482,7 +482,6 @@ type QueuedSessionDispatchPhase = {
   phase: 'dispatching' | 'admitted' | 'running';
   admittedAt?: number;
   completedBeforeAdmission?: boolean;
-  snapshotTreeWorking?: boolean;
   statusCheckAfter?: number;
   statusCheckInFlight?: boolean;
   statusCheckOwner?: symbol;
@@ -905,7 +904,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [workspaceSendPending, setWorkspaceSendPending] = createSignal(false);
   const authoritativeQueuedSessionStatuses = new Map<
     string,
-    { status: 'busy' | 'idle'; observedAt: number; revision: number }
+    { status: 'busy' | 'idle'; observedAt: number; revision: number; snapshotStartedAt?: number }
   >();
   let authoritativeQueuedStatusRevision = 0;
   const queuedStatusReconciliationOwner = Symbol();
@@ -4009,10 +4008,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const getAuthoritativeQueuedSessionStatus = (sessionId: string) => {
     const entry = authoritativeQueuedSessionStatuses.get(sessionId);
     if (!entry) return undefined;
-    if (Date.now() - entry.observedAt <= AUTHORITATIVE_QUEUED_STATUS_MAX_AGE_MS) {
+    if (
+      Date.now() - entry.observedAt <= AUTHORITATIVE_QUEUED_STATUS_MAX_AGE_MS &&
+      (entry.snapshotStartedAt === undefined ||
+        !sessionStore.isSessionStatusSnapshotStale(sessionId, entry.snapshotStartedAt))
+    ) {
       return entry.status;
     }
-    authoritativeQueuedSessionStatuses.delete(sessionId);
     return undefined;
   };
   const getQueuedSessionStatusType = (sessionId: string) =>
@@ -4020,20 +4022,35 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       ? (getAuthoritativeQueuedSessionStatus(sessionId) ?? state.sessionStatus[sessionId]?.type)
       : state.sessionStatus[sessionId]?.type;
   const isOtherQueuedTreeSessionWorking = (sessionId: string) =>
-    getSessionTreeIdsForSession(sessionId).some(
-      (id) => id !== sessionId && isSessionStatusWorking(state.sessionStatus[id])
-    );
+    getSessionTreeIdsForSession(sessionId).some((id) => {
+      if (id === sessionId) return false;
+      const reconciled = getAuthoritativeQueuedSessionStatus(id);
+      return (
+        sessionStore.isProviderRetryScheduled(id) ||
+        (reconciled === undefined
+          ? isSessionStatusWorking(state.sessionStatus[id])
+          : reconciled === 'busy')
+      );
+    });
   const isQueuedSessionTreeWorking = (sessionId: string) => {
     const status = getQueuedSessionStatusType(sessionId);
-    return status === 'busy' || status === 'retry' || isOtherQueuedTreeSessionWorking(sessionId);
+    return (
+      status === 'busy' ||
+      status === 'retry' ||
+      sessionStore.isProviderRetryScheduled(sessionId) ||
+      isOtherQueuedTreeSessionWorking(sessionId)
+    );
   };
 
   createEffect(() => {
     const queuedStatusSessionIds = new Set(
       state.queuedMessages.filter(ownsQueuedMessage).map((message) => message.sessionId)
     );
+    const queuedTreeSessionIds = new Set(
+      [...queuedStatusSessionIds].flatMap(getSessionTreeIdsForSession)
+    );
     for (const sessionId of authoritativeQueuedSessionStatuses.keys()) {
-      if (!queuedStatusSessionIds.has(sessionId)) {
+      if (!queuedTreeSessionIds.has(sessionId)) {
         authoritativeQueuedSessionStatuses.delete(sessionId);
       }
     }
@@ -4124,13 +4141,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const observeQueuedSessionStatus = (
     sessionId: string,
     status: 'busy' | 'idle',
-    source: 'event' | 'reconciliation' = 'event'
+    snapshotStartedAt?: number
   ) => {
-    if (state.queuedMessages.some((message) => message.sessionId === sessionId)) {
+    if (
+      state.queuedMessages.some(
+        (message) =>
+          ownsQueuedMessage(message) &&
+          (message.sessionId === sessionId ||
+            getSessionTreeIdsForSession(message.sessionId).includes(sessionId))
+      )
+    ) {
       authoritativeQueuedSessionStatuses.set(sessionId, {
         status,
         observedAt: Date.now(),
         revision: ++authoritativeQueuedStatusRevision,
+        snapshotStartedAt,
       });
     } else {
       authoritativeQueuedSessionStatuses.delete(sessionId);
@@ -4144,7 +4169,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       scheduleQueuedStatusReconciliation();
       return false;
     }
-    if (dispatch.snapshotTreeWorking || isOtherQueuedTreeSessionWorking(sessionId)) {
+    if (
+      sessionStore.isProviderRetryScheduled(sessionId) ||
+      isOtherQueuedTreeSessionWorking(sessionId)
+    ) {
       scheduleQueuedStatusReconciliation();
       return false;
     }
@@ -4152,7 +4180,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (dispatch.phase === 'running') dispatch.completedBeforeAdmission = true;
       return false;
     }
-    if (dispatch.phase !== 'running' && source !== 'reconciliation') {
+    if (dispatch.phase !== 'running' && snapshotStartedAt === undefined) {
       scheduleQueuedStatusReconciliation();
       return false;
     }
@@ -4211,11 +4239,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   ) {
     if (queueDispatchDisposed || queuedSessionDispatchPhases.get(sessionId) !== dispatch) return;
     if (dispatch.admittedAt === undefined) return;
-    const statusRevision = authoritativeQueuedSessionStatuses.get(sessionId)?.revision ?? 0;
+    const statusRevision = authoritativeQueuedStatusRevision;
+    const snapshotStartedAt = captureSessionStatusSnapshotTime();
     dispatch.statusCheckInFlight = true;
     dispatch.statusCheckOwner = queuedStatusReconciliationOwner;
     try {
-      const statuses = await client.session.status();
+      const statuses = await client.session.status({ fresh: true });
       if (
         queueDispatchDisposed ||
         queuedSessionDispatchPhases.get(sessionId) !== dispatch ||
@@ -4224,26 +4253,42 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         return;
       }
       const latestStatus = authoritativeQueuedSessionStatuses.get(sessionId);
-      if (latestStatus && latestStatus.revision > statusRevision) {
-        dispatch.statusCheckInFlight = false;
-        dispatch.statusCheckOwner = undefined;
-        return;
-      }
-      const tree = getSessionTreeIdsForSession(sessionId);
-      dispatch.snapshotTreeWorking = tree.some(
-        (id) => id !== sessionId && isSessionStatusWorking(statuses[id])
-      );
       if (
-        isSessionStatusWorking(statuses[sessionId]) ||
-        dispatch.snapshotTreeWorking ||
-        isOtherQueuedTreeSessionWorking(sessionId)
+        (latestStatus && latestStatus.revision > statusRevision) ||
+        sessionStore.isSessionStatusSnapshotStale(sessionId, snapshotStartedAt)
       ) {
         dispatch.statusCheckInFlight = false;
         dispatch.statusCheckOwner = undefined;
-        observeQueuedSessionStatus(sessionId, 'busy', 'reconciliation');
+        dispatch.statusCheckAfter = Date.now() + QUEUED_RUNNING_STATUS_RECONCILIATION_DELAY_MS;
         return;
       }
-      if (observeQueuedSessionStatus(sessionId, 'idle', 'reconciliation')) {
+      const tree = getSessionTreeIdsForSession(sessionId);
+      for (const id of tree) {
+        if (
+          id === sessionId ||
+          (authoritativeQueuedSessionStatuses.get(id)?.revision ?? 0) > statusRevision ||
+          sessionStore.isSessionStatusSnapshotStale(id, snapshotStartedAt)
+        )
+          continue;
+        // Reconcile only this queue's tree. An idle session can be absent from the snapshot.
+        authoritativeQueuedSessionStatuses.set(id, {
+          status: isSessionStatusWorking(statuses[id]) ? 'busy' : 'idle',
+          observedAt: Date.now(),
+          revision: ++authoritativeQueuedStatusRevision,
+          snapshotStartedAt,
+        });
+      }
+      if (
+        isSessionStatusWorking(statuses[sessionId]) ||
+        isOtherQueuedTreeSessionWorking(sessionId) ||
+        sessionStore.isProviderRetryScheduled(sessionId)
+      ) {
+        dispatch.statusCheckInFlight = false;
+        dispatch.statusCheckOwner = undefined;
+        observeQueuedSessionStatus(sessionId, 'busy', snapshotStartedAt);
+        return;
+      }
+      if (observeQueuedSessionStatus(sessionId, 'idle', snapshotStartedAt)) {
         dispatchAfterAuthoritativeIdle(sessionId);
       }
     } catch {
@@ -4265,7 +4310,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const properties = event.properties;
       if (!isString(properties?.sessionID)) return;
       const status = properties.status?.type;
-      if (status === 'busy') {
+      if (status === 'busy' || status === 'retry') {
         observeQueuedSessionStatus(properties.sessionID, 'busy');
         return;
       }

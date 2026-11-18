@@ -81,6 +81,7 @@ export function installNativePaintProbe() {
       markers,
       held: list.hasAttribute('data-pointer-scroll-owned'),
       banner: !!list.querySelector('.message-history-banner'),
+      firstLoadedMessageId: list.dataset.firstLoadedMessageId ?? null,
       previews: list.querySelectorAll('.file-change-inline-diffs').length,
       diffLines: list.querySelectorAll('.diff-view-lines').length,
     };

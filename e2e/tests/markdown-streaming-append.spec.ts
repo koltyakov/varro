@@ -540,6 +540,179 @@ test('hides streamed inline commands until the closing backtick arrives', async 
   await expect(markdown.locator('.streaming-markdown-pending')).toHaveCount(0);
 });
 
+const INLINE_ICON_TABLE = [
+  '| Screenshot | What the trace shows |',
+  '|---|---|',
+  '| [00002](./artifacts/00002.png), +5.6 ms | The compositor jumped 1,448 CSS px upward and submitted a frame with one missing tile at +2.8 ms. The main-thread `scroll` handler did not start until +14.1 ms. It ran for 100.6 ms, but text was already visible again at +18.3 ms. The slow handler delayed fresh paint; it did not trigger the first blank. |',
+  '| [00005](./artifacts/00005.png) and [00006](./artifacts/00006.png), +133.8 and +140.9 ms | A 1,053 px downward jump was followed by missing-tile draws at +127.7 ms and +138.9 ms. The webview painted and activated a new layer tree by +144.0 ms. The text was back in [00007](./artifacts/00007.png) at +150.2 ms. |',
+].join('\n');
+
+test('aligns visible link icons in tables and prose', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 458, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter&theme=dark');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  await completeResponse(
+    page,
+    [
+      'In the [primary compositor trace](./artifacts/compositor-trace.json), times are relative to the first drag move.',
+      '',
+      INLINE_ICON_TABLE,
+      '',
+      'The [DOM samples](./artifacts/dom-evidence.json) show that mounted rows covered both destinations. See the [trace docs](https://example.test/docs).',
+    ].join('\n')
+  );
+  const leading = markdown.locator('.link-leading-content');
+  await expect(leading).toHaveCount(7);
+  await page.evaluate(() => document.fonts.ready);
+
+  for (const size of [13.5, 18]) {
+    await markdown.evaluate((element, fontSize) => {
+      if (!(element instanceof HTMLElement)) throw new Error('Missing Markdown element');
+      element.style.fontSize = `${fontSize}px`;
+    }, size);
+    const offsets = await leading.evaluateAll(async (wrappers) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 96;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Missing icon measurement context');
+      const measurements = [];
+      for (const wrapper of wrappers) {
+        const icon = wrapper.querySelector('img');
+        const label = wrapper.querySelector('.link-leading-label');
+        if (!icon || !label) throw new Error('Missing link icon or label');
+
+        await icon.decode();
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(icon, 0, 0, canvas.width, canvas.height);
+        const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+        const lastPixel = data.findLastIndex((alpha, index) => index % 4 === 3 && alpha >= 128);
+        if (lastPixel < 0) throw new Error('Link icon has no visible pixels');
+        const inkBottom = Math.floor(lastPixel / (canvas.width * 4)) + 1;
+        // A zero-size inline block sits on the label's first baseline.
+        const marker = document.createElement('span');
+        marker.style.cssText = 'display: inline-block; width: 0; height: 0;';
+        label.prepend(marker);
+        const baseline = marker.getBoundingClientRect().top;
+        const iconBox = icon.getBoundingClientRect();
+        marker.remove();
+        measurements.push({
+          offset: iconBox.top + (iconBox.height * inkBottom) / canvas.height - baseline,
+          label: label.textContent,
+          context: wrapper.closest('td') ? 'table cell' : 'prose',
+        });
+      }
+      return measurements;
+    });
+    await markdown.screenshot({ path: testInfo.outputPath(`inline-icons-${size}px.png`) });
+    for (const { offset, label, context } of offsets) {
+      expect(
+        Math.abs(offset),
+        `${label} in ${context} at ${size}px (offset ${offset}px)`
+      ).toBeLessThanOrEqual(1.25);
+      if (context === 'table cell') {
+        // Screenshot icons draw low in their box. At 1x, a whole-pixel miss shows as a full row.
+        expect(
+          Math.abs(offset),
+          `${label} in ${context} at ${size}px (offset ${offset}px)`
+        ).toBeLessThanOrEqual(0.1);
+      }
+    }
+  }
+});
+
+test('paints screenshot icons close to the digits and at a consistent height', async ({
+  browser,
+  baseURL,
+}, testInfo) => {
+  // Retina rasterization exposes half-pixel dips that a 1x screenshot rounds away.
+  const browserContext = await browser.newContext({
+    baseURL,
+    deviceScaleFactor: 2,
+    viewport: { width: 458, height: 800 },
+  });
+  const page = await browserContext.newPage();
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter&theme=dark');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  await completeResponse(page, INLINE_ICON_TABLE);
+  const icons = markdown.locator('td img.file-path-icon');
+  await expect(icons).toHaveCount(4);
+  await icons.evaluateAll((images: HTMLImageElement[]) =>
+    Promise.all(images.map((image) => image.decode()))
+  );
+  await page.evaluate(() => document.fonts.ready);
+  await markdown.scrollIntoViewIfNeeded();
+
+  const samples = [];
+  // Different line positions exercise the raster rounding that DOM rectangles don't capture.
+  for (const padding of [0, 0.25, 0.5, 0.75]) {
+    await markdown.evaluate((element, top) => {
+      if (!(element instanceof HTMLElement)) throw new Error('Missing Markdown element');
+      element.style.paddingTop = `${top}px`;
+    }, padding);
+    const screenshot = await page.screenshot({
+      path: testInfo.outputPath(`inline-icon-raster-${padding}.png`),
+      scale: 'device',
+    });
+    const offsets = await markdown.evaluate(async (element, pixels) => {
+      const screenshotImage = new Image();
+      screenshotImage.src = `data:image/png;base64,${pixels}`;
+      await screenshotImage.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = screenshotImage.width;
+      canvas.height = screenshotImage.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Missing screenshot canvas');
+      context.drawImage(screenshotImage, 0, 0);
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const scale = window.devicePixelRatio;
+      const inkBounds = (box: DOMRect) => {
+        let left = Infinity;
+        let right = -Infinity;
+        let bottom = -Infinity;
+        for (let y = Math.floor(box.top * scale); y < Math.ceil(box.bottom * scale); y++) {
+          for (let x = Math.floor(box.left * scale); x < Math.ceil(box.right * scale); x++) {
+            // The screenshot uses the dark theme; both the blue label and teal icon have
+            // a brighter green channel than the background or border.
+            if ((data[(y * canvas.width + x) * 4 + 1] ?? 0) > 100) {
+              left = Math.min(left, x);
+              right = Math.max(right, x);
+              bottom = Math.max(bottom, y);
+            }
+          }
+        }
+        if (left === Infinity) throw new Error(`No visible pixels in ${JSON.stringify(box)}`);
+        return { left, right, bottom };
+      };
+      return Array.from(element.querySelectorAll('td .link-leading-content'), (wrapper) => {
+        const icon = wrapper.querySelector('img');
+        const label = wrapper.querySelector('.link-leading-label')?.firstChild;
+        if (!icon || !(label instanceof Text)) throw new Error('Missing icon or label');
+        const digit = document.createRange();
+        digit.setStart(label, 0);
+        digit.setEnd(label, 1);
+        const iconInk = inkBounds(icon.getBoundingClientRect());
+        const digitInk = inkBounds(digit.getBoundingClientRect());
+        return {
+          label: label.data,
+          offset: iconInk.bottom - digitInk.bottom,
+          gap: (digitInk.left - iconInk.right - 1) / scale,
+        };
+      });
+    }, screenshot.toString('base64'));
+    samples.push({ padding, offsets });
+  }
+  await browserContext.close();
+  const offsets = samples.flatMap((sample) => sample.offsets.map((entry) => entry.offset));
+  expect(new Set(offsets).size, JSON.stringify(samples)).toBe(1);
+  // Ink below the digits reads as a sunken icon.
+  expect(offsets[0], JSON.stringify(samples)).toBeLessThanOrEqual(0);
+  const gaps = samples.flatMap((sample) => sample.offsets.map((entry) => entry.gap));
+  expect(Math.min(...gaps), JSON.stringify(samples)).toBeGreaterThan(0);
+  expect(Math.max(...gaps), JSON.stringify(samples)).toBeLessThanOrEqual(3);
+});
+
 test('keeps filename links inside narrow table cells throughout streaming and completion', async ({
   page,
 }) => {

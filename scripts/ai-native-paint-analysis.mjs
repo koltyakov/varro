@@ -24,7 +24,7 @@ export async function analyzeNativePaint(
   host,
   readImage,
   prependEpoch,
-  { decode = decodeNativeImage, firstMoveEpoch } = {}
+  { decode = decodeNativeImage, firstMoveEpoch, referenceDeadline = prependEpoch } = {}
 ) {
   const coldFailures = [];
   const textFailures = [];
@@ -68,7 +68,8 @@ export async function analyzeNativePaint(
     const row = { file: frame.file, epoch, top: before.top, bright, markers: [] };
     if (before.label === 'first-top' && baseline && moving) {
       coldChecks++;
-      if (bright < 10) coldFailures.push({ file: frame.file, epoch, bright });
+      if (bright < 10 || body.width * body.height - bright < 10)
+        coldFailures.push({ file: frame.file, epoch, bright });
     }
     for (const marker of before.markers) {
       const next = after.markers.find((m) => m.node === marker.node);
@@ -98,7 +99,12 @@ export async function analyzeNativePaint(
       const reference = references.get(key);
       const pixels = brightPixels(image, crop);
       // A reference must actually be painted before the older page is applied.
-      if (!reference && epoch < prependEpoch && pixels.length >= 35) {
+      if (
+        !reference &&
+        epoch < referenceDeadline &&
+        pixels.length >= 35 &&
+        pixels.length < crop.width * crop.height * 0.6
+      ) {
         references.set(key, {
           node: marker.node,
           text: marker.text,

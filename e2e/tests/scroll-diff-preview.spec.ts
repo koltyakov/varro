@@ -125,8 +125,9 @@ async function updateDiffPreviewWithPatch(
 }
 
 test.describe('diff preview anchoring', () => {
-  for (const partialOlderResponse of [false, true]) {
-    test(`preserves the native prose destination with ${partialOlderResponse ? 'one older detail already loaded' : 'all details still pending'}`, async ({
+  for (const gesture of ['wheel', 'wheel after partial response', 'PageDown']) {
+    const partialOlderResponse = gesture === 'wheel after partial response';
+    test(`preserves the native prose destination for ${gesture} while details are pending`, async ({
       page,
     }) => {
       await page.setViewportSize({ width: 486, height: 794 });
@@ -135,7 +136,8 @@ test.describe('diff preview anchoring', () => {
         '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewCompleted=1'
       );
       await expect(page.locator('.interactive-list')).toBeVisible();
-      await page.evaluate(() => {
+      const stepCount = gesture === 'PageDown' ? 9 : 4;
+      await page.evaluate((steps) => {
         const sessionID = 'session-diff-preview-large-transcript';
         const host = window as PartialDiffWindow & {
           __sendToExtension: (message: WebviewMessage) => void;
@@ -216,7 +218,7 @@ test.describe('diff preview anchoring', () => {
         const template = host.__varroE2E.getSessionMessages(sessionID).at(-1)!.info;
         const emit = (type: string, properties: Record<string, unknown>) =>
           window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
-        for (let step = 0; step < 4; step++) {
+        for (let step = 0; step < steps; step++) {
           const messageID = `message-partial-diff-${step}`;
           const info = { ...template, id: messageID, time: { created: Date.now() + step } };
           host.__varroE2E.updateMessageInfo(info);
@@ -270,7 +272,7 @@ test.describe('diff preview anchoring', () => {
             emit('message.part.updated', { part });
           }
         }
-      });
+      }, stepCount);
       const marker = page.locator('[data-msg-id="message-partial-diff-2"] p').first();
       const preceding = page.locator('[data-msg-id="message-partial-diff-1"]');
       await expect(
@@ -348,8 +350,66 @@ test.describe('diff preview anchoring', () => {
         .poll(() =>
           page.evaluate(() => (window as PartialDiffWindow).partialDiffProbe.pending.size)
         )
-        .toBe(12);
+        .toBe(stepCount * 3);
       await expect(preceding.locator('.file-change-inline-diffs')).toHaveCount(0);
+      if (gesture === 'PageDown') {
+        await marker.evaluate((element: HTMLElement) => {
+          element.tabIndex = -1;
+          element.focus({ preventScroll: true });
+        });
+        await expect(marker).toBeFocused();
+        await page.evaluate(() => {
+          (window as PartialDiffWindow).partialDiffProbe.events.length = 0;
+        });
+        await page.keyboard.press('PageDown');
+        await waitForAnimationFrames(page, 30);
+        const tops = await page.evaluate(() =>
+          (window as PartialDiffWindow).partialDiffProbe.events
+            .filter((event) => event.type === 'scroll' && event.trusted)
+            .map((event) => event.markerTop)
+        );
+        expect(tops.length).toBeGreaterThan(1);
+        expect(before - (await position()), JSON.stringify(tops)).toBeGreaterThan(box.height / 2);
+        expect(tops.every((top, index) => !index || top <= tops[index - 1]! + 1)).toBe(true);
+        const destination = await list.evaluate((element) => {
+          const cutoff = element
+            .querySelector('.latest-user-message-sticky-bottom-solid')!
+            .getBoundingClientRect().bottom;
+          const paragraph = [
+            ...element.querySelectorAll('[data-msg-id^="message-partial-diff-"] p'),
+          ].find((node) => node.getBoundingClientRect().top >= cutoff);
+          if (
+            !paragraph ||
+            paragraph.getBoundingClientRect().bottom > element.getBoundingClientRect().bottom
+          )
+            throw new Error('Missing painted paragraph at the PageDown destination');
+          return {
+            id: paragraph.closest<HTMLElement>('[data-msg-id]')!.dataset.msgId!,
+            top: paragraph.getBoundingClientRect().top,
+          };
+        });
+        const samples = await page
+          .locator(`[data-msg-id="${destination.id}"] p`)
+          .first()
+          .evaluate(async (paragraph, steps) => {
+            const probe = (window as PartialDiffWindow).partialDiffProbe;
+            for (let row = 0; row < steps; row++) {
+              for (let file = 0; file < 3; file++) probe.release(row, file);
+            }
+            const positions: number[] = [];
+            for (let frame = 0; frame < 24; frame++) {
+              await new Promise(requestAnimationFrame);
+              positions.push(paragraph.getBoundingClientRect().top);
+            }
+            return positions;
+          }, stepCount);
+        await expect(preceding.locator('.file-change-inline-diffs')).toHaveCount(3);
+        expect(
+          samples.every((top) => Math.abs(top - destination.top) <= 2),
+          JSON.stringify(samples)
+        ).toBe(true);
+        return;
+      }
       // Freeze the next presentation callback, not response delivery or native input.
       // This makes the recorded response-between-frames ordering deterministic.
       const now = await page.evaluate(() => Date.now());

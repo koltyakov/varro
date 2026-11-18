@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import {
   brightPixels,
+  firstAppliedPage,
   glyphContinuity,
   topTargeting,
   verdict,
@@ -12,6 +13,7 @@ import {
 } from './ai-native-paint-oracles.mjs';
 import { nativePaintFixture } from './ai-native-paint-fixture.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
+import { createBootstrapProxy } from './ai-streaming.mjs';
 import { analyzeNativePaint } from './ai-native-paint-analysis.mjs';
 import { startPaintTrace, PAINT_TRACE_CATEGORIES } from './ai-native-paint-trace.mjs';
 
@@ -79,18 +81,67 @@ test('frame analysis retains early blanks and missing glyphs after later correct
     frames,
     samples,
     { x: 0, y: 0 },
-    async (file) => (file === '3' ? blank : good),
+    async (file) =>
+      file === '0' || file === '4'
+        ? { ...good, data: new Uint8Array(good.data.length).fill(240) }
+        : file === '3'
+          ? blank
+          : good,
     250,
     { decode: async (value) => value, firstMoveEpoch: 250 }
   );
   assert.equal(result.cold.verdict, 'FAIL');
   assert.equal(result.retained.verdict, 'FAIL');
-  assert.equal(result.cold.failures[0].file, '3');
-  assert.equal(result.retained.failures[0].file, '3');
+  assert.deepEqual(
+    result.cold.failures.map((f) => f.file),
+    ['3', '4']
+  );
+  assert.deepEqual(
+    result.retained.failures.map((f) => f.file),
+    ['3', '4']
+  );
+  assert.equal(result.retained.references[0][1].file, '1');
   assert.ok(result.inspected.at(-1).markers[0].score > 0.9);
   assert.equal(result.retained.nodeChanges.length, 1);
   assert.equal(result.retained.nodeChanges[0].from, 1);
   assert.equal(result.retained.nodeChanges[0].to, 2);
+});
+test('the first placed row from a completed older page marks prepend with the banner still present', () => {
+  const pages = [
+    { before: 'page1', cursor: 'page2', finished: 5, status: 200, messageIds: ['older'] },
+    { before: 'page2', cursor: null, finished: 40, status: 200, messageIds: ['oldest'] },
+  ];
+  const sample = (epoch, firstLoadedMessageId, visible = firstLoadedMessageId) => ({
+    epoch,
+    banner: true,
+    firstLoadedMessageId,
+    rows: [{ id: visible, width: 100, height: 24 }],
+  });
+  const initial = sample(10, 'current');
+  const samples = [
+    sample(15, 'current', 'older'),
+    sample(22, 'current', 'unrelated'),
+    sample(30, 'older', 'current'),
+    sample(60, 'oldest'),
+  ];
+  assert.equal(firstAppliedPage(samples.slice(0, 2), pages, initial), null);
+  assert.deepEqual(firstAppliedPage(samples, pages, initial), {
+    epoch: 30,
+    referenceDeadline: 22,
+    finished: 5,
+    before: 'page1',
+    row: 'older',
+    prefetched: true,
+  });
+  // If the first page was already applied when recording began, remounting it is not prepend.
+  assert.deepEqual(firstAppliedPage(samples, pages, sample(30, 'older')), {
+    epoch: 60,
+    referenceDeadline: 30,
+    finished: 40,
+    before: 'page2',
+    row: 'oldest',
+    prefetched: false,
+  });
 });
 test('loaded-window top and compensated prepend do not mean complete-history top', () => {
   const action = { name: 'first-top', held: true, before: { top: 10000 }, finished: 300 };
@@ -205,6 +256,53 @@ test('generated paginated multi-file fixture is accepted by the read-only server
     assert.ok(response.headers.get('x-next-cursor'));
     assert.equal((await response.json()).length, 200);
   } finally {
+    await server.close();
+  }
+});
+
+test('observes ordered page IDs before the bootstrap proxy streams the body', async () => {
+  const capture = nativePaintFixture();
+  const pages = [];
+  const server = await createStreamingServer({
+    capture,
+    timeline: [],
+    directory: '/generated-native-test',
+    onMessagePage: (page) => pages.push(page),
+  });
+  const proxy = await createBootstrapProxy(server);
+  try {
+    const route = `${proxy.url}/session/${server.getResult().sessionID}/message?limit=100`;
+    const first = await fetch(route);
+    const firstCursor = first.headers.get('x-next-cursor');
+    assert.ok(firstCursor);
+    await first.arrayBuffer();
+    assert.deepEqual(pages, []);
+    const older = await fetch(`${route}&before=${firstCursor}`);
+    const secondCursor = older.headers.get('x-next-cursor');
+    assert.ok(secondCursor);
+    assert.equal((await older.json()).length, 100);
+    const oldest = await fetch(`${route}&before=${secondCursor}`);
+    assert.equal(oldest.headers.get('x-next-cursor'), null);
+    await oldest.arrayBuffer();
+
+    assert.deepEqual(
+      pages.map((page) => page.before),
+      [firstCursor, secondCursor]
+    );
+    assert.deepEqual(
+      pages.map((page) => page.cursor),
+      [secondCursor, null]
+    );
+    assert.ok(pages.every((page) => page.status === 200 && page.finished >= page.started));
+    assert.deepEqual(
+      pages.map((page) => page.messageIds),
+      [
+        capture.initialMessages.slice(70, 170).map(({ info }) => info.id),
+        capture.initialMessages.slice(0, 70).map(({ info }) => info.id),
+      ]
+    );
+  } finally {
+    await proxy.close();
     await server.close();
   }
 });

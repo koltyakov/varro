@@ -392,7 +392,7 @@ describe('McpSettingsPanel', () => {
     });
 
     it.each(['Global', 'This project'] as const)(
-      'saves %s defaults without waiting for sessions',
+      'does not save %s defaults until all sessions settle',
       async (label) => {
         mocks.setDefault.mockResolvedValue({
           ...defaults,
@@ -402,8 +402,18 @@ describe('McpSettingsPanel', () => {
         cleanup = render(() => McpSettingsPanel(), container);
         await flush();
         openTab(label);
+        expect(checkbox('docs').disabled).toBe(true);
+        expect(container.textContent).toContain('when running sessions finish');
+        toggle('docs');
+        await flush();
+        expect(mocks.setDefault).not.toHaveBeenCalled();
+        expect(mocks.refreshSessionMcps).not.toHaveBeenCalled();
+        expect(checkbox('docs').checked).toBe(true);
+
+        setState('sessionStatus', sessionId, { type: 'idle' });
+        expect(checkbox('docs').disabled).toBe(true);
+        setState('sessionStatus', 'retrying', { type: 'idle' });
         expect(checkbox('docs').disabled).toBe(false);
-        expect(container.textContent).not.toContain('when running sessions finish');
         toggle('docs');
         await flush();
         expect(mocks.setDefault).toHaveBeenCalledWith(
@@ -414,12 +424,10 @@ describe('McpSettingsPanel', () => {
         expect(checkbox('docs').checked).toBe(false);
         expect(checkbox('docs').disabled).toBe(false);
         expect(mocks.refreshSessionMcps).toHaveBeenCalledWith('current');
-        expect(state.sessionStatus[sessionId]?.type).toBe('busy');
-        expect(state.sessionStatus.retrying?.type).toBe('retry');
       }
     );
 
-    it('clears a project override without waiting for sessions', async () => {
+    it('does not clear a project override until all sessions settle', async () => {
       mocks.setDefault.mockResolvedValue({
         ...defaults,
         project: {},
@@ -428,6 +436,13 @@ describe('McpSettingsPanel', () => {
       cleanup = render(() => McpSettingsPanel(), container);
       await flush();
       openTab('This project');
+      expect(useGlobalButton('rare')?.disabled).toBe(true);
+      useGlobalButton('rare')!.click();
+      await flush();
+      expect(mocks.setDefault).not.toHaveBeenCalled();
+
+      setState('sessionStatus', sessionId, { type: 'idle' });
+      setState('sessionStatus', 'retrying', { type: 'idle' });
       expect(useGlobalButton('rare')?.disabled).toBe(false);
       useGlobalButton('rare')!.click();
       await flush();

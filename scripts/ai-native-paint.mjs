@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import diagnosticsChannel from 'node:diagnostics_channel';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +13,12 @@ import { nativePaintFixture } from './ai-native-paint-fixture.mjs';
 import { installNativePaintProbe } from './ai-native-paint-probe.mjs';
 import { analyzeNativePaint } from './ai-native-paint-analysis.mjs';
 import { startPaintTrace, PAINT_TRACE_CATEGORIES } from './ai-native-paint-trace.mjs';
-import { summarizeTrace, topTargeting, verdict } from './ai-native-paint-oracles.mjs';
+import {
+  firstAppliedPage,
+  summarizeTrace,
+  topTargeting,
+  verdict,
+} from './ai-native-paint-oracles.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
@@ -58,25 +62,6 @@ const result = {
   errors: [],
   started: new Date().toISOString(),
 };
-const pageObserver = ({ request, response }) => {
-  if (!/\/message\?/.test(request.url ?? '')) return;
-  const url = new URL(request.url, 'http://isolated');
-  const page = {
-    started: Date.now(),
-    port: request.socket.localPort,
-    before: url.searchParams.get('before'),
-    limit: url.searchParams.get('limit'),
-  };
-  result.pages.push(page);
-  response.once('finish', () =>
-    Object.assign(page, {
-      finished: Date.now(),
-      status: response.statusCode,
-      cursor: response.getHeader('x-next-cursor') ?? null,
-    })
-  );
-};
-diagnosticsChannel.subscribe('http.server.request.start', pageObserver);
 let finished = false;
 let control,
   cdp,
@@ -88,15 +73,18 @@ let control,
 let traceName = 'compositor-trace.json';
 const images = [];
 const runDirectory = path.join(output, 'editor');
-const runner = runCapture({
-  capture: capturePath,
-  output: runDirectory,
-  observer: 'off',
-  checkpoints: [checkpoint],
-  'setup-timeout-ms': 120_000,
-  'start-timeout-ms': 120_000,
-  'replay-timeout-ms': 300_000,
-})
+const runner = runCapture(
+  {
+    capture: capturePath,
+    output: runDirectory,
+    observer: 'off',
+    checkpoints: [checkpoint],
+    'setup-timeout-ms': 120_000,
+    'start-timeout-ms': 120_000,
+    'replay-timeout-ms': 300_000,
+  },
+  { onMessagePage: (page) => result.pages.push(page) }
+)
   .then(
     (value) => ({ value }),
     (error) => ({ error: error.stack })
@@ -225,7 +213,6 @@ try {
     const status = await controlRequest(control, 'status');
     return status.playbackState === 'paused' ? status : false;
   }, 'replay checkpoint');
-  result.replayPort = Number(new URL(paused.replayUrl).port);
   const delivered = await fetch(
     `${paused.replayUrl}/session/${paused.sessionID}/message?limit=1000`
   ).then((r) => r.json());
@@ -321,7 +308,15 @@ try {
     );
     await workbench.call('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
     recording = true;
-    if (result.generated && first.after.banner) {
+    if (
+      result.generated &&
+      first.after.banner &&
+      !firstAppliedPage(
+        await main('globalThis.__nativePaint.samples'),
+        result.pages,
+        result.initial
+      )
+    ) {
       await main("globalThis.__nativePaint.begin('retained-reference-arm')");
       const beforeArm = await snapshot();
       await cdp.wheel('.interactive-list', 200 - beforeArm.top, 'right');
@@ -380,7 +375,6 @@ try {
   } catch (error) {
     result.errors.push(`Cleanup metadata: ${error.message}`);
   }
-  diagnosticsChannel.unsubscribe('http.server.request.start', pageObserver);
   const index = [];
   for (const [i, frame] of images.entries()) {
     const file = `frames/${String(i).padStart(5, '0')}.png`;
@@ -391,26 +385,23 @@ try {
   if (evidence) {
     await save('dom-evidence.json', evidence);
     try {
-      const prepend =
-        evidence.samples.find((sample) => result.initial.banner && !sample.banner)?.epoch ??
-        Infinity;
-      result.prependEpoch = Number.isFinite(prepend) ? prepend : null;
+      const pages = result.pages;
+      result.prepend = firstAppliedPage(evidence.samples, pages, result.initial);
+      result.prependEpoch = result.prepend?.epoch ?? null;
       result.paint = await analyzeNativePaint(
         index,
         evidence.samples,
         result.host,
         (file) => readFile(path.join(output, file)),
-        prepend,
-        { firstMoveEpoch: result.actions[0]?.dispatches[0]?.started }
+        result.prependEpoch ?? Infinity,
+        {
+          referenceDeadline: result.prepend?.referenceDeadline ?? Infinity,
+          firstMoveEpoch: result.actions[0]?.dispatches[0]?.started,
+        }
       );
       result.top = result.actions.map((action) => ({
         name: action.name,
-        ...topTargeting(
-          action,
-          evidence.samples,
-          result.pages.filter((page) => page.port === result.replayPort),
-          capture.initialMessages[0].info.id
-        ),
+        ...topTargeting(action, evidence.samples, pages, capture.initialMessages[0].info.id),
       }));
       if (!result.top[0]?.delivered) {
         for (const check of [result.paint.cold, result.paint.retained]) {

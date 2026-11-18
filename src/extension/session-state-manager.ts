@@ -155,6 +155,10 @@ export class SessionStateManager {
   private readonly serverBusySessions = new Set<string>();
   private readonly completedSessions = new Set<string>();
   private readonly completedSessionMarkers = new Map<string, number>();
+  private readonly lastAnnouncedCompletions = new Map<
+    string,
+    TerminalEvidence & { observedAt: number }
+  >();
   private readonly acknowledgedCompletedRoots: Map<string, AcknowledgedCompletionMarkers>;
   private readonly failedSessions = new Set<string>();
   private readonly failedSessionMarkers = new Map<string, number>();
@@ -555,6 +559,7 @@ export class SessionStateManager {
   markSessionBusy(sessionID: string): SessionBusyAttempt | undefined {
     if (!sessionID) return undefined;
     this.touchSessionMetadata(sessionID);
+    this.lastAnnouncedCompletions.delete(sessionID);
     const attempt = { sessionID, id: ++this.nextBusyAttemptID };
     this.addBusyGeneration(sessionID, attempt.id);
     if (this.markBusyInternal(sessionID)) {
@@ -696,10 +701,20 @@ export class SessionStateManager {
           ) || changed;
         break;
       }
+      case 'session.next.prompted':
       case 'session.next.prompt.admitted': {
         const sessionID = getString(props?.sessionID);
         if (sessionID) {
-          this.serverBusyTerminalEvidence.delete(sessionID);
+          if (type === 'session.next.prompt.admitted')
+            this.serverBusyTerminalEvidence.delete(sessionID);
+          const completion = this.lastAnnouncedCompletions.get(sessionID);
+          const promptedAt = getNumber(props?.timestamp);
+          if (
+            promptedAt === undefined ||
+            completion?.completedAt === undefined ||
+            promptedAt > completion.completedAt
+          )
+            this.lastAnnouncedCompletions.delete(sessionID);
         }
         break;
       }
@@ -744,6 +759,15 @@ export class SessionStateManager {
         if (getString(info?.role) !== 'assistant') {
           if (getString(info?.role) === 'user') {
             this.noteSuccessorProgress(sessionID);
+            // V1 can deliver the new user message without a prompt admission event.
+            const previous = this.lastAnnouncedCompletions.get(sessionID);
+            const createdAt = getNumber(asRecord(info?.time)?.created);
+            if (
+              previous &&
+              createdAt !== undefined &&
+              createdAt > (previous.completedAt ?? previous.observedAt)
+            )
+              this.lastAnnouncedCompletions.delete(sessionID);
           }
           break;
         }
@@ -1527,6 +1551,7 @@ export class SessionStateManager {
     changed = this.unclaimedInterruptedSessions.delete(sessionID) || changed;
     this.busyStartedAt.delete(sessionID);
     this.busyEvidenceRevisions.delete(sessionID);
+    this.lastAnnouncedCompletions.delete(sessionID);
     this.trailingTerminalsWhileBusy.delete(sessionID);
     this.serverBusyTerminalEvidence.delete(sessionID);
     this.clearQuestionResponsePending(sessionID);
@@ -1778,7 +1803,34 @@ export class SessionStateManager {
     }
 
     this.clearBusy(sessionID);
+    const previous = this.lastAnnouncedCompletions.get(sessionID);
+    const hasDistinctAssistant =
+      evidence.messageID !== undefined &&
+      previous?.messageID !== undefined &&
+      evidence.messageID !== previous.messageID &&
+      (evidence.completedAt === undefined ||
+        previous.completedAt === undefined ||
+        evidence.completedAt > previous.completedAt);
+    const hasNewerCompletion =
+      evidence.completedAt !== undefined &&
+      previous?.completedAt !== undefined &&
+      evidence.completedAt > previous.completedAt &&
+      (evidence.messageID === undefined || evidence.messageID !== previous.messageID);
+    if (previous && !hasDistinctAssistant && !hasNewerCompletion) {
+      // A status-only resume still updates the UI. It doesn't announce the same turn again.
+      this.addCompletedSession(sessionID, previous.completedAt);
+      this.setSessionMetadata(this.lastAnnouncedCompletions, sessionID, {
+        messageID: previous.messageID ?? evidence.messageID,
+        completedAt: previous.completedAt ?? evidence.completedAt,
+        observedAt: previous.observedAt,
+      });
+      return true;
+    }
     this.addCompletedSession(sessionID, evidence.completedAt);
+    this.setSessionMetadata(this.lastAnnouncedCompletions, sessionID, {
+      ...evidence,
+      observedAt: Date.now(),
+    });
     this.listener.onSessionCompleted?.(
       sessionID,
       this.isPlanSession(sessionID) ? 'plan-ready' : 'completed'

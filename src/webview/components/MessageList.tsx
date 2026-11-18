@@ -2068,6 +2068,7 @@ export function MessageList() {
     null
   );
   let changedLayoutAnchorInputEpoch = -1;
+  let nativeKeyScrollEpoch = -1;
   let resumeChangedLayoutAnchor: (() => void) | null = null;
   let deferredLayoutInputAnchor: {
     anchor: VisibleScrollAnchor;
@@ -2075,14 +2076,17 @@ export function MessageList() {
     inputEpoch: number;
     sessionId: string | null;
   } | null = null;
-  function cancelDeferredLayoutAnchor(preserveDestination = false) {
+  function cancelDeferredLayoutAnchor(
+    preserveDestination = false,
+    previousEpoch = directScrollInputEpoch - 1
+  ) {
     const previousInputAnchor = deferredLayoutInputAnchor;
     const anchor = untrack(changedLayoutAnchor);
     deferredLayoutInputAnchor =
       preserveDestination &&
       pendingInlineDiffLoads.size > 0 &&
       anchor &&
-      changedLayoutAnchorInputEpoch === directScrollInputEpoch - 1
+      changedLayoutAnchorInputEpoch === previousEpoch
         ? {
             anchor,
             // Passive wheel delivery may already include the native movement.
@@ -2092,7 +2096,7 @@ export function MessageList() {
             sessionId: state.activeSessionId,
           }
         : preserveDestination &&
-            previousInputAnchor?.inputEpoch === directScrollInputEpoch - 1 &&
+            previousInputAnchor?.inputEpoch === previousEpoch &&
             previousInputAnchor.sessionId === state.activeSessionId
           ? { ...previousInputAnchor, inputEpoch: directScrollInputEpoch }
           : null;
@@ -6313,6 +6317,23 @@ export function MessageList() {
     const top = clampEditScrollTop(containerRef.scrollTop);
     const currentViewportHeight = containerRef.clientHeight;
     const scrollDelta = top - lastObservedScrollTop;
+    const userScrollInputActive =
+      pointerScrollOwnershipActive ||
+      now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS ||
+      now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS ||
+      now - lastUserOwnedScrollMovementAt <= USER_SCROLL_IDLE_MS;
+    // One keydown on a descendant can scroll the transcript over several frames.
+    // Hand the last settled paragraph back to each native step, just as on keydown.
+    if (
+      nativeKeyScrollEpoch === directScrollInputEpoch &&
+      changedLayoutAnchorInputEpoch === directScrollInputEpoch &&
+      untrack(changedLayoutAnchor) &&
+      userScrollInputActive &&
+      !suppressSyncScrollTop &&
+      Math.abs(scrollDelta) > 0.5
+    ) {
+      cancelDeferredLayoutAnchor(true, directScrollInputEpoch);
+    }
     const inputAnchor = deferredLayoutInputAnchor;
     const movedLayoutAnchor: VisibleScrollAnchor | null =
       inputAnchor &&
@@ -6430,11 +6451,6 @@ export function MessageList() {
     let structuralAnchorSettling =
       pendingStructuralScrollAnchor?.sessionId === state.activeSessionId &&
       pendingStructuralScrollAnchor.ownershipEpoch === userScrollOwnershipEpoch;
-    const userScrollInputActive =
-      pointerScrollOwnershipActive ||
-      now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS ||
-      now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS ||
-      now - lastUserOwnedScrollMovementAt <= USER_SCROLL_IDLE_MS;
     const actualScrollMovement = !suppressSyncScrollTop && Math.abs(scrollDelta) > 0.5;
     if (actualScrollMovement && scrollDelta < 0 && userScrollInputActive) {
       setActiveTurnNavigationTargetId(null);
@@ -7006,6 +7022,8 @@ export function MessageList() {
     }
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
+    nativeKeyScrollEpoch =
+      target !== containerRef && pendingInlineDiffLoads.size > 0 ? directScrollInputEpoch : -1;
     cancelDeferredLayoutAnchor(true);
     virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
     const metrics = shouldVirtualize() ? virtualMetrics() : null;
@@ -10669,6 +10687,7 @@ export function MessageList() {
         tabIndex={0}
         aria-live="polite"
         aria-label="Chat messages"
+        data-first-loaded-message-id={messages()[0]?.info.id}
         onClick={() => {
           if (!state.messagesLoading && shouldShowStarterLogo()) requestComposerFocus();
         }}

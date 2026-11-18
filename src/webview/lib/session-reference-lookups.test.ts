@@ -129,6 +129,37 @@ describe('session reference lookups', () => {
     expect(state.sessionLookups.ses_new).toEqual(reference('ses_new'));
   });
 
+  it('discards an in-flight routing result when only workspace membership changes', async () => {
+    const external = reference('ses_other');
+    const local = { ...external, external: false };
+    let release!: (value: SessionLookup) => void;
+    const fetch = vi
+      .spyOn(client.varro.session, 'reference')
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      )
+      .mockResolvedValue(local);
+    const root = { name: 'repo', path: '/repo' };
+    const added = { name: 'other', path: external.directory };
+    setState('editorContext', 'workspacePath', root.path);
+    setState('editorContext', 'workspaceFolders', [root]);
+    const old = lookupSessionReference(external.id);
+    await Promise.resolve();
+
+    setState('editorContext', 'workspaceFolders', [root, added]);
+    await expect(lookupSessionReference(external.id)).resolves.toEqual(local);
+    release(external);
+    await expect(old).resolves.toBeNull();
+    expect(state.sessionLookups[external.id]).toEqual(local);
+
+    setState('editorContext', 'workspaceFolders', [added, root]);
+    await expect(lookupSessionReference(external.id)).resolves.toEqual(local);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('bounds the metadata cache', async () => {
     vi.spyOn(client.varro.session, 'reference').mockImplementation(async (id) => reference(id));
     for (let i = 0; i < 260; i++) await lookupSessionReference(`ses_${i}`);

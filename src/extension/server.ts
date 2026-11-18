@@ -28,7 +28,6 @@ import {
   measureStartupPhase,
   STARTUP_CREDENTIAL_TIMEOUT_MS,
   STARTUP_HEALTH_TIMEOUT_MS,
-  StartupDeadlineError,
   withStartupDeadline,
 } from '../shared/startup';
 import type { StartupPhase } from '../shared/startup';
@@ -1066,8 +1065,9 @@ export class OpenCodeServer extends EventEmitter {
       if (!missingAsk) return;
     } catch (error) {
       this.throwIfStartCancelled(disposeGeneration, signal);
-      if (!(error instanceof StartupDeadlineError)) throw error;
-      logger.warn(`${error.message}; deferring runtime config recovery`);
+      logger.warn(
+        `Deferring optional OpenCode runtime config recovery: ${error instanceof Error ? error.message : String(error)}`
+      );
       return;
     }
     this.throwIfStartCancelled(disposeGeneration, signal);

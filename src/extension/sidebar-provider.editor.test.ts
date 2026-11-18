@@ -1872,6 +1872,22 @@ describe('SidebarProvider editor panels', () => {
           (message.payload as { status?: string } | undefined)?.status === 'idle'
       )
     ).toHaveLength(idleStatusCountBeforeCompletion);
+
+    posted.length = 0;
+    provider.post({
+      type: 'server/event',
+      payload: {
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-b',
+          status: { type: 'retry', attempt: 1, message: 'Retrying', next: 8_000 },
+        },
+      },
+    });
+    expect(posted).toContainEqual({
+      type: 'queued-messages/session-status',
+      payload: { sessionId: 'session-b', status: 'busy' },
+    });
   });
 
   it('does not report queued-message idle while a newer busy attempt remains', async () => {

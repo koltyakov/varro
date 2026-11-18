@@ -176,6 +176,35 @@ const FILE_EXTENSION_ICONS = new Map<string, string>(
   })
 );
 
+// Lowest ink as a fraction of the icon height, for artwork drawn below the usual 14/16 frame.
+const LOW_INK_BOTTOMS = new Map<string, number>([
+  ...[
+    audioIcon,
+    dartIcon,
+    graphqlIcon,
+    imageIcon,
+    licenseIcon,
+    lockIcon,
+    luaIcon,
+    makefileIcon,
+    perlIcon,
+    pythonMiscIcon,
+    readmeIcon,
+    rustIcon,
+    sassIcon,
+    svgIcon,
+    terraformIcon,
+    tomlIcon,
+    tsconfigIcon,
+  ].map((icon): [string, number] => [icon, 0.9375]),
+  ...[fileIcon, mavenIcon, pdfIcon, pythonIcon, svelteIcon, xmlIcon, yamlIcon].map(
+    (icon): [string, number] => [icon, 0.917]
+  ),
+  [gitIcon, 0.948],
+  [nodeIcon, 0.969],
+  [gemfileIcon, 1],
+]);
+
 export function hasRecognizedFileType(path: string): boolean {
   const filename = getLeafPathName(path).toLowerCase();
   if (FILE_NAME_ICONS.has(filename) || filename.endsWith('.gradle.kts')) return true;
@@ -203,7 +232,13 @@ export function createFileTypeIconElement(
 ): HTMLImageElement {
   const icon = document.createElement('img');
   icon.className = `file-type-icon ${className}`;
-  icon.src = getFileTypeIcon(path);
+  const src = getFileTypeIcon(path);
+  icon.src = src;
+  const inkBottom = LOW_INK_BOTTOMS.get(src);
+  if (inkBottom !== undefined) {
+    icon.classList.add('low-ink-icon');
+    icon.style.setProperty('--file-icon-ink-bottom', String(inkBottom));
+  }
   icon.alt = '';
   icon.setAttribute('aria-hidden', 'true');
   icon.draggable = false;
