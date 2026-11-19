@@ -4,6 +4,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  flush,
   onCleanup,
   onSettled,
   untrack,
@@ -839,6 +840,7 @@ export function MessageList() {
   let nativeScrollbarActive = false;
   let scrollTouch: { identifier: number; x: number; y: number } | null = null;
   let pointerScrollRange = 0;
+  let heldScrollFloor = 0;
   let wheelListenerPassive = true;
   let diffFocusPauseActive = false;
   let resumeAutoScrollAfterDiffFocus = false;
@@ -5602,10 +5604,67 @@ export function MessageList() {
     } else reserveBottomCollapseSpace(reserve);
   }
 
+  // Chromium maps a held thumb's pixel position through the scroll range, so every range change
+  // while it is held remaps the thumb, sometimes backward. A reserve published after a removal
+  // reaches the page a frame after a replacement row arrives, so hold the track at its grabbed
+  // height instead: shrinking and regrowing content then lands in one layout with no range change.
+  function holdScrollFloor() {
+    if (!trackRef) return;
+    heldScrollFloor = trackRef.getBoundingClientRect().height;
+    setHeldTrackHeight(heldScrollFloor);
+    // The floor covers any reserve the hold started with.
+    if (untrack(appendBottomReserve) > 0.5) setAppendBottomReserve(0);
+    if (untrack(activityExitBottomReserve) > 0.5) setActivityExitBottomReserve(0);
+  }
+
+  function heldTrackContentHeight() {
+    if (!trackRef) return 0;
+    const trackBox = trackRef.getBoundingClientRect();
+    const trackStyle = getComputedStyle(trackRef);
+    let bottom = trackBox.top + (Number.parseFloat(trackStyle.paddingTop) || 0);
+    // Out-of-flow children, such as the screen-reader status, do not extend the content. A sticky
+    // header leads the rows, but it paints where it sticks, which can be below the real content.
+    for (const child of trackRef.children) {
+      const style = getComputedStyle(child);
+      if (style.position !== 'static' && style.position !== 'relative') continue;
+      const childBottom =
+        child.getBoundingClientRect().bottom + (Number.parseFloat(style.marginBottom) || 0);
+      if (childBottom > bottom) bottom = childBottom;
+    }
+    return bottom + (Number.parseFloat(trackStyle.paddingBottom) || 0) - trackBox.top;
+  }
+
+  // Growth below the held height stays clipped until release: even genuine growth changes the
+  // range, and Chromium then remaps the held thumb backward for a frame.
+  function setHeldTrackHeight(height: number) {
+    if (!trackRef) return;
+    trackRef.style.minHeight = `${height}px`;
+    trackRef.style.maxHeight = `${height}px`;
+    trackRef.style.overflowY = 'clip';
+  }
+
+  function releaseScrollFloor() {
+    if (!trackRef || heldScrollFloor <= 0) return;
+    // Keep the released position reachable: hand the floor's blank space to the bottom reserve,
+    // which release cleanup trims to the part that still intersects the viewport.
+    const blank = heldScrollFloor - heldTrackContentHeight();
+    heldScrollFloor = 0;
+    if (blank > 0.5 && containerRef) {
+      appendBottomReserveTarget = Math.max(appendBottomReserveTarget, containerRef.scrollTop);
+      setAppendBottomReserve((current) => current + blank);
+      flush();
+    }
+    trackRef.style.removeProperty('min-height');
+    trackRef.style.removeProperty('max-height');
+    trackRef.style.removeProperty('overflow-y');
+  }
+
   // A held thumb owns scrolling, and a downward drag leaves bottom-follow pinned. Keep only the
   // range a collapse removes: an exit target or summary anchor armed here would capture the grab
   // position and restore it against the drag, then again after release.
   function reserveHeldScrollbarRange(reserve: number) {
+    // The held floor already keeps the range; a reserve on top would overshoot it on regrowth.
+    if (heldScrollFloor > 0) return;
     // At the top, removed flow content cannot clamp the thumb backward.
     if (!containerRef || reserve <= 0.5 || containerRef.scrollTop <= 0) return;
     appendBottomReserveTarget = Math.max(appendBottomReserveTarget, containerRef.scrollTop);
@@ -6005,6 +6064,18 @@ export function MessageList() {
 
   function releaseEmptyPointerScrollRange() {
     if (!containerRef || !pointerScrollOwnershipActive) return;
+    if (trackRef && heldScrollFloor > 0) {
+      // A measurement correction can leave the whole held viewport below every message. There is
+      // no painted anchor to keep there, so let the browser clamp to real content.
+      const content = heldTrackContentHeight();
+      if (
+        trackRef.getBoundingClientRect().top + content <=
+        containerRef.getBoundingClientRect().top + 0.5
+      ) {
+        heldScrollFloor = content;
+        setHeldTrackHeight(content);
+      }
+    }
     const reserve = untrack(appendBottomReserve);
     if (reserve <= 0.5) return;
     const reserveElement = trackRef?.querySelector<HTMLElement>('.append-scroll-bottom-reserve');
@@ -7403,6 +7474,7 @@ export function MessageList() {
     activityCollapseSettleRafId = 0;
     pointerScrollOwnershipActive = true;
     nativeScrollbarActive = event.pointerType !== 'touch';
+    holdScrollFloor();
     pointerScrollRange = bottomScrollTop();
     containerRef.dataset.pointerScrollOwned = '';
     // Browser anchoring can otherwise adjust a detached, non-virtualized list
@@ -7465,6 +7537,7 @@ export function MessageList() {
     if (event?.pointerType === 'touch' && scrollTouch) return;
     const ownedScroll = pointerScrollOwnershipActive;
     releaseEmptyPointerScrollRange();
+    releaseScrollFloor();
     pointerScrollOwnershipActive = false;
     nativeScrollbarActive = false;
     pointerScrollRange = 0;

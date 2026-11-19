@@ -181,6 +181,7 @@ for (const destination of ['top', 'bottom'] as const) {
     const thumb = await getThumb(list);
     const bounds = await list.boundingBox();
     if (!bounds) throw new Error('Missing transcript viewport');
+    const heldScrollHeight = thumb.scrollHeight;
     await page.mouse.move(thumb.x, thumb.y);
     await page.mouse.down();
     await expect(list).toHaveAttribute('data-pointer-scroll-owned', '');
@@ -192,7 +193,11 @@ for (const destination of ['top', 'bottom'] as const) {
       block.style.height = '20px';
       block.style.overflow = 'hidden';
     });
-    await expect(list.locator('.append-scroll-bottom-reserve')).toBeVisible();
+    // The held thumb keeps its range while the content shrinks underneath it.
+    await waitForAnimationFrames(page, 2);
+    expect(await list.evaluate((element) => element.scrollHeight)).toBeGreaterThanOrEqual(
+      heldScrollHeight - 1
+    );
     await page.mouse.move(
       thumb.x,
       destination === 'top' ? bounds.y - 40 : bounds.y + bounds.height + 40,
@@ -204,7 +209,9 @@ for (const destination of ['top', 'bottom'] as const) {
     // Releasing immediately can accidentally pass because a queued frame cleans up afterward.
     await waitForAnimationFrames(page, 60);
     if (destination === 'top')
-      await expect(list.locator('.append-scroll-bottom-reserve')).toBeVisible();
+      expect(await list.evaluate((element) => element.scrollHeight)).toBeGreaterThanOrEqual(
+        heldScrollHeight - 1
+      );
     else {
       const paintedFrames = await list.evaluate(async (element) => {
         const frames = [];
