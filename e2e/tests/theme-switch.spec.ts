@@ -68,7 +68,7 @@ for (const theme of ['dark', 'light']) {
     const foreground = await unselected.evaluate((element) => getComputedStyle(element).color);
     expect(foreground).not.toBe('rgb(255, 255, 255)');
     await expect(selected).toHaveCSS('color', foreground, { timeout: 1000 });
-    await page.locator('.composer-completion-menu').evaluate(async (element) => {
+    await page.locator('.composer-completion-popup').evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
     await page.screenshot({ path: testInfo.outputPath('completion-selection.png') });

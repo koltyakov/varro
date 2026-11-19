@@ -83,6 +83,8 @@ export function CompletionMenu(props: {
   anchorRect?: () => DOMRect | null;
 }) {
   // oxlint-disable-next-line no-unassigned-vars
+  let popupRef: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
   let menuRef: HTMLDivElement | undefined;
   const itemRefs = new Map<string, HTMLButtonElement>();
   const selectedHelp = () => {
@@ -98,24 +100,24 @@ export function CompletionMenu(props: {
   }
 
   function reposition() {
-    if (!menuRef) return;
+    if (!popupRef) return;
     const caret = props.anchorRect?.();
-    const host = menuRef.offsetParent;
+    const host = popupRef.offsetParent;
     if (caret && host instanceof HTMLElement) {
       const bottom = caret.top - 6;
-      menuRef.style.top = 'auto';
-      menuRef.style.bottom = `${host.getBoundingClientRect().bottom - bottom}px`;
-      menuRef.style.transform = '';
-      menuRef.style.maxHeight = `${Math.min(220, Math.max(0, bottom - getPopupTopBound(menuRef, 8)))}px`;
+      popupRef.style.top = 'auto';
+      popupRef.style.bottom = `${host.getBoundingClientRect().bottom - bottom}px`;
+      popupRef.style.transform = '';
+      popupRef.style.maxHeight = `${Math.max(0, bottom - getPopupTopBound(popupRef, 8))}px`;
     } else {
-      flipPopupDownIfNeeded(menuRef);
-      clampPopupToViewport(menuRef);
+      flipPopupDownIfNeeded(popupRef);
+      clampPopupToViewport(popupRef);
     }
     updateScrollbarInset();
   }
 
   createEffect(
-    () => props.anchorRect?.(),
+    () => [props.anchorRect?.(), selectedHelp()],
     () => {
       queueMicrotask(reposition);
     }
@@ -158,16 +160,16 @@ export function CompletionMenu(props: {
     const cleanups: Array<() => void> = [];
 
     updateScrollbarInset();
-    if (!menuRef)
+    if (!popupRef)
       return () => {
         for (const cleanup of cleanups.toReversed()) cleanup();
       };
 
-    cleanups.push(observePopupViewport(menuRef, reposition));
+    cleanups.push(observePopupViewport(popupRef, reposition));
     document.addEventListener('selectionchange', reposition);
     document.addEventListener('scroll', reposition, true);
     const observer = globalThis.ResizeObserver ? new ResizeObserver(reposition) : undefined;
-    if (menuRef.parentElement) observer?.observe(menuRef.parentElement);
+    if (popupRef.parentElement) observer?.observe(popupRef.parentElement);
     cleanups.push(() => {
       document.removeEventListener('selectionchange', reposition);
       document.removeEventListener('scroll', reposition, true);
@@ -180,77 +182,7 @@ export function CompletionMenu(props: {
   });
 
   return (
-    <div class="composer-completion-menu" ref={menuRef}>
-      <Show when={props.header}>
-        <div class="composer-completion-header">{props.header}</div>
-      </Show>
-      <Show when={props.items.length === 0 && props.emptyMessage}>
-        <div class="composer-completion-empty" role="status">
-          {props.emptyMessage}
-        </div>
-      </Show>
-      <For each={props.items}>
-        {(item, index) => {
-          const isSlash = item.type === 'slash' || item.type === 'skill';
-          const isSkill =
-            item.type === 'skill' || (item.type === 'slash' && item.source === 'skill');
-          const title = () =>
-            'name' in item
-              ? `${isSkill ? (props.header === 'Skills' ? '' : '/skill:') : '/'}${item.name}`
-              : item.label;
-          const detail =
-            item.type === 'session'
-              ? `${item.detail ? `${item.detail} · ` : ''}${formatRelativeAge(item.session.time.updated, Date.now())}`
-              : 'description' in item
-                ? item.description
-                : item.detail;
-          return (
-            <button
-              ref={(el) => itemRefs.set(item.key, el)}
-              class={`composer-completion-item completion-${isSlash ? 'slash' : item.type} ${props.selectedIndex === index() ? 'selected' : ''}`}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => props.onSelect(item)}
-            >
-              <Show when={!isSlash || (isSkill && props.header === 'Skills')}>
-                <span class="composer-completion-icon">
-                  <Show
-                    when={item.type === 'agent'}
-                    fallback={
-                      isSkill ? (
-                        <MaterialChipIcon kind="skill" class="completion-skill-icon" />
-                      ) : item.type === 'session' ? (
-                        <MaterialChipIcon kind="session" class="completion-session-icon" />
-                      ) : item.type === 'problems' ? (
-                        <ProblemsIcon severity={item.diagnostic?.severity ?? item.severity} />
-                      ) : item.type === 'table' ? (
-                        <MaterialChipIcon kind="table" class="completion-file-type-icon" />
-                      ) : item.type === 'file' && item.file.type === 'directory' ? (
-                        <FolderIcon width={12} height={12} />
-                      ) : (
-                        <FileTypeIcon
-                          path={
-                            item.type === 'file' ? item.file.relativePath || item.file.path : ''
-                          }
-                          class="completion-file-type-icon"
-                        />
-                      )
-                    }
-                  >
-                    <MaterialChipIcon kind="agent" class="completion-agent-icon" />
-                  </Show>
-                </span>
-              </Show>
-              <CompletionTitle title={title()} />
-              <span
-                class={`composer-completion-detail${item.type === 'session' ? ' composer-completion-age' : ''}`}
-                title={item.type === 'session' ? item.session.directory : detail}
-              >
-                {detail}
-              </span>
-            </button>
-          );
-        }}
-      </For>
+    <div class="composer-completion-popup" ref={popupRef}>
       <Show when={selectedHelp()}>
         {(help) => (
           <div class="composer-completion-help" role="note">
@@ -258,6 +190,78 @@ export function CompletionMenu(props: {
           </div>
         )}
       </Show>
+      <div class="composer-completion-menu" ref={menuRef}>
+        <Show when={props.header}>
+          <div class="composer-completion-header">{props.header}</div>
+        </Show>
+        <Show when={props.items.length === 0 && props.emptyMessage}>
+          <div class="composer-completion-empty" role="status">
+            {props.emptyMessage}
+          </div>
+        </Show>
+        <For each={props.items}>
+          {(item, index) => {
+            const isSlash = item.type === 'slash' || item.type === 'skill';
+            const isSkill =
+              item.type === 'skill' || (item.type === 'slash' && item.source === 'skill');
+            const title = () =>
+              'name' in item
+                ? `${isSkill ? (props.header === 'Skills' ? '' : '/skill:') : '/'}${item.name}`
+                : item.label;
+            const detail =
+              item.type === 'session'
+                ? `${item.detail ? `${item.detail} · ` : ''}${formatRelativeAge(item.session.time.updated, Date.now())}`
+                : 'description' in item
+                  ? item.description
+                  : item.detail;
+            return (
+              <button
+                ref={(el) => itemRefs.set(item.key, el)}
+                class={`composer-completion-item completion-${isSlash ? 'slash' : item.type} ${props.selectedIndex === index() ? 'selected' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => props.onSelect(item)}
+              >
+                <Show when={!isSlash || (isSkill && props.header === 'Skills')}>
+                  <span class="composer-completion-icon">
+                    <Show
+                      when={item.type === 'agent'}
+                      fallback={
+                        isSkill ? (
+                          <MaterialChipIcon kind="skill" class="completion-skill-icon" />
+                        ) : item.type === 'session' ? (
+                          <MaterialChipIcon kind="session" class="completion-session-icon" />
+                        ) : item.type === 'problems' ? (
+                          <ProblemsIcon severity={item.diagnostic?.severity ?? item.severity} />
+                        ) : item.type === 'table' ? (
+                          <MaterialChipIcon kind="table" class="completion-file-type-icon" />
+                        ) : item.type === 'file' && item.file.type === 'directory' ? (
+                          <FolderIcon width={12} height={12} />
+                        ) : (
+                          <FileTypeIcon
+                            path={
+                              item.type === 'file' ? item.file.relativePath || item.file.path : ''
+                            }
+                            class="completion-file-type-icon"
+                          />
+                        )
+                      }
+                    >
+                      <MaterialChipIcon kind="agent" class="completion-agent-icon" />
+                    </Show>
+                  </span>
+                </Show>
+                <CompletionTitle title={title()} />
+                <span
+                  class={`composer-completion-detail${item.type === 'session' ? ' composer-completion-age' : ''}`}
+                  title={item.type === 'session' ? item.session.directory : detail}
+                >
+                  {detail}
+                </span>
+              </button>
+            );
+          }}
+        </For>
+      </div>
     </div>
   );
 }

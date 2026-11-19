@@ -105,7 +105,7 @@ afterEach(() => {
 });
 
 describe('CompletionMenu', () => {
-  it('shows native execution help only for the selected command', () => {
+  it('shows selected command help in a separate panel above the scrollable menu', () => {
     const [selectedIndex, setSelectedIndex] = createSignal(0);
     cleanup = render(
       () => (
@@ -118,9 +118,13 @@ describe('CompletionMenu', () => {
       container!
     );
     flushSolid();
-    expect(container?.querySelector('[role="note"]')?.textContent).toBe(
-      'OpenCode decides where this runs.'
-    );
+    const help = container?.querySelector('[role="note"]');
+    const menu = container?.querySelector('.composer-completion-menu');
+    expect(help?.textContent).toBe('OpenCode decides where this runs.');
+    expect(help?.parentElement).toBe(menu?.parentElement);
+    expect(help?.nextElementSibling).toBe(menu);
+    expect(menu?.contains(help ?? null)).toBe(false);
+    expect(menu?.querySelectorAll('button')).toHaveLength(2);
     setSelectedIndex(1);
     flushSolid();
     expect(container?.querySelector('[role="note"]')).toBeNull();

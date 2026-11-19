@@ -18,6 +18,55 @@ test('explains native command execution without inventing a delegation badge', a
   await expect(composer).toContainText('/audit');
 });
 
+for (const [width, height] of [
+  [460, 600],
+  [1100, 600],
+  [460, 360],
+] as const) {
+  test(`shows command help in a separate panel above suggestions at ${width}x${height}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height });
+    await page.goto('/e2e/harness/index.html?scenario=slash-commands&nativeCommand=1');
+    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+    await composer.fill('/');
+    const command = page.locator('.composer-completion-item').filter({ hasText: '/audit' });
+    await expect(command).toBeVisible();
+    // Select the native command without closing the suggestions.
+    const itemCount = await page.locator('.composer-completion-item').count();
+    for (let index = 0; index < itemCount; index++) {
+      if (await command.evaluate((element) => element.classList.contains('selected'))) break;
+      await composer.press('ArrowDown');
+    }
+    const help = page.locator('.composer-completion-help');
+    const menu = page.locator('.composer-completion-menu');
+    await expect(help).toBeVisible();
+    await expect(menu.locator('.composer-completion-help')).toHaveCount(0);
+    await page.locator('.composer-completion-popup').evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    const helpBox = await help.boundingBox();
+    const menuBox = await menu.boundingBox();
+    expect(helpBox).not.toBeNull();
+    expect(menuBox).not.toBeNull();
+    expect(helpBox!.y).toBeGreaterThanOrEqual(8);
+    expect(helpBox!.y + helpBox!.height + 6).toBeLessThanOrEqual(menuBox!.y);
+    expect(Math.abs(helpBox!.width - menuBox!.width)).toBeLessThanOrEqual(1);
+    expect(menuBox!.height).toBeLessThanOrEqual(220);
+    expect(await help.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(
+      true
+    );
+    await menu.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(help).toBeVisible();
+    expect(Math.abs((await help.boundingBox())!.y - helpBox!.y)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: testInfo.outputPath('command-help-above.png') });
+    await composer.fill('/plan');
+    await expect(help).toHaveCount(0);
+  });
+}
+
 test('sends multiple inline skill chips without duplicating them above the message', async ({
   page,
 }, testInfo) => {
