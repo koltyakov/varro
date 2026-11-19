@@ -3660,7 +3660,7 @@ describe('ChatInput', () => {
   });
 
   it.each(['zai', 'zai-coding-plan'])(
-    'keeps the %s limits control accessible through failure and recovery',
+    'hides unavailable %s limits and restores the control after recovery',
     async (providerID) => {
       setState(
         storePath('providers', [
@@ -3690,9 +3690,25 @@ describe('ChatInput', () => {
         modelID: 'glm-4.5',
         checkedAt: Date.now(),
       });
-      setState(storePath('providerLimits', { [key]: fresh }));
+      setState(
+        storePath('providerLimits', {
+          [key]: {
+            providerID,
+            modelID: 'glm-4.5',
+            status: 'unsupported',
+            source: 'provider',
+            checkedAt: Date.now(),
+            note: 'Provider quota checks are not supported in attach-only mode without a server-owned limits endpoint.',
+          },
+        })
+      );
       flushSolid();
       cleanup = render(() => ChatInput(), container!);
+      flushSolid();
+      expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
+      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
+
+      setState(storePath('providerLimits', { [key]: fresh }));
       flushSolid();
       const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
       expect(chip).not.toBeNull();
@@ -3733,33 +3749,24 @@ describe('ChatInput', () => {
         })
       );
       flushSolid();
-      const unavailable = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
-      expect(unavailable?.textContent).toContain('Unavailable');
-      expect(unavailable?.disabled).toBe(false);
-      expect(unavailable?.getAttribute('aria-label')).toContain('Authentication failed');
-      expect(unavailable?.getAttribute('aria-expanded')).toBe('true');
-      const popup = container?.querySelector('.provider-limit-popup');
-      expect(popup?.textContent).toContain('rejected credentials (401)');
-      expect(popup?.textContent).toContain('Retry available at');
-      expect(popup?.querySelector('.provider-limit-row')).toBeNull();
-      unavailable?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
       expect(container?.querySelector('.provider-limit-popup')).toBeNull();
-      expect(unavailable?.getAttribute('aria-expanded')).toBe('false');
-      unavailable?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
-      expect(container?.querySelector('.provider-limit-popup')).not.toBeNull();
 
       setState(storePath('providerLimits', { [key]: fresh }));
       flushSolid();
+      expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
       expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain(
         'Unavailable'
       );
       expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain('Stale');
+      expect(container?.querySelector('.toolbar-limit-chip')?.getAttribute('aria-expanded')).toBe(
+        'false'
+      );
+      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
+      container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
+      flushSolid();
+      await flushAsyncWork();
+      flushSolid();
       expect(container?.querySelector('.provider-limit-popup')?.textContent).not.toContain(
         'Authentication failed'
       );

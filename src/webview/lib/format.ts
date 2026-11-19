@@ -203,12 +203,7 @@ export function getProviderLimitCompactBadges(
   }
 ) {
   limit = getProviderLimitDisplay(limit);
-  if (!limit) return [];
-  if (limit.status !== 'available') {
-    return limit.providerID === 'zai' || limit.providerID === 'zai-coding-plan'
-      ? [{ label: 'Unavailable', tone: 'warning' }]
-      : [];
-  }
+  if (!limit || limit.status !== 'available') return [];
 
   const preferredPeriods = options?.preferredPeriods ?? ['5h', 'W', 'M'];
   const fallbackCount = options?.fallbackCount ?? 1;

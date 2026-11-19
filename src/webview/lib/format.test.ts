@@ -45,7 +45,7 @@ function availableLimit(
 
 describe('format helpers', () => {
   it.each(['zai', 'zai-coding-plan'])(
-    'keeps %s failures visible with a reason and retry time',
+    'hides %s failure badges while preserving diagnostic details',
     (providerID) => {
       const limit: ProviderLimitStatus = {
         providerID,
@@ -56,9 +56,15 @@ describe('format helpers', () => {
         retryAt: Date.parse('2026-11-17T10:05:00Z'),
         note: 'Z.ai quota endpoint rejected credentials (401)',
       };
-      expect(getProviderLimitCompactBadges(limit)).toEqual([
-        { label: 'Unavailable', tone: 'warning' },
-      ]);
+      expect(getProviderLimitCompactBadges(limit)).toEqual([]);
+      expect(getProviderLimitCompactBadges({ ...limit, status: 'error' })).toEqual([]);
+      expect(
+        getProviderLimitCompactBadges({
+          ...limit,
+          failureKind: undefined,
+          note: 'Provider quota checks are not supported in attach-only mode without a server-owned limits endpoint.',
+        })
+      ).toEqual([]);
       const title = formatProviderLimitTitle(limit);
       expect(title).toContain('Limits unavailable');
       expect(title).toContain('Authentication failed');
@@ -99,9 +105,7 @@ describe('format helpers', () => {
     ]);
     expect(formatProviderLimitTitle(limit)).toContain('Quota data is stale');
     const expired = { ...limit, checkedAt: Date.now() - 15 * 60_000 };
-    expect(getProviderLimitCompactBadges(expired)).toEqual([
-      { label: 'Unavailable', tone: 'warning' },
-    ]);
+    expect(getProviderLimitCompactBadges(expired)).toEqual([]);
     expect(getOrderedProviderLimitWindows(expired)).toEqual([]);
     expect(formatProviderLimitTitle(expired)).toContain('Cached quota snapshot expired');
   });
