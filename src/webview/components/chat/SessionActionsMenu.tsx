@@ -259,7 +259,7 @@ export function SessionActionsMenu(props: {
                     openSideQuestion();
                   }}
                 >
-                  Ask a side question…
+                  Ask side-question
                 </button>
               </Show>
               <button

@@ -160,7 +160,9 @@ for (const settleMs of [0, 600]) {
           },
         ]);
         await expect(page.locator('[data-activity-part-id="handoff-read"]')).toHaveCount(0);
-        await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCSS('height', /[1-9]/);
+        // Short history has no scroll range to hold, so only overflowing history needs a reserve.
+        if (!shortHistory)
+          await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCSS('height', /[1-9]/);
         if (settleMs) await page.waitForTimeout(settleMs);
         const nextInfo: AssistantMessage = {
           ...info,

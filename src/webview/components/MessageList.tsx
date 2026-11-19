@@ -5879,6 +5879,13 @@ export function MessageList() {
       !hasVisibleActivityTrayRows() &&
       getResponseContentSignature() === activityExitHeldResponseContentSignature
     ) {
+      // Thinking fills part of the departed tray. The surplus sits past the held position, so
+      // releasing it keeps the transcript in place and leaves the viewport at the real bottom.
+      const heldTop = Math.max(containerRef.scrollTop, appendBottomReserveTarget);
+      const surplus =
+        containerRef.scrollHeight - containerRef.clientHeight - pendingHeightReduction - heldTop;
+      if (reserve > 0 && surplus > 0.5 && pinnedToBottom && !pointerScrollOwnershipActive)
+        publishReserve(Math.max(0, reserve - surplus));
       return;
     }
 

@@ -317,7 +317,7 @@ test('streaming yields to a held scrollbar, stays at the top, and follows a drag
     .toBeLessThanOrEqual(1);
 });
 
-for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointer'] as const) {
+for (const phase of ['bottom-event', 'retained', 'held-pointer'] as const) {
   test(`scrollbar dragging releases the ${phase} activity-collapse anchor`, async ({
     page,
   }, testInfo) => {
@@ -332,12 +332,6 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThanOrEqual(1);
-    const pauseExit = phase.startsWith('exiting')
-      ? await page.addStyleTag({
-          content:
-            '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
-        })
-      : null;
     await page.evaluate(() => {
       // SAFETY: The isolated fixture installs this typed message store and event transport.
       const harness = (
@@ -361,13 +355,9 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
         });
       }
     });
-    if (phase.startsWith('exiting')) {
-      await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(1);
-    } else {
-      await expect(items).toHaveCount(0);
-      await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
-      await waitForAnimationFrames(page, 40);
-    }
+    await expect(items).toHaveCount(0);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
+    await waitForAnimationFrames(page, 40);
 
     const thumb = await list.evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -385,7 +375,7 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
     });
     await page.mouse.move(thumb.x, thumb.y);
     await page.mouse.down();
-    if (phase === 'exiting-bottom-event') {
+    if (phase === 'bottom-event') {
       // Reproduce a layout-driven bottom event after the pointer releases the exit
       // anchor, before native dragging moves away. It must not reclaim ownership.
       await list.evaluate((element) => {
@@ -399,7 +389,6 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
     // Custom Chromium scrollbars deliver the final drag movement on the next frame.
     await waitForAnimationFrames(page, 2);
     await page.mouse.up();
-    await pauseExit?.evaluate((element) => element.parentNode?.removeChild(element));
 
     const samples = await list.evaluate(async (element) => {
       const summary = element.querySelector('.assistant-activity-summary');

@@ -2,6 +2,7 @@ import { storePath } from '@solidjs/signals';
 
 import type { AssistantMessage, Message, MessageEntry, Part } from '../types';
 import {
+  readLatestActiveSessionId,
   defaultAppState,
   messageIndex,
   messageStructureVersion,
@@ -841,10 +842,12 @@ function recordSettledAssistantMarkers(messages: MessageEntry[]) {
   const settledMessages = getSettledLatestAssistantMessages(messages);
   if (settledMessages.size === 0) return;
 
+  // A session and its history can be published in the same tick.
+  const activeSessionId = readLatestActiveSessionId();
   (() => {
     for (const [sessionId, message] of settledMessages) {
       if (message.error) continue;
-      if (state.activeSessionId === sessionId && !showSessionPicker()) {
+      if (activeSessionId === sessionId && !showSessionPicker()) {
         markSessionSeen(sessionId, message.time.completed);
       } else {
         markSessionResponseCompleted(sessionId, message.time.completed);

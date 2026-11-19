@@ -1144,9 +1144,9 @@ export function resetWorkspaceDerivedState(options?: {
     }
     appStore.setState(storePath('sessionsLoadingMore', false));
     appStore.setState(storePath('sessionsPaginationError', null));
-    appStore.setState(
-      storePath('messagesLoading', appStore.state.pendingSessionSelectionId !== null)
-    );
+    appStore.setState((draft) => {
+      draft.messagesLoading = draft.pendingSessionSelectionId !== null;
+    });
     appStore.setState(storePath('permissions', []));
     appStore.setState(storePath('questions', []));
     appStore.setState(storePath('compactingSessionIds', []));

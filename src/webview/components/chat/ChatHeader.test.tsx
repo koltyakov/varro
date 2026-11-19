@@ -401,7 +401,7 @@ describe('ActiveChatHeader', () => {
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     flushSolid();
     const action = [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-      (button) => button.textContent?.includes('Ask a side question')
+      (button) => button.textContent?.trim() === 'Ask side-question'
     );
     expect(action?.disabled).toBe(false);
     action!.click();

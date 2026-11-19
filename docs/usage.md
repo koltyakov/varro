@@ -289,7 +289,7 @@ Unsent composer text and explicit file or folder attachments are restored after 
 ### Side questions
 
 With an OpenCode V2 conversation open, type `/btw Why did that test fail?`
-or choose **Ask a side question…** from the conversation's title menu. `/btw`
+or choose **Ask side-question** from the conversation's title menu. `/btw`
 without a question opens an empty form.
 
 Before the first question is sent, the dialog shows the independently centered

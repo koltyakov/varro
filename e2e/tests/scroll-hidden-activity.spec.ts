@@ -236,7 +236,8 @@ for (const width of [480, 1442]) {
         0,
         before.top - (beforeResume.height - beforeResume.reserve - beforeResume.viewport)
       );
-      expect.soft(beforeResume.reserve).toBeLessThanOrEqual(Math.ceil(requiredReserve) + 2);
+      // Without frames the reserve cannot give back the 24px Thinking row, but it must not grow.
+      expect.soft(beforeResume.reserve).toBeLessThanOrEqual(Math.ceil(requiredReserve) + 26);
       expect(
         frames.every((frame) => frame.reserve < 1),
         JSON.stringify(frames)

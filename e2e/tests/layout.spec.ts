@@ -1918,7 +1918,7 @@ for (const elapsedSeconds of [0, 31]) {
   });
 }
 
-test('keeps the hidden loading slot fixed while an active tool is visible', async ({ page }) => {
+test('collapses the hidden loading slot while an active tool is visible', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
 
@@ -1943,15 +1943,16 @@ test('keeps the hidden loading slot fixed while an active tool is visible', asyn
       if (!loadingVerb) throw new Error('Thinking indicator is missing');
       return loadingVerb.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
     });
-  expect(await measureGap()).toBe(12);
+  const toolGap = await measureGap();
+  await expect(page.locator('.interactive-loading-row')).toHaveClass(/is-collapsed/);
   expect(
     await page.locator('.interactive-loading-row').evaluate((element) => element.clientHeight)
-  ).toBe(24);
+  ).toBe(0);
   const loadingSlotStyle = await page.locator('.interactive-loading-row').evaluate((element) => {
     const style = getComputedStyle(element);
     return { flexShrink: style.flexShrink, minHeight: style.minHeight };
   });
-  expect(loadingSlotStyle).toEqual({ flexShrink: '0', minHeight: '24px' });
+  expect(loadingSlotStyle).toEqual({ flexShrink: '0', minHeight: '0px' });
 
   await page.evaluate(() => {
     const harnessWindow = window as typeof window & {
@@ -1985,7 +1986,7 @@ test('keeps the hidden loading slot fixed while an active tool is visible', asyn
   await expect(emptyRow).toBeAttached();
   await expect(emptyRow).toHaveClass(/interactive-item-render-empty/);
   expect((await emptyRow.boundingBox())?.height).toBe(0);
-  expect(await measureGap()).toBe(12);
+  expect(await measureGap()).toBe(toolGap);
 });
 
 test('keeps a debounced trailing tool row at zero height until the tool is visible', async ({

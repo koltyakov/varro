@@ -90,6 +90,8 @@ export function setSelectedModel(
     rememberVariant?: string | null;
     selectionId?: string;
     protectDuringTurn?: boolean;
+    /** The session the composer is switching to, when that switch happens in this tick. */
+    composerSessionId?: string | null;
   }
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
@@ -106,8 +108,16 @@ export function setSelectedModel(
       // sending starts. Keep the sent model through delayed previous-turn snapshots.
       activeTurnComposerModels.set(sessionId, { ...model });
     }
-  } else if (!persistGlobal && !showSessionPicker() && state.activeSessionId) {
-    const activeTurnModel = getActiveTurnComposerModel(state.activeSessionId);
+  } else if (!persistGlobal) {
+    const composerSessionId =
+      options?.composerSessionId !== undefined
+        ? options.composerSessionId
+        : showSessionPicker()
+          ? null
+          : state.activeSessionId;
+    const activeTurnModel = composerSessionId
+      ? getActiveTurnComposerModel(composerSessionId)
+      : null;
     if (activeTurnModel) model = { ...activeTurnModel };
   }
   if (sessionId) {
@@ -300,8 +310,10 @@ export function setSelectedAgent(
     // Loaded metadata describes the running turn, not a newer composer choice.
     agent = getProtectedSessionAgent(sessionId) ?? agent;
   }
-  if (options?.updateSelection !== false && state.selectedAgent !== agent) {
-    setState(storePath('selectedAgent', agent));
+  if (options?.updateSelection !== false) {
+    setState((draft) => {
+      if (draft.selectedAgent !== agent) draft.selectedAgent = agent;
+    });
   }
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedAgent, agent);
 

@@ -3,9 +3,9 @@ import { expect, test } from '@playwright/test';
 import type { MessageEntry, Part } from '../../src/webview/types';
 
 // Regression contract for AI agents: preserve the busy turn, explicit live completion events,
-// one visible reasoning preview plus queued siblings, real exit animation, and every-frame
-// same-anchor checks. Tools group without an exit animation; reasoning still exercises the
-// production animated lifecycle without bypassing retention or widening drift tolerance.
+// one visible reasoning preview plus queued siblings, instant removal, and every-frame
+// same-anchor checks. Active rows leave without animation; these cases exercise the production
+// lifecycle without bypassing retention or widening drift tolerance.
 const exitCases: Array<{
   name: string;
   count: number;
@@ -15,31 +15,13 @@ const exitCases: Array<{
   virtual?: boolean;
   detached?: boolean;
   detachDuring?: boolean;
-  reattachDuring?: boolean;
   keyDuring?: boolean;
-  animation?: 'cancel' | 'fallback';
 }> = [
   { name: 'three simultaneous', count: 3, gap: 9, early: false, stagger: false },
   { name: 'three amplified', count: 3, gap: 27, early: false, stagger: false },
   { name: 'virtual three', count: 3, gap: 9, early: false, stagger: false, virtual: true },
   { name: 'virtual eight', count: 8, gap: 9, early: false, stagger: false, virtual: true },
   { name: 'detached before exit', count: 3, gap: 9, early: false, stagger: false, detached: true },
-  {
-    name: 'cancelled exit animation',
-    count: 3,
-    gap: 9,
-    early: false,
-    stagger: false,
-    animation: 'cancel',
-  },
-  {
-    name: 'exit timer fallback',
-    count: 3,
-    gap: 9,
-    early: false,
-    stagger: false,
-    animation: 'fallback',
-  },
   { name: 'wheel during exit', count: 3, gap: 9, early: false, stagger: false, detachDuring: true },
   {
     name: 'downward key during exit',
@@ -48,16 +30,6 @@ const exitCases: Array<{
     early: false,
     stagger: false,
     keyDuring: true,
-  },
-  {
-    name: 'return to bottom during exit',
-    count: 3,
-    gap: 9,
-    early: false,
-    stagger: false,
-    virtual: true,
-    detached: true,
-    reattachDuring: true,
   },
   { name: 'one', count: 1, gap: 9, early: false, stagger: false },
   { name: 'two', count: 2, gap: 9, early: false, stagger: false },
@@ -115,34 +87,20 @@ for (const scenario of exitCases) {
     });
     expect(geometry.bottomDistance).toBeLessThanOrEqual(2);
     expect(geometry.clipped).toBeLessThanOrEqual(1);
-    if (scenario.animation === 'fallback') {
-      await page.addStyleTag({
-        content: '.assistant-active-activity-item.is-exiting { animation: none !important; }',
-      });
-    }
     if (scenario.detached) {
       const bounds = await page.locator('.interactive-list').boundingBox();
       if (!bounds) throw new Error('Transcript viewport is missing');
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
-      // Keep the virtualized active row in the painted core so reattachment exercises an exit.
-      // Off-core activity intentionally skips height animations.
-      await page.mouse.wheel(0, scenario.reattachDuring ? -80 : -180);
+      await page.mouse.wheel(0, -180);
       await expect
         .poll(() =>
           page
             .locator('.interactive-list')
             .evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
         )
-        .toBeGreaterThan(scenario.reattachDuring ? 50 : 100);
+        .toBeGreaterThan(100);
       await page.waitForTimeout(150);
     }
-    const pauseExit =
-      scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring
-        ? await page.addStyleTag({
-            content:
-              '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
-          })
-        : null;
     const sampling = page
       .locator('.interactive-list')
       .evaluate(
@@ -162,7 +120,6 @@ for (const scenario of exitCases) {
             top: number | null;
             expectedTop: number | null;
             active: number;
-            exiting: number;
             thinking: boolean;
             scrollTop: number;
             scrollHeight: number;
@@ -209,7 +166,6 @@ for (const scenario of exitCases) {
               '*'
             );
           };
-          let cancelledAnimations = 0;
           const start = performance.now();
           // Hydrated queued siblings get their own minimum preview after a slot is freed.
           const sampleDuration = options.count > 3 ? 12_000 : 4_500;
@@ -221,25 +177,6 @@ for (const scenario of exitCases) {
             const current = list.querySelector<HTMLElement>(
               `[data-msg-id="${CSS.escape(messageId)}"] .assistant-activity-summary`
             );
-            if (
-              options.animation === 'cancel' &&
-              cancelledAnimations === 0 &&
-              performance.now() - start > 100
-            ) {
-              for (const item of list.querySelectorAll(
-                '.assistant-active-activity-item.is-exiting'
-              )) {
-                for (const animation of item.getAnimations()) {
-                  if (
-                    animation instanceof CSSAnimation &&
-                    animation.animationName === 'assistant-active-activity-out'
-                  ) {
-                    animation.cancel();
-                    cancelledAnimations += 1;
-                  }
-                }
-              }
-            }
             samples.push({
               top: current ? current.getBoundingClientRect().top - containerTop : null,
               expectedTop:
@@ -249,7 +186,6 @@ for (const scenario of exitCases) {
                     ? Number(list.dataset.exitTestAnchor)
                     : before,
               active: list.querySelectorAll('.assistant-active-activity-item').length,
-              exiting: list.querySelectorAll('.assistant-active-activity-item.is-exiting').length,
               thinking: !!list.querySelector(
                 '.interactive-loading-row:not(.is-reserved):not(.trailing-assistant-summary-row)'
               ),
@@ -263,9 +199,9 @@ for (const scenario of exitCases) {
                   .height ?? 0,
             });
           }
-          return { before, messageId, samples, cancelledAnimations };
+          return { before, messageId, samples };
         },
-        { count, stagger, sessionId, targetMessageId, animation: scenario.animation }
+        { count, stagger, sessionId, targetMessageId }
       )
       .then(async (result) => {
         await test.info().attach('frame-geometry', {
@@ -274,9 +210,13 @@ for (const scenario of exitCases) {
         });
         return result;
       });
-    if (scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring) {
-      await page.waitForFunction(() =>
-        document.querySelector('.assistant-active-activity-item.is-exiting')
+    if (scenario.detachDuring || scenario.keyDuring) {
+      // The row leaves at once, so the gesture lands while its reserve still holds the viewport.
+      await page.waitForFunction(
+        () =>
+          !document.querySelector('.assistant-active-activity-item') &&
+          (document.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect()
+            .height ?? 0) > 0
       );
       const list = page.locator('.interactive-list');
       await list.evaluate((element) => {
@@ -284,26 +224,6 @@ for (const scenario of exitCases) {
       });
       const bounds = await list.boundingBox();
       if (!bounds) throw new Error('Transcript viewport is missing');
-      if (scenario.reattachDuring) {
-        await list.evaluate((element, messageId) => {
-          // Capture native arrival before the scroll handler reserves the remaining exit height.
-          // That reserve can create a physical bottom gap while preserving the user's destination.
-          const recordArrival = () => {
-            const distance = element.scrollHeight - element.clientHeight - element.scrollTop;
-            if (distance > 1) return;
-            const summary = element.querySelector(
-              `[data-msg-id="${messageId}"] .assistant-activity-summary`
-            );
-            if (!summary) throw new Error('Missing activity summary at native bottom arrival');
-            element.dataset.exitTestBottomReached = String(distance);
-            element.dataset.exitTestAnchor = String(
-              summary.getBoundingClientRect().top - element.getBoundingClientRect().top
-            );
-            element.removeEventListener('scroll', recordArrival, true);
-          };
-          element.addEventListener('scroll', recordArrival, true);
-        }, targetMessageId);
-      }
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
       if (scenario.keyDuring) {
         const beforeKey = await list.evaluate((element) => element.scrollTop);
@@ -325,23 +245,19 @@ for (const scenario of exitCases) {
           );
         }, targetMessageId);
         await page.keyboard.press('ArrowDown');
-        await expect
-          .poll(() => list.evaluate((element) => element.scrollTop))
-          .toBeGreaterThan(beforeKey + 1);
-      } else await page.mouse.wheel(0, scenario.reattachDuring ? 420 : -180);
+        // The viewport already rests on the real bottom, so the key has nowhere further to go.
+        await page.waitForTimeout(200);
+        expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(
+          beforeKey - 1
+        );
+      } else await page.mouse.wheel(0, -180);
       const distance = () =>
         list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
-      if (scenario.reattachDuring)
-        await expect
-          .poll(() =>
-            list.evaluate((element) => Number(element.dataset.exitTestBottomReached ?? Infinity))
-          )
-          .toBeLessThanOrEqual(1);
-      else if (!scenario.keyDuring) await expect.poll(distance).toBeGreaterThan(100);
+      if (!scenario.keyDuring) await expect.poll(distance).toBeGreaterThan(100);
       await page.waitForTimeout(100);
       // The new anchor is established by genuine native movement. Later animation/timer cleanup
       // must preserve this destination, not restore the pre-gesture bottom target.
-      if (!scenario.reattachDuring && !scenario.keyDuring)
+      if (!scenario.keyDuring)
         await list.evaluate((element, messageId) => {
           const summary = element.querySelector(
             `[data-msg-id="${messageId}"] .assistant-activity-summary`
@@ -350,29 +266,27 @@ for (const scenario of exitCases) {
             summary.getBoundingClientRect().top - element.getBoundingClientRect().top
           );
         }, targetMessageId);
-      await pauseExit?.evaluate((element) => element.parentNode?.removeChild(element));
     }
     const result = await sampling;
-    if (scenario.detachDuring || scenario.reattachDuring || scenario.keyDuring) {
-      expect(
-        result.samples.filter(
-          (sample) => sample.expectedTop !== null && sample.expectedTop !== result.before
-        ).length
-      ).toBeGreaterThan(10);
+    if (scenario.detachDuring || scenario.keyDuring) {
+      if (scenario.detachDuring)
+        expect(
+          result.samples.filter(
+            (sample) => sample.expectedTop !== null && sample.expectedTop !== result.before
+          ).length
+        ).toBeGreaterThan(10);
       expect(result.samples.at(-1)?.exit).toBe(0);
       if (scenario.detachDuring) expect(result.samples.at(-1)?.append).toBe(0);
       else expect(result.samples.at(-1)?.append).toBeGreaterThan(0);
     }
-    expect(result.samples.some((sample) => sample.exiting === 1)).toBe(true);
     expect(result.samples.every((sample) => sample.active <= 1)).toBe(true);
     expect(result.samples.at(-1)?.active).toBe(0);
     expect(result.samples.at(-1)?.thinking).toBe(true);
     expect(result.samples.at(-1)?.exit).toBe(0);
-    if (scenario.detached && !scenario.reattachDuring) {
+    if (scenario.detached) {
       expect(result.samples.every((sample) => sample.append === 0 && sample.exit === 0)).toBe(true);
       expect(result.samples.at(-1)?.scrollTop).toBeCloseTo(result.samples[0]!.scrollTop, 0);
     } else if (!scenario.detachDuring) expect(result.samples.at(-1)?.append).toBeGreaterThan(0);
-    if (scenario.animation === 'cancel') expect(result.cancelledAnimations).toBe(1);
     const maxDrift = Math.max(
       ...result.samples.map((sample) =>
         sample.expectedTop === null
@@ -387,6 +301,14 @@ for (const scenario of exitCases) {
       'The same logical summary must remain fixed through exit and Thinking handoff'
     ).toBeLessThanOrEqual(1);
     if (scenario.name === 'three simultaneous') {
+      // Thinking fills part of the departed tray, so the reserve must not overshoot the bottom.
+      await expect
+        .poll(() =>
+          page
+            .locator('.interactive-list')
+            .evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
+        )
+        .toBeLessThanOrEqual(1);
       const appendReserve = page.locator('.append-scroll-bottom-reserve');
       const originalReserve = await appendReserve.evaluate(
         (element) => element.getBoundingClientRect().height
@@ -415,15 +337,23 @@ for (const scenario of exitCases) {
           },
           { sessionId, messageID: targetMessageId, text }
         );
-      // Small real growth must consume reserve without moving the preceding transcript. A large
+      // Small real growth must not move the preceding transcript or grow the reserve. A large
       // all-at-once replacement only proves eventual cleanup and misses premature consumption.
       await appendText('A short continuation.');
+      await expect(page.locator('.interactive-list')).toContainText('A short continuation.');
       await expect
-        .poll(() => appendReserve.evaluate((element) => element.getBoundingClientRect().height))
-        .toBeLessThan(originalReserve - 5);
+        .poll(() =>
+          page
+            .locator('.interactive-list')
+            .evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
+        )
+        .toBeLessThanOrEqual(1);
+      // The continuation may consume the whole reserve, which removes its spacer.
       expect(
-        await appendReserve.evaluate((element) => element.getBoundingClientRect().height)
-      ).toBeGreaterThan(0);
+        await appendReserve.evaluateAll((elements) =>
+          elements.reduce((total, element) => total + element.getBoundingClientRect().height, 0)
+        )
+      ).toBeLessThanOrEqual(originalReserve);
       const top = await page
         .locator(`[data-msg-id="${targetMessageId}"] .assistant-activity-summary`)
         .evaluate(
@@ -558,7 +488,6 @@ test('activity exit tolerates persistent summary drift without observer feedback
     const samples: Array<{
       top: number;
       scrollTop: number;
-      exiting: number;
       active: number;
       append: number;
       exit: number;
@@ -657,7 +586,6 @@ test('activity exit tolerates persistent summary drift without observer feedback
         samples.push({
           top: top(),
           scrollTop: container.scrollTop,
-          exiting: container.querySelectorAll('.assistant-active-activity-item.is-exiting').length,
           active: container.querySelectorAll('.assistant-active-activity-item').length,
           append:
             container.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect()
@@ -682,7 +610,6 @@ test('activity exit tolerates persistent summary drift without observer feedback
   expect(result.injectedDrift, 'The fixture must introduce a positive 1px exit-anchor delta').toBe(
     1
   );
-  expect(result.samples.some((sample) => sample.exiting === 1)).toBe(true);
   expect(
     result.guardTrips,
     `Activity exit must not feed back on its own reserve style (${result.maxDeliveries} deliveries without yielding)`
@@ -692,7 +619,7 @@ test('activity exit tolerates persistent summary drift without observer feedback
   expect(
     Math.max(...result.samples.map((sample) => sample.append + sample.exit))
   ).toBeLessThanOrEqual(result.before.reserveBudget);
-  for (const sample of result.samples.filter((frame) => frame.exiting > 0)) {
+  for (const sample of result.samples) {
     expect(Math.abs(sample.scrollTop - result.before.scrollTop)).toBeLessThanOrEqual(1);
     expect(Math.abs(sample.top - result.before.top)).toBeLessThanOrEqual(1);
   }

@@ -767,6 +767,16 @@ export const defaultAppState = createAppState();
 
 export const state = defaultAppState.state;
 export const setState = defaultAppState.setState;
+
+/** Store reads return the committed value until flush; a draft also sees this tick's writes. */
+export function readLatestActiveSessionId(): string | null {
+  let sessionId = state.activeSessionId;
+  setState((draft) => {
+    sessionId = draft.activeSessionId;
+  });
+  return sessionId;
+}
+
 export const showThinking = defaultAppState.showThinking;
 export const setShowThinking = defaultAppState.setShowThinking;
 export const showFileDiffs = defaultAppState.showFileDiffs;

@@ -3,6 +3,7 @@ import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { editingMessage, resetMessageEditState, startEditingMessage } from './message-edit-state';
 import { newChatDraftKey, startNewChatDraft } from './new-chat-draft';
+import { getPersistedLastOpenedView } from './state-view-persistence';
 import {
   getPersistedSelectedAgent,
   getPersistedSelectedModel,
@@ -67,6 +68,17 @@ describe('startNewChatDraft', () => {
     flushSolid();
     expect(newChatDraftKey()).toBeGreaterThan(first);
     expect(state.activeSessionId).toBeNull();
+  });
+
+  it('remembers the new chat instead of the session it just left', () => {
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+
+    startNewChatDraft();
+    flushSolid();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(getPersistedLastOpenedView()?.type).toBe('new-session');
   });
 
   it('preserves the complete composer draft', () => {

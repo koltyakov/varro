@@ -43,8 +43,9 @@ test('opening and closing Explored during an activity exit preserves its painted
   });
   await page.waitForFunction(
     () =>
-      (document.querySelector('.activity-exit-bottom-reserve')?.getBoundingClientRect().height ??
-        0) > 20
+      !document.querySelector('.assistant-active-activity-item') &&
+      (document.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect().height ??
+        0) > 0
   );
   const summary = page.locator('button.assistant-activity-summary');
   await expect(summary).toHaveCount(1);
