@@ -1,4 +1,4 @@
-import { createEffect, For, Show, createSignal } from 'solid-js';
+import { createEffect, For, Show, createSignal, untrack } from 'solid-js';
 import { ariaBoolean } from '../lib/aria';
 import type { NativeFormValue } from '../../shared/protocol';
 import { isString } from '../../shared/type-utils';
@@ -21,7 +21,10 @@ export function NativeQuestionChoices(props: {
 }) {
   const unmatchedValue = () =>
     isString(props.value) && !props.options.some((option) => option.value === props.value);
-  const [customSelected, setCustomSelected] = createSignal(!!props.custom && unmatchedValue());
+  // Initial state only: the effect below follows value and option changes.
+  const [customSelected, setCustomSelected] = createSignal(
+    untrack(() => !!props.custom && unmatchedValue())
+  );
   const customText = () =>
     unmatchedValue() && isString(props.value) ? props.value : (props.customValue ?? '');
   const name = () => `native-question-${props.id}`;
@@ -57,7 +60,7 @@ export function NativeQuestionChoices(props: {
     >
       <For each={props.options}>
         {(option, index) => {
-          const descriptionID = `${props.id}-choice-${index()}-description`;
+          const descriptionID = () => `${props.id}-choice-${index()}-description`;
           return (
             <label
               class={[
@@ -74,7 +77,7 @@ export function NativeQuestionChoices(props: {
                 aria-invalid={ariaBoolean(props.invalid)}
                 aria-required={ariaBoolean(props.required)}
                 aria-describedby={
-                  [props.describedBy, option.description ? descriptionID : undefined]
+                  [props.describedBy, option.description ? descriptionID() : undefined]
                     .filter(Boolean)
                     .join(' ') || undefined
                 }
@@ -85,7 +88,7 @@ export function NativeQuestionChoices(props: {
               <span class="question-option-text">
                 <span class="question-option-label">{option.label}</span>
                 <Show when={option.description}>
-                  <span id={descriptionID} class="question-option-desc">
+                  <span id={descriptionID()} class="question-option-desc">
                     {' '}
                     {option.description}
                   </span>

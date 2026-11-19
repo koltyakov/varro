@@ -7,6 +7,7 @@ import {
   runWithOwner,
   onSettled,
   onCleanup,
+  untrack,
 } from 'solid-js';
 import { type JSX, Portal, render } from '@solidjs/web';
 
@@ -2396,10 +2397,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   const lw = () => props.lightweight ?? false;
   const [mermaidPreview, setMermaidPreview] = createSignal<{ svg: string } | null>(null);
-  let appliedMermaidTheme = theme();
 
   function closeMermaidPreview() {
-    if (!mermaidPreview()) return;
+    if (!untrack(mermaidPreview)) return;
     setMermaidPreview(null);
     postMessage({ type: 'vscode/mermaid-preview', payload: { open: false } });
   }
@@ -2413,39 +2413,63 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let rafId: number | null = null;
   const stableHighlights = new CodeHighlightBinding();
   const tailHighlights = new CodeHighlightBinding();
-  const initialCacheByContent = !!props.cacheByContent && !props.forceStreaming;
-  const initialSegments = getMarkdownRenderSegments(props.content || '', initialCacheByContent);
+  // The first render is synchronous so a mounted row paints its content immediately. These are
+  // baselines, not live values: the update effect below tracks every input read here and
+  // re-renders against them.
+  const initial = untrack(() => {
+    const cacheByContent = !!props.cacheByContent && !props.forceStreaming;
+    const content = props.content || '';
+    const segments = getMarkdownRenderSegments(content, cacheByContent);
+    const lightweight = lw();
+    const disablePathLinkify = !!props.disablePathLinkify;
+    const escapeHtml = !!props.escapeHtml;
+    const directory = sessionDirectory();
+    const stableHtml = segments.stableContent
+      ? parseMarkdown(segments.stableContent, {
+          cacheByContent: false,
+          directory,
+          disablePathLinkify,
+          disableCodeHighlighting: lightweight,
+          allowMermaidHydration: lightweight,
+          escapeHtml,
+        })
+      : '';
+    const tailParseOptions = {
+      cacheByContent: segments.stableContent.length === 0 && cacheByContent,
+      directory,
+      disablePathLinkify,
+      disableCodeHighlighting: segments.hasUnclosedFence || lightweight,
+      allowMermaidHydration: lightweight && !segments.hasUnclosedFence,
+      escapeHtml,
+    };
+    return {
+      cacheByContent,
+      segments,
+      lightweight,
+      disablePathLinkify,
+      escapeHtml,
+      workspacePath: state.editorContext.workspacePath || '',
+      directory,
+      sessionContextKey: getSessionReferenceContextKey(content),
+      stableHtml,
+      tailHtml: cacheByContent
+        ? parseMarkdown(segments.tailContent, tailParseOptions)
+        : parseIncompleteStreamingMarkdown(segments.tailContent, tailParseOptions),
+    };
+  });
+  const initialSegments = initial.segments;
   let lastAppliedScanState = initialSegments.scanState;
-  let lastAppliedCacheByContent = initialCacheByContent;
-  let lastAppliedLightweight = lw();
-  let lastAppliedDisablePathLinkify = !!props.disablePathLinkify;
-  let lastAppliedEscapeHtml = !!props.escapeHtml;
-  let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
-  let lastAppliedDirectory = sessionDirectory();
-  let lastAppliedSessionContextKey = getSessionReferenceContextKey(props.content || '');
+  let lastAppliedCacheByContent = initial.cacheByContent;
+  let lastAppliedLightweight = initial.lightweight;
+  let lastAppliedDisablePathLinkify = initial.disablePathLinkify;
+  let lastAppliedEscapeHtml = initial.escapeHtml;
+  let lastAppliedWorkspacePath = initial.workspacePath;
+  let lastAppliedDirectory = initial.directory;
+  let lastAppliedSessionContextKey = initial.sessionContextKey;
   let lastAppliedStableContent = initialSegments.stableContent;
   let lastAppliedTailContent = initialSegments.tailContent;
-  let lastAppliedStableHtml = initialSegments.stableContent
-    ? parseMarkdown(initialSegments.stableContent, {
-        cacheByContent: false,
-        directory: lastAppliedDirectory,
-        disablePathLinkify: !!props.disablePathLinkify,
-        disableCodeHighlighting: lw(),
-        allowMermaidHydration: lw(),
-        escapeHtml: !!props.escapeHtml,
-      })
-    : '';
-  const initialTailParseOptions = {
-    cacheByContent: initialSegments.stableContent.length === 0 && initialCacheByContent,
-    directory: lastAppliedDirectory,
-    disablePathLinkify: !!props.disablePathLinkify,
-    disableCodeHighlighting: initialSegments.hasUnclosedFence || lw(),
-    allowMermaidHydration: lw() && !initialSegments.hasUnclosedFence,
-    escapeHtml: !!props.escapeHtml,
-  };
-  let lastAppliedTailHtml = initialCacheByContent
-    ? parseMarkdown(initialSegments.tailContent, initialTailParseOptions)
-    : parseIncompleteStreamingMarkdown(initialSegments.tailContent, initialTailParseOptions);
+  let lastAppliedStableHtml = initial.stableHtml;
+  let lastAppliedTailHtml = initial.tailHtml;
   let lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(lastAppliedStableHtml);
   let lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(lastAppliedTailHtml);
   let lastAppliedStableContentWasAppendOnlySafe = isAppendOnlySafeMarkdown(
@@ -2870,9 +2894,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
     }
   );
 
-  createEffect(theme, (nextTheme) => {
-    if (nextTheme === appliedMermaidTheme) return;
-    appliedMermaidTheme = nextTheme;
+  createEffect(theme, (nextTheme, previousTheme) => {
+    // The first run is the theme the diagrams were rendered with.
+    if (previousTheme === undefined || nextTheme === previousTheme) return;
     closeMermaidPreview();
     resetMermaidDiagramsForThemeForTests(stableRef);
     resetMermaidDiagramsForThemeForTests(tailRef);
@@ -3088,12 +3112,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
   createEffect(
     () => null,
     () => {
-      runWithOwner(owner, () => {
-        hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
-        hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
-        stableHighlights.reconcile([stableRef], initialCacheByContent ? 0 : 1);
-        tailHighlights.reconcile([tailRef], initialCacheByContent ? 0 : 1);
-      });
+      // One-time mount hydration with the current link context. Later input changes
+      // re-render through the update effect, which hydrates again.
+      runWithOwner(owner, () =>
+        untrack(() => {
+          hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
+          hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
+          stableHighlights.reconcile([stableRef], initial.cacheByContent ? 0 : 1);
+          tailHighlights.reconcile([tailRef], initial.cacheByContent ? 0 : 1);
+        })
+      );
     }
   );
   onCleanup(() => {
@@ -3179,8 +3207,11 @@ function MermaidPreviewOverlay(props: { preview: { svg: string } | null; onClose
                 </button>
               </div>
               <div
+                // The overlay is modal, so its diagram cannot change while it is open.
                 ref={(element) =>
-                  element.replaceChildren(createSanitizedMermaidFragment(preview().svg))
+                  element.replaceChildren(
+                    createSanitizedMermaidFragment(untrack(() => preview().svg))
+                  )
                 }
                 class="mermaid-preview-canvas"
                 onClick={(event) => event.stopPropagation()}

@@ -187,7 +187,8 @@ export function VirtualizedContent(
         cancelRetainedPlaceholderRelease();
         return;
       }
-      scheduleRetainedPlaceholderRelease();
+      // Scheduling checks the current release gate; it does not subscribe this effect to it.
+      untrack(scheduleRetainedPlaceholderRelease);
     }
   );
   onCleanup(cancelRetainedPlaceholderRelease);

@@ -533,7 +533,12 @@ export function MessageList() {
   let altHeld = false;
   let disposed = false;
 
-  function ensurePromptNumbersReady(
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
+  function ensurePromptNumbersReady(...args: Parameters<typeof ensurePromptNumbersReadyNow>) {
+    return untrack(() => ensurePromptNumbersReadyNow(...args));
+  }
+  function ensurePromptNumbersReadyNow(
     sessionId: string,
     generation = promptNumberHoldGeneration
   ): Promise<void> {
@@ -2019,7 +2024,7 @@ export function MessageList() {
         : [];
       if (appendedMessageIds.length > 0 && currentMessageIds.length >= VIRTUALIZE_THRESHOLD) {
         pendingMeasuredAppendScroll = true;
-        pendingMeasuredAppendAnchor ??= captureVisibleScrollAnchor();
+        pendingMeasuredAppendAnchor ??= untrack(captureVisibleScrollAnchor);
       }
       const appendedIds = currentMessageIds.length < VIRTUALIZE_THRESHOLD ? appendedMessageIds : [];
       previousEntranceMessageIds = currentMessageIds;
@@ -2225,7 +2230,7 @@ export function MessageList() {
       (previousResizeMessageIds.length !== currentMessageIds.length ||
         previousResizeMessageIds.some((id, index) => id !== currentMessageIds[index]));
     previousResizeMessageIds = currentMessageIds;
-    if (idsChanged && state.activeSessionId) {
+    if (idsChanged && untrack(() => state.activeSessionId)) {
       // Yield to both the message and virtual-range reconciliations, but still correct before paint.
       queueMicrotask(() => {
         queueMicrotask(() => {
@@ -2315,7 +2320,14 @@ export function MessageList() {
     resume();
   }
 
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
   function scheduleChangedLayoutRowMeasurements(
+    ...args: Parameters<typeof scheduleChangedLayoutRowMeasurementsNow>
+  ) {
+    return untrack(() => scheduleChangedLayoutRowMeasurementsNow(...args));
+  }
+  function scheduleChangedLayoutRowMeasurementsNow(
     previous: ReadonlyMap<string, string>,
     current: ReadonlyMap<string, string>,
     preferredAnchor?: VisibleScrollAnchor | null
@@ -2593,7 +2605,14 @@ export function MessageList() {
     });
   });
 
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
   function invalidateChangedZeroHeightRows(
+    ...args: Parameters<typeof invalidateChangedZeroHeightRowsNow>
+  ) {
+    return untrack(() => invalidateChangedZeroHeightRowsNow(...args));
+  }
+  function invalidateChangedZeroHeightRowsNow(
     candidateMessageIds: Iterable<string>,
     streaming: StreamingLayoutProjection
   ) {
@@ -4536,7 +4555,12 @@ export function MessageList() {
     return true;
   }
 
-  function publishMeasurementVersion(options?: {
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
+  function publishMeasurementVersion(...args: Parameters<typeof publishMeasurementVersionNow>) {
+    return untrack(() => publishMeasurementVersionNow(...args));
+  }
+  function publishMeasurementVersionNow(options?: {
     preserveVisibleAnchor?: boolean;
     skipGenericAnchor?: boolean;
   }) {
@@ -4809,7 +4833,14 @@ export function MessageList() {
     }, ACTIVE_WHEEL_WINDOW_MS);
   }
 
-  function shouldDeferStickyDuringUpwardHandoff() {
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
+  function shouldDeferStickyDuringUpwardHandoff(
+    ...args: Parameters<typeof shouldDeferStickyDuringUpwardHandoffNow>
+  ) {
+    return untrack(() => shouldDeferStickyDuringUpwardHandoffNow(...args));
+  }
+  function shouldDeferStickyDuringUpwardHandoffNow() {
     const handoff = upwardStickyHandoff;
     if (!handoff || !containerRef) return false;
     const elapsed = performance.now() - handoff.lastInputAt;
@@ -5009,7 +5040,14 @@ export function MessageList() {
     return getStickyUserMessagePreviewHideReason(preview, geometry) !== null;
   }
 
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
   function shouldHideStickyUserMessagePreviewAfterLayout(
+    ...args: Parameters<typeof shouldHideStickyUserMessagePreviewAfterLayoutNow>
+  ) {
+    return untrack(() => shouldHideStickyUserMessagePreviewAfterLayoutNow(...args));
+  }
+  function shouldHideStickyUserMessagePreviewAfterLayoutNow(
     preview: StickyUserMessagePreview | null,
     geometry?: {
       containerRect: DOMRect;
@@ -5771,7 +5809,12 @@ export function MessageList() {
 
   const bottomFollowMotion = new BottomFollowMotion();
 
-  function performScroll(options?: {
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
+  function performScroll(...args: Parameters<typeof performScrollNow>) {
+    return untrack(() => performScrollNow(...args));
+  }
+  function performScrollNow(options?: {
     force?: boolean;
     immediate?: boolean;
     elapsedMs?: number;
@@ -5884,7 +5927,14 @@ export function MessageList() {
     appendScrollRafId = 0;
   }
 
-  function reconcileAppendBottomReserve() {
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
+  function reconcileAppendBottomReserve(
+    ...args: Parameters<typeof reconcileAppendBottomReserveNow>
+  ) {
+    return untrack(() => reconcileAppendBottomReserveNow(...args));
+  }
+  function reconcileAppendBottomReserveNow() {
     if (!containerRef) return;
     // Diff-view replacement owns the new physical bottom, not the previous painted target.
     // Its settling loop clears reserves; deferred rounding must not recreate one between frames.
@@ -6368,7 +6418,12 @@ export function MessageList() {
     return elapsedMs;
   }
 
-  function startFollowLoop(
+  // Imperative: reads the current list state. Callers decide when it runs, so it never subscribes
+  // the effect or handler that calls it.
+  function startFollowLoop(...args: Parameters<typeof startFollowLoopNow>) {
+    return untrack(() => startFollowLoopNow(...args));
+  }
+  function startFollowLoopNow(
     sessionId: string,
     options?: {
       immediate?: boolean;
@@ -8752,13 +8807,14 @@ export function MessageList() {
 
       // Existing chats keep the preceding response visible.
       // Only an empty chat may top-align its first turn.
+      const measuredRows = untrack(shouldMeasureRows);
       const shouldAlignNewTurn =
-        !!targetMessageId && !shouldMeasureRows() && messages().length === 1;
+        !!targetMessageId && !measuredRows && untrack(() => messages().length) === 1;
       pendingScrollToBottomRequest = true;
       pendingNewTurnMessageId = shouldAlignNewTurn ? targetMessageId : null;
       followModeLocked = true;
-      if (shouldMeasureRows()) {
-        pendingMeasuredAppendAnchor ??= captureVisibleScrollAnchor();
+      if (measuredRows) {
+        pendingMeasuredAppendAnchor ??= untrack(captureVisibleScrollAnchor);
         requestAnimationFrame(() => {
           if (
             disposed ||
@@ -8827,7 +8883,7 @@ export function MessageList() {
     ([sessionId, working]) => {
       const completedSessionId = previousWorkingSessionId;
       previousWorkingSessionId = working ? sessionId : null;
-      if (working || !sessionId || completedSessionId !== sessionId || !autoScroll()) return;
+      if (working || !sessionId || completedSessionId !== sessionId || !untrack(autoScroll)) return;
 
       queueMicrotask(() => {
         if (state.activeSessionId !== sessionId || activeSessionWorking() || !autoScroll()) return;
@@ -8853,8 +8909,8 @@ export function MessageList() {
     if (!prevLoading && loading) {
       clearActivityExitSummaryAnchor();
     }
-    if (prevLoading && !loading && autoScroll()) {
-      const sessionId = state.activeSessionId;
+    if (prevLoading && !loading && untrack(autoScroll)) {
+      const sessionId = untrack(() => state.activeSessionId);
       const summaryAnchor =
         activityExitSummaryAnchor?.sessionId === sessionId ? activityExitSummaryAnchor : null;
       const activityReserveOwnsCompletion = !!summaryAnchor;
@@ -10195,21 +10251,24 @@ export function MessageList() {
         return;
       }
 
-      const currentMessageIds = new Set(messages().map((message) => message.info.id));
-      let forcedContentChanged = false;
-      for (const messageId of new Set([...previous, ...next])) {
-        if (previous.has(messageId) === next.has(messageId)) continue;
-        if (previous.has(messageId) && currentMessageIds.has(messageId)) {
-          measuredHeights.delete(messageId);
-          estimatedRowHeights()?.delete(messageId);
-          zeroHeightRenderGeometrySignatures.delete(messageId);
-          forcedVirtualContentMessageIds.add(messageId);
-          forcedContentChanged = true;
+      // Imperative cache cleanup against the current rows. The compute decides when this runs.
+      untrack(() => {
+        const currentMessageIds = new Set(messages().map((message) => message.info.id));
+        let forcedContentChanged = false;
+        for (const messageId of new Set([...previous, ...next])) {
+          if (previous.has(messageId) === next.has(messageId)) continue;
+          if (previous.has(messageId) && currentMessageIds.has(messageId)) {
+            measuredHeights.delete(messageId);
+            estimatedRowHeights()?.delete(messageId);
+            zeroHeightRenderGeometrySignatures.delete(messageId);
+            forcedVirtualContentMessageIds.add(messageId);
+            forcedContentChanged = true;
+          }
+          markVirtualMetricsDirty(messageId);
         }
-        markVirtualMetricsDirty(messageId);
-      }
-      setKnownZeroHeightMessageIds(next);
-      if (forcedContentChanged) publishMeasurementVersion();
+        setKnownZeroHeightMessageIds(next);
+        if (forcedContentChanged) publishMeasurementVersion();
+      });
     }
   );
   const getMessageBlockBoundarySegment = (

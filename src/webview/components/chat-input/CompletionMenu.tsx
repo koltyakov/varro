@@ -208,7 +208,7 @@ export function CompletionMenu(props: {
               'name' in item
                 ? `${isSkill ? (props.header === 'Skills' ? '' : '/skill:') : '/'}${item.name}`
                 : item.label;
-            const detail =
+            const detail = () =>
               item.type === 'session'
                 ? `${item.detail ? `${item.detail} · ` : ''}${formatRelativeAge(item.session.time.updated, Date.now())}`
                 : 'description' in item
@@ -253,9 +253,9 @@ export function CompletionMenu(props: {
                 <CompletionTitle title={title()} />
                 <span
                   class={`composer-completion-detail${item.type === 'session' ? ' composer-completion-age' : ''}`}
-                  title={item.type === 'session' ? item.session.directory : detail}
+                  title={item.type === 'session' ? item.session.directory : detail()}
                 >
-                  {detail}
+                  {detail()}
                 </span>
               </button>
             );

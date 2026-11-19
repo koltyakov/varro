@@ -155,7 +155,6 @@ export function Message(props: {
 }) {
   let turnRef: HTMLDivElement | undefined;
   const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
-  let wasCompleted = props.info.role === 'assistant' && props.info.time.completed !== undefined;
   let finalMarkPulsePending = false;
 
   createEffect(
@@ -163,18 +162,15 @@ export function Message(props: {
       completed: props.info.role === 'assistant' && props.info.time.completed !== undefined,
       highlighted: props.highlightFinalAnswer,
     }),
-    ({ completed, highlighted }) => {
+    ({ completed, highlighted }, previous) => {
       if (!completed) {
-        wasCompleted = false;
         finalMarkPulsePending = false;
         setPulseFinalMark(false);
         return;
       }
 
-      if (!wasCompleted) {
-        wasCompleted = true;
-        finalMarkPulsePending = true;
-      }
+      // Pulse only on a completion observed after mount, not for history that loads completed.
+      if (previous && !previous.completed) finalMarkPulsePending = true;
 
       if (finalMarkPulsePending && highlighted) {
         finalMarkPulsePending = false;

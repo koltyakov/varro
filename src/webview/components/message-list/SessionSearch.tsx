@@ -219,10 +219,14 @@ export function SessionSearch(props: {
         };
       }
       setSearching(true);
+      // A liveness check for async pagination: it compares against the latest values on purpose.
       const isCurrent = () =>
         !controller.signal.aborted &&
-        props.sessionId === sessionId &&
-        getSessionMessageWindowStateVersion(sessionId) === version;
+        untrack(
+          () =>
+            props.sessionId === sessionId &&
+            getSessionMessageWindowStateVersion(sessionId) === version
+        );
       void (async () => {
         const seen = new Set<string>();
         const collected = new Map(untrack(history).map((document) => [document.id, document]));

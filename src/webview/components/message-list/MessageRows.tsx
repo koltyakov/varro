@@ -174,15 +174,23 @@ export function MessageRow(
 ) {
   let rowRef: HTMLDivElement | undefined;
   let disposeEntrance: (() => void) | undefined;
-  const messageId = props.msg.info.id;
+  // Rows are keyed by message ID, and the entrance is claimed and decided once when the row
+  // mounts. Later part or role changes must not replay or cancel an entrance already started.
+  const { messageId, animateEntrance, allowInitialAssistantItemReveal } = untrack(() => {
+    const id = props.msg.info.id;
+    const claimed = props.claimMessageEntrance?.(id) ?? false;
+    const hasImage = props.msg.parts.some(
+      (part) => part.type === 'file' && part.mime.startsWith('image/')
+    );
+    const animate = claimed && !hasImage && props.msg.info.role !== 'user';
+    return {
+      messageId: id,
+      animateEntrance: animate,
+      allowInitialAssistantItemReveal: animate || props.msg.parts.length === 0,
+    };
+  });
   const isTurnHovered = () =>
     !!props.hoveredTurnId && props.messagePromptGroupIds?.get(messageId) === props.hoveredTurnId;
-  const claimedEntrance = props.claimMessageEntrance?.(messageId) ?? false;
-  const hasImage = props.msg.parts.some(
-    (part) => part.type === 'file' && part.mime.startsWith('image/')
-  );
-  const animateEntrance = claimedEntrance && !hasImage && props.msg.info.role !== 'user';
-  const allowInitialAssistantItemReveal = animateEntrance || props.msg.parts.length === 0;
   const isOffCore = () => !!props.outerListVirtualized && props.nearViewport === false;
   const isVirtualPlaceholder = () => isOffCore() && !!props.virtualPlaceholder;
   const [entrancePending, setEntrancePending] = createSignal(animateEntrance);

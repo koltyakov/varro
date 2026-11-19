@@ -1,4 +1,4 @@
-import { createEffect } from 'solid-js';
+import { createEffect, untrack } from 'solid-js';
 import { hasUnsettledToolPart } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
 import type { AssistantMessage, MessageEntry, SessionStatus } from '../../types';
@@ -295,7 +295,8 @@ export function registerStuckSessionWatchdogEffect(deps: {
           inFlight = false;
         }
       };
-      void tick();
+      // The first check reads current statuses like later timer ticks; it must not subscribe.
+      void untrack(tick);
       const timer = window.setInterval(() => void tick(), STUCK_SESSION_WATCHDOG_INTERVAL_MS);
       cleanups.push(() => {
         cancelled = true;

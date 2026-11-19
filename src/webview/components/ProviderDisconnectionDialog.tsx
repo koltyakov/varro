@@ -1,4 +1,4 @@
-import { createEffect, For, Show, createMemo, createSignal, onSettled } from 'solid-js';
+import { createEffect, For, Show, createMemo, createSignal, onSettled, untrack } from 'solid-js';
 import { hostMetadata } from '../host/extensions';
 import { Portal } from '@solidjs/web';
 import type { Provider } from '../types';
@@ -19,8 +19,9 @@ export function ProviderDisconnectionDialog(props: {
   onClose: () => void;
 }) {
   const [query, setQuery] = createSignal('');
+  // Initial selection only; the user edits it from here.
   const [selectedProviderID, setSelectedProviderID] = createSignal<string | null>(
-    props.initialProviderID ?? null
+    untrack(() => props.initialProviderID ?? null)
   );
   const [isDeleting, setIsDeleting] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal('');

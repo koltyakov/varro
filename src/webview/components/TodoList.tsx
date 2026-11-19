@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, onSettled } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup, onSettled, untrack } from 'solid-js';
 import { ariaBoolean } from '../lib/aria';
 import { defaultAppState } from '../lib/state';
 import { prepareForTodoCollapse } from '../lib/message-list-layout';
@@ -43,14 +43,12 @@ export function TodoList() {
       radius: diameter / 2,
     }));
   };
+  // Initial state only: the effect below applies automatic collapse changes after mount.
   const [collapsed, setCollapsed] = createSignal(
-    allDone() || readStored<boolean>(STORAGE_KEYS.todoListCollapsed) === true
+    untrack(() => allDone() || readStored<boolean>(STORAGE_KEYS.todoListCollapsed) === true)
   );
   const [listMaxHeight, setListMaxHeight] = createSignal(DEFAULT_TODO_LIST_HEIGHT);
   const [listScrollable, setListScrollable] = createSignal(false);
-  let previousTodoIds = new Set(todos().map((todo) => todo.id));
-  let previousUserMessageCount = userMessageCount();
-  let previousAllDone = allDone();
   let blockRef: HTMLDivElement | undefined;
   let listRef: HTMLUListElement | undefined;
   let activeTodoTextRef: HTMLSpanElement | undefined;
@@ -64,7 +62,9 @@ export function TodoList() {
   };
 
   const setAutomaticCollapsed = (nextCollapsed: boolean) => {
-    if (nextCollapsed && !collapsed() && listRef?.isConnected) prepareForTodoCollapse(listRef);
+    if (nextCollapsed && !untrack(collapsed) && listRef?.isConnected) {
+      prepareForTodoCollapse(listRef);
+    }
     manuallyExpanded = false;
     setCollapsed(nextCollapsed);
   };
@@ -110,21 +110,19 @@ export function TodoList() {
       nextUserMessageCount: userMessageCount(),
       nextAllDone: allDone(),
     }),
-    ({ ids, nextUserMessageCount, nextAllDone }) => {
-      const nextTodoIds = new Set(ids);
+    ({ ids, nextUserMessageCount, nextAllDone }, previous) => {
+      // The first run is the mounted state, which the initial collapsed value already reflects.
+      if (!previous) return;
+      const previousTodoIds = new Set(previous.ids);
       const hasNewTodo = ids.some((id) => !previousTodoIds.has(id));
 
-      if (nextAllDone && !previousAllDone) {
+      if (nextAllDone && !previous.nextAllDone) {
         setAutomaticCollapsed(true);
       } else if (hasNewTodo) {
         setAutomaticCollapsed(readStored<boolean>(STORAGE_KEYS.todoListCollapsed) === true);
-      } else if (nextUserMessageCount > previousUserMessageCount && nextAllDone) {
+      } else if (nextUserMessageCount > previous.nextUserMessageCount && nextAllDone) {
         setAutomaticCollapsed(true);
       }
-
-      previousTodoIds = nextTodoIds;
-      previousUserMessageCount = nextUserMessageCount;
-      previousAllDone = nextAllDone;
     }
   );
 

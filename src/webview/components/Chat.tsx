@@ -138,7 +138,7 @@ export function Chat() {
     () => ({ request: providerConnectionRequest(), data: providerConnectionData() }),
     ({ request, data }) => {
       if (!request || data) return;
-      consumeProviderConnectionRequest(request.id);
+      untrack(() => consumeProviderConnectionRequest(request.id));
       const loadingState = {
         providers: [],
         error: '',
@@ -555,10 +555,13 @@ export function Chat() {
     sessionSearchFocusKey,
     (key) => {
       if (key === 0) return;
-      setSessionFilter(null);
-      setSubagentParentId(null);
-      setShowModels(false);
-      setShowSessionPicker(true);
+      // Actions persist the current view state; the focus key alone decides when they run.
+      untrack(() => {
+        setSessionFilter(null);
+        setSubagentParentId(null);
+        setShowModels(false);
+        setShowSessionPicker(true);
+      });
     },
     { defer: true }
   );

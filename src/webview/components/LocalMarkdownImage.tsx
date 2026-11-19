@@ -29,12 +29,13 @@ export function LocalMarkdownImage(props: {
   };
   createImagePreviewEffect(() => preview() !== null, closePreview);
 
-  const request = (signal: AbortSignal, original = false) => {
-    const body: LocalImageRequest = {
-      path: props.source,
-      directory: props.directory,
-      sessionID: props.sessionID,
-    };
+  const currentScope = (): Pick<LocalImageRequest, 'path' | 'directory' | 'sessionID'> => ({
+    path: props.source,
+    directory: props.directory,
+    sessionID: props.sessionID,
+  });
+  const request = (signal: AbortSignal, original = false, scope = currentScope()) => {
+    const body: LocalImageRequest = { ...scope };
     if (original) body.original = true;
     return apiCall<LocalImageResponse>('POST', VARRO_API_ENDPOINTS.localImage, body, {
       signal,
@@ -44,7 +45,7 @@ export function LocalMarkdownImage(props: {
   };
 
   createEffect(
-    () => nearViewport() && [props.source, props.directory, props.sessionID],
+    () => (nearViewport() ? currentScope() : null),
     (scope) => {
       if (!scope) return;
       const current = new AbortController();
@@ -52,7 +53,7 @@ export function LocalMarkdownImage(props: {
       setImage(null);
       setError('');
       closePreview();
-      void request(current.signal).then(
+      void request(current.signal, false, scope).then(
         (result) => {
           if (!current.signal.aborted) setImage(result);
         },

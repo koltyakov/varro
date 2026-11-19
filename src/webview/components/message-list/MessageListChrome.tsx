@@ -1,5 +1,14 @@
 import { ariaBoolean } from '../../lib/aria';
-import { createEffect, For, Show, createMemo, createSignal, onCleanup, onSettled } from 'solid-js';
+import {
+  createEffect,
+  For,
+  Show,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onSettled,
+  untrack,
+} from 'solid-js';
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { useSecondClock } from '../../lib/clock';
 import { openBackgroundProcessView } from '../../lib/background-process-view';
@@ -373,7 +382,8 @@ export function TurnNavigationRail(props: {
       </Show>
       <For each={windowTurns().map((turn) => turn.id)}>
         {(id, index) => {
-          const initialTurn = turnsById().get(id)!;
+          // Fallback only while a removed turn's row is still leaving the window.
+          const initialTurn = untrack(() => turnsById().get(id)!);
           const turn = () => turnsById().get(id) ?? initialTurn;
           const sentTimestamp = createMemo(() => {
             const sentAt = turn().sentAt;

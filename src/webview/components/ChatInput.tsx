@@ -1087,7 +1087,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return undefined;
     },
     (action) => {
-      if (action === 'cancel') cancelQueuedMessageEdit();
+      if (action === 'cancel') untrack(cancelQueuedMessageEdit);
       else if (action === 'clear') setQueuedMessageEdit(null);
     }
   );
@@ -1714,7 +1714,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         }
         if (pendingSessionReferenceIds.has(id)) continue;
         pendingSessionReferenceIds.add(id);
-        void lookupSessionReference(id)
+        // A one-time lookup with the current workspace scope; the compute above decides when.
+        void untrack(() => lookupSessionReference(id))
           .then((session) => {
             if (!session) return;
             if (!getSessionReferenceIds(inputText()).includes(id)) return;
@@ -5731,7 +5732,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         pastedFileChipText.has(path)
       );
       if (applyingComposerHistory) return;
-      composerHistory.record(snapshot);
+      untrack(() => composerHistory.record(snapshot));
     }
   );
 
@@ -5809,7 +5810,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     },
     (changedSession) => {
       if (changedSession) {
-        cancelMessageEdit();
+        untrack(cancelMessageEdit);
       }
     }
   );

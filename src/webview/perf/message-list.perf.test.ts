@@ -21,10 +21,14 @@ const { messageRowPassCounts } = vi.hoisted(() => ({
 
 /* oxlint-disable anti-slop/no-module-mocking -- This benchmark measures MessageList integration without MessageRows render cost. */
 vi.mock('../components/message-list/MessageRows', async () => {
-  const { createRenderEffect } = await import('solid-js');
+  const { createRenderEffect, untrack } = await import('solid-js');
 
+  // Counting reads each passed row; it must not subscribe the render effect to those rows.
   function countMessagePass(message: { info: Message; parts: Part[] }) {
-    messageRowPassCounts.set(message.info.id, (messageRowPassCounts.get(message.info.id) ?? 0) + 1);
+    untrack(() => {
+      const id = message.info.id;
+      messageRowPassCounts.set(id, (messageRowPassCounts.get(id) ?? 0) + 1);
+    });
   }
 
   return {

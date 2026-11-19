@@ -1,6 +1,6 @@
 import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, vi } from 'vitest';
-import { reconcile } from 'solid-js';
+import { reconcile, untrack } from 'solid-js';
 import {
   setExpandThinking,
   setState,
@@ -403,6 +403,11 @@ export function assistantMessage(
 }
 
 export function hasAssistantModelChangeBetween(previousId: string, currentId: string) {
+  // Fake layout reads this during measurement; real DOM geometry never subscribes.
+  return untrack(() => hasAssistantModelChangeBetweenNow(previousId, currentId));
+}
+
+function hasAssistantModelChangeBetweenNow(previousId: string, currentId: string) {
   const previous = state.messages.find((message) => message.info.id === previousId);
   const current = state.messages.find((message) => message.info.id === currentId);
   return (

@@ -1,5 +1,5 @@
 import { ariaBoolean } from '../../lib/aria';
-import { createEffect, Show, createSignal, onCleanup } from 'solid-js';
+import { createEffect, Show, createSignal, onCleanup, untrack } from 'solid-js';
 import { Portal } from '@solidjs/web';
 import { gymIcon, messageTextIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { AttachmentLabel } from '../AttachmentLabel';
@@ -29,7 +29,8 @@ export function AttachmentChip(props: {
   compressionHint?: string;
 }) {
   const [previewStyle, setPreviewStyle] = createSignal<Record<string, string> | null>(null);
-  const [showTitle, setShowTitle] = createSignal(props.title !== props.label);
+  // Initial state only: the effect below keeps it in sync with title and truncation changes.
+  const [showTitle, setShowTitle] = createSignal(untrack(() => props.title !== props.label));
   const hasFormatIcon = () =>
     props.icon === 'file' ||
     props.icon === undefined ||

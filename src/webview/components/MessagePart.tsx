@@ -1,4 +1,4 @@
-import { createEffect, Show, createMemo, createSignal, onCleanup } from 'solid-js';
+import { createEffect, Show, createMemo, createSignal, onCleanup, untrack } from 'solid-js';
 import { ariaBoolean } from '../lib/aria';
 import { getMessageById, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatModelName, formatVariantLabel } from '../lib/format';
@@ -154,17 +154,23 @@ function ReasoningBlock(props: {
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
   const isStreaming = () => !!props.streaming || props.part.time.end === undefined;
   const isAutoExpansionRequested = () => !!props.expandedByDefault && isStreaming();
-  let currentExpansionKey = expansionKey();
+  // Baselines only: the effects below track key, streaming and auto-expansion changes against them.
+  const initial = untrack(() => ({
+    expansionKey: expansionKey(),
+    streaming: isStreaming(),
+    autoExpansion: isAutoExpansionRequested(),
+  }));
+  let currentExpansionKey = initial.expansionKey;
   let contentElement: HTMLDivElement | undefined;
   let autoFollow = true;
   let wasExpanded = false;
-  let wasStreaming = isStreaming();
-  let wasAutoExpansionRequested = isAutoExpansionRequested();
+  let wasStreaming = initial.streaming;
+  let wasAutoExpansionRequested = initial.autoExpansion;
   let followFrameRequest = 0;
   let previousFollowTime: number | null = null;
   let lastAutoScrollTop: number | null = null;
   const [expanded, setExpanded] = createSignal(
-    isAutoExpansionRequested() || (getMessageBlockExpanded(currentExpansionKey) ?? false)
+    initial.autoExpansion || (getMessageBlockExpanded(initial.expansionKey) ?? false)
   );
   const detail = createDeferredPart(() => props.part, expanded);
   const reasoningText = createMemo(() =>

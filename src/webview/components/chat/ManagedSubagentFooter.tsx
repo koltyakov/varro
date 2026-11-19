@@ -148,16 +148,14 @@ export function ManagedSubagentFooter(props: {
     setShowProviderLimitPopup(false);
   };
 
-  let popupSessionId = state.activeSessionId;
   createEffect(
     () => ({
       sessionId: state.activeSessionId,
       providerLimit: showProviderLimit(),
       usage: contextUsage(),
     }),
-    ({ sessionId, providerLimit, usage }) => {
-      if (sessionId !== popupSessionId) closePopups();
-      popupSessionId = sessionId;
+    ({ sessionId, providerLimit, usage }, previous) => {
+      if (previous && sessionId !== previous.sessionId) closePopups();
       if (!providerLimit) setShowProviderLimitPopup(false);
       if (!usage) setShowContextPopup(false);
     }

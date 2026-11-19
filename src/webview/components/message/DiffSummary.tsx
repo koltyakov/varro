@@ -1,5 +1,5 @@
 import { ariaBoolean } from '../../lib/aria';
-import { createEffect, Show, createMemo, createSignal } from 'solid-js';
+import { Show, createMemo, createSignal } from 'solid-js';
 import {
   getMessageBlockExpanded,
   setMessageBlockExpanded,
@@ -10,22 +10,15 @@ import { DiffView } from '../DiffView';
 import { UiIcon } from '../UiIcon';
 
 export function DiffSummary(props: { diffs: FileDiff[]; stateKey: string }) {
-  let currentStateKey = props.stateKey;
-  const [expanded, setExpanded] = createSignal(getMessageBlockExpanded(currentStateKey) ?? false);
+  // Writable derived state: the remembered expansion is the seed, and it follows a new key.
+  const [expanded, setExpanded] = createSignal(
+    () => getMessageBlockExpanded(props.stateKey) ?? false
+  );
   const summary = createMemo(() =>
     props.diffs.reduce((acc, d) => ({ add: acc.add + d.additions, del: acc.del + d.deletions }), {
       add: 0,
       del: 0,
     })
-  );
-
-  createEffect(
-    () => props.stateKey,
-    (nextStateKey) => {
-      if (nextStateKey === currentStateKey) return;
-      currentStateKey = nextStateKey;
-      setExpanded(getMessageBlockExpanded(nextStateKey) ?? false);
-    }
   );
 
   const toggleExpanded = () => {

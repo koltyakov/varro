@@ -135,15 +135,15 @@ export function QueuedMessages(props: {
           >
             <For each={props.pendingSteers}>
               {(item) => {
-                const label = getAnnotationPreviewText(item) || 'Attached context';
+                const label = () => getAnnotationPreviewText(item) || 'Attached context';
                 return (
                   <div class="chat-queue-item" role="listitem" data-steered-message-id={item.id}>
                     <div class="chat-queue-body">
                       <span class="chat-steer-icon" aria-hidden="true">
                         <UiIcon source={hourglassIcon} width={12} height={12} />
                       </span>
-                      <span class="chat-queue-label" title={label}>
-                        {label}
+                      <span class="chat-queue-label" title={label()}>
+                        {label()}
                       </span>
                     </div>
                     <QueueAttachmentIcons
@@ -183,8 +183,8 @@ export function QueuedMessages(props: {
                 const didSteerFail = () => props.failedSteerItemIds?.has(item.id) ?? false;
                 const [labelTruncated, setLabelTruncated] = createSignal(false);
                 let labelRef: HTMLSpanElement | undefined;
-                const imageCount = item.clipboardImages?.length || 0;
-                const attachmentCount =
+                const imageCount = () => item.clipboardImages?.length || 0;
+                const attachmentCount = () =>
                   (item.queuedContext?.currentDocumentEnabled
                     ? (item.queuedContext.editorContext.extensionContexts?.length ?? 0)
                     : 0) +
@@ -193,7 +193,7 @@ export function QueuedMessages(props: {
                   (item.terminalSelection ? 1 : 0) +
                   (item.inlineProblems?.length ?? 0) +
                   (item.attachedDiagnostics ? 1 : 0);
-                const label =
+                const label = () =>
                   (item.inlineProblems ?? []).reduce(
                     (text, reference) =>
                       text.replaceAll(
@@ -203,9 +203,11 @@ export function QueuedMessages(props: {
                     getAnnotationPreviewText(item)
                   ) ||
                   [
-                    imageCount > 0 ? `${imageCount} ${imageCount === 1 ? 'image' : 'images'}` : '',
-                    attachmentCount > 0
-                      ? `${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`
+                    imageCount() > 0
+                      ? `${imageCount()} ${imageCount() === 1 ? 'image' : 'images'}`
+                      : '',
+                    attachmentCount() > 0
+                      ? `${attachmentCount()} ${attachmentCount() === 1 ? 'attachment' : 'attachments'}`
                       : '',
                   ]
                     .filter(Boolean)
@@ -280,7 +282,7 @@ export function QueuedMessages(props: {
                         }}
                         onKeyDown={reorderWithKeyboard}
                         title="Drag to reorder queued message"
-                        aria-label={`Reorder queued message: ${label}`}
+                        aria-label={`Reorder queued message: ${label()}`}
                       >
                         <Show
                           when={draggedItemId() || isAltPressed()}
@@ -302,7 +304,7 @@ export function QueuedMessages(props: {
                       </button>
                       <span
                         class="chat-queue-label"
-                        title={labelTruncated() ? label : undefined}
+                        title={labelTruncated() ? label() : undefined}
                         ref={(element) => {
                           labelRef = element;
                         }}
@@ -312,15 +314,15 @@ export function QueuedMessages(props: {
                           );
                         }}
                       >
-                        {label}
+                        {label()}
                       </span>
                       <Show when={item.paused}>
                         <span class="chat-queue-paused-label">Paused</span>
                       </Show>
                     </div>
                     <QueueAttachmentIcons
-                      imageCount={imageCount}
-                      attachmentCount={attachmentCount}
+                      imageCount={imageCount()}
+                      attachmentCount={attachmentCount()}
                     />
                     <div class="chat-queue-actions">
                       <Show when={isEditing()}>

@@ -1,4 +1,13 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onSettled,
+  Show,
+  untrack,
+} from 'solid-js';
 import { Portal } from '@solidjs/web';
 import { ariaBoolean } from '../lib/aria';
 import type { McpStatus } from '../../shared/protocol';
@@ -35,7 +44,8 @@ export function McpPicker(props: {
   let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
-  const [query, setQuery] = createSignal(props.initialQuery ?? '');
+  // Initial search text only; the user edits it from here.
+  const [query, setQuery] = createSignal(untrack(() => props.initialQuery ?? ''));
   const [focusIndex, setFocusIndex] = createSignal(0);
   const [authServer, setAuthServer] = createSignal<{
     name: string;
@@ -440,7 +450,10 @@ function McpAuthDialog(props: {
   const [authorizationUrl, setAuthorizationUrl] = createSignal('');
   const [canPasteRedirect, setCanPasteRedirect] = createSignal(false);
   const [authorizationCode, setAuthorizationCode] = createSignal('');
-  const [currentStatus, setCurrentStatus] = createSignal<McpStatus>(props.server.status);
+  // Initial state only: the effect below follows live status updates for this server.
+  const [currentStatus, setCurrentStatus] = createSignal<McpStatus>(
+    untrack(() => props.server.status)
+  );
   const [isSubmitting, publishSubmitting] = createSignal(false);
   let submitting = false;
   const setIsSubmitting = (value: boolean) => {

@@ -1,4 +1,4 @@
-import { flush as flushSolid, reconcile } from 'solid-js';
+import { flush as flushSolid, reconcile, untrack } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '@solidjs/web';
@@ -4127,8 +4127,11 @@ describe('MessageList auto-scroll', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement
     ) {
-      const zeroRowHasContent =
-        state.messages.find((message) => message.info.id === 'assistant-30')?.parts.length !== 0;
+      // Fake geometry reads the store like a measurement: untracked.
+      const zeroRowHasContent = untrack(
+        () =>
+          state.messages.find((message) => message.info.id === 'assistant-30')?.parts.length !== 0
+      );
       const trackHeight = zeroRowHasContent ? 5000 : 4900;
       if (this === list || this.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
@@ -4366,9 +4369,15 @@ describe('MessageList auto-scroll', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement
     ) {
-      const zeroRowHasContent = !!state.messages
-        .find((message) => message.info.id === 'assistant-30')
-        ?.parts.find((part) => part.id === 'text-30' && part.type === 'text' && part.text.trim());
+      // Fake geometry reads the store like a measurement: untracked.
+      const zeroRowHasContent = untrack(
+        () =>
+          !!state.messages
+            .find((message) => message.info.id === 'assistant-30')
+            ?.parts.find(
+              (part) => part.id === 'text-30' && part.type === 'text' && part.text.trim()
+            )
+      );
       const trackHeight = zeroRowHasContent ? 5000 : 4900;
       if (this === list || this.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);

@@ -1,4 +1,4 @@
-import { createEffect, createMemo } from 'solid-js';
+import { createEffect, createMemo, untrack } from 'solid-js';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import type { SessionStatus } from '../../types';
@@ -482,7 +482,8 @@ export function registerProviderLimitRefreshEffect(deps: {
     },
     (target) => {
       if (!target) return undefined;
-      void refreshCurrent?.();
+      // Polling reads the current session state like later timer ticks; it must not subscribe.
+      void untrack(() => refreshCurrent?.());
       const timer = window.setInterval(() => void refreshCurrent?.(), target.pollIntervalMs);
       return () => window.clearInterval(timer);
     }

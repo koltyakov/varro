@@ -1,4 +1,4 @@
-import { flush as flushSolid } from 'solid-js';
+import { flush as flushSolid, untrack } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '@solidjs/web';
@@ -729,15 +729,21 @@ describe('virtualized editing', () => {
       ) {
         if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
         if (this.classList.contains('interactive-list-track')) {
-          const targetHasContent = state.messages
-            .find((message) => message.info.id === 'message-30')
-            ?.parts.some((part) => part.type === 'text' && part.text.trim());
+          // Fake geometry reads the store like a measurement: untracked.
+          const targetHasContent = untrack(() =>
+            state.messages
+              .find((message) => message.info.id === 'message-30')
+              ?.parts.some((part) => part.type === 'text' && part.text.trim())
+          );
           return new DOMRect(0, 0, 500, targetHasContent ? 6000 : 5900);
         }
         if (this.dataset.msgId) {
-          const targetHasContent = state.messages
-            .find((message) => message.info.id === 'message-30')
-            ?.parts.some((part) => part.type === 'text' && part.text.trim());
+          // Fake geometry reads the store like a measurement: untracked.
+          const targetHasContent = untrack(() =>
+            state.messages
+              .find((message) => message.info.id === 'message-30')
+              ?.parts.some((part) => part.type === 'text' && part.text.trim())
+          );
           return new DOMRect(
             0,
             0,
@@ -1094,7 +1100,7 @@ describe('MessageList history pagination', () => {
         return new DOMRect(0, 0, 500, 400);
       }
       if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, state.messages.length * 100);
+        return new DOMRect(0, 0, 500, untrack(() => state.messages.length) * 100);
       }
       if (this.dataset.assistantRenderKey) {
         const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
@@ -2339,7 +2345,7 @@ describe('MessageList history pagination', () => {
         return new DOMRect(0, 0, 500, 400);
       }
       if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, state.messages.length * 100);
+        return new DOMRect(0, 0, 500, untrack(() => state.messages.length) * 100);
       }
       if (this.dataset.msgId) {
         const index = state.messages.findIndex((message) => message.info.id === this.dataset.msgId);

@@ -487,8 +487,9 @@ export function AssistantMessageContent(props: {
     }
   );
   const errorDetailsExpansionKey = () => getAssistantErrorDetailsExpansionKey(props.info.id);
+  // Writable derived state: the remembered expansion is the seed, and it follows a new key.
   const [errorDetailsOpen, setErrorDetailsOpen] = createSignal(
-    getMessageBlockExpanded(errorDetailsExpansionKey()) ?? false
+    () => getMessageBlockExpanded(errorDetailsExpansionKey()) ?? false
   );
   const errorDetailsId = () => `assistant-error-details-${props.info.id}`;
   const toggleErrorDetails = () => {

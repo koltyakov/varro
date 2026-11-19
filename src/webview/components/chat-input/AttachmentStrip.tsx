@@ -1,4 +1,4 @@
-import { For } from 'solid-js';
+import { For, Show } from 'solid-js';
 import type { ExtensionContext } from '../../../shared/extension-context';
 import { showAttachmentDetails } from '../../host/extensions';
 import type { ClipboardImage, NativePdfAttachment } from '../../lib/app-state-types';
@@ -178,47 +178,52 @@ export function AttachmentStrip(props: {
           }
 
           if (item.type === 'file') {
-            const database = item.value.database;
-            const annotation = readChatAnnotation(item.value);
-            const lineRange = database
-              ? databaseAttachmentDetail(database)
-              : formatContextLineRanges(item.value.lineRanges);
-            const chip = (
+            const database = () => item.value.database;
+            const annotation = () => readChatAnnotation(item.value);
+            const lineRange = () => {
+              const source = database();
+              return source
+                ? databaseAttachmentDetail(source)
+                : formatContextLineRanges(item.value.lineRanges);
+            };
+            const chip = () => (
               <AttachmentChip
                 label={
-                  annotation
-                    ? getChatAnnotationLabel(annotation.note)
+                  annotation()
+                    ? getChatAnnotationLabel(annotation()!.note)
                     : getDroppedFileLabel(item.value)
                 }
-                preserveExtension={annotation ? false : undefined}
+                preserveExtension={annotation() ? false : undefined}
                 path={item.value.relativePath || item.value.path}
-                detail={lineRange}
+                detail={lineRange()}
                 icon={
-                  annotation
+                  annotation()
                     ? 'message-text'
-                    : database
+                    : database()
                       ? 'table'
                       : item.value.type === 'directory'
                         ? 'folder'
                         : 'file'
                 }
-                title={
-                  annotation
-                    ? undefined
-                    : database
-                      ? `${database.name}${database.dataSource ? ` · ${database.dataSource}` : ''} · ${lineRange}`
-                      : lineRange
-                        ? `${item.value.relativePath || item.value.path} ${lineRange}`
-                        : item.value.relativePath || item.value.path
-                }
+                title={(() => {
+                  if (annotation()) return undefined;
+                  const source = database();
+                  if (source)
+                    return `${source.name}${source.dataSource ? ` · ${source.dataSource}` : ''} · ${lineRange()}`;
+                  return lineRange()
+                    ? `${item.value.relativePath || item.value.path} ${lineRange()}`
+                    : item.value.relativePath || item.value.path;
+                })()}
                 onClick={props.onOpenFile ? () => props.onOpenFile?.(item.value) : undefined}
                 onRemove={() => props.onRemoveFile(item.value.path)}
               />
             );
-            return annotation ? (
-              <AnnotationTooltip annotation={annotation}>{chip}</AnnotationTooltip>
-            ) : (
-              chip
+            return (
+              <Show when={annotation()} fallback={chip()}>
+                {(current) => (
+                  <AnnotationTooltip annotation={current()}>{chip()}</AnnotationTooltip>
+                )}
+              </Show>
             );
           }
 

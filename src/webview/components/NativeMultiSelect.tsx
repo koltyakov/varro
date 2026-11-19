@@ -79,7 +79,7 @@ export function NativeMultiSelect(props: {
       >
         <For each={props.field.options}>
           {(option, index) => {
-            const descriptionID = `${props.id}-option-${index()}-description`;
+            const descriptionID = () => `${props.id}-option-${index()}-description`;
             return (
               <label
                 class={[
@@ -96,7 +96,7 @@ export function NativeMultiSelect(props: {
                     aria-invalid={ariaBoolean(props.invalid)}
                     disabled={props.disabled}
                     aria-describedby={
-                      [props.describedBy, option.description ? descriptionID : undefined]
+                      [props.describedBy, option.description ? descriptionID() : undefined]
                         .filter(Boolean)
                         .join(' ') || undefined
                     }
@@ -116,7 +116,7 @@ export function NativeMultiSelect(props: {
                 <span class="question-option-text">
                   <span class="question-option-label">{option.label}</span>
                   <Show when={option.description}>
-                    <span class="question-option-desc" id={descriptionID}>
+                    <span class="question-option-desc" id={descriptionID()}>
                       {' '}
                       {option.description}
                     </span>

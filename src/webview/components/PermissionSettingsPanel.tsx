@@ -443,7 +443,7 @@ function PermissionActionSelect(props: {
             {(action, index) => (
               <button
                 ref={(element) => {
-                  options[index()] = element;
+                  options[untrack(index)] = element;
                 }}
                 type="button"
                 role="option"
@@ -979,18 +979,18 @@ export function PermissionSettingsPanel() {
 
   createEffect(
     serverConnection,
-    () => {
+    (connected) => {
       setRemovingServerRule(null);
       setEditingServerRule(null);
       setConfirmingServerRule(null);
       setSavingServerRule(false);
-      if (serverConnection()) {
+      if (connected) {
         setServerMemory(null);
-        void refreshServerMemory();
+        void untrack(refreshServerMemory);
       } else {
         serverMemoryLoadGeneration += 1;
         setServerMemoryLoading(false);
-        const previous = serverMemory();
+        const previous = untrack(serverMemory);
         if (previous?.supported)
           setServerMemory({
             ...previous,

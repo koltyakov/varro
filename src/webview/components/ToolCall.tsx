@@ -1496,7 +1496,7 @@ function FileChangeCard(props: {
       <Show when={showInlinePreview()}>
         <div
           class="file-change-inline-diffs file-change-inline-diffs-unwrapped"
-          ref={(element) => notifyInlineDiffMount(element, props.messageID)}
+          ref={(element) => untrack(() => notifyInlineDiffMount(element, props.messageID))}
         >
           <DiffView diffs={inlineDiffs()} showChanges stateKey={props.previewStateKey} />
         </div>

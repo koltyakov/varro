@@ -1,5 +1,14 @@
 import { ariaBoolean } from '../lib/aria';
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onSettled } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onSettled,
+  untrack,
+} from 'solid-js';
 import { Portal } from '@solidjs/web';
 import type {
   ProviderAuthMethod,
@@ -29,8 +38,9 @@ export function ProviderConnectionDialog(props: {
   reauthentication?: boolean;
   onClose: () => void;
 }) {
+  // Initial selection only; the user edits it from here.
   const [providerID, setProviderID] = createSignal<string | null>(
-    props.lockProvider ? props.initialProviderID?.trim() || null : null
+    untrack(() => (props.lockProvider ? props.initialProviderID?.trim() || null : null))
   );
   const [providerQuery, setProviderQuery] = createSignal('');
   const [activeProviderIndex, setActiveProviderIndex] = createSignal(0);
@@ -150,20 +160,21 @@ export function ProviderConnectionDialog(props: {
     ({ loading, id, methodID, providerOptions }) => {
       if (initialProviderApplied || loading) return;
       initialProviderApplied = true;
-      const provider = providerOptions.find((option) => option.id === id);
-      if (id && provider) {
+      // Applied once when providers load; later changes belong to the user's own selection.
+      untrack(() => {
+        const provider = providerOptions.find((option) => option.id === id);
+        if (!id || !provider) return;
         chooseProvider(id);
-        if (methodID) {
-          const index = provider.methods.findIndex(
-            (method) =>
-              method.id === methodID ||
-              (!method.id &&
-                methodID === 'chatgpt-browser' &&
-                authMethodPresentation(id, method).label === 'ChatGPT via Codex')
-          );
-          if (index >= 0) chooseMethod(index, provider.methods[index]);
-        }
-      }
+        if (!methodID) return;
+        const index = provider.methods.findIndex(
+          (method) =>
+            method.id === methodID ||
+            (!method.id &&
+              methodID === 'chatgpt-browser' &&
+              authMethodPresentation(id, method).label === 'ChatGPT via Codex')
+        );
+        if (index >= 0) chooseMethod(index, provider.methods[index]);
+      });
     }
   );
 
@@ -982,7 +993,7 @@ function PromptSelect(props: {
   const [activeIndex, setActiveIndex] = createSignal(0);
   let rootRef: HTMLDivElement | undefined;
   let bodyRef: HTMLElement | null = null;
-  const listboxID = `provider-prompt-${props.prompt.key}-options`;
+  const listboxID = () => `provider-prompt-${props.prompt.key}-options`;
   const selectedIndex = () =>
     Math.max(
       0,
@@ -1066,8 +1077,8 @@ function PromptSelect(props: {
         role="combobox"
         aria-haspopup="listbox"
         aria-expanded={ariaBoolean(open())}
-        aria-controls={listboxID}
-        aria-activedescendant={open() ? `${listboxID}-${activeIndex()}` : undefined}
+        aria-controls={listboxID()}
+        aria-activedescendant={open() ? `${listboxID()}-${activeIndex()}` : undefined}
         disabled={props.disabled}
         onClick={() => (open() ? setOpen(false) : openMenu())}
         onKeyDown={handleKeyDown}
@@ -1078,11 +1089,11 @@ function PromptSelect(props: {
         <UiIcon source={navArrowDownIcon} width={14} height={14} aria-hidden="true" />
       </button>
       <Show when={open()}>
-        <div id={listboxID} class="provider-connect-select-options" role="listbox">
+        <div id={listboxID()} class="provider-connect-select-options" role="listbox">
           <For each={props.prompt.options}>
             {(option, index) => (
               <button
-                id={`${listboxID}-${index()}`}
+                id={`${listboxID()}-${index()}`}
                 type="button"
                 class={`provider-connect-select-option ${index() === activeIndex() ? 'is-active' : ''}`}
                 role="option"

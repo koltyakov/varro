@@ -38,9 +38,16 @@ const [pendingReplies, setPendingReplies] = createSignal<ReadonlySet<string>>(ne
 export function NativeFormPrompt(props: { form: NativeForm }) {
   const draftKey = () => `${props.form.sessionID}/${props.form.id}`;
   const isQuestion = () => props.form.metadata?.kind === 'question';
-  const initialForm = untrack(() => props.form);
-  const saved = nativeFormDrafts.get(initialForm.id, initialForm.sessionID);
-  const initialValues = saved?.values ?? nativeFormDefaults(initialForm);
+  // The draft is seeded once from the saved draft or the form defaults; the user owns it after.
+  const { initialForm, saved, initialValues } = untrack(() => {
+    const form = props.form;
+    const savedDraft = nativeFormDrafts.get(form.id, form.sessionID);
+    return {
+      initialForm: form,
+      saved: savedDraft,
+      initialValues: savedDraft?.values ?? nativeFormDefaults(form),
+    };
+  });
   const [draft, setDraft] = createSignal<NativeFormAnswer>(initialValues);
   const [customValues, setCustomValues] = createSignal<Record<string, string>>(saved?.custom ?? {});
   const customValue = (key: string) =>
@@ -48,33 +55,35 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
   const [multiselectRows, setMultiselectRows] = createSignal<
     Record<string, NativeMultiSelectDraftRow[]>
   >(
-    Object.fromEntries(
-      initialForm.fields.flatMap((field) => {
-        if (field.type !== 'multiselect') return [];
-        const initialValue = initialValues[field.key];
-        const selected = Array.isArray(initialValue) ? initialValue : [];
-        const restored =
-          saved?.multiselectRows && Object.hasOwn(saved.multiselectRows, field.key)
-            ? saved.multiselectRows[field.key]
-            : undefined;
-        const initialCustom =
-          saved && Object.hasOwn(saved.custom, field.key) ? saved.custom[field.key] : undefined;
-        const rows = restored
-          ? restored
-              .filter((row, index) => row.value || index === restored.length - 1)
-              .map((row) => ({ ...row, id: createUniqueId() }))
-          : [
-              ...new Set([
-                ...selected.filter(
-                  (item) => !field.options.some((option) => option.value === item)
-                ),
-                ...(field.custom && initialCustom ? [initialCustom] : []),
-              ]),
-            ].map((value) => ({ id: createUniqueId(), value, selected: true }));
-        if (field.custom && (!rows.length || rows.at(-1)?.value))
-          rows.push({ id: createUniqueId(), value: '', selected: false });
-        return [[field.key, rows]];
-      })
+    untrack(() =>
+      Object.fromEntries(
+        initialForm.fields.flatMap((field) => {
+          if (field.type !== 'multiselect') return [];
+          const initialValue = initialValues[field.key];
+          const selected = Array.isArray(initialValue) ? initialValue : [];
+          const restored =
+            saved?.multiselectRows && Object.hasOwn(saved.multiselectRows, field.key)
+              ? saved.multiselectRows[field.key]
+              : undefined;
+          const initialCustom =
+            saved && Object.hasOwn(saved.custom, field.key) ? saved.custom[field.key] : undefined;
+          const rows = restored
+            ? restored
+                .filter((row, index) => row.value || index === restored.length - 1)
+                .map((row) => ({ ...row, id: createUniqueId() }))
+            : [
+                ...new Set([
+                  ...selected.filter(
+                    (item) => !field.options.some((option) => option.value === item)
+                  ),
+                  ...(field.custom && initialCustom ? [initialCustom] : []),
+                ]),
+              ].map((value) => ({ id: createUniqueId(), value, selected: true }));
+          if (field.custom && (!rows.length || rows.at(-1)?.value))
+            rows.push({ id: createUniqueId(), value: '', selected: false });
+          return [[field.key, rows]];
+        })
+      )
     )
   );
   const answers = createMemo<NativeFormAnswer>(() =>
