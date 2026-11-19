@@ -57,6 +57,7 @@ const KNOWN_TYPES = new Set<string>([
   'queued-messages/sync',
   'queued-messages/session-status',
   'queued-messages/claim-result',
+  'pinned-sessions/sync',
   'permission-modes/sync',
   'session-models/sync',
   'session-plan-state/sync',
@@ -393,6 +394,16 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.autoAttachActiveFile))
         config.autoAttachActiveFile = payload.autoAttachActiveFile;
       return { type, payload: config };
+    }
+
+    case 'pinned-sessions/sync': {
+      const payload = asRecord(record.payload);
+      if (
+        !Array.isArray(payload?.sessionIds) ||
+        !payload.sessionIds.every(isSafePersistedSessionId)
+      )
+        return null;
+      return { type, payload: { sessionIds: [...payload.sessionIds] } };
     }
 
     case 'session/catalog-invalidated':

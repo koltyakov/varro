@@ -1,5 +1,6 @@
-import { batch } from 'solid-js';
-import { produce, reconcile } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+
+import { reconcile } from 'solid-js';
 import type { Message, MessageEntry, Session, SessionStatus } from '../types';
 import type { RecycleBinEntry, WorkspaceStatusEventSummary } from '../../shared/protocol';
 import type { WorkspaceStatusEntry } from '../../shared/opencode-types';
@@ -26,7 +27,6 @@ import {
   isSkippedPlanSessionMarker,
   nextSessionMarkerTimestamp,
   pruneSessionMarkers,
-  pruneSkippedPlanSessions,
   readMergedSessionMarkerState,
   updateScopedSessionMarker,
   writeScopedSessionMarkerState,
@@ -38,58 +38,78 @@ import { readInitialWebviewState } from './state-stored-values';
 const EMPTY_SESSION_TREE_IDS: string[] = [];
 const markerStorage = { readStored, writeStored };
 const restoredMarkerDirectories = new Map<string, string>();
+const CATALOG_MARKER_FIELDS = [
+  'lastSeenSessions',
+  'skippedPlanSessions',
+  'completedSessionResponses',
+  'interruptedSessionResponses',
+] as const;
 
-function restoreCatalogSessionMarkers(sessions: readonly Session[]) {
+type MarkerSession = Pick<Session, 'id' | 'directory'>;
+
+function restoreCatalogSessionMarkers(sessions: readonly MarkerSession[]) {
   const unrestored = sessions.filter(
     (session) => restoredMarkerDirectories.get(session.id) !== session.directory
   );
   if (unrestored.length === 0) return;
-  for (const field of [
-    'lastSeenSessions',
-    'skippedPlanSessions',
-    'completedSessionResponses',
-    'interruptedSessionResponses',
-  ] as const) {
+  for (const field of CATALOG_MARKER_FIELDS) {
     const stored = readMergedSessionMarkerState(markerStorage, STORAGE_KEYS[field], [], unrestored);
-    batch(() => {
+    setState((draft) => {
       for (const [sessionId, timestamp] of Object.entries(stored)) {
-        const current = state[field][sessionId];
-        if (current === undefined || timestamp > current) setState(field, sessionId, timestamp);
+        const current = draft[field][sessionId];
+        if (current === undefined || timestamp > current) draft[field][sessionId] = timestamp;
       }
     });
   }
   for (const session of unrestored) restoredMarkerDirectories.set(session.id, session.directory);
   const shared = readInitialWebviewState().sessionReadState ?? {};
-  for (const session of unrestored) {
-    const localSeenAt = state.lastSeenSessions[session.id];
-    const sharedSeenAt = shared[session.id];
-    if (sharedSeenAt !== undefined && (localSeenAt === undefined || sharedSeenAt > localSeenAt)) {
-      setState('lastSeenSessions', session.id, sharedSeenAt);
-      writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, session.id, sharedSeenAt);
-    } else if (
-      localSeenAt !== undefined &&
-      (sharedSeenAt === undefined || localSeenAt > sharedSeenAt)
-    ) {
-      postMessage({
-        type: 'session-read-state/update',
-        payload: { sessionId: session.id, seenAt: localSeenAt },
-      });
+  const updates: { sessionId: string; seenAt: number }[] = [];
+  setState((draft) => {
+    for (const session of unrestored) {
+      const sharedSeenAt = shared[session.id];
+      const localSeenAt = draft.lastSeenSessions[session.id];
+      if (sharedSeenAt !== undefined && (localSeenAt === undefined || sharedSeenAt > localSeenAt)) {
+        draft.lastSeenSessions[session.id] = sharedSeenAt;
+        writeMarkerForSession(
+          STORAGE_KEYS.lastSeenSessions,
+          session.id,
+          sharedSeenAt,
+          session.directory
+        );
+      } else if (
+        localSeenAt !== undefined &&
+        (sharedSeenAt === undefined || localSeenAt > sharedSeenAt)
+      ) {
+        updates.push({ sessionId: session.id, seenAt: localSeenAt });
+      }
     }
+  });
+  for (const payload of updates) {
+    postMessage({ type: 'session-read-state/update', payload });
   }
 }
 
-function writeMarkerForSession(key: string, sessionId: string, timestamp: number | undefined) {
-  const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
+function writeMarkerForSession(
+  key: string,
+  sessionId: string,
+  timestamp: number | undefined,
+  directory: string | undefined
+) {
   const scope = directory
     ? getSessionMarkerWorkspaceScope(directory)
     : getSessionMarkerWorkspaceScopeValue();
   updateScopedSessionMarker(markerStorage, key, scope, sessionId, timestamp);
 }
 
-function writeOpenWorkspaceMarkerState(key: string, markers: Record<string, number>) {
-  for (const folder of state.editorContext.workspaceFolders ?? []) {
+function writeOpenWorkspaceMarkerState(
+  key: string,
+  markers: Record<string, number>,
+  sessions: readonly Session[],
+  folders: readonly { path: string }[]
+) {
+  for (const folder of folders) {
     const sessionIds = new Set(
-      state.sessions
+      sessions
         .filter((session) => isSameWorkspacePath(session.directory, folder.path))
         .map((session) => session.id)
     );
@@ -104,45 +124,64 @@ function writeOpenWorkspaceMarkerState(key: string, markers: Record<string, numb
 
 export function consumeInterruptedSessionIds() {
   const ids = [...state.interruptedSessionIds];
-  setState('interruptedSessionIds', []);
+  setState(storePath('interruptedSessionIds', []));
   return ids;
 }
 
 export function markSessionSeen(id: string, updatedAt?: number) {
   // Opening a session acknowledges its known markers even when the server clock is ahead.
   // Explicit message timestamps acknowledge only that message, not newer activity.
-  const seenAt =
-    updatedAt ??
-    Math.max(
-      Date.now(),
-      state.sessions.find((session) => session.id === id)?.time.updated ?? 0,
-      state.completedSessionResponses[id] ?? 0,
-      state.interruptedSessionResponses[id] ?? 0,
-      ...getSessionTreeIds(id).map((sessionId) => state.interruptedSessionResponses[sessionId] ?? 0)
+  let seenAt: number | undefined;
+  setState((draft) => {
+    const previous = draft.lastSeenSessions[id];
+    if (updatedAt !== undefined && previous !== undefined && previous >= updatedAt) return;
+    const session = draft.sessions.find((item) => item.id === id);
+    const timestamp = nextSessionMarkerTimestamp(
+      previous,
+      updatedAt ??
+        Math.max(
+          Date.now(),
+          session?.time.updated ?? 0,
+          draft.completedSessionResponses[id] ?? 0,
+          ...sessionTreeIndex
+            .getTreeIds(id, draft.sessions, draft.sessionUsageLimits)
+            .map((sessionId) => draft.interruptedSessionResponses[sessionId] ?? 0)
+        )
     );
-  const timestamp = nextSessionMarkerTimestamp(state.lastSeenSessions[id], seenAt);
-  if (timestamp === null) return false;
-  setState('lastSeenSessions', id, timestamp);
-  writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, timestamp);
-  postMessage({ type: 'session-read-state/update', payload: { sessionId: id, seenAt: timestamp } });
+    if (timestamp === null) return;
+    seenAt = timestamp;
+    draft.lastSeenSessions[id] = timestamp;
+    writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, timestamp, session?.directory);
+  });
+  if (seenAt === undefined) return false;
+  postMessage({ type: 'session-read-state/update', payload: { sessionId: id, seenAt } });
   return true;
 }
 
 export function markSessionResponseCompleted(id: string, completedAt?: number) {
-  const timestamp = nextSessionMarkerTimestamp(state.completedSessionResponses[id], completedAt);
-  if (timestamp === null) return;
-  setState('completedSessionResponses', id, timestamp);
-  writeMarkerForSession(STORAGE_KEYS.completedSessionResponses, id, timestamp);
+  advanceResponseMarker('completedSessionResponses', id, completedAt);
 }
 
 export function markSessionResponseInterrupted(id: string, interruptedAt?: number) {
-  const timestamp = nextSessionMarkerTimestamp(
-    state.interruptedSessionResponses[id],
-    interruptedAt
-  );
-  if (timestamp === null) return;
-  setState('interruptedSessionResponses', id, timestamp);
-  writeMarkerForSession(STORAGE_KEYS.interruptedSessionResponses, id, timestamp);
+  advanceResponseMarker('interruptedSessionResponses', id, interruptedAt);
+}
+
+function advanceResponseMarker(
+  field: 'completedSessionResponses' | 'interruptedSessionResponses',
+  id: string,
+  updatedAt?: number
+) {
+  setState((draft) => {
+    const timestamp = nextSessionMarkerTimestamp(draft[field][id], updatedAt);
+    if (timestamp === null) return;
+    draft[field][id] = timestamp;
+    writeMarkerForSession(
+      STORAGE_KEYS[field],
+      id,
+      timestamp,
+      draft.sessions.find((item) => item.id === id)?.directory
+    );
+  });
 }
 
 export function isSessionInterruptedResponseUnread(sessionId: string) {
@@ -159,23 +198,39 @@ export function isSessionInterruptedResponseUnread(sessionId: string) {
 }
 
 export function clearSessionSeen(id: string) {
-  if (!(id in state.lastSeenSessions)) return;
-  setState(
-    'lastSeenSessions',
-    produce((draft) => {
-      delete draft[id];
-    })
-  );
-  writeMarkerForSession(STORAGE_KEYS.lastSeenSessions, id, undefined);
+  clearSessionMarker('lastSeenSessions', id);
+}
+
+function clearSessionMarker(field: 'lastSeenSessions' | 'skippedPlanSessions', id: string) {
+  setState((draft) => {
+    if (!(id in draft[field])) return;
+    delete draft[field][id];
+    writeMarkerForSession(
+      STORAGE_KEYS[field],
+      id,
+      undefined,
+      draft.sessions.find((item) => item.id === id)?.directory
+    );
+  });
 }
 
 export function skipPlanSession(sessionId: string, updatedAt?: number) {
-  const sessionUpdatedAt =
-    updatedAt ?? state.sessions.find((session) => session.id === sessionId)?.time.updated;
-  if (!isNumber(sessionUpdatedAt)) return;
-  const skippedAt = updatedAt ?? getSessionPlanUpdatedAt(sessionId, sessionUpdatedAt);
-  setState('skippedPlanSessions', sessionId, skippedAt);
-  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, skippedAt);
+  let skippedAt: number | undefined;
+  setState((draft) => {
+    const session = draft.sessions.find((item) => item.id === sessionId);
+    const sessionUpdatedAt = updatedAt ?? session?.time.updated;
+    if (!isNumber(sessionUpdatedAt)) return;
+    skippedAt =
+      updatedAt ?? Math.max(sessionUpdatedAt, draft.completedSessionResponses[sessionId] ?? 0);
+    draft.skippedPlanSessions[sessionId] = skippedAt;
+    writeMarkerForSession(
+      STORAGE_KEYS.skippedPlanSessions,
+      sessionId,
+      skippedAt,
+      session?.directory
+    );
+  });
+  if (skippedAt === undefined) return;
   postMessage({
     type: 'session-plan-state/update',
     payload: { sessionId, skippedAt },
@@ -187,28 +242,20 @@ export function clearSkippedPlanSession(sessionId: string) {
     type: 'session-plan-state/update',
     payload: { sessionId, skippedAt: null },
   });
-  if (!(sessionId in state.skippedPlanSessions)) return;
-  setState(
-    'skippedPlanSessions',
-    produce((draft) => {
-      delete draft[sessionId];
-    })
-  );
-  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, undefined);
+  clearSessionMarker('skippedPlanSessions', sessionId);
 }
 
 export function applySessionPlanStateUpdate(sessionId: string, skippedAt: number | null) {
-  if (skippedAt === null) {
-    setState(
-      'skippedPlanSessions',
-      produce((draft) => {
-        delete draft[sessionId];
-      })
+  setState((draft) => {
+    if (skippedAt === null) delete draft.skippedPlanSessions[sessionId];
+    else draft.skippedPlanSessions[sessionId] = skippedAt;
+    writeMarkerForSession(
+      STORAGE_KEYS.skippedPlanSessions,
+      sessionId,
+      skippedAt ?? undefined,
+      draft.sessions.find((item) => item.id === sessionId)?.directory
     );
-  } else {
-    setState('skippedPlanSessions', sessionId, skippedAt);
-  }
-  writeMarkerForSession(STORAGE_KEYS.skippedPlanSessions, sessionId, skippedAt ?? undefined);
+  });
 }
 
 export function isSkippedPlanSession(sessionId: string, updatedAt: number) {
@@ -234,14 +281,15 @@ export function isSessionCompletedResponseUnread(sessionId: string) {
 
 export function setSessionCompacting(sessionId: string, compacting: boolean) {
   setState(
-    'compactingSessionIds',
-    produce((ids) => {
+    storePath('compactingSessionIds', (ids) => {
       const idx = ids.indexOf(sessionId);
       if (compacting) {
         if (idx === -1) ids.push(sessionId);
-        return;
+        return ids;
       }
       if (idx !== -1) ids.splice(idx, 1);
+
+      return ids;
     })
   );
 }
@@ -300,16 +348,26 @@ export function isSessionAwaitingInput(sessionId: string) {
 }
 
 export function setWorkspaceStatuses(entries: WorkspaceStatusEntry[]) {
-  setState('workspaceStatuses', entries);
+  setState(storePath('workspaceStatuses', entries));
 }
 
 export function setWorkspaceStatusSummary(summary: WorkspaceStatusEventSummary) {
-  setState('workspaceStatusSummary', summary);
+  setState(storePath('workspaceStatusSummary', summary));
 }
 
 export function setSessions(nextSessions: Session[], complete = false) {
   sessionTreeIndex.invalidate();
-  setState('sessions', reconcile(nextSessions, { key: 'id' }));
+  setState((draft) => {
+    // Native array reconciliation may replace unobserved proxies. Catalog readers
+    // retain row handles even while their list is unmounted.
+    const previous = new Map(draft.sessions.map((session) => [session.id, session]));
+    draft.sessions = nextSessions.map((session) => {
+      const retained = previous.get(session.id);
+      if (!retained) return session;
+      reconcile(session)(retained);
+      return retained;
+    });
+  });
   restoreCatalogSessionMarkers(nextSessions);
   // Pagination and local mutations cannot prove that an unloaded session was deleted.
   if (!complete) return;
@@ -317,35 +375,25 @@ export function setSessions(nextSessions: Session[], complete = false) {
   for (const sessionId of restoredMarkerDirectories.keys()) {
     if (!sessionIds.has(sessionId)) restoredMarkerDirectories.delete(sessionId);
   }
-  const nextMarkers = pruneSkippedPlanSessions(state.skippedPlanSessions, sessionIds);
-  if (nextMarkers) {
-    setState(
+  setState((draft) => {
+    for (const field of [
       'skippedPlanSessions',
-      produce((draft) => {
-        for (const id of Object.keys(draft)) {
-          if (!sessionIds.has(id)) delete draft[id];
-        }
-      })
-    );
-    writeOpenWorkspaceMarkerState(STORAGE_KEYS.skippedPlanSessions, nextMarkers);
-  }
-  const nextCompletedMarkers = pruneSessionMarkers(state.completedSessionResponses, sessionIds);
-  if (nextCompletedMarkers) {
-    setState(
       'completedSessionResponses',
-      produce((draft) => {
-        for (const id of Object.keys(draft)) {
-          if (!sessionIds.has(id)) delete draft[id];
-        }
-      })
-    );
-    writeOpenWorkspaceMarkerState(STORAGE_KEYS.completedSessionResponses, nextCompletedMarkers);
-  }
-  const nextInterruptedMarkers = pruneSessionMarkers(state.interruptedSessionResponses, sessionIds);
-  if (nextInterruptedMarkers) {
-    setState('interruptedSessionResponses', reconcile(nextInterruptedMarkers));
-    writeOpenWorkspaceMarkerState(STORAGE_KEYS.interruptedSessionResponses, nextInterruptedMarkers);
-  }
+      'interruptedSessionResponses',
+    ] as const) {
+      const retained = pruneSessionMarkers(draft[field], sessionIds);
+      if (!retained) continue;
+      for (const id of Object.keys(draft[field])) {
+        if (!sessionIds.has(id)) delete draft[field][id];
+      }
+      writeOpenWorkspaceMarkerState(
+        STORAGE_KEYS[field],
+        retained,
+        nextSessions,
+        draft.editorContext.workspaceFolders ?? []
+      );
+    }
+  });
 }
 
 export function syncSessionMarkersForWorkspace(
@@ -358,59 +406,50 @@ export function syncSessionMarkersForWorkspace(
   );
   restoredMarkerDirectories.clear();
   setSessionMarkerWorkspaceScopeValue(scope);
-  setState(
-    'interruptedSessionResponses',
-    reconcile(
-      readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.interruptedSessionResponses, scopes)
-    )
-  );
-  setState(
-    'lastSeenSessions',
-    reconcile(readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.lastSeenSessions, scopes))
-  );
-  setState(
-    'skippedPlanSessions',
-    reconcile(readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.skippedPlanSessions, scopes))
-  );
-  setState(
-    'completedSessionResponses',
-    reconcile(
-      readMergedSessionMarkerState(markerStorage, STORAGE_KEYS.completedSessionResponses, scopes)
-    )
-  );
-  restoreCatalogSessionMarkers(
-    state.sessions.filter((session) =>
-      scopes.some((root) => getRelativePathWithinWorkspace(session.directory, root) !== null)
-    )
-  );
+  let catalog: MarkerSession[] = [];
+  setState((draft) => {
+    for (const field of CATALOG_MARKER_FIELDS) {
+      reconcile(readMergedSessionMarkerState(markerStorage, STORAGE_KEYS[field], scopes))(
+        draft[field]
+      );
+    }
+    catalog = draft.sessions
+      .filter((session) =>
+        scopes.some((root) => getRelativePathWithinWorkspace(session.directory, root) !== null)
+      )
+      .map(({ id, directory }) => ({ id, directory }));
+  });
+  restoreCatalogSessionMarkers(catalog);
 }
 
 export function setRecycleBinEntries(entries: RecycleBinEntry[]) {
-  setState('recycleBinEntries', entries);
+  setState(storePath('recycleBinEntries', entries));
 }
 
 export function setSessionFailed(sessionId: string, failed: boolean) {
   const wasFailed = state.failedSessionIds.includes(sessionId);
   if (failed && !wasFailed) {
-    setState('failedSessionUpdatedAt', sessionId, Date.now());
+    setState(storePath('failedSessionUpdatedAt', sessionId, Date.now()));
   } else if (!failed && state.failedSessionUpdatedAt[sessionId] !== undefined) {
     setState(
-      'failedSessionUpdatedAt',
-      produce((updatedAt) => {
+      storePath('failedSessionUpdatedAt', (updatedAt) => {
         delete updatedAt[sessionId];
+
+        return updatedAt;
       })
     );
   }
 
   setState(
-    'failedSessionIds',
-    produce((ids) => {
+    storePath('failedSessionIds', (ids) => {
       const idx = ids.indexOf(sessionId);
       if (failed) {
         if (idx === -1) ids.push(sessionId);
-        return;
+        return ids;
       }
       if (idx !== -1) ids.splice(idx, 1);
+
+      return ids;
     })
   );
   if (failed) clearQuestionResponsePending(sessionId);
@@ -419,20 +458,24 @@ export function setSessionFailed(sessionId: string, failed: boolean) {
 export function setSessionUsageLimit(sessionId: string, notice: UsageLimitNotice | null) {
   if (!sessionId) return;
 
+  // Update through the draft: store reads stay stale until flush, and one tick can touch
+  // several sessions in a tree or set and clear the same session.
   if (notice === null) {
-    if (state.sessionUsageLimits[sessionId] === undefined) return;
-    const nextLimits = { ...state.sessionUsageLimits };
-    delete nextLimits[sessionId];
+    let removed = false;
+    setState((draft) => {
+      if (draft.sessionUsageLimits[sessionId] === undefined) return;
+      delete draft.sessionUsageLimits[sessionId];
+      removed = true;
+    });
+    if (!removed) return;
     sessionTreeIndex.invalidate();
-    setState('sessionUsageLimits', reconcile(nextLimits));
     setSessionUsageLimitVersion((value) => value + 1);
     return;
   }
 
   sessionTreeIndex.invalidate();
-  setState('sessionUsageLimits', {
-    ...state.sessionUsageLimits,
-    [sessionId]: notice,
+  setState((draft) => {
+    draft.sessionUsageLimits[sessionId] = notice;
   });
   setSessionUsageLimitVersion((value) => value + 1);
 }
@@ -495,9 +538,17 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
     if (!failedSessionIds.has(sessionId)) delete failedSessionUpdatedAt[sessionId];
   }
 
-  setState('failedSessionUpdatedAt', reconcile(failedSessionUpdatedAt));
-  setState('failedSessionIds', [
-    ...state.failedSessionIds.filter((sessionId) => !scopedSessionIds.has(sessionId)),
-    ...failedSessionIds,
-  ]);
+  setState((draft) => {
+    const current = draft['failedSessionUpdatedAt'];
+    const incoming = failedSessionUpdatedAt satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['failedSessionUpdatedAt'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState(
+    storePath('failedSessionIds', [
+      ...state.failedSessionIds.filter((sessionId) => !scopedSessionIds.has(sessionId)),
+      ...failedSessionIds,
+    ])
+  );
 }

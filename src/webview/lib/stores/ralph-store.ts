@@ -1,5 +1,5 @@
-import { createSignal } from 'solid-js';
-import { createStore, produce, reconcile } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+import { createSignal, createStore, reconcile } from 'solid-js';
 import type {
   RalphConfig,
   RalphIteration,
@@ -82,7 +82,7 @@ export const ralphStore = {
       if (legacyMigrationAcknowledged) acknowledgedLegacyRunIds.push(managerSessionId);
     }
 
-    setRuns(reconcile(cleanRuns, { merge: true }));
+    setRuns(reconcile(cleanRuns, 'id'));
     setActiveRunnerIds(activeIds);
     acknowledgeLegacyRuns(acknowledgedLegacyRunIds);
   },
@@ -108,33 +108,34 @@ export const ralphStore = {
       iterations: [],
       updatedAt: now,
     };
-    setRuns(config.managerSessionId, run);
+    setRuns(storePath(config.managerSessionId, run));
   },
 
   setStatus(sessionId: string, status: RalphStatus, stopReason?: RalphStopReason, note?: string) {
     if (!runs[sessionId]) return;
-    setRuns(sessionId, 'status', status);
-    setRuns(sessionId, 'updatedAt', Date.now());
+    setRuns(storePath(sessionId, 'status', status));
+    setRuns(storePath(sessionId, 'updatedAt', Date.now()));
     if (stopReason !== undefined) {
-      setRuns(sessionId, 'stopReason', stopReason);
+      setRuns(storePath(sessionId, 'stopReason', stopReason));
     } else if (status === 'running' || status === 'paused') {
       // Clear any prior terminal stop reason when leaving a terminal state.
-      setRuns(sessionId, 'stopReason', undefined);
+      setRuns(storePath(sessionId, 'stopReason', storePath.DELETE));
     }
-    if (note !== undefined) setRuns(sessionId, 'note', note);
-    else if (status === 'running') setRuns(sessionId, 'note', undefined);
+    if (note !== undefined) setRuns(storePath(sessionId, 'note', note));
+    else if (status === 'running') setRuns(storePath(sessionId, 'note', storePath.DELETE));
   },
 
   addIterations(sessionId: string, count: number) {
     if (!runs[sessionId] || !Number.isFinite(count) || count < 1) return;
     setRuns(
-      sessionId,
-      produce((draft) => {
+      storePath(sessionId, (draft) => {
         draft.config.iterations = Math.min(
           MAX_RALPH_ITERATIONS,
           draft.config.iterations + Math.floor(count)
         );
         draft.updatedAt = Date.now();
+
+        return draft;
       })
     );
   },
@@ -142,10 +143,11 @@ export const ralphStore = {
   updateRunModel(sessionId: string, model: RalphSelectedModel | null) {
     if (!runs[sessionId]) return;
     setRuns(
-      sessionId,
-      produce((draft) => {
+      storePath(sessionId, (draft) => {
         draft.config.model = model;
         draft.updatedAt = Date.now();
+
+        return draft;
       })
     );
     postMessage({ type: 'ralph/update-model', payload: { managerSessionId: sessionId, model } });
@@ -154,25 +156,24 @@ export const ralphStore = {
   upsertIteration(sessionId: string, iteration: RalphIteration) {
     if (!runs[sessionId]) return;
     setRuns(
-      sessionId,
-      produce((draft) => {
+      storePath(sessionId, (draft) => {
         const existing = draft.iterations.findIndex((it) => it.index === iteration.index);
         if (existing >= 0) draft.iterations[existing] = iteration;
         else draft.iterations.push(iteration);
         draft.iterations.sort((a, b) => a.index - b.index);
         draft.currentIteration = Math.max(draft.currentIteration, iteration.index);
         draft.updatedAt = Date.now();
+
+        return draft;
       })
     );
   },
 
   removeRun(sessionId: string) {
     if (!runs[sessionId]) return;
-    setRuns(
-      produce((draft) => {
-        delete draft[sessionId];
-      })
-    );
+    setRuns((draft) => {
+      delete draft[sessionId];
+    });
   },
 };
 

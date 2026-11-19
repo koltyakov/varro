@@ -1,12 +1,12 @@
 import {
   For,
   Show,
-  createComputed,
+  createRenderEffect,
   createEffect,
   createMemo,
   createSignal,
   onCleanup,
-  onMount,
+  onSettled,
   untrack,
 } from 'solid-js';
 import { isAbortedAssistantError } from '../../../shared/error-classification';
@@ -142,7 +142,7 @@ export function getUserMessageSeriesEndId(
 function InlineEditComposerSlot() {
   let slotRef: HTMLDivElement | undefined;
 
-  onMount(() => {
+  onSettled(() => {
     if (slotRef) registerInlineEditMount(slotRef);
   });
   onCleanup(() => {
@@ -199,19 +199,20 @@ export function MessageRow(
     return ownIndex > editedIndex;
   });
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
-  createComputed((hadSummary: boolean | undefined) => {
-    const hasSummary = !!summary();
-    if (hadSummary && !hasSummary) {
-      untrack(() => {
-        if (!editingMessage()) return;
-        const element = rowRef?.querySelector<HTMLElement>('.assistant-dialog-summary');
-        // Reconciliation hides Worked before replacing history. Reserve its lost range
-        // before the DOM shrinks, without handing scrolling back to bottom follow.
-        if (element) prepareForMessageBlockRemoval(element);
-      });
+  createRenderEffect(
+    () => !!summary(),
+    (hasSummary, hadSummary) => {
+      if (hadSummary && !hasSummary) {
+        untrack(() => {
+          if (!editingMessage()) return;
+          const element = rowRef?.querySelector<HTMLElement>('.assistant-dialog-summary');
+          // Reconciliation hides Worked before replacing history. Reserve its lost range
+          // before the DOM shrinks, without handing scrolling back to bottom follow.
+          if (element) prepareForMessageBlockRemoval(element);
+        });
+      }
     }
-    return hasSummary;
-  });
+  );
   const assistantActivityGroups = () =>
     props.assistantActivityGroupMap?.get(props.msg.info.id) ?? null;
   const highlightFinalAnswer = () => {
@@ -233,7 +234,7 @@ export function MessageRow(
     isAssistantMessage(props.msg.info) &&
     isPlanningAssistantMessage(props.msg.info);
 
-  onMount(() => {
+  onSettled(() => {
     if (rowRef && animateEntrance) {
       disposeEntrance = prepareMeasuredEntrance(rowRef, {
         animationName: 'streamed-message-row-in',
@@ -243,8 +244,7 @@ export function MessageRow(
     }
     if (rowRef) props.observeMeasuredRow?.(rowRef, messageId, true);
   });
-  createEffect((wasVirtualPlaceholder) => {
-    const virtualPlaceholder = isVirtualPlaceholder();
+  createEffect(isVirtualPlaceholder, (virtualPlaceholder, wasVirtualPlaceholder) => {
     if (wasVirtualPlaceholder && !virtualPlaceholder) {
       // Let Solid publish the hydrated class/content before measuring the row's real geometry.
       queueMicrotask(() => {
@@ -253,8 +253,7 @@ export function MessageRow(
         }
       });
     }
-    return virtualPlaceholder;
-  }, isVirtualPlaceholder());
+  });
   onCleanup(() => {
     disposeEntrance?.();
     props.onTurnHoverChange?.(messageId, false);
@@ -531,8 +530,13 @@ function AssistantDialogSummary(props: {
       onWorkedSummaryHoverChange?.(promptMessageId, true);
     }, HOVER_INTENT_DELAY_MS);
   };
-  onMount(() => {
-    if (!summaryRef) return;
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (!summaryRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const messageRow = summaryRef.closest<HTMLElement>('[data-msg-id]');
     const summaryRow = summaryRef.closest<HTMLElement>('.trailing-assistant-summary-row');
     const hoverRoot =
@@ -562,10 +566,14 @@ function AssistantDialogSummary(props: {
     };
     hoverRoot.addEventListener('mouseover', onMouseOver);
     hoverRoot.addEventListener('mouseout', onMouseOut);
-    onCleanup(() => {
+    cleanups.push(() => {
       hoverRoot.removeEventListener('mouseover', onMouseOver);
       hoverRoot.removeEventListener('mouseout', onMouseOut);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   onCleanup(() => {
     if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
@@ -589,7 +597,7 @@ function AssistantDialogSummary(props: {
           {(time) => (
             <time
               class={`assistant-dialog-summary-completed-time${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
-              dateTime={new Date(props.summary.completedAt!).toISOString()}
+              datetime={new Date(props.summary.completedAt!).toISOString()}
             >
               <span class="assistant-dialog-summary-completed-time-text">{time()}</span>
             </time>
@@ -682,8 +690,11 @@ function AssistantDialogSummary(props: {
             <Tooltip content={copied() ? 'Copied' : 'Copy final response'} delay={500}>
               <button
                 type="button"
-                class="assistant-dialog-summary-turn-action assistant-dialog-summary-copy"
-                classList={{ 'is-copied': copied() }}
+
+                class={[
+                  'assistant-dialog-summary-turn-action assistant-dialog-summary-copy',
+                  { 'is-copied': copied() },
+                ]}
                 aria-label={copied() ? 'Copied final response' : 'Copy final response'}
                 onClick={() => void copyFinalResponse()}
               >

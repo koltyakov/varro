@@ -1,6 +1,8 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it } from 'vitest';
-import { batch } from 'solid-js';
-import { render } from 'solid-js/web';
+
+import { render } from '@solidjs/web';
 import {
   applyMessagePartDelta,
   clearMessages,
@@ -90,7 +92,9 @@ describe('MessageList text ownership', () => {
 
       try {
         setSessions([session('session-1'), session('previous-session')]);
-        setState('activeSessionId', 'previous-session');
+        flushSolid();
+        setState(storePath('activeSessionId', 'previous-session'));
+        flushSolid();
         replaceMessages([
           {
             info: assistantMessage('previous-assistant', { sessionID: 'previous-session' }),
@@ -105,24 +109,33 @@ describe('MessageList text ownership', () => {
             ],
           },
         ]);
+        flushSolid();
         cleanup = render(() => MessageList(), container!);
+        flushSolid();
         applyMessagePartDelta(
           'previous-assistant',
           'previous-text',
           ' Pending old delta.',
           'previous-session'
         );
-        batch(() => {
-          setState('activeSessionId', 'session-1');
+        flushSolid();
+        (() => {
+          setState(storePath('activeSessionId', 'session-1'));
           clearMessages();
           if (transition === 'session switch') setMessagesIncremental(transcript);
           else upsertMessage(steps[6]!);
-        });
+        })();
+        flushSolid();
 
         applyMessagePartDelta(lateId, lateText.id, paragraph, 'session-1');
+        flushSolid();
         setMessagesIncremental(transcript, { preserveExtraParts: true });
+        flushSolid();
 
         const assertOwnership = () => {
+          const lateEntry = state.messages.find((entry) => entry.info.id === lateId);
+          const latePart = lateEntry?.parts.find((part) => part.id === lateText.id);
+          expect(latePart?.type === 'text' ? latePart.text : null).toBe(paragraph);
           const rows = [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')];
           expect(rows.map((row) => row.dataset.msgId)).toEqual(
             transcript.map((entry) => entry.info.id)
@@ -141,11 +154,16 @@ describe('MessageList text ownership', () => {
 
         for (let frame = 0; frame < 3; frame += 1) {
           frames.flush();
+          flushSolid();
           await Promise.resolve();
+          flushSolid();
           assertOwnership();
+          flushSolid();
         }
         upsertPart({ ...lateText, text: paragraph });
+        flushSolid();
         finishMessageStreaming(lateId);
+        flushSolid();
         setMessagesIncremental(
           transcript.map((entry) => ({
             ...entry,
@@ -154,11 +172,16 @@ describe('MessageList text ownership', () => {
             ),
           }))
         );
+        flushSolid();
         frames.flush();
+        flushSolid();
         await Promise.resolve();
+        flushSolid();
         assertOwnership();
+        flushSolid();
       } finally {
         frames.restore();
+        flushSolid();
       }
     }
   );

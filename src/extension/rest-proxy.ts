@@ -56,6 +56,8 @@ import { diagnosticTimeline } from './diagnostics';
 import { projectDeferredPart, projectPartAttachments } from './message-content';
 import { ImageThumbnails } from './image-thumbnails';
 import { RemoteImages } from './remote-images';
+import { LocalImages } from './local-images';
+import { parseLocalImagePath } from '../shared/local-images';
 import {
   readExtensionConfigState,
   readFollowupModel,
@@ -477,11 +479,12 @@ export interface RestProxyCallbacks {
 export class RestProxy {
   private readonly imageThumbnails = new ImageThumbnails();
   private readonly remoteImages = new RemoteImages();
+  private readonly localImages: LocalImages;
   private readonly modelPricing = new ModelPricingCatalog();
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
   private authorizedSessionDirectories = new Map<string, AuthorizedSessionDirectory>();
-  private readonly authorizedTransferWorktrees = new Map<string, AuthorizedSessionDirectory>();
+  private readonly authorizedTransferredSessions = new Map<string, AuthorizedSessionDirectory>();
   private sessionCatalogGeneration = 0;
   private readonly projectGitWorktrees = new Map<
     string,
@@ -527,6 +530,7 @@ export class RestProxy {
   private readonly remoteImageConfigSubscription: vscode.Disposable | undefined;
 
   constructor(private readonly callbacks: RestProxyCallbacks) {
+    this.localImages = new LocalImages(callbacks.contextProvider);
     this.remoteImageConfigSubscription = vscode.workspace.onDidChangeConfiguration?.((event) => {
       if (
         event.affectsConfiguration('varro.chat.followupModel') ||
@@ -586,7 +590,7 @@ export class RestProxy {
     this.currentProjects.clear();
     this.sessionEventCatalogRefreshes.clear();
     this.authorizedSessionDirectories.clear();
-    this.authorizedTransferWorktrees.clear();
+    this.authorizedTransferredSessions.clear();
     this.projectGitWorktrees.clear();
     this.authorizedSessionCatalogs.clear();
     this.hasSessionDirectorySnapshot = false;
@@ -670,10 +674,10 @@ export class RestProxy {
       )
     )
       return true;
-    return this.authorizeTransferredWorktree(sessionID, directory, generation);
+    return this.authorizeTransferredSession(sessionID, directory, generation);
   }
 
-  private async authorizeTransferredWorktree(
+  private async authorizeTransferredSession(
     sessionID: string,
     directory: string,
     generation: number
@@ -685,8 +689,8 @@ export class RestProxy {
         (session) => session.id === sessionID && isSameWorkspacePath(session.directory, directory)
       );
     if (!transfer || !isSafePersistedSessionId(sessionID)) return false;
-    const previous = this.authorizedTransferWorktrees.get(sessionID);
-    this.authorizedTransferWorktrees.delete(sessionID);
+    const previous = this.authorizedTransferredSessions.get(sessionID);
+    this.authorizedTransferredSessions.delete(sessionID);
     if (previous && this.authorizedSessionDirectories.get(sessionID) === previous) {
       this.authorizedSessionDirectories.delete(sessionID);
     }
@@ -694,40 +698,8 @@ export class RestProxy {
       const signal = AbortSignal.timeout(5_000);
       for (const root of roots) {
         this.requireOpenWorkspaceRoot(root);
-        const project = await this.loadSessionCatalogProject(root, signal);
-        if (project.id === 'global' || project.id !== transfer.projectID) continue;
-        const projects = await this.requestServer('GET', '/project', undefined, {
-          directory: root,
-          signal,
-        });
-        if (
-          !Array.isArray(projects) ||
-          !projects.some((value) => {
-            const info = asRecord(value);
-            return info?.id === project.id && info.vcs === 'git';
-          })
-        )
-          continue;
-        // Saved inventory reads must not initialize configuration in an unapproved destination.
-        const worktrees = await this.requestServer(
-          'GET',
-          `/experimental/worktree?projectID=${encodeURIComponent(project.id)}`,
-          undefined,
-          { directory: root, signal }
-        );
-        if (
-          !Array.isArray(worktrees) ||
-          !worktrees.some((value) => {
-            const info = asRecord(value);
-            const worktreeDirectory = typeof value === 'string' ? value : info?.directory;
-            return (
-              typeof worktreeDirectory === 'string' &&
-              isSameWorkspacePath(worktreeDirectory, directory) &&
-              (info?.strategy === undefined || info.strategy === 'git')
-            );
-          })
-        )
-          continue;
+        // A retained link grants access only to its canonical session, not the
+        // destination's catalog. Verify through an already open origin folder.
         const session = asRecord(
           await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
             directory: root,
@@ -736,7 +708,7 @@ export class RestProxy {
         );
         if (
           session?.id !== sessionID ||
-          session.projectID !== project.id ||
+          session.projectID !== transfer.projectID ||
           typeof session.directory !== 'string' ||
           !isSameWorkspacePath(session.directory, directory)
         )
@@ -749,13 +721,13 @@ export class RestProxy {
           return false;
         this.requireOpenWorkspaceRoot(root);
         const authorized = { directory: session.directory, catalogRoot: root };
-        this.authorizedTransferWorktrees.set(sessionID, authorized);
+        this.authorizedTransferredSessions.set(sessionID, authorized);
         this.authorizedSessionDirectories.set(sessionID, authorized);
         return true;
       }
     } catch (error) {
       logger.warn(
-        `Could not verify moved conversation worktree: ${error instanceof Error ? error.message : String(error)}`
+        `Could not verify moved conversation: ${error instanceof Error ? error.message : String(error)}`
       );
     }
     return false;
@@ -766,9 +738,9 @@ export class RestProxy {
     directory?: string
   ): Promise<boolean> {
     for (const sessionID of sessionIDs) {
-      const authorized = this.authorizedTransferWorktrees.get(sessionID);
+      const authorized = this.authorizedTransferredSessions.get(sessionID);
       if (authorized && directory && !isSameWorkspacePath(authorized.directory, directory)) {
-        this.authorizedTransferWorktrees.delete(sessionID);
+        this.authorizedTransferredSessions.delete(sessionID);
         this.authorizedSessionDirectories.delete(sessionID);
       }
     }
@@ -854,6 +826,7 @@ export class RestProxy {
     this.promptCompletion.invalidate();
     this.imageThumbnails.dispose();
     this.remoteImages.dispose();
+    this.localImages.dispose();
     this.remoteImageConfigSubscription?.dispose();
   }
 
@@ -1049,14 +1022,14 @@ export class RestProxy {
       const transferAvailable =
         transfer &&
         (transfer.transfer?.available ||
-          (await this.authorizeTransferredWorktree(
+          (await this.authorizeTransferredSession(
             transfer.id,
             transfer.directory,
             this.sessionCatalogGeneration
           )));
       if (transfer && !transferAvailable && !transferRead) {
         throw new Error(
-          `Conversation moved to ${transfer.directory}. Open its folder to continue.`
+          'Could not verify the current location of this conversation. Refresh and try again.'
         );
       }
       let explicitWorkspaceDirectory: string | null = null;
@@ -1151,6 +1124,37 @@ export class RestProxy {
         this.callbacks.server.apiVersion !== 2
       ) {
         throw new Error('Native forms require OpenCode V2');
+      }
+      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.localImage) {
+        const body = asRecord(payload.body);
+        const source = body?.path;
+        const path = typeof source === 'string' ? parseLocalImagePath(source) : null;
+        if (!path) throw new Error('Invalid local image path');
+        const requestedDirectory = body?.directory;
+        if (
+          requestedDirectory !== undefined &&
+          (typeof requestedDirectory !== 'string' ||
+            !requestedDirectory.trim() ||
+            requestedDirectory.length > 4096)
+        )
+          throw new Error('Invalid local image directory');
+        const sessionID = body?.sessionID;
+        if (sessionID !== undefined && !isSafePersistedSessionId(sessionID))
+          throw new Error('Invalid local image session');
+        const directory = requestedDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        if (typeof directory !== 'string') throw new Error('No open workspace for local image');
+        if (typeof sessionID === 'string') {
+          if (!(await this.authorizeSessionDirectory(sessionID, directory)))
+            throw new Error('Session workspace folder is not open');
+        } else this.requireOpenWorkspaceRoot(directory);
+        const data = await this.localImages.load(
+          path,
+          directory,
+          request?.controller.signal ?? new AbortController().signal,
+          body?.original === true
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
       }
       if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.remoteImage) {
         const mode = readExtensionConfigState().remoteImages;
@@ -2360,9 +2364,7 @@ export class RestProxy {
             requestedDirectory
           );
           if (!transferRead)
-            throw new Error(
-              `Conversation moved to ${session.directory}. Open its folder to continue.`
-            );
+            throw new Error(`Conversation moved to ${session.directory}. Try again.`);
         }
       }
       if (queuedDispatch && promptSessionID) {
@@ -3434,7 +3436,7 @@ export class RestProxy {
     this.authorizedSessionDirectories = new Map(
       [...this.authorizedSessionCatalogs.values()]
         .flatMap((catalog) => [...catalog.sessions.entries()])
-        .concat([...this.authorizedTransferWorktrees.entries()])
+        .concat([...this.authorizedTransferredSessions.entries()])
     );
   }
 
@@ -4381,7 +4383,7 @@ export class RestProxy {
     if (!isSameWorkspacePath(directory, workspacePath)) {
       if (directory && isSameWorkspacePath(knownDirectory, workspacePath)) {
         await this.callbacks.sessionTransferred?.(sessionID, directory, knownDirectory);
-        throw new Error(`Conversation moved to ${directory}. Open its folder to continue.`);
+        throw new Error(`Conversation moved to ${directory}. Try again.`);
       }
       throw new Error('404 Session not found');
     }

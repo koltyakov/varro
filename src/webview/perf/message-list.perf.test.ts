@@ -1,5 +1,6 @@
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { MessageList } from '../components/MessageList';
 import { getAssistantDialogSummaryMap } from '../components/message-list/assistant-dialog';
 import { replaceMessages, resetDefaultAppState, setState, upsertPart } from '../lib/state';
@@ -28,16 +29,19 @@ vi.mock('../components/message-list/MessageRows', async () => {
 
   return {
     MessageRows(props: { messages: Array<{ info: Message; parts: Part[] }> }) {
-      createRenderEffect(() => {
-        for (const message of props.messages) {
-          countMessagePass(message);
+      createRenderEffect(
+        () => [...props.messages],
+        (messages) => {
+          for (const message of messages) {
+            countMessagePass(message);
+          }
         }
-      });
+      );
 
       return null;
     },
     MessageRow(props: { msg: { info: Message; parts: Part[] } }) {
-      createRenderEffect(() => countMessagePass(props.msg));
+      createRenderEffect(() => props.msg, countMessagePass);
 
       return null;
     },
@@ -211,7 +215,7 @@ describe('MessageList perf guards', () => {
       entry(createAssistantMessage('message-2'), [createTextPart('part-b', 'message-2', 'Beta')]),
       entry(createAssistantMessage('message-3'), [createTextPart('part-c', 'message-3', 'Gamma')]),
     ]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
 
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
@@ -221,8 +225,10 @@ describe('MessageList perf guards', () => {
     expect(messageRowPassCounts.get('message-3')).toBe(1);
 
     for (let index = 0; index < 10; index += 1) {
-      setState('messages', 0, 'parts', 0, (part) =>
-        part.type === 'text' ? { ...part, text: `${part.text}${index}` } : part
+      setState(
+        storePath('messages', 0, 'parts', 0, (part) =>
+          part.type === 'text' ? { ...part, text: `${part.text}${index}` } : part
+        )
       );
     }
 
@@ -347,10 +353,10 @@ describe('MessageList perf guards', () => {
         createTextPart('final-text', 'final', ''),
       ])
     );
-    setState('messages', messages);
-    setState('activeSessionId', 'session-1');
-    setState('streamingPartId', 'final-text');
-    setState('streamingText', text);
+    setState(storePath('messages', messages));
+    setState(storePath('activeSessionId', 'session-1'));
+    setState(storePath('streamingPartId', 'final-text'));
+    setState(storePath('streamingText', text));
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
     expect(baselineReads).toBeGreaterThan(0);
@@ -415,9 +421,9 @@ describe('MessageList perf guards', () => {
         []
       )
     );
-    setState('messages', messages);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setState(storePath('messages', messages));
+    setState(storePath('activeSessionId', 'session-1'));
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
     expect(historyReads).toBeGreaterThan(0);

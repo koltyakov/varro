@@ -1,4 +1,5 @@
-import { createRoot } from 'solid-js';
+import { flush as flushSolid, createRoot } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 import { AUTO_APPROVE_JUDGE_TIMEOUT_MS, type ServerEventName } from '../../shared/protocol';
 import type { onMessage } from '../lib/bridge';
@@ -86,10 +87,15 @@ function configureReconciliationMocks() {
 describe('useOpenCode permission and config flows', () => {
   it('saves reviewed global patterns before replying once and keeps grouped peers pending', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
-    stateModule.setState('sessions', [session()]);
+    flushSolid();
+    stateModule.setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session()]));
+    flushSolid();
     stateModule.addPermission(permission());
+    flushSolid();
     stateModule.addPermission(permission('perm-2'));
+    flushSolid();
     const persisted = deferred<void>();
     clientMocks.sessionPersistGlobalPermissionAllow.mockReturnValue(persisted.promise);
     const approval = hookModule.alwaysAllowPermissionForGlobal('session-1', 'perm-1', [
@@ -102,7 +108,9 @@ describe('useOpenCode permission and config flows', () => {
     );
     expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
     persisted.resolve();
+    flushSolid();
     await approval;
+    flushSolid();
     expect(clientMocks.sessionRespondPermission).toHaveBeenCalledExactlyOnceWith(
       'session-1',
       'perm-1',
@@ -113,20 +121,25 @@ describe('useOpenCode permission and config flows', () => {
 
   it('keeps global approval pending after config or reply failures', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
+    flushSolid();
+    stateModule.setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    flushSolid();
     stateModule.addPermission(permission());
+    flushSolid();
     clientMocks.sessionPersistGlobalPermissionAllow.mockRejectedValueOnce(
       new Error('Write failed')
     );
     await expect(
       hookModule.alwaysAllowPermissionForGlobal('session-1', 'perm-1', ['git *'])
     ).rejects.toThrow('Write failed');
+    flushSolid();
     expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
     expect(stateModule.state.permissions).toHaveLength(1);
     clientMocks.sessionRespondPermission.mockRejectedValueOnce(new Error('Reply failed'));
     await expect(
       hookModule.alwaysAllowPermissionForGlobal('session-1', 'perm-1', ['git *'])
     ).rejects.toThrow('Reply failed');
+    flushSolid();
     expect(stateModule.state.permissions).toHaveLength(1);
   });
 
@@ -134,10 +147,15 @@ describe('useOpenCode permission and config flows', () => {
     'persists project approval before replying with the V%s lifetime',
     async (apiVersion) => {
       const { stateModule, hookModule } = await loadModules();
-      stateModule.setState('serverStatus', { state: 'running', apiVersion });
-      stateModule.setState('sessions', [session()]);
+      flushSolid();
+      stateModule.setState(storePath('serverStatus', { state: 'running', apiVersion }));
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session()]));
+      flushSolid();
       stateModule.addPermission(permission());
+      flushSolid();
       stateModule.addPermission(permission('perm-2'));
+      flushSolid();
       const persisted = deferred<void>();
       clientMocks.sessionPersistProjectPermissionAllow.mockReturnValue(persisted.promise);
       const approval = hookModule.alwaysAllowPermissionForProject('session-1', 'perm-1');
@@ -151,7 +169,9 @@ describe('useOpenCode permission and config flows', () => {
       expect(stateModule.state.permissions).toHaveLength(1);
       expect(stateModule.state.permissions[0]?.groupMembers).toHaveLength(2);
       persisted.resolve();
+      flushSolid();
       await approval;
+      flushSolid();
 
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledExactlyOnceWith(
         'session-1',
@@ -167,26 +187,34 @@ describe('useOpenCode permission and config flows', () => {
 
   it('does not reply or remove the V2 prompt when project persistence fails', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
+    flushSolid();
+    stateModule.setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    flushSolid();
     stateModule.addPermission(permission());
+    flushSolid();
     clientMocks.sessionPersistProjectPermissionAllow.mockRejectedValue(new Error('Write failed'));
 
     await expect(hookModule.alwaysAllowPermissionForProject('session-1', 'perm-1')).rejects.toThrow(
       'Write failed'
     );
+    flushSolid();
     expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
     expect(stateModule.state.permissions).toHaveLength(1);
   });
 
   it('keeps the V2 project prompt actionable when its once reply fails', async () => {
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('serverStatus', { state: 'running', apiVersion: 2 });
+    flushSolid();
+    stateModule.setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    flushSolid();
     stateModule.addPermission(permission());
+    flushSolid();
     clientMocks.sessionRespondPermission.mockRejectedValue(new Error('Reply failed'));
 
     await expect(hookModule.alwaysAllowPermissionForProject('session-1', 'perm-1')).rejects.toThrow(
       'Reply failed'
     );
+    flushSolid();
     expect(clientMocks.sessionRespondPermission).toHaveBeenCalledExactlyOnceWith(
       'session-1',
       'perm-1',
@@ -201,18 +229,24 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.permissionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.addPermission(permission('perm-stale'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
 
       await vi.waitFor(() => expect(stateModule.state.permissions).toEqual([]));
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -225,16 +259,21 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.permissionList.mockRejectedValue(error);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.addPermission(permission('perm-restored'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
 
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(1));
+      flushSolid();
       await vi.waitFor(() =>
         expect(bridgeMocks.postMessage).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -242,6 +281,7 @@ describe('useOpenCode permission and config flows', () => {
           })
         )
       );
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-restored' }),
       ]);
@@ -251,6 +291,7 @@ describe('useOpenCode permission and config flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -265,14 +306,18 @@ describe('useOpenCode permission and config flows', () => {
     });
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
@@ -283,6 +328,7 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ])
       );
+      flushSolid();
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(1);
       expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
         expect.objectContaining({
@@ -293,6 +339,7 @@ describe('useOpenCode permission and config flows', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -305,21 +352,25 @@ describe('useOpenCode permission and config flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-unowned'),
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-unowned' }),
         ])
       );
+      flushSolid();
       expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
       expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
@@ -328,6 +379,7 @@ describe('useOpenCode permission and config flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -350,22 +402,27 @@ describe('useOpenCode permission and config flows', () => {
     );
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', mode);
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: { ...permissionListItem('perm-direct-unowned'), permission: type },
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-direct-unowned', type }),
         ])
       );
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
       expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
       expect(stateModule.error()).toBeNull();
@@ -375,6 +432,7 @@ describe('useOpenCode permission and config flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -396,27 +454,35 @@ describe('useOpenCode permission and config flows', () => {
       clientMocks.permissionList.mockResolvedValue([pending]);
 
       const { stateModule, hookModule } = await loadModules();
+      flushSolid();
       stateModule.setPermissionModeForSession('session-1', 'full');
+      flushSolid();
       const dispose = createRoot((cleanup) => {
         hookModule.useOpenCode();
         return cleanup;
       });
+      flushSolid();
 
       try {
         serverEventHandlers.get('permission.asked')?.({ properties: pending });
+        flushSolid();
         await vi.waitFor(() => expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce());
+        flushSolid();
         if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
         bridgeHandler({
           type: 'permission-automation/update',
           payload: { owner: false, lease: 2 },
         });
+        flushSolid();
         response.reject(new Error('Permission automation ownership changed'));
+        flushSolid();
 
         await vi.waitFor(() =>
           expect(stateModule.state.permissions).toEqual([
             expect.objectContaining({ id: 'perm-handoff' }),
           ])
         );
+        flushSolid();
         expect(stateModule.error()).toBeNull();
         expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
           type: 'permission/reveal',
@@ -428,9 +494,11 @@ describe('useOpenCode permission and config flows', () => {
           type: 'permission-automation/update',
           payload: { owner: true, lease: 3 },
         });
+        flushSolid();
         await vi.waitFor(() =>
           expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(2)
         );
+        flushSolid();
         expect(clientMocks.sessionRespondPermission).toHaveBeenLastCalledWith(
           'session-1',
           'perm-handoff',
@@ -438,9 +506,11 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 3 }
         );
         await vi.waitFor(() => expect(stateModule.state.permissions).toEqual([]));
+        flushSolid();
         expect(stateModule.error()).toBeNull();
       } finally {
         dispose();
+        flushSolid();
       }
     }
   );
@@ -465,21 +535,26 @@ describe('useOpenCode permission and config flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-failover'),
       });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-failover' }),
         ])
       );
+      flushSolid();
       expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
 
@@ -487,8 +562,10 @@ describe('useOpenCode permission and config flows', () => {
         type: 'permission-automation/update',
         payload: { owner: true, lease: 2 },
       });
+      flushSolid();
 
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({
@@ -497,16 +574,20 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ])
       );
+      flushSolid();
 
       bridgeHandler({
         type: 'permission-automation/update',
         payload: { owner: true, lease: 2 },
       });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(clientMocks.permissionList).toHaveBeenCalledOnce();
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -520,16 +601,20 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-rejected'),
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
@@ -539,6 +624,7 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 1 }
         )
       );
+      flushSolid();
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
         'session-1': { inFlight: 0, approved: 0, rejected: 1 },
       });
@@ -551,6 +637,7 @@ describe('useOpenCode permission and config flows', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -560,16 +647,20 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockRejectedValue(new Error('Judge model unavailable'));
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-judge-failed'),
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
@@ -579,8 +670,10 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ])
       );
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -592,34 +685,45 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const { deriveSessionIndicators } = await import('../components/chat/SessionListView');
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     stateModule.addPermission(permission('perm-restored'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
       expect(deriveSessionIndicators(stateModule.state.sessions).attentionIds).not.toContain(
         'session-1'
       );
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-restored' }),
         ])
       );
+      flushSolid();
       expect(deriveSessionIndicators(stateModule.state.sessions).attentionIds).toContain(
         'session-1'
       );
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -638,38 +742,48 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     stateModule.addPermission({
       ...permission('perm-restored-child'),
       sessionID: 'child-1',
     });
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       expect(stateModule.state.permissions).toEqual([]);
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
 
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-restored-child', sessionID: 'child-1' }),
       ]);
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-restored-child', sessionID: 'child-1' }),
         ])
       );
+      flushSolid();
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
         type: 'permission/reveal',
         payload: { permissionId: 'perm-restored-child' },
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -681,29 +795,39 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-canceled'),
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
 
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
       );
+      flushSolid();
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      flushSolid();
       await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSolid();
 
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -716,33 +840,45 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+      flushSolid();
 
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-current'),
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       pendingPermissions.resolve([]);
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
       );
+      flushSolid();
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-current' }),
         ])
       );
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -755,14 +891,20 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const { deriveSessionIndicators } = await import('../components/chat/SessionListView');
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     stateModule.addPermission(permission('perm-restored'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       expect(stateModule.state.permissions).toEqual([]);
@@ -771,21 +913,28 @@ describe('useOpenCode permission and config flows', () => {
       );
 
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
 
       pendingPermissions.resolve([permissionListItem('perm-restored')]);
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-restored' }),
         ])
       );
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -795,24 +944,31 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.permissionList.mockRejectedValue(new Error('Permission list failed'));
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     stateModule.addPermission(permission('perm-restored'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       expect(stateModule.state.permissions).toEqual([]);
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-restored' }),
         ])
       );
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -824,17 +980,23 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.permissionList.mockRejectedValue(new Error('Permission list failed'));
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     stateModule.addPermission(permission('perm-pending-full'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       expect(stateModule.state.permissions).toEqual([]);
       const update = hookModule.updatePermissionModeForSession('full', 'session-1');
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(
           'session-1',
@@ -842,13 +1004,16 @@ describe('useOpenCode permission and config flows', () => {
           { directory: '/repo' }
         )
       );
+      flushSolid();
 
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toContainEqual(
           expect.objectContaining({ id: 'perm-pending-full' })
         )
       );
+      flushSolid();
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
         type: 'permission/reveal',
         payload: { permissionId: 'perm-pending-full' },
@@ -856,7 +1021,9 @@ describe('useOpenCode permission and config flows', () => {
       expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
 
       modeUpdate.reject(new Error('Permission mode update failed'));
+      flushSolid();
       await update;
+      flushSolid();
 
       expect(stateModule.getPermissionModeForSession('session-1')).toBe('auto');
       expect(stateModule.state.permissions).toContainEqual(
@@ -864,6 +1031,7 @@ describe('useOpenCode permission and config flows', () => {
       );
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -884,34 +1052,47 @@ describe('useOpenCode permission and config flows', () => {
       .mockReturnValueOnce(secondList.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     stateModule.addPermission(permission('perm-restored'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+      flushSolid();
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
       bridgeHandler({
         type: 'permission/actionable',
         payload: { permissionId: 'perm-restored' },
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(2));
+      flushSolid();
 
       firstList.resolve([]);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       secondList.reject(new Error('newer sync failed'));
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-restored' }),
         ])
       );
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -940,10 +1121,12 @@ describe('useOpenCode permission and config flows', () => {
     };
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       expect(stateModule.state.permissions).toEqual([]);
@@ -957,6 +1140,7 @@ describe('useOpenCode permission and config flows', () => {
           diagnostics: [],
         },
       });
+      flushSolid();
       bridgeHandler({
         type: 'context/update',
         payload: {
@@ -966,12 +1150,16 @@ describe('useOpenCode permission and config flows', () => {
           diagnostics: [],
         },
       });
+      flushSolid();
 
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
       );
+      flushSolid();
 
       expect(stateModule.state.permissions).toEqual([]);
       expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
@@ -988,23 +1176,28 @@ describe('useOpenCode permission and config flows', () => {
           diagnostics: [],
         },
       });
+      flushSolid();
       bridgeHandler({
         type: 'permission/actionable',
         payload: { permissionId: 'perm-restored-a' },
       });
+      flushSolid();
 
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(2));
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-restored-a' }),
         ])
       );
+      flushSolid();
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
         type: 'permission/reveal',
         payload: { permissionId: 'perm-restored-a' },
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1017,18 +1210,24 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-timeout'),
       });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
         'session-1': { inFlight: 1, approved: 0, rejected: 0 },
@@ -1040,9 +1239,11 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS - 1);
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
 
       await vi.advanceTimersByTimeAsync(1);
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-timeout' }),
       ]);
@@ -1055,6 +1256,7 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       judge.resolve({ decision: 'allow', reason: 'Late approval.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
@@ -1063,12 +1265,14 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 1 }
         )
       );
+      flushSolid();
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
         'session-1': { inFlight: 0, approved: 1, rejected: 0 },
       });
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
       vi.useRealTimers();
     }
   });
@@ -1082,20 +1286,27 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-timeout-sync'),
       });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({
           id: 'perm-timeout-sync',
@@ -1104,9 +1315,11 @@ describe('useOpenCode permission and config flows', () => {
       ]);
 
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
       );
+      flushSolid();
 
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
       expect(stateModule.state.permissions).toEqual([
@@ -1117,6 +1330,7 @@ describe('useOpenCode permission and config flows', () => {
       ]);
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({
@@ -1125,8 +1339,10 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ])
       );
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
       vi.useRealTimers();
     }
   });
@@ -1141,25 +1357,33 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockReturnValue(response.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-timeout-response'),
       });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-timeout-response' }),
       ]);
 
       judge.resolve({ decision: 'allow', reason: 'Late approval.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
@@ -1168,14 +1392,18 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 1 }
         )
       );
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-timeout-response' }),
       ]);
 
       response.resolve(undefined);
+      flushSolid();
       await vi.waitFor(() => expect(stateModule.state.permissions).toEqual([]));
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
       vi.useRealTimers();
     }
   });
@@ -1190,32 +1418,43 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockReturnValue(userResponse.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-user-first'),
       });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-user-first' }),
       ]);
 
       const response = hookModule.respondPermission('session-1', 'perm-user-first', 'once');
       await Promise.resolve();
+      flushSolid();
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
         'session-1': { inFlight: 0, approved: 0, rejected: 0 },
       });
       judge.resolve({ decision: 'allow', reason: 'Too late.' });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(1);
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
@@ -1224,10 +1463,13 @@ describe('useOpenCode permission and config flows', () => {
         'once'
       );
       userResponse.resolve(undefined);
+      flushSolid();
       await response;
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
       vi.useRealTimers();
     }
   });
@@ -1239,17 +1481,22 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-replied-first'),
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
         expect.objectContaining({ permissionId: 'perm-replied-first', status: 'reviewing' }),
       ]);
@@ -1257,17 +1504,22 @@ describe('useOpenCode permission and config flows', () => {
       serverEventHandlers.get('permission.replied')?.({
         properties: { id: 'perm-replied-first' },
       });
+      flushSolid();
 
       expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([]);
       expect(stateModule.state.sessionAutoPermissionCounts['session-1']?.inFlight).toBe(0);
 
       judge.resolve({ decision: 'allow', reason: 'Too late.' });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
       expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1279,35 +1531,46 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-snapshot-resolved'),
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
         expect.objectContaining({ permissionId: 'perm-snapshot-resolved', status: 'reviewing' }),
       ]);
 
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([])
       );
+      flushSolid();
       expect(stateModule.state.sessionAutoPermissionCounts['session-1']?.inFlight).toBe(0);
 
       judge.resolve({ decision: 'allow', reason: 'Too late.' });
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
       expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1321,26 +1584,34 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: { ...permissionListItem('perm-child'), sessionID: 'child-1' },
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', { directory: undefined })
       );
+      flushSolid();
       expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
       expect(stateModule.state.permissions).toEqual([]);
 
       childSession.resolve({ ...session('child-1'), parentID: 'session-1' });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
       expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
         type: 'permission/reveal',
@@ -1348,6 +1619,7 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       judge.resolve({ decision: 'allow', reason: 'Safe child action.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'child-1',
@@ -1356,9 +1628,11 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 1 }
         )
       );
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1370,24 +1644,31 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionGet.mockReturnValue(childSession.promise);
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: { ...permissionListItem('perm-child-timeout'), sessionID: 'child-1' },
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', { directory: undefined })
       );
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      flushSolid();
 
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-child-timeout', sessionID: 'child-1' }),
@@ -1399,6 +1680,7 @@ describe('useOpenCode permission and config flows', () => {
       });
     } finally {
       dispose();
+      flushSolid();
       vi.useRealTimers();
     }
   });
@@ -1415,21 +1697,28 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const { getStandalonePermissionPrompts } =
       await import('../components/message-list/pending-prompts');
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: { ...permissionListItem('perm-child-ask'), sessionID: 'child-1' },
       });
+      flushSolid();
 
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
       expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
         type: 'permission/reveal',
@@ -1437,11 +1726,13 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-child-ask', sessionID: 'child-1' }),
         ])
       );
+      flushSolid();
       expect(
         getStandalonePermissionPrompts([], stateModule.state.permissions, 'session-1')
       ).toEqual([expect.objectContaining({ id: 'perm-child-ask' })]);
@@ -1451,6 +1742,7 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       await hookModule.respondPermission('child-1', 'perm-child-ask', 'once');
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
         'child-1',
         'perm-child-ask',
@@ -1459,6 +1751,7 @@ describe('useOpenCode permission and config flows', () => {
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1474,16 +1767,20 @@ describe('useOpenCode permission and config flows', () => {
       .mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-response-failed'),
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
@@ -1494,6 +1791,7 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ])
       );
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(1);
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
         'session-1': { inFlight: 0, approved: 0, rejected: 0 },
@@ -1504,6 +1802,7 @@ describe('useOpenCode permission and config flows', () => {
       });
 
       await hookModule.respondPermission('session-1', 'perm-response-failed', 'once');
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(2);
       expect(clientMocks.sessionRespondPermission).toHaveBeenLastCalledWith(
         'session-1',
@@ -1513,6 +1812,7 @@ describe('useOpenCode permission and config flows', () => {
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1533,17 +1833,22 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
         properties: { ...permissionListItem('perm-grandchild'), sessionID: 'grandchild-1' },
       });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(clientMocks.sessionGet).toHaveBeenCalledWith('grandchild-1', {
@@ -1551,10 +1856,13 @@ describe('useOpenCode permission and config flows', () => {
         });
         expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', { directory: undefined });
       });
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
 
       judge.resolve({ decision: 'allow', reason: 'Safe nested child action.' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'grandchild-1',
@@ -1563,9 +1871,11 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 1 }
         )
       );
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1585,30 +1895,41 @@ describe('useOpenCode permission and config flows', () => {
         .mockResolvedValueOnce({ decision: judgeDecision, reason: 'matches user decision' });
 
       const { stateModule, hookModule } = await loadModules();
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1' },
-      ]);
+      flushSolid();
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1' },
+        ])
+      );
+      flushSolid();
       stateModule.setPermissionModeForSession('session-1', 'auto');
+      flushSolid();
       const dispose = createRoot((cleanup) => {
         hookModule.useOpenCode();
         return cleanup;
       });
+      flushSolid();
 
       try {
         serverEventHandlers.get('server.connected')?.({});
+        flushSolid();
         await vi.waitFor(() => expect(serverEventHandlers.has('permission.asked')).toBe(true));
+        flushSolid();
 
         serverEventHandlers.get('permission.asked')?.({
           properties: permissionListItem('perm-manual'),
         });
+        flushSolid();
         await vi.waitFor(() =>
           expect(stateModule.state.permissions).toEqual([
             expect.objectContaining({ id: 'perm-manual' }),
           ])
         );
+        flushSolid();
 
         await hookModule.respondPermission('session-1', 'perm-manual', userResponse);
+        flushSolid();
         expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
           expect.objectContaining({
             permissionId: 'perm-manual',
@@ -1618,8 +1939,10 @@ describe('useOpenCode permission and config flows', () => {
         serverEventHandlers.get('permission.asked')?.({
           properties: { ...permissionListItem('perm-similar'), sessionID: 'child-1' },
         });
+        flushSolid();
 
         await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2));
+        flushSolid();
         expect(clientMocks.varroJudgePermission.mock.calls[1]?.[0]).toEqual(
           expect.objectContaining({
             approvedReferences: [
@@ -1639,6 +1962,7 @@ describe('useOpenCode permission and config flows', () => {
             { permissionAutomationLease: 1 }
           )
         );
+        flushSolid();
         expect(stateModule.state.permissions).not.toContainEqual(
           expect.objectContaining({ id: 'perm-similar' })
         );
@@ -1652,15 +1976,19 @@ describe('useOpenCode permission and config flows', () => {
         );
 
         stateModule.setPermissionModeForSession('session-2', 'auto');
+        flushSolid();
         serverEventHandlers.get('permission.asked')?.({
           properties: { ...permissionListItem('perm-other'), sessionID: 'session-2' },
         });
+        flushSolid();
         await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(3));
+        flushSolid();
         expect(clientMocks.varroJudgePermission.mock.calls[2]?.[0]).toEqual(
           expect.objectContaining({ approvedReferences: [] })
         );
       } finally {
         dispose();
+        flushSolid();
       }
     }
   );
@@ -1674,50 +2002,68 @@ describe('useOpenCode permission and config flows', () => {
       clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'review' });
 
       const { stateModule, hookModule } = await loadModules();
-      stateModule.setState('sessions', [
-        session('session-1'),
-        { ...session('child-1'), parentID: 'session-1' },
-        session('session-2'),
-      ]);
-      stateModule.setState('messages', [{ info: userMessage('user-first'), parts: [] }]);
+      flushSolid();
+      stateModule.setState(
+        storePath('sessions', [
+          session('session-1'),
+          { ...session('child-1'), parentID: 'session-1' },
+          session('session-2'),
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('messages', [{ info: userMessage('user-first'), parts: [] }]));
+      flushSolid();
       stateModule.setPermissionModeForSession('session-1', 'auto');
+      flushSolid();
       stateModule.setPermissionModeForSession('session-2', 'auto');
+      flushSolid();
       const dispose = createRoot((cleanup) => {
         hookModule.useOpenCode();
         return cleanup;
       });
+      flushSolid();
 
       try {
         serverEventHandlers.get('permission.asked')?.({
           properties: { ...permissionListItem('perm-manual'), sessionID: 'child-1' },
         });
+        flushSolid();
         await vi.waitFor(() => expect(stateModule.state.permissions).toHaveLength(1));
+        flushSolid();
         await hookModule.respondPermission('child-1', 'perm-manual', response);
+        flushSolid();
 
         // Unrelated conversations and subagent launch prompts do not start a new root turn.
         for (const sessionID of ['session-2', 'child-1']) {
           serverEventHandlers.get('message.updated')?.({
             properties: { info: { ...userMessage(`user-${sessionID}`), sessionID } },
           });
+          flushSolid();
         }
         serverEventHandlers.get('permission.asked')?.({
           properties: permissionListItem('perm-same-turn'),
         });
+        flushSolid();
         await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2));
+        flushSolid();
         expect(clientMocks.varroJudgePermission.mock.calls[1]?.[0]).toEqual(
           expect.objectContaining({
             approvedReferences: [expect.objectContaining({ response })],
           })
         );
         await vi.waitFor(() => expect(stateModule.state.permissions).toHaveLength(1));
+        flushSolid();
 
         serverEventHandlers.get('message.updated')?.({
           properties: { info: userMessage('user-retry') },
         });
+        flushSolid();
         serverEventHandlers.get('permission.asked')?.({
           properties: { ...permissionListItem('perm-retry'), sessionID: 'child-1' },
         });
+        flushSolid();
         await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(3));
+        flushSolid();
         expect(clientMocks.varroJudgePermission.mock.calls[2]?.[0]).toEqual(
           expect.objectContaining({
             approvedReferences:
@@ -1729,9 +2075,11 @@ describe('useOpenCode permission and config flows', () => {
             expect.objectContaining({ id: 'perm-retry' })
           )
         );
+        flushSolid();
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(1);
       } finally {
         dispose();
+        flushSolid();
       }
     }
   );
@@ -1750,43 +2098,60 @@ describe('useOpenCode permission and config flows', () => {
       clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'review' });
 
       const { stateModule, hookModule } = await loadModules();
-      stateModule.setState('sessions', [session()]);
-      stateModule.setState('messages', [{ info: userMessage('user-first'), parts: [] }]);
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session()]));
+      flushSolid();
+      stateModule.setState(storePath('messages', [{ info: userMessage('user-first'), parts: [] }]));
+      flushSolid();
       stateModule.setPermissionModeForSession('session-1', 'auto');
+      flushSolid();
       const dispose = createRoot((cleanup) => {
         hookModule.useOpenCode();
         return cleanup;
       });
+      flushSolid();
 
       try {
         serverEventHandlers.get('permission.asked')?.({
           properties: permissionListItem('perm-manual'),
         });
+        flushSolid();
         await vi.waitFor(() => expect(stateModule.state.permissions).toHaveLength(1));
+        flushSolid();
         const rejection = hookModule.respondPermission('session-1', 'perm-manual', 'reject');
         await vi.waitFor(() => expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce());
+        flushSolid();
 
         if (race === 'automatic review') {
           await rejection;
+          flushSolid();
           clientMocks.varroJudgePermission.mockReturnValueOnce(review.promise);
           serverEventHandlers.get('permission.asked')?.({
             properties: permissionListItem('perm-reviewing'),
           });
+          flushSolid();
           await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2));
+          flushSolid();
         }
+        flushSolid();
 
         serverEventHandlers.get('message.updated')?.({
           properties: { info: { ...userMessage('user-retry'), time: { created: 2 } } },
         });
+        flushSolid();
         // A delayed update for the old prompt must not restore its rejection scope.
         serverEventHandlers.get('message.updated')?.({
           properties: { info: userMessage('user-first') },
         });
+        flushSolid();
         if (race === 'manual reply') {
           reply.resolve();
+          flushSolid();
           await rejection;
+          flushSolid();
         } else {
           review.resolve({ decision: 'reject', reason: 'Matches the old rejection.' });
+          flushSolid();
           await vi.waitFor(() =>
             expect(stateModule.state.permissions).toContainEqual(
               expect.objectContaining({
@@ -1795,19 +2160,23 @@ describe('useOpenCode permission and config flows', () => {
               })
             )
           );
+          flushSolid();
           expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toContainEqual(
             expect.objectContaining({ permissionId: 'perm-reviewing', status: 'approval-required' })
           );
         }
+        flushSolid();
 
         serverEventHandlers.get('permission.asked')?.({
           properties: permissionListItem('perm-retry'),
         });
+        flushSolid();
         await vi.waitFor(() =>
           expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(
             race === 'manual reply' ? 2 : 3
           )
         );
+        flushSolid();
         expect(clientMocks.varroJudgePermission.mock.lastCall?.[0]).toEqual(
           expect.objectContaining({ approvedReferences: [] })
         );
@@ -1818,6 +2187,7 @@ describe('useOpenCode permission and config flows', () => {
             )
           ).toContain('perm-retry')
         );
+        flushSolid();
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce();
         expect(stateModule.state.sessionAutoPermissionCounts['session-1']).toEqual({
           inFlight: 0,
@@ -1826,6 +2196,7 @@ describe('useOpenCode permission and config flows', () => {
         });
       } finally {
         dispose();
+        flushSolid();
       }
     }
   );
@@ -1843,15 +2214,20 @@ describe('useOpenCode permission and config flows', () => {
       .mockReturnValueOnce(recheck.promise);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(serverEventHandlers.has('permission.asked')).toBe(true));
+      flushSolid();
 
       serverEventHandlers.get('permission.asked')?.({
         properties: {
@@ -1862,6 +2238,7 @@ describe('useOpenCode permission and config flows', () => {
           metadata: { filepath: '/external/path/one', parentDir: '/external/path' },
         },
       });
+      flushSolid();
       serverEventHandlers.get('permission.asked')?.({
         properties: {
           ...permissionListItem('perm-second'),
@@ -1871,6 +2248,7 @@ describe('useOpenCode permission and config flows', () => {
           metadata: { filepath: '/external/path/two', parentDir: '/external/path' },
         },
       });
+      flushSolid();
       await vi.waitFor(() => {
         expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2);
         expect(stateModule.state.permissions).toEqual(
@@ -1880,10 +2258,13 @@ describe('useOpenCode permission and config flows', () => {
           ])
         );
       });
+      flushSolid();
 
       await hookModule.respondPermission('session-1', 'perm-first', 'always');
+      flushSolid();
 
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(3));
+      flushSolid();
       expect(stateModule.state.permissions).toContainEqual(
         expect.objectContaining({ id: 'perm-second' })
       );
@@ -1901,6 +2282,7 @@ describe('useOpenCode permission and config flows', () => {
         })
       );
       recheck.resolve({ decision: 'allow', reason: 'matches the always preference' });
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
           'session-1',
@@ -1909,11 +2291,13 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 1 }
         )
       );
+      flushSolid();
       expect(stateModule.state.permissions).not.toContainEqual(
         expect.objectContaining({ id: 'perm-second' })
       );
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1930,24 +2314,34 @@ describe('useOpenCode permission and config flows', () => {
     );
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(1));
+      flushSolid();
 
       stateModule.setPermissionModeForSession('session-1', 'default');
+      flushSolid();
       resolveJudge?.({ decision: 'allow', reason: 'Allowed.' });
+      flushSolid();
 
       await Promise.resolve();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1958,15 +2352,20 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
     stateModule.addPermission(permission());
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
@@ -1976,9 +2375,11 @@ describe('useOpenCode permission and config flows', () => {
           { permissionAutomationLease: 1 }
         )
       );
+      flushSolid();
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -1986,18 +2387,23 @@ describe('useOpenCode permission and config flows', () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
     const modeUpdate = deferred<ReturnType<typeof session>>();
+    const reply = deferred<void>();
     clientMocks.varroSessionUpdatePermissionMode.mockReturnValue(modeUpdate.promise);
-    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+    clientMocks.sessionRespondPermission.mockReturnValue(reply.promise);
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [session('session-1')]);
+    flushSolid();
+    stateModule.setState(storePath('sessions', [session('session-1')]));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       const update = hookModule.updatePermissionModeForSession('full', 'session-1');
+      flushSolid();
       await vi.waitFor(() =>
         expect(clientMocks.varroSessionUpdatePermissionMode).toHaveBeenCalledWith(
           'session-1',
@@ -2005,17 +2411,26 @@ describe('useOpenCode permission and config flows', () => {
           { directory: '/repo' }
         )
       );
+      flushSolid();
 
       serverEventHandlers.get('permission.asked')?.({
         properties: permissionListItem('perm-during-patch'),
       });
+      flushSolid();
       expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
       expect(stateModule.state.permissions).toContainEqual(
         expect.objectContaining({ id: 'perm-during-patch' })
       );
 
       modeUpdate.resolve(session('session-1'));
+      await vi.waitFor(() => expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.permissions).toContainEqual(
+        expect.objectContaining({ id: 'perm-during-patch' })
+      );
+      reply.resolve();
       await update;
+      flushSolid();
+      expect(stateModule.state.permissions).toEqual([]);
 
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
         'session-1',
@@ -2025,6 +2440,7 @@ describe('useOpenCode permission and config flows', () => {
       );
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -2037,18 +2453,26 @@ describe('useOpenCode permission and config flows', () => {
     });
 
     const { stateModule, hookModule } = await loadModules();
-    stateModule.setState('sessions', [
-      session('root-1'),
-      { ...session('child-1'), parentID: 'root-1' },
-      { ...session('sibling-1'), parentID: 'root-1' },
-      { ...session('grandchild-1'), parentID: 'child-1' },
-    ]);
+    flushSolid();
+    stateModule.setState(
+      storePath('sessions', [
+        session('root-1'),
+        { ...session('child-1'), parentID: 'root-1' },
+        { ...session('sibling-1'), parentID: 'root-1' },
+        { ...session('grandchild-1'), parentID: 'child-1' },
+        { ...session('inheriting-grandchild'), parentID: 'child-1' },
+      ])
+    );
+    flushSolid();
     stateModule.setPermissionModeForSession('root-1', 'auto');
+    flushSolid();
     stateModule.setPermissionModeForSession('grandchild-1', 'default');
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       for (const [id, sessionID] of [
@@ -2056,16 +2480,21 @@ describe('useOpenCode permission and config flows', () => {
         ['perm-child', 'child-1'],
         ['perm-sibling', 'sibling-1'],
         ['perm-restrictive', 'grandchild-1'],
+        ['perm-inherited', 'inheriting-grandchild'],
       ] as const) {
         stateModule.addPermission({ ...permission(id), sessionID });
+        flushSolid();
       }
       await hookModule.updatePermissionModeForSession('full', 'child-1');
+      flushSolid();
 
       expect(clientMocks.sessionRespondPermission.mock.calls).toEqual([
         ['child-1', 'perm-child', 'once', { permissionAutomationLease: 1 }],
+        ['inheriting-grandchild', 'perm-inherited', 'once', { permissionAutomationLease: 1 }],
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -2077,29 +2506,38 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     stateModule.addPermission(permission('perm-answered'));
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(1));
+      flushSolid();
 
       await hookModule.respondPermission('session-1', 'perm-answered', 'once');
+      flushSolid();
       permissionList.resolve([
         permissionListItem('perm-answered'),
         permissionListItem('perm-current'),
       ]);
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
           expect.objectContaining({ id: 'perm-current' }),
         ])
       );
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -2120,10 +2558,12 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
@@ -2138,10 +2578,12 @@ describe('useOpenCode permission and config flows', () => {
           chatFontFamily: 'default',
         },
       });
+      flushSolid();
 
       expect(stateModule.desktopSessionPaneSide()).toBe('right');
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -2192,10 +2634,12 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
@@ -2204,6 +2648,7 @@ describe('useOpenCode permission and config flows', () => {
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.permissions).toEqual([
@@ -2216,10 +2661,12 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ]);
       });
+      flushSolid();
       expect(stateModule.isSessionAwaitingInput('session-1')).toBe(true);
       expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -2270,10 +2717,12 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
@@ -2282,6 +2731,7 @@ describe('useOpenCode permission and config flows', () => {
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.permissions).toEqual([
@@ -2294,10 +2744,12 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ]);
       });
+      flushSolid();
       expect(stateModule.isSessionAwaitingInput('session-1')).toBe(true);
       expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -2327,10 +2779,12 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
@@ -2339,10 +2793,12 @@ describe('useOpenCode permission and config flows', () => {
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(serverEventHandlers.has('permission.asked')).toBe(true);
       });
+      flushSolid();
 
       serverEventHandlers.get('permission.asked')?.({
         properties: {
@@ -2355,6 +2811,7 @@ describe('useOpenCode permission and config flows', () => {
           time: { created: 123 },
         },
       });
+      flushSolid();
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
@@ -2367,12 +2824,14 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ])
       );
+      flushSolid();
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
         type: 'permission/reveal',
         payload: { permissionId: 'perm-live-1' },
       });
     } finally {
       dispose();
+      flushSolid();
     }
   });
 });

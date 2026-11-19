@@ -1,5 +1,5 @@
 import { For, Show, createMemo } from 'solid-js';
-import type { JSX } from 'solid-js';
+import { type JSX } from '@solidjs/web';
 import { parseIssueAttachment } from '../lib/editor-problems';
 import { Tooltip } from './Tooltip';
 

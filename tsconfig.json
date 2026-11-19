@@ -4,7 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "preserve",
-    "jsxImportSource": "solid-js",
+    "jsxImportSource": "@solidjs/web",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node", "vscode", "vitest/globals"],
     "strict": true,

@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { createEffect, Show, createMemo, createSignal, onSettled } from 'solid-js';
 import type { SelectedModel } from '../../lib/app-state-types';
 import {
   formatProviderLimitTitle,
@@ -149,15 +149,23 @@ export function ManagedSubagentFooter(props: {
   };
 
   let popupSessionId = state.activeSessionId;
-  createEffect(() => {
-    const sessionId = state.activeSessionId;
-    if (sessionId !== popupSessionId) closePopups();
-    popupSessionId = sessionId;
-    if (!showProviderLimit()) setShowProviderLimitPopup(false);
-    if (!contextUsage()) setShowContextPopup(false);
-  });
+  createEffect(
+    () => ({
+      sessionId: state.activeSessionId,
+      providerLimit: showProviderLimit(),
+      usage: contextUsage(),
+    }),
+    ({ sessionId, providerLimit, usage }) => {
+      if (sessionId !== popupSessionId) closePopups();
+      popupSessionId = sessionId;
+      if (!providerLimit) setShowProviderLimitPopup(false);
+      if (!usage) setShowContextPopup(false);
+    }
+  );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const handlePointerDown = (event: PointerEvent) => {
       if (event.target instanceof Node && footerRef?.contains(event.target)) return;
       closePopups();
@@ -171,10 +179,14 @@ export function ManagedSubagentFooter(props: {
     };
     document.addEventListener('pointerdown', handlePointerDown);
     window.addEventListener('keydown', handleKeyDown);
-    onCleanup(() => {
+    cleanups.push(() => {
       document.removeEventListener('pointerdown', handlePointerDown);
       window.removeEventListener('keydown', handleKeyDown);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (

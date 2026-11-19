@@ -23,5 +23,5 @@ export function clearDirectSessionReturn(): void {
 }
 
 export function clearDirectSessionReturnUnless(sessionId: string | null): void {
-  if (directSessionReturn()?.sessionId !== sessionId) clearDirectSessionReturn();
+  setDirectSessionReturn((current) => (current?.sessionId === sessionId ? current : null));
 }

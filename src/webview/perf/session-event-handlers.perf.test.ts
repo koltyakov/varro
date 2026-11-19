@@ -1,7 +1,9 @@
 import { createEffect } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerEvent } from '../../shared/protocol';
 import { registerSessionEventHandlers } from '../hooks/session/session-event-handlers';
+import { SessionLifecycleOperations } from '../hooks/session/session-lifecycle';
 import { serverEvents } from '../lib/client';
 import {
   getAssistantActivityGroupMap,
@@ -24,6 +26,7 @@ import {
   startLoading,
   state,
 } from '../lib/state';
+import { sessionStore } from '../lib/stores/session-store';
 import type { AssistantMessage, MessageEntry } from '../types';
 import { createPerfRoot, settlePerfEffects } from './harness';
 
@@ -56,14 +59,16 @@ describe('settlement event perf guards', () => {
   });
 
   it.each([
-    { boundary: 'event', pendingDelta: true },
-    { boundary: 'event', pendingDelta: false },
-    { boundary: 'state', pendingDelta: true },
-    { boundary: 'state', pendingDelta: false },
-    { boundary: 'part', pendingDelta: false },
+    { boundary: 'event', pendingDelta: true, busyChild: false },
+    { boundary: 'event', pendingDelta: false, busyChild: false },
+    { boundary: 'event', pendingDelta: false, busyChild: true },
+    { boundary: 'event', pendingDelta: false, busyChild: 'new' },
+    { boundary: 'state', pendingDelta: true, busyChild: false },
+    { boundary: 'state', pendingDelta: false, busyChild: false },
+    { boundary: 'part', pendingDelta: false, busyChild: false },
   ])(
-    'publishes $boundary settlement once after long reasoning history, pending delta: $pendingDelta',
-    async ({ boundary, pendingDelta }) => {
+    'publishes $boundary settlement once after long reasoning history, pending delta: $pendingDelta, busy child: $busyChild',
+    async ({ boundary, pendingDelta, busyChild }) => {
       const markdown =
         '# Settlement report\n\n- Generated fixture item\n\n```ts\nconst ready = true;\n```\n'.repeat(
           120
@@ -100,13 +105,26 @@ describe('settlement event perf guards', () => {
         ],
       });
       setMessagesIncremental(messages);
-      if (boundary === 'part') setState('messages', messages);
-      setState('activeSessionId', 'session-1');
-      setState('sessionStatus', 'session-1', { type: 'busy' });
+      if (boundary === 'part') setState(storePath('messages', messages));
+      setState(storePath('activeSessionId', 'session-1'));
+      const parent = {
+        id: 'session-1',
+        directory: '/workspace',
+        projectID: 'project',
+        title: 'Parent',
+        version: '1',
+        time: { created: 1, updated: 2 },
+      };
+      const child = { ...parent, id: 'child', parentID: parent.id };
+      if (busyChild) {
+        sessionStore.setSessions(busyChild === 'new' ? [parent] : [parent, child]);
+      }
+      setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
       startLoading();
-      setState('streamingPartId', 'text');
+      setState(storePath('streamingPartId', 'text'));
       const finalText = `${markdown}\nFinal audit sentence.`;
-      setState('streamingText', pendingDelta ? markdown : finalText);
+      setState(storePath('streamingText', pendingDelta ? markdown : finalText));
+      await settlePerfEffects();
       if (pendingDelta) {
         applyMessagePartDelta('final', 'text', '\nFinal audit sentence.', 'session-1');
       }
@@ -121,17 +139,25 @@ describe('settlement event perf guards', () => {
       const cleanups = registerSessionEventHandlers({
         getActiveSessionId: () => state.activeSessionId,
         getSessionStatus: (id) => state.sessionStatus[id],
-        isSessionTreeStatusWorking: (id) => state.sessionStatus[id]?.type === 'busy',
         getMessages: () => state.messages,
         handoffTodosToMessages: () => true,
-        upsertSession: vi.fn(),
+        upsertSession: new SessionLifecycleOperations({
+          getCurrentWorkspacePath: () => '/workspace',
+          clearPendingAbort: vi.fn(),
+          clearPendingAbortTree: vi.fn(),
+          resetTodoSync: vi.fn(),
+          resetToolCallExpansionState: vi.fn(),
+          publishSessionModel: vi.fn(),
+        }).upsertSession,
+        isSessionInActiveTree: (id) =>
+          sessionStore.getSessionTreeRootId(id) === sessionStore.getSessionTreeRootId(parent.id),
         setSessionCompacting: vi.fn(),
         removeDeletedSessionTree: vi.fn(),
         shouldIgnorePendingAbortStatus: () => false,
         hasPendingAbort: () => false,
         markPendingAbort: vi.fn(),
         clearPendingAbort: vi.fn(),
-        setSessionStatusEntry: (id, status) => setState('sessionStatus', id, status),
+        setSessionStatusEntry: sessionStore.setSessionStatusEntry,
         clearUsageLimitOnResumedProgress: vi.fn(),
         updateUsageLimitState: vi.fn(),
         syncSession: async () => {},
@@ -151,29 +177,33 @@ describe('settlement event perf guards', () => {
       let recomputations = 0;
       let groups = new Map<string, AssistantActivityGroupInfo[]>();
       const dispose = createPerfRoot(() => {
-        createEffect(() => {
-          messageInfoVersion();
-          messageStructureVersion();
-          void state.streamingPartId;
-          void state.streamingText;
-          isLoading();
-          void state.sessionStatus['session-1']?.type;
-          for (const entry of state.messages) {
-            if (entry.info.role === 'assistant') void entry.info.time.completed;
-            for (const part of entry.parts) {
-              if (part.type === 'text' || part.type === 'reasoning') void part.text;
+        createEffect(
+          () => {
+            messageInfoVersion();
+            messageStructureVersion();
+            void state.streamingPartId;
+            void state.streamingText;
+            isLoading();
+            void state.sessionStatus['session-1']?.type;
+            for (const entry of state.messages) {
+              if (entry.info.role === 'assistant') void entry.info.time.completed;
+              for (const part of entry.parts) {
+                if (part.type === 'text' || part.type === 'reasoning') void part.text;
+              }
             }
+            if (boundary === 'part') {
+              groups = preserveAssistantActivityGroupKeys(
+                getAssistantActivityGroupMap(state.messages),
+                groups
+              );
+              getCompactActivityDisclosureLayoutSignatures(groups, () => false);
+              getRenderEmptyMessageIds(state.messages, groups, () => false);
+            }
+          },
+          () => {
+            recomputations += 1;
           }
-          recomputations += 1;
-          if (boundary === 'part') {
-            groups = preserveAssistantActivityGroupKeys(
-              getAssistantActivityGroupMap(state.messages),
-              groups
-            );
-            getCompactActivityDisclosureLayoutSignatures(groups, () => false);
-            getRenderEmptyMessageIds(state.messages, groups, () => false);
-          }
-        });
+        );
       });
       try {
         await settlePerfEffects();
@@ -198,13 +228,16 @@ describe('settlement event perf guards', () => {
               },
             },
           });
-          expect
-            .soft(baselineReads, 'part.updated historical activity work')
-            .toBeLessThan(200 * 50);
         } else {
           finishMessageStreaming('final');
         }
+        await settlePerfEffects();
         const completionPasses = recomputations - before;
+        if (boundary === 'part') {
+          expect
+            .soft(baselineReads, 'part.updated historical activity work')
+            .toBeLessThan(200 * 50);
+        }
         expect(state.streamingPartId).toBeNull();
         expect(state.streamingText).toBe('');
         expect(state.messages[200]!.parts[1]).toMatchObject({
@@ -218,15 +251,41 @@ describe('settlement event perf guards', () => {
             type: 'message.updated',
             properties: { info: { ...assistant('final', 3), finish: 'stop' } },
           });
+          await settlePerfEffects();
         }
         if (boundary === 'event' || boundary === 'part') {
           const beforeIdle = recomputations;
+          // Child progress and parent idle can arrive before either status commits.
+          if (busyChild === 'new') {
+            expect(state.sessions.some((session) => session.id === child.id)).toBe(false);
+            handlers.get('session.created')!({
+              type: 'session.created',
+              properties: { info: child },
+            });
+          }
+          if (busyChild) {
+            handlers.get('session.status')!({
+              type: 'session.status',
+              properties: { sessionID: child.id, status: { type: 'busy' } },
+            });
+          }
+          if (busyChild === 'new') {
+            expect(state.sessions.some((session) => session.id === child.id)).toBe(false);
+            expect(state.sessionStatus[child.id]).toBeUndefined();
+          }
           handlers.get('session.idle')!({
             type: 'session.idle',
             properties: { sessionID: 'session-1' },
           });
+          await settlePerfEffects();
           expect(state.sessionStatus['session-1']?.type).toBe('idle');
-          expect(isLoading()).toBe(false);
+          if (busyChild) {
+            expect(state.sessions.find((session) => session.id === child.id)?.parentID).toBe(
+              parent.id
+            );
+            expect(state.sessionStatus[child.id]?.type).toBe('busy');
+          }
+          expect(isLoading()).toBe(Boolean(busyChild));
           expect(state.messages[200]!.info.time).toMatchObject({ completed: 3 });
           expect.soft(recomputations - beforeIdle, 'idle publication passes').toBe(1);
           const afterIdle = recomputations;
@@ -234,6 +293,7 @@ describe('settlement event perf guards', () => {
             type: 'session.idle',
             properties: { sessionID: 'session-1' },
           });
+          await settlePerfEffects();
           expect(recomputations, 'duplicate idle is inert').toBe(afterIdle);
         }
         expect(completionPasses, 'completion publication passes').toBe(1);

@@ -1,17 +1,18 @@
 import {
+  createEffect,
   Show,
   For,
-  Index,
-  createEffect,
   createMemo,
   createRenderEffect,
   createSignal,
   createUniqueId,
   onCleanup,
-  onMount,
+  onSettled,
+  untrack,
 } from 'solid-js';
-import type { JSX } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { type JSX, Portal } from '@solidjs/web';
+import { ariaBoolean } from '../lib/aria';
+
 import {
   isAbortedToolError,
   isPermissionRejectedToolError,
@@ -37,7 +38,11 @@ import { useSecondClock } from '../lib/clock';
 import { formatCommandDisplay } from '../lib/command-display';
 import { formatCost, formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
-import { prepareForMessageBlockRemoval, trackInlineDiffLoad } from '../lib/message-list-layout';
+import {
+  notifyInlineDiffMount,
+  prepareForMessageBlockRemoval,
+  trackInlineDiffLoad,
+} from '../lib/message-list-layout';
 import type { FileChange } from '../lib/tool-file-change';
 import {
   getToolCallExpanded,
@@ -182,7 +187,7 @@ function ToolCallIcon(props: {
           aria-label={props.statusLabel}
           aria-live={props.statusLabel ? 'polite' : undefined}
           aria-atomic={props.statusLabel ? 'true' : undefined}
-          aria-hidden={props.statusLabel ? undefined : 'true'}
+          aria-hidden={ariaBoolean(props.statusLabel ? undefined : 'true')}
           title={props.statusLabel}
         />
       }
@@ -193,7 +198,7 @@ function ToolCallIcon(props: {
         aria-label={props.statusLabel}
         aria-live={props.statusLabel ? 'polite' : undefined}
         aria-atomic={props.statusLabel ? 'true' : undefined}
-        aria-hidden={props.statusLabel ? undefined : 'true'}
+        aria-hidden={ariaBoolean(props.statusLabel ? undefined : 'true')}
         title={props.statusLabel}
       />
     </Show>
@@ -468,7 +473,7 @@ export function ToolCall(props: {
   diffPreviewStateKey?: string;
 }) {
   const expansionKey = () => getToolCallExpansionKey(props.part);
-  const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
+  const [expanded, setExpanded] = createSignal(untrack(() => getToolCallExpanded(expansionKey())));
   const detail = createDeferredPart(
     () => props.part,
     () =>
@@ -479,17 +484,21 @@ export function ToolCall(props: {
   );
   // Overscan rows keep their diff geometry. Dropping details outside the core collapses
   // their height, which can move them back into the core and repeatedly reload the diff.
-  createRenderEffect(() => {
-    if (
-      !props.compactFileChanges &&
-      showFileDiffs() &&
-      getToolFileChanges(props.part.tool, props.part.state).length > 0 &&
-      detail.loading()
-    ) {
-      const finish = trackInlineDiffLoad(props.part.sessionID, props.part.messageID);
-      if (finish) onCleanup(finish);
+  createRenderEffect(
+    () => ({
+      loading:
+        !props.compactFileChanges &&
+        showFileDiffs() &&
+        getToolFileChanges(props.part.tool, props.part.state).length > 0 &&
+        detail.loading(),
+      sessionID: props.part.sessionID,
+      messageID: props.part.messageID,
+    }),
+    ({ loading, sessionID, messageID }) => {
+      if (loading) return trackInlineDiffLoad(sessionID, messageID);
+      return undefined;
     }
-  });
+  );
   const tool = detail.part;
   const state = () => tool().state;
   const toolSessionRootId = createMemo(
@@ -641,8 +650,8 @@ export function ToolCall(props: {
   });
   const runningOutput = createMemo(() => getRunningToolOutput(state()));
 
-  createEffect(() => {
-    setExpanded(getToolCallExpanded(expansionKey()));
+  createEffect(expansionKey, (key) => {
+    setExpanded(getToolCallExpanded(key));
   });
 
   const toggleExpand = () => {
@@ -698,6 +707,7 @@ export function ToolCall(props: {
     if (kind === 'file-change') {
       return (
         <FileChangeCard
+          messageID={props.part.messageID}
           toolState={state()}
           changes={fileChanges()}
           animatePending={isApplyPatchTool(tool().tool)}
@@ -944,6 +954,7 @@ function ReadToolCard(props: {
 }
 
 function FileChangeCard(props: {
+  messageID: string;
   toolState: ToolPart['state'];
   changes: FileChange[];
   animatePending: boolean;
@@ -1008,12 +1019,20 @@ function FileChangeCard(props: {
     }))
   );
 
-  createEffect(() => {
-    if (!showCompactCard() || hiddenMultiFileCount() === 0) setMoreMenuOpen(false);
-  });
+  createEffect(
+    () => !showCompactCard() || hiddenMultiFileCount() === 0,
+    (hidden) => {
+      if (hidden) setMoreMenuOpen(false);
+    }
+  );
 
-  createEffect(() => {
-    if (!moreMenuOpen()) return;
+  createEffect(moreMenuOpen, (open) => {
+    const cleanups: Array<() => void> = [];
+
+    if (!open)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
 
     const positionMenu = () => {
       if (!moreButtonRef || !moreMenuRef) return;
@@ -1066,13 +1085,17 @@ function FileChangeCard(props: {
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('resize', positionMenu);
     window.addEventListener('scroll', positionMenu, true);
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('focusin', onFocusIn);
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('resize', positionMenu);
       window.removeEventListener('scroll', positionMenu, true);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   const action = () => {
@@ -1179,6 +1202,16 @@ function FileChangeCard(props: {
       </span>
     </>
   );
+  const reservePreviewBeforeRemoval = () => {
+    let element: HTMLDivElement | undefined;
+    onCleanup(() => {
+      if (element?.isConnected && isCompleted() && showInlinePreview())
+        prepareForMessageBlockRemoval(element);
+    });
+    return (target: HTMLDivElement) => {
+      element = target;
+    };
+  };
   const fileContent = () => (
     <>
       <Show when={!isMultiFile() && change()}>
@@ -1246,15 +1279,7 @@ function FileChangeCard(props: {
   return (
     <>
       <Show when={showCompactCard() && !splitCompletedChanges()}>
-        <div
-          class="chat-tool-invocation-part file-change-card"
-          ref={(element) =>
-            onCleanup(() => {
-              if (element.isConnected && isCompleted() && showInlinePreview())
-                prepareForMessageBlockRemoval(element);
-            })
-          }
-        >
+        <div class="chat-tool-invocation-part file-change-card" ref={reservePreviewBeforeRemoval()}>
           <div
             class={`file-change-card-header${props.compact ? '' : ' is-standalone'}${canExpandError() ? ' is-expandable' : ''}`}
             onClick={() => {
@@ -1288,7 +1313,7 @@ function FileChangeCard(props: {
                       type="button"
                       class="file-edit-more-count"
                       aria-haspopup="menu"
-                      aria-expanded={moreMenuOpen()}
+                      aria-expanded={ariaBoolean(moreMenuOpen())}
                       aria-controls={moreMenuId}
                       onClick={(event) => {
                         event.preventDefault();
@@ -1413,7 +1438,7 @@ function FileChangeCard(props: {
                   event.stopPropagation();
                   props.toggleExpand();
                 }}
-                aria-expanded={isErrorExpanded()}
+                aria-expanded={ariaBoolean(isErrorExpanded())}
                 aria-controls={errorBodyId}
                 aria-label={
                   isErrorExpanded() ? 'Collapse file change error' : 'Expand file change error'
@@ -1447,6 +1472,7 @@ function FileChangeCard(props: {
           <For each={changes()}>
             {(item) => (
               <FileChangeCard
+                messageID={props.messageID}
                 toolState={props.toolState}
                 changes={[item]}
                 animatePending={props.animatePending}
@@ -1468,7 +1494,10 @@ function FileChangeCard(props: {
         )}
       </For>
       <Show when={showInlinePreview()}>
-        <div class="file-change-inline-diffs file-change-inline-diffs-unwrapped">
+        <div
+          class="file-change-inline-diffs file-change-inline-diffs-unwrapped"
+          ref={(element) => notifyInlineDiffMount(element, props.messageID)}
+        >
           <DiffView diffs={inlineDiffs()} showChanges stateKey={props.previewStateKey} />
         </div>
       </Show>
@@ -1607,6 +1636,9 @@ function GenericToolCall(props: {
   const isRunning = createMemo(() => {
     if (props.state.status === 'running') return true;
     if (!isTask() || props.state.status !== 'completed') return false;
+    // Follow-ups can arrive before a result. Only the newest launch owns the
+    // child's remaining work, even when an older launch has no final notice.
+    if (nextLaunch() !== Infinity) return false;
     if (childWorking()) return true;
     const notice = taskResultNotice();
     // Native idle only ends an execution period. Wait for the child result,
@@ -1615,9 +1647,7 @@ function GenericToolCall(props: {
       !!notice?.backgroundPending ||
       (isBackgroundLaunch() &&
         !notice &&
-        (isNativeBackgroundLaunch() ||
-          (nextLaunch() === Infinity &&
-            (taskChildStatus()?.type !== 'idle' || !observedChildWork()))))
+        (isNativeBackgroundLaunch() || taskChildStatus()?.type !== 'idle' || !observedChildWork()))
     );
   });
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
@@ -1829,8 +1859,14 @@ function GenericToolCall(props: {
     }
     return null;
   };
-  onMount(() => {
-    if (isTask()) onCleanup(retainTaskActivityAltListener());
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (isTask()) cleanups.push(retainTaskActivityAltListener());
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   const now = useSecondClock(() => durationStartedAt() !== null);
   const runningDurationLabel = () => {
@@ -1882,9 +1918,14 @@ function GenericToolCall(props: {
   const bodyId = createUniqueId();
   let taskHeader: HTMLButtonElement | undefined;
   const observedTaskSessionId = createMemo(() => (isRunning() ? taskSessionId() : null));
-  createEffect(() => {
-    const sessionId = observedTaskSessionId();
-    if (sessionId && taskHeader) onCleanup(observeSubagentCard(taskHeader, sessionId));
+  createEffect(observedTaskSessionId, (sessionId) => {
+    const cleanups: Array<() => void> = [];
+
+    if (sessionId && taskHeader) cleanups.push(observeSubagentCard(taskHeader, sessionId));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   return (
     <div class={`chat-tool-invocation-part${isTask() ? ' tool-invocation-task' : ''}`}>
@@ -1899,7 +1940,7 @@ function GenericToolCall(props: {
           }}
           onClick={props.toggleExpand}
           disabled={!hasExpandableContent()}
-          aria-expanded={hasExpandableContent() ? isExpanded() : undefined}
+          aria-expanded={ariaBoolean(hasExpandableContent() ? isExpanded() : undefined)}
           aria-controls={hasExpandableContent() ? bodyId : undefined}
         >
           <ToolCallIcon
@@ -2165,16 +2206,27 @@ function LiveTerminalOutput(props: { content: string }) {
     viewportRef.scrollTop = bottom;
   };
 
-  createEffect(() => {
-    void props.content;
-    queueMicrotask(scrollToBottom);
-  });
+  createEffect(
+    () => props.content,
+    () => {
+      queueMicrotask(scrollToBottom);
+    }
+  );
 
-  onMount(() => {
-    if (!contentRef || globalThis.ResizeObserver === undefined) return;
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (!contentRef || globalThis.ResizeObserver === undefined)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const observer = new ResizeObserver(scrollToBottom);
     observer.observe(contentRef);
-    onCleanup(() => observer.disconnect());
+    cleanups.push(() => observer.disconnect());
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
@@ -2196,7 +2248,7 @@ function CodeModeToolCalls(props: { calls: CodeModeToolCall[] }) {
   return (
     <ol class="code-mode-tool-calls" aria-label="Code Mode tool calls">
       {/* Calls have no IDs; OpenCode reports them in start order. Keep rows mounted by position. */}
-      <Index each={props.calls}>
+      <For keyed={false} each={props.calls}>
         {(call) => (
           <li class="code-mode-tool-call" data-status={call().status}>
             <div class="code-mode-tool-call-header">
@@ -2218,7 +2270,7 @@ function CodeModeToolCalls(props: { calls: CodeModeToolCall[] }) {
             />
           </li>
         )}
-      </Index>
+      </For>
     </ol>
   );
 }

@@ -239,8 +239,9 @@ const ICON_INK_EDGES = new Map<string, readonly [right: number, bottom: number]>
   [zipIcon, [0.875, 0.875]],
 ]);
 
-// Artwork drawn below the usual 14/16 frame needs sub-pixel baseline placement.
+// Artwork ending outside the usual 14/16 frame, such as wide logos, needs exact baseline placement.
 const LOW_INK_BOTTOM = 0.9;
+const HIGH_INK_BOTTOM = 0.8;
 
 export function hasRecognizedFileType(path: string): boolean {
   const filename = getLeafPathName(path).toLowerCase();
@@ -275,7 +276,7 @@ export function createFileTypeIconElement(
   if (inkEdges) {
     const [right, bottom] = inkEdges;
     icon.style.setProperty('--file-icon-ink-right', String(right));
-    if (bottom > LOW_INK_BOTTOM) {
+    if (bottom > LOW_INK_BOTTOM || bottom < HIGH_INK_BOTTOM) {
       icon.classList.add('low-ink-icon');
       icon.style.setProperty('--file-icon-ink-bottom', String(bottom));
     }

@@ -35,6 +35,43 @@ describe('PinnedSessionManager', () => {
     expect(stored.value).toEqual(['session-2']);
   });
 
+  it('publishes committed pins even when the caller stopped waiting for its response', async () => {
+    let finishWrite: (() => void) | undefined;
+    persistence.set.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        })
+    );
+    const changed = vi.fn();
+    const manager = new PinnedSessionManager(persistence, changed);
+    const pending = manager.setPinned('session-1', true);
+    await Promise.resolve();
+    expect(changed).not.toHaveBeenCalled();
+    expect(manager.list()).toEqual([]);
+
+    finishWrite?.();
+    await pending;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(['session-1']);
+    // The broadcast is a detached snapshot, not the manager's mutable state.
+    changed.mock.calls[0]![0].push('foreign-session');
+    expect(manager.list()).toEqual(['session-1']);
+  });
+
+  it('publishes serialized reorder and unpin snapshots, but not failed writes', async () => {
+    stored.value = ['session-1', 'session-2'];
+    const changed = vi.fn();
+    const manager = new PinnedSessionManager(persistence, changed);
+    await Promise.all([
+      manager.reorder('session-1', 'session-2'),
+      manager.setPinned('session-2', false),
+    ]);
+    expect(changed.mock.calls).toEqual([[['session-2', 'session-1']], [['session-1']]]);
+    persistence.set.mockRejectedValueOnce(new Error('write failed'));
+    await expect(manager.setPinned('session-3', true)).rejects.toThrow('write failed');
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
   it('reorders pinned sessions', async () => {
     stored.value = ['session-1', 'session-2', 'session-3'];
     const manager = new PinnedSessionManager(persistence);

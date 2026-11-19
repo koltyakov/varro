@@ -1,4 +1,5 @@
-import { Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
+import { Show, createSignal, onSettled } from 'solid-js';
 import {
   toggleWindowChatTheme,
   windowChatTheme,
@@ -23,9 +24,14 @@ export function WindowChatThemeToggle() {
 function FloatingThemeButton() {
   const [hasRoom, setHasRoom] = createSignal(false);
   let toolbar!: HTMLDivElement;
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const root = toolbar.closest('.interactive-session');
-    if (!root) return;
+    if (!root)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     let frame = 0;
     const sync = () => {
       frame = 0;
@@ -49,20 +55,24 @@ function FloatingThemeButton() {
     if (column) resizeObserver.observe(column);
     window.addEventListener('resize', schedule);
     sync();
-    onCleanup(() => {
+    cleanups.push(() => {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
       window.removeEventListener('resize', schedule);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   return (
     <div
       ref={(element) => {
         toolbar = element;
       }}
-      class="window-chat-theme-toolbar"
-      classList={{ 'is-occluded': !hasRoom() }}
-      aria-hidden={!hasRoom()}
+
+      class={['window-chat-theme-toolbar', { 'is-occluded': !hasRoom() }]}
+      aria-hidden={ariaBoolean(!hasRoom())}
     >
       <Tooltip content={label()}>
         <button
@@ -70,7 +80,7 @@ function FloatingThemeButton() {
           class="chat-header-btn"
           disabled={!windowChatTheme()?.counterpart}
           aria-label={label()}
-          aria-pressed={windowChatThemeReversed()}
+          aria-pressed={ariaBoolean(windowChatThemeReversed())}
           onClick={toggleWindowChatTheme}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">

@@ -1,7 +1,7 @@
+import { flush as flushSolid, createSignal, createStore } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
-import { createSignal } from 'solid-js';
-import { createStore } from 'solid-js/store';
+import { render } from '@solidjs/web';
 import { resetDefaultAppState, setShowFileDiffs, setShowThinking, setState } from '../lib/state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { lightBulbIcon } from '../lib/ui-icons';
@@ -24,17 +24,24 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   resetDefaultAppState();
+  flushSolid();
   resetToolCallExpansionState();
+  flushSolid();
   setShowThinking(true);
+  flushSolid();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  flushSolid();
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   resetDefaultAppState();
+  flushSolid();
 });
 
 function renderPart(
@@ -80,8 +87,10 @@ it.each(['text', 'reasoning'] as const)(
     const checks = vi
       .spyOn(citationPathChecks, 'peek')
       .mockReturnValue('/repo/packages/child/models/file.py');
-    setState('activeSessionId', 'parent-session');
-    setState('editorContext', 'workspacePath', '/other');
+    setState(storePath('activeSessionId', 'parent-session'));
+    flushSolid();
+    setState(storePath('editorContext', 'workspacePath', '/other'));
+    flushSolid();
     const text = '`models/file.py:710-744`';
     const part =
       type === 'reasoning'
@@ -93,10 +102,14 @@ it.each(['text', 'reasoning'] as const)(
         path: { cwd: '/repo/packages/child', root: '/repo' },
       }),
     });
+    flushSolid();
     if (type === 'reasoning')
       container!.querySelector<HTMLButtonElement>('.thinking-header')!.click();
+    flushSolid();
     await nextFrame();
+    flushSolid();
     container!.querySelector<HTMLAnchorElement>('a.file-path-link')!.click();
+    flushSolid();
     expect(open).toHaveBeenCalledWith({
       path: '/repo/packages/child/models/file.py',
       line: 710,
@@ -130,15 +143,21 @@ it('retains the Markdown renderer when a text part snapshot is replaced', async 
       }),
     container!
   );
+  flushSolid();
   await nextFrame();
+  flushSolid();
   const renderer = container!.querySelector('.rendered-markdown');
   const first = renderer!.querySelector('p');
   setPart({ ...part() });
+  flushSolid();
   await nextFrame();
+  flushSolid();
   expect(container!.querySelector('.rendered-markdown')).toBe(renderer);
   expect(renderer!.querySelector('p')).toBe(first);
   setPart({ ...part(), text: 'Stable paragraph.\n\nLive paragraph. More content.' });
+  flushSolid();
   await nextFrame();
+  flushSolid();
   expect(container!.querySelector('.rendered-markdown')).toBe(renderer);
   expect(renderer!.querySelector('p')).toBe(first);
   expect(renderer!.textContent).toContain('More content.');
@@ -151,6 +170,7 @@ it.each([
   '$name retains an expanded diff across tool replacement and updates its content',
   async ({ Component }) => {
     setShowFileDiffs(true);
+    flushSolid();
     container!.className = 'interactive-list-shell';
     const input = {
       filePath: 'src/preview.css',
@@ -180,9 +200,13 @@ it.each([
         }),
       container!
     );
+    flushSolid();
     await nextFrame();
+    flushSolid();
     container!.querySelector<HTMLButtonElement>('.diff-view-toggle')!.click();
+    flushSolid();
     await nextFrame();
+    flushSolid();
     const overlay = container!.querySelector<HTMLElement>('.diff-view-overlay');
     expect(overlay).not.toBeNull();
     const viewport = overlay!.querySelector<HTMLElement>('.diff-view-overlay-lines')!;
@@ -199,7 +223,9 @@ it.each([
       },
     };
     setPart(completed);
+    flushSolid();
     await nextFrame();
+    flushSolid();
     expect(overlay!.isConnected).toBe(true);
     expect(container!.querySelector('.diff-view-overlay')).toBe(overlay);
     expect(viewport.scrollTop).toBe(120);
@@ -216,7 +242,9 @@ it.each([
         },
       },
     });
+    flushSolid();
     await nextFrame();
+    flushSolid();
     expect(container!.querySelector('.diff-view-overlay')).toBe(overlay);
     expect(overlay!.textContent).toContain('width: 3px');
     expect(overlay!.textContent).not.toContain('width: 2px');
@@ -315,6 +343,7 @@ describe('splitReasoningText', () => {
 describe('MessagePart', () => {
   it('starts reasoning blocks collapsed', () => {
     renderPart(reasoningPart('**Planning**\n\nStep one'));
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
@@ -330,6 +359,7 @@ describe('MessagePart', () => {
 
   it('uses an unnamed reasoning description as the collapsed ellipsized label', () => {
     renderPart(reasoningPart('Let me inspect the source tree.\n\nThen I will check the tests.'));
+    flushSolid();
 
     const header = container?.querySelector<HTMLButtonElement>('.thinking-header');
     const label = header?.querySelector<HTMLElement>('.thinking-label-text');
@@ -337,9 +367,11 @@ describe('MessagePart', () => {
     expect(label?.classList).toContain('thinking-label-text');
 
     header?.click();
+    flushSolid();
     expect(label?.textContent).toBe('Reasoning');
 
     header?.click();
+    flushSolid();
     expect(label?.textContent).toBe('Let me inspect the source tree. Then I will check the tests.');
   });
 
@@ -347,6 +379,7 @@ describe('MessagePart', () => {
     renderPart(reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } }), {
       expandReasoning: true,
     });
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
@@ -359,10 +392,12 @@ describe('MessagePart', () => {
       reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } })
     );
     cleanup = render(() => MessagePart({ part, expandReasoning: true }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
 
-    setPart('time', 'end', 1_000);
+    setPart(storePath('time', 'end', 1_000));
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
@@ -372,6 +407,7 @@ describe('MessagePart', () => {
 
   it('keeps configured completed reasoning collapsed', () => {
     renderPart(reasoningPart('**Planning**\n\nStep one'), { expandReasoning: true });
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
@@ -384,6 +420,7 @@ describe('MessagePart', () => {
       reasoningPart('**Planning**\n\nUse **care** with `inline value`.', { time: { start: 0 } }),
       { expandReasoning: true }
     );
+    flushSolid();
 
     const details = container?.querySelector('.thinking-text');
     expect(details?.classList).toContain('rendered-markdown');
@@ -395,13 +432,16 @@ describe('MessagePart', () => {
     renderPart(reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } }), {
       expandReasoning: true,
     });
+    flushSolid();
 
     const header = container?.querySelector<HTMLButtonElement>('.thinking-header');
     header?.click();
+    flushSolid();
     expect(header?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.thinking-content')).toBeNull();
 
     header?.click();
+    flushSolid();
     expect(header?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
   });
@@ -409,14 +449,18 @@ describe('MessagePart', () => {
   it('keeps a user-expanded reasoning block open when virtualization remounts it', () => {
     const part = reasoningPart('**Planning**\n\nStep one');
     renderPart(part);
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    flushSolid();
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container!.innerHTML = '';
     renderPart({ ...part, text: '**Planning**\n\nStep one\nStep two' });
+    flushSolid();
 
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step two');
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
@@ -444,35 +488,47 @@ describe('MessagePart', () => {
     try {
       const [part, setPart] = createStore(reasoningPart('Step one', { time: { start: 0 } }));
       cleanup = render(() => MessagePart({ part }), container!);
+      flushSolid();
 
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      flushSolid();
       const content = container?.querySelector<HTMLDivElement>('.thinking-content');
       expect(content?.scrollTop).toBe(0);
 
       await nextFrame();
+      flushSolid();
       const initialAutoScrollTop = content!.scrollTop;
       expect(initialAutoScrollTop).toBeGreaterThan(0);
       expect(initialAutoScrollTop).toBeLessThan(300);
 
-      setPart('text', 'Step one\nStep two');
+      setPart(storePath('text', 'Step one\nStep two'));
+      flushSolid();
       await nextFrame();
+      flushSolid();
       expect(content!.scrollTop).toBeGreaterThan(initialAutoScrollTop);
       expect(content!.scrollTop).toBeLessThan(400);
 
       content!.scrollTop = 100;
       content?.dispatchEvent(new Event('scroll'));
-      setPart('text', 'Step one\nStep two\nStep three');
+      flushSolid();
+      setPart(storePath('text', 'Step one\nStep two\nStep three'));
+      flushSolid();
       await nextFrame();
+      flushSolid();
       expect(content?.scrollTop).toBe(100);
 
-      setPart('time', 'end', 1000);
+      setPart(storePath('time', 'end', 1000));
+      flushSolid();
       await nextFrame();
+      flushSolid();
       expect(content?.scrollTop).toBe(100);
     } finally {
       if (scrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeight);
       else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      flushSolid();
       if (clientHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeight);
       else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+      flushSolid();
     }
   });
 
@@ -486,28 +542,37 @@ describe('MessagePart', () => {
     try {
       const [part, setPart] = createStore(reasoningPart('Step one', { time: { start: 0 } }));
       cleanup = render(() => MessagePart({ part }), container!);
+      flushSolid();
 
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      flushSolid();
       const content = container?.querySelector<HTMLDivElement>('.thinking-content');
       await nextFrame();
+      flushSolid();
       expect(content!.scrollTop).toBeGreaterThan(0);
 
-      setPart('time', 'end', 1000);
+      setPart(storePath('time', 'end', 1000));
+      flushSolid();
       expect(content?.scrollTop).toBe(0);
 
       content!.scrollTop = 120;
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      flushSolid();
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      flushSolid();
       expect(container?.querySelector<HTMLDivElement>('.thinking-content')?.scrollTop).toBe(0);
     } finally {
       if (scrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeight);
       else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      flushSolid();
     }
   });
 
   it('marks additional reasoning content above and below the viewport', () => {
     renderPart(reasoningPart('Step one'));
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    flushSolid();
     const content = container?.querySelector<HTMLDivElement>('.thinking-content');
     Object.defineProperties(content!, {
       scrollHeight: { configurable: true, value: 400 },
@@ -515,22 +580,26 @@ describe('MessagePart', () => {
     });
 
     content!.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(content?.classList.contains('has-more-above')).toBe(false);
     expect(content?.classList.contains('has-more-below')).toBe(true);
 
     content!.scrollTop = 100;
     content!.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(content?.classList.contains('has-more-above')).toBe(true);
     expect(content?.classList.contains('has-more-below')).toBe(true);
 
     content!.scrollTop = 220;
     content!.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(content?.classList.contains('has-more-above')).toBe(true);
     expect(content?.classList.contains('has-more-below')).toBe(false);
   });
 
   it('keeps a reasoning summary but hides an empty HTML-comment body', () => {
     renderPart(reasoningPart('**Designing shared finder cache with TTL**\n\n<!-- -->'));
+    flushSolid();
 
     expect(container?.querySelector('.thinking-label-text')?.textContent).toBe(
       'Designing shared finder cache with TTL'
@@ -551,6 +620,7 @@ describe('MessagePart', () => {
       },
       { streamedText: 'live streamed text' }
     );
+    flushSolid();
 
     expect(container?.textContent).toContain('live streamed text');
     expect(container?.textContent).not.toContain('stale text');
@@ -566,6 +636,7 @@ describe('MessagePart', () => {
       error: { name: 'RateLimitError', data: { message: '429 usage limit reached, retry in 2s' } },
       time: { created: 0 },
     });
+    flushSolid();
 
     const notice = container?.querySelector('.chat-retry-notice');
     expect(notice?.classList.contains('usage-limit')).toBe(true);
@@ -585,12 +656,15 @@ describe('MessagePart', () => {
     };
 
     renderPart(part);
+    flushSolid();
     expect(container?.querySelector('.chat-retry-notice')).toBeNull();
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container!.textContent = '';
     renderPart({ ...part, attempt: 4 });
+    flushSolid();
     expect(container?.querySelector('.chat-retry-notice')?.textContent).toContain(
       'Retry attempt 4'
     );
@@ -606,6 +680,7 @@ describe('MessagePart', () => {
       error: { name: 'NetworkError', data: { message: 'socket disconnected' } },
       time: { created: 0 },
     });
+    flushSolid();
 
     expect(container?.querySelector('.chat-retry-notice')?.classList.contains('usage-limit')).toBe(
       false
@@ -622,30 +697,33 @@ describe('MessagePart', () => {
   ])(
     'shows model$speed and variant labels when subagent reasoning changes models',
     ({ speed, count }) => {
-      setState('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
-            'gpt-5': {
-              id: 'gpt-5',
-              name: `GPT-5${speed}`,
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: {
-                'high-reasoning': {},
+      setState(
+        storePath('providers', [
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            source: 'api',
+            models: {
+              'gpt-4o': {
+                id: 'gpt-4o',
+                name: 'GPT-4o',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+              },
+              'gpt-5': {
+                id: 'gpt-5',
+                name: `GPT-5${speed}`,
+                capabilities: { toolcall: true, reasoning: true },
+                cost: { input: 0, output: 0 },
+                variants: {
+                  'high-reasoning': {},
+                },
               },
             },
           },
-        },
-      ]);
+        ])
+      );
+      flushSolid();
 
       const parent = assistantMessage('parent-1', {
         providerID: 'openai',
@@ -659,38 +737,46 @@ describe('MessagePart', () => {
         variant: 'high-reasoning',
       });
 
-      setState('messages', [
-        { info: parent, parts: [] },
-        { info: child, parts: [] },
-      ]);
+      setState(
+        storePath('messages', [
+          { info: parent, parts: [] },
+          { info: child, parts: [] },
+        ])
+      );
+      flushSolid();
 
       renderPart(reasoningPart('**Planning**\n\nStep one', { messageID: child.id }), {
         messageInfo: child,
       });
+      flushSolid();
 
       const label = container?.querySelector('.thinking-label-text');
       expect(label?.textContent?.replace(/\s+/g, ' ')).toBe('Planning · GPT-5 · High Reasoning');
+      flushSolid();
       expect(label?.querySelectorAll('.model-speed-icon')).toHaveLength(count);
       expect(label?.textContent).not.toContain('⚡');
     }
   );
 
   it('shows a No thinking detail when a subagent drops an unsupported variant', () => {
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-4o-mini': {
-            id: 'gpt-4o-mini',
-            name: 'GPT-4o mini',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-4o-mini': {
+              id: 'gpt-4o-mini',
+              name: 'GPT-4o mini',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
+      ])
+    );
+    flushSolid();
 
     const parent = assistantMessage('parent-2', {
       providerID: 'openai',
@@ -704,14 +790,18 @@ describe('MessagePart', () => {
       mode: 'subagent',
     });
 
-    setState('messages', [
-      { info: parent, parts: [] },
-      { info: child, parts: [] },
-    ]);
+    setState(
+      storePath('messages', [
+        { info: parent, parts: [] },
+        { info: child, parts: [] },
+      ])
+    );
+    flushSolid();
 
     renderPart(reasoningPart('**Routing**\n\nStep one', { messageID: child.id }), {
       messageInfo: child,
     });
+    flushSolid();
 
     expect(container?.querySelector('.thinking-label-text')?.textContent).toBe(
       'Routing · No thinking'
@@ -726,6 +816,7 @@ describe('MessagePart', () => {
       type: 'agent',
       name: 'explore',
     });
+    flushSolid();
 
     const chip = container?.querySelector('.message-attachment-chip');
     expect(chip?.textContent).toBe('Explore');
@@ -733,6 +824,7 @@ describe('MessagePart', () => {
     expect(chip?.getAttribute('title')).toBe('Agent: Explore');
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
 
     renderPart({
@@ -743,6 +835,7 @@ describe('MessagePart', () => {
       auto: true,
       overflow: true,
     });
+    flushSolid();
 
     expect(container?.textContent).toContain('context compacted (auto)');
     expect(container?.textContent).toContain('after overflow');
@@ -758,18 +851,22 @@ describe('MessagePart', () => {
       description: 'Inspect failing tests',
       agent: '',
     });
+    flushSolid();
 
     expect(container?.textContent).toContain('Inspect failing tests');
     expect(container?.querySelector('.subtask-meta')).toBeNull();
   });
 
   it('renders workspace-relative file chips for non-image attachments', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     renderPart({
       id: 'file-1',
@@ -780,18 +877,22 @@ describe('MessagePart', () => {
       filename: '/repo/docs/spec.pdf',
       url: 'https://example.test/spec.pdf',
     });
+    flushSolid();
 
     expect(container?.querySelector('.chip-label')?.textContent).toBe('docs/spec.pdf');
     expect(container?.querySelector('.file-type-icon')).toBeInstanceOf(HTMLImageElement);
   });
 
   it('opens and closes image previews for image attachments', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     renderPart({
       id: 'file-2',
@@ -806,12 +907,14 @@ describe('MessagePart', () => {
         text: { value: '', start: 0, end: 0 },
       },
     });
+    flushSolid();
 
     const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
     expect(trigger?.getAttribute('aria-label')).toBe('Open image preview: images/chart.png');
     expect(trigger?.hasAttribute('title')).toBe(false);
 
     trigger?.click();
+    flushSolid();
 
     expect(document.body.classList.contains('chat-image-preview-open')).toBe(true);
     expect(
@@ -819,6 +922,7 @@ describe('MessagePart', () => {
     ).toBe('Image preview: images/chart.png');
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSolid();
 
     expect(document.body.classList.contains('chat-image-preview-open')).toBe(false);
     expect(document.body.querySelector('.chat-image-preview-overlay')).toBeNull();

@@ -7,6 +7,7 @@ import {
   brightPixels,
   firstAppliedPage,
   glyphContinuity,
+  markerPaintEligibility,
   topTargeting,
   verdict,
   summarizeTrace,
@@ -63,6 +64,7 @@ test('frame analysis retains early blanks and missing glyphs after later correct
     label: 'first-top',
     top: i < 5 ? 10000 : 9000,
     viewport: { x: 0, y: 0, width, height },
+    stickyOccluders: [],
     markers: [
       {
         node: i < 3 ? 1 : 2,
@@ -105,6 +107,103 @@ test('frame analysis retains early blanks and missing glyphs after later correct
   assert.equal(result.retained.nodeChanges.length, 1);
   assert.equal(result.retained.nodeChanges[0].from, 1);
   assert.equal(result.retained.nodeChanges[0].to, 2);
+});
+test('text eligibility uses the actual opaque sticky footprint, not hit testing or a fixed inset', () => {
+  const marker = {
+    rect: { x: 20, y: 120, width: 100, height: 16 },
+    styles: [{ opacity: '1', visibility: 'visible', display: 'block' }],
+    hits: [{ containsParagraph: true }],
+  };
+  const sample = {
+    viewport: { x: 0, y: 0, width: 600, height: 700 },
+    stickyOccluders: [
+      { x: 14, y: 51, width: 458, height: 76 },
+      { x: 14, y: 127, width: 458, height: 8 },
+    ],
+  };
+  assert.equal(markerPaintEligibility(marker, sample), 'sticky-occluded');
+  assert.equal(
+    markerPaintEligibility({ ...marker, rect: { ...marker.rect, y: 138 } }, sample),
+    null
+  );
+  assert.equal(markerPaintEligibility(marker, { ...sample, stickyOccluders: [] }), null);
+  assert.equal(
+    markerPaintEligibility(marker, { viewport: sample.viewport }),
+    'unknown-sticky-coverage'
+  );
+  assert.equal(
+    markerPaintEligibility({ ...marker, rect: { ...marker.rect, y: 1 } }, sample),
+    'clipped'
+  );
+  assert.equal(
+    markerPaintEligibility(
+      { ...marker, styles: [{ opacity: '0', visibility: 'visible', display: 'block' }] },
+      { ...sample, stickyOccluders: [] }
+    ),
+    'hidden'
+  );
+});
+test('either sticky-covered bracket excludes a marker from references and failures', async () => {
+  const width = 600;
+  const height = 700;
+  const rect = { x: 20, y: 120, width: 100, height: 10 };
+  const good = { width, height, data: new Uint8Array(width * height * 3).fill(20) };
+  for (let y = rect.y; y < rect.y + rect.height; y++) {
+    for (let x = rect.x; x < rect.x + rect.width; x++) {
+      if ((x + y) % 3 === 0) good.data.fill(200, (y * width + x) * 3, (y * width + x) * 3 + 3);
+    }
+  }
+  const blank = { ...good, data: new Uint8Array(good.data.length).fill(20) };
+  const marker = {
+    node: 1,
+    row: 'covered',
+    text: 'retained marker',
+    rect,
+    styles: [{ opacity: '1', visibility: 'visible', display: 'block' }],
+    // pointer-events:none chrome does not show up in elementFromPoint.
+    hits: [{ containsParagraph: true }],
+  };
+  for (const coveredBracket of [0, 1]) {
+    const samples = Array.from({ length: 6 }, (_, index) => ({
+      epoch: index * 100,
+      label: 'first-top',
+      top: 1000,
+      viewport: { x: 0, y: 0, width, height },
+      stickyOccluders: index % 2 === coveredBracket ? [rect] : [],
+      markers: [marker],
+    }));
+    const frames = [0, 2, 4].map((index) => ({
+      file: String(index),
+      metadata: { timestamp: (index * 100 + 50) / 1000, deviceWidth: width, deviceHeight: height },
+    }));
+    const analyze = (evidence) =>
+      analyzeNativePaint(frames, evidence, { x: 0, y: 0 }, async () => good, 250, {
+        decode: async (value) => value,
+      });
+    const covered = await analyze(samples);
+    assert.deepEqual(covered.retained.references, []);
+    assert.equal(covered.retained.checkedFrames, 0);
+    assert.deepEqual(covered.retained.failures, []);
+    assert.equal(covered.retained.excludedMarkers.length, frames.length);
+    assert.ok(covered.retained.excludedMarkers.every(({ reason }) => reason === 'sticky-occluded'));
+
+    // Seed a real reference, then cover either side of a blank frame. Neither
+    // the missing glyphs nor the later recovery can be counted while covered.
+    samples[0].stickyOccluders = [];
+    samples[1].stickyOccluders = [];
+    const retained = await analyzeNativePaint(
+      frames,
+      samples,
+      { x: 0, y: 0 },
+      async (file) => (file === '0' ? good : blank),
+      250,
+      { decode: async (value) => value }
+    );
+    assert.equal(retained.retained.references.length, 1);
+    assert.equal(retained.retained.checkedFrames, 0);
+    assert.deepEqual(retained.retained.failures, []);
+    assert.equal(retained.retained.excludedMarkers.length, frames.length - 1);
+  }
 });
 test('the first placed row from a completed older page marks prepend with the banner still present', () => {
   const pages = [

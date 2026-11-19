@@ -1,3 +1,5 @@
+import { flush as flushSolid, flush } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionContext } from '../../shared/extension-context';
 import { nativePdfFixture } from '../../shared/native-pdf.test-support';
@@ -69,8 +71,84 @@ function createOperations(
 }
 
 describe('SessionSendOperations', () => {
+  it('sends captured queued image/PDF capabilities without changing the displayed catalog', async () => {
+    appStore.setState((draft) => {
+      draft.activeSessionId = 'session-1';
+      draft.providers = [
+        {
+          id: 'fixture',
+          name: 'Fixture',
+          source: 'api',
+          models: {
+            text: {
+              id: 'text',
+              name: 'Text',
+              cost: { input: 0, output: 0 },
+              capabilities: { vision: false, toolcall: false, input: ['text'] },
+            },
+          },
+        },
+      ];
+    });
+    flushSolid();
+    flush();
+    flushSolid();
+    const catalog = appStore.state.providers;
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const selection = { providerID: 'fixture', modelID: 'text', variant: 'captured' };
+    const sent = await createOperations(sendAsync).sendMessage('Describe the files', {
+      selectedModel: selection,
+      preserveComposer: true,
+      queuedContext: {
+        currentDocumentEnabled: false,
+        editorContext: {
+          workspacePath: null,
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+          queuedModel: {
+            selection,
+            capabilities: { vision: true, tools: true, pdf: true },
+          },
+        },
+      },
+      queuedAttachments: {
+        clipboardImages: [
+          {
+            id: 'queued-image',
+            filename: 'image.png',
+            mime: 'image/png',
+            url: 'data:image/png;base64,AA==',
+            size: 1,
+          },
+        ],
+        nativePdfs: [nativePdfFixture()],
+      },
+    });
+    flushSolid();
+    flush();
+    flushSolid();
+    expect(sent).toBe(true);
+    expect(sendAsync).toHaveBeenCalledOnce();
+    expect(sendAsync.mock.calls[0]?.[0]).toBe('session-1');
+    expect(sendAsync.mock.calls[0]?.[1]).toMatchObject({
+      model: { providerID: 'fixture', modelID: 'text' },
+      variant: 'captured',
+      parts: expect.arrayContaining([
+        expect.objectContaining({ type: 'file', mime: 'image/png' }),
+        expect.objectContaining({ type: 'file', mime: 'application/pdf' }),
+      ]),
+    });
+    expect(appStore.state.providers).toBe(catalog);
+    expect(appStore.state.providers[0]?.models.text?.capabilities).toMatchObject({
+      vision: false,
+      toolcall: false,
+      input: ['text'],
+    });
+  });
   it('sends context-free actions without attaching or consuming any composer context', async () => {
-    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const diagnostic = {
       path: '/repo/index.html',
       line: 1,
@@ -101,30 +179,44 @@ describe('SessionSendOperations', () => {
         },
       ],
     };
-    appStore.setState('droppedFiles', [
-      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
-    ]);
-    appStore.setState('clipboardImages', [
-      {
-        id: 'draft-image',
-        url: 'data:image/png;base64,AA==',
-        mime: 'image/png',
-        filename: 'draft.png',
-        size: 1,
-      },
-    ]);
-    appStore.setState('nativePdfs', [
-      {
-        id: 'draft-pdf',
-        url: 'data:application/pdf;base64,AA==',
-        mime: 'application/pdf',
-        filename: 'draft.pdf',
-        size: 1,
-      },
-    ]);
-    appStore.setState('terminalSelection', { text: 'Draft terminal output', terminalName: 'zsh' });
-    appStore.setState('attachedDiagnostics', { diagnostics: [diagnostic], total: 1 });
-    appStore.setState('inlineProblems', [{ id: 'draft-problem', diagnostic }]);
+    appStore.setState(
+      storePath('droppedFiles', [
+        { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
+      ])
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('clipboardImages', [
+        {
+          id: 'draft-image',
+          url: 'data:image/png;base64,AA==',
+          mime: 'image/png',
+          filename: 'draft.png',
+          size: 1,
+        },
+      ])
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('nativePdfs', [
+        {
+          id: 'draft-pdf',
+          url: 'data:application/pdf;base64,AA==',
+          mime: 'application/pdf',
+          filename: 'draft.pdf',
+          size: 1,
+        },
+      ])
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('terminalSelection', { text: 'Draft terminal output', terminalName: 'zsh' })
+    );
+    flushSolid();
+    appStore.setState(storePath('attachedDiagnostics', { diagnostics: [diagnostic], total: 1 }));
+    flushSolid();
+    appStore.setState(storePath('inlineProblems', [{ id: 'draft-problem', diagnostic }]));
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
     const operations = createOperations(sendAsync);
     const text = 'Stop process 42';
@@ -135,6 +227,7 @@ describe('SessionSendOperations', () => {
         queuedContext: { editorContext, currentDocumentEnabled: true },
       })
     ).toBe(true);
+    flushSolid();
     expect(sendAsync.mock.calls[0]?.[1].parts).toEqual([{ type: 'text', text }]);
     expect(appStore.state.droppedFiles).toHaveLength(1);
     expect(appStore.state.clipboardImages).toHaveLength(1);
@@ -145,7 +238,8 @@ describe('SessionSendOperations', () => {
   });
 
   it('sends restored extension snapshots without a provider and reports missing uncaptured providers', async () => {
-    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const captured: ExtensionContext = {
       provider: 'uninstalled.context',
       version: 4,
@@ -168,6 +262,7 @@ describe('SessionSendOperations', () => {
         queuedContext: { currentDocumentEnabled: true, editorContext },
       })
     ).toBe(true);
+    flushSolid();
     expect(JSON.stringify(sendAsync.mock.calls[0]![1])).toContain('Original issue');
     sendAsync.mockClear();
     const { captured: _captured, ...uncaptured } = captured;
@@ -179,13 +274,15 @@ describe('SessionSendOperations', () => {
         },
       })
     ).toBe(false);
+    flushSolid();
     expect(sendAsync).not.toHaveBeenCalled();
     expect(error()).toContain('Context provider unavailable');
   });
   it.each([false, true])(
     'clears sent inline problems and restores them on failure=%s',
     async (fail) => {
-      appStore.setState('activeSessionId', 'session-1');
+      appStore.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       const reference = {
         id: 'captured',
         diagnostic: {
@@ -195,7 +292,8 @@ describe('SessionSendOperations', () => {
           message: 'Captured problem',
         },
       };
-      appStore.setState('inlineProblems', [reference]);
+      appStore.setState(storePath('inlineProblems', [reference]));
+      flushSolid();
       const sendAsync = vi.fn<SendAsync>(async () => {
         if (fail) throw new Error('Send failed');
       });
@@ -203,6 +301,7 @@ describe('SessionSendOperations', () => {
       expect(await operations.sendMessage(`Explain ${problemReferenceMarker(reference)}`)).toBe(
         !fail
       );
+      flushSolid();
       expect(
         sendAsync.mock.calls[0]![1].parts.flatMap((part) =>
           part.text ? [parseInlineProblem(part.text)] : []
@@ -213,7 +312,8 @@ describe('SessionSendOperations', () => {
   );
 
   it('sends queued inline problem snapshots without consuming the current draft', async () => {
-    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const queued = {
       id: 'queued-problem',
       diagnostic: {
@@ -232,12 +332,14 @@ describe('SessionSendOperations', () => {
         message: 'Live problem',
       },
     };
-    appStore.setState('inlineProblems', [live]);
+    appStore.setState(storePath('inlineProblems', [live]));
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
     await createOperations(sendAsync).sendMessage(`Explain ${problemReferenceMarker(queued)}`, {
       queuedAttachments: { inlineProblems: [queued] },
       preserveComposer: true,
     });
+    flushSolid();
     expect(
       sendAsync.mock.calls[0]![1].parts.flatMap((part) =>
         part.text ? [parseInlineProblem(part.text)] : []
@@ -247,38 +349,48 @@ describe('SessionSendOperations', () => {
   });
   beforeEach(() => {
     window.localStorage.clear();
+    flushSolid();
     appStore.resetDefaultAppState();
+    flushSolid();
     postMessage.mockClear();
   });
 
   afterEach(() => {
     window.localStorage.clear();
+    flushSolid();
     appStore.resetDefaultAppState();
+    flushSolid();
   });
 
   it.each([false, true])(
     'reports an unavailable selection before sending, newSession=%s',
     async (newSession) => {
       const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol' };
-      appStore.setState('activeSessionId', newSession ? null : 'session-1');
+      appStore.setState(storePath('activeSessionId', newSession ? null : 'session-1'));
+      flushSolid();
       routingStore.setSelectedModel(selected);
+      flushSolid();
       appStore.setState(
-        'providers',
-        ['openrouter', 'github-copilot'].map((id) => ({
-          id,
-          name: id,
-          source: 'api',
-          models: {
-            'gpt-6.1-sol': {
-              id: 'gpt-6.1-sol',
-              name: 'GPT-6.1 Sol',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
+        storePath(
+          'providers',
+          ['openrouter', 'github-copilot'].map((id) => ({
+            id,
+            name: id,
+            source: 'api',
+            models: {
+              'gpt-6.1-sol': {
+                id: 'gpt-6.1-sol',
+                name: 'GPT-6.1 Sol',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+              },
             },
-          },
-        }))
+          }))
+        )
       );
+      flushSolid();
       composerStore.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
+      flushSolid();
       const sendAsync = vi.fn<SendAsync>(async () => {});
       const createSession = vi.fn(async () => 'session-2');
       const beforeOptimisticPublish = vi.fn();
@@ -290,6 +402,7 @@ describe('SessionSendOperations', () => {
           onOptimisticPublish: beforeOptimisticPublish,
         })
       ).toBe(false);
+      flushSolid();
 
       expect(error()).toContain('Selected model openai/gpt-6.1-sol is unavailable');
       expect(sendAsync).not.toHaveBeenCalled();
@@ -309,43 +422,52 @@ describe('SessionSendOperations', () => {
     async ({ newSession, explicitDefault }) => {
       const model = { providerID: 'openai', modelID: 'gpt-6.1-sol' };
       const selected = explicitDefault ? model : { ...model, variant: 'high' };
-      appStore.setState('activeSessionId', newSession ? null : 'session-1');
-      appStore.setState('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-6.1-sol': {
-              id: 'gpt-6.1-sol',
-              name: 'GPT-6.1 Sol',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              variants: { high: {} },
+      appStore.setState(storePath('activeSessionId', newSession ? null : 'session-1'));
+      flushSolid();
+      appStore.setState(
+        storePath('providers', [
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            source: 'api',
+            models: {
+              'gpt-6.1-sol': {
+                id: 'gpt-6.1-sol',
+                name: 'GPT-6.1 Sol',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+                variants: { high: {} },
+              },
             },
           },
-        },
-      ]);
+        ])
+      );
+      flushSolid();
       routingStore.setSelectedModel(model, { rememberVariant: 'high' });
+      flushSolid();
       if (explicitDefault) {
         routingStore.setSelectedModel(model, { sessionId: 'session-1', persistGlobal: false });
+        flushSolid();
       }
+      flushSolid();
       const createSession = vi.fn<
         ConstructorParameters<typeof SessionSendOperations>[0]['createSession']
       >(async () => {
-        appStore.setState('activeSessionId', 'session-1');
+        appStore.setState(storePath('activeSessionId', 'session-1'));
         return 'session-1';
       });
       const sendAsync = vi.fn<SendAsync>(async () => {});
       const operations = createOperations(sendAsync, undefined, { createSession });
 
       expect(await operations.sendMessage('First prompt')).toBe(true);
+      flushSolid();
       expect(appStore.state.selectedModel).toEqual(selected);
       expect(routingStore.getSelectedModelForSession('session-1')).toEqual(selected);
       if (newSession) {
         expect(createSession).toHaveBeenCalledWith(expect.any(String), undefined, selected);
       }
       expect(await operations.sendMessage('Follow-up prompt')).toBe(true);
+      flushSolid();
       expect(sendAsync).toHaveBeenCalledTimes(2);
       for (const [, body] of sendAsync.mock.calls) {
         expect(body.variant).toBe(explicitDefault ? undefined : 'high');
@@ -354,27 +476,34 @@ describe('SessionSendOperations', () => {
   );
 
   it.each([undefined, ['text']])('preserves PDFs on capability rejection: %j', async (input) => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('providers', [
-      {
-        id: 'fixture',
-        name: 'Fixture',
-        source: 'api',
-        models: {
-          text: {
-            id: 'text',
-            name: 'Text',
-            capabilities: { input },
-            cost: { input: 0, output: 0 },
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('providers', [
+        {
+          id: 'fixture',
+          name: 'Fixture',
+          source: 'api',
+          models: {
+            text: {
+              id: 'text',
+              name: 'Text',
+              capabilities: { input },
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    appStore.setState('selectedModel', { providerID: 'fixture', modelID: 'text' });
+      ])
+    );
+    flushSolid();
+    appStore.setState(storePath('selectedModel', { providerID: 'fixture', modelID: 'text' }));
+    flushSolid();
     const pdf = nativePdfFixture();
-    appStore.setState('nativePdfs', [pdf]);
+    appStore.setState(storePath('nativePdfs', [pdf]));
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>();
     expect(await createOperations(sendAsync).sendMessage('Keep this draft')).toBe(false);
+    flushSolid();
     expect(error()).toContain(
       input ? 'does not support PDF input' : 'PDF input support is unknown'
     );
@@ -384,86 +513,109 @@ describe('SessionSendOperations', () => {
   });
 
   it('builds the payload from stores and clears sent composer attachments', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5': {
-            id: 'gpt-5',
-            name: 'PDF fixture',
-            capabilities: { input: ['text', 'image', 'pdf'] },
-            cost: { input: 0, output: 0 },
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5': {
+              id: 'gpt-5',
+              name: 'PDF fixture',
+              capabilities: { input: ['text', 'image', 'pdf'] },
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    appStore.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5' });
-    appStore.setState('editorContext', {
-      workspacePath: null,
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    appStore.setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
-    appStore.setState('droppedFiles', [
-      {
-        path: '/repo/src/file.ts',
-        relativePath: 'src/file.ts',
-        type: 'file',
-        attachmentSequence: 1,
-      },
-    ]);
-    appStore.setState('clipboardImages', [
-      {
-        id: 'image-1',
-        url: 'blob:image-1',
-        mime: 'image/png',
-        filename: 'image.png',
-        size: 10,
-        attachmentSequence: 2,
-        contextFile: {
-          path: '/tmp/varro-drops/image.png',
-          relativePath: 'image.png',
+      ])
+    );
+    flushSolid();
+    appStore.setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-5' }));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: null,
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    appStore.setState(storePath('terminalSelection', { text: 'npm test', terminalName: 'zsh' }));
+    flushSolid();
+    appStore.setState(
+      storePath('droppedFiles', [
+        {
+          path: '/repo/src/file.ts',
+          relativePath: 'src/file.ts',
           type: 'file',
+          attachmentSequence: 1,
         },
-      },
-    ]);
-    appStore.setState('nativePdfs', [
-      {
-        id: 'pdf-1',
-        url: 'data:application/pdf;base64,JVBERi0=',
-        mime: 'application/pdf',
-        filename: 'spec.pdf',
-        size: 5,
-        attachmentSequence: 3,
-        contextFile: {
-          path: '/tmp/varro-drops/spec.pdf',
-          relativePath: 'spec.pdf',
-          type: 'file',
+      ])
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('clipboardImages', [
+        {
+          id: 'image-1',
+          url: 'blob:image-1',
+          mime: 'image/png',
+          filename: 'image.png',
+          size: 10,
+          attachmentSequence: 2,
+          contextFile: {
+            path: '/tmp/varro-drops/image.png',
+            relativePath: 'image.png',
+            type: 'file',
+          },
         },
-      },
-    ]);
-    appStore.setState('todos', [
-      { id: 'todo-1', content: 'Keep visible', status: 'completed', priority: 'high' },
-    ]);
+      ])
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('nativePdfs', [
+        {
+          id: 'pdf-1',
+          url: 'data:application/pdf;base64,JVBERi0=',
+          mime: 'application/pdf',
+          filename: 'spec.pdf',
+          size: 5,
+          attachmentSequence: 3,
+          contextFile: {
+            path: '/tmp/varro-drops/spec.pdf',
+            relativePath: 'spec.pdf',
+            type: 'file',
+          },
+        },
+      ])
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Keep visible', status: 'completed', priority: 'high' },
+      ])
+    );
+    flushSolid();
 
     const sendAsync = vi.fn<SendAsync>(async () => {
-      appStore.setState('messages', [
-        {
-          info: {
-            id: 'user-1',
-            sessionID: 'session-1',
-            role: 'user',
-            time: { created: 1 },
-            agent: 'build',
-            model: { providerID: 'openai', modelID: 'gpt-5' },
+      appStore.setState(
+        storePath('messages', [
+          {
+            info: {
+              id: 'user-1',
+              sessionID: 'session-1',
+              role: 'user',
+              time: { created: 1 },
+              agent: 'build',
+              model: { providerID: 'openai', modelID: 'gpt-5' },
+            },
+            parts: [],
           },
-          parts: [],
-        },
-      ]);
+        ])
+      );
     });
     const resetTodoSync = vi.fn();
     const operations = new SessionSendOperations({
@@ -481,6 +633,7 @@ describe('SessionSendOperations', () => {
     });
 
     await operations.sendMessage('hello');
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
       messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
@@ -530,36 +683,44 @@ describe('SessionSendOperations', () => {
   });
 
   it('uses a session Default without replacing the remembered reasoning variant', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.4': {
-            id: 'gpt-5.4',
-            name: 'GPT-5.4',
-            capabilities: { toolcall: true, reasoning: true },
-            cost: { input: 0, output: 0 },
-            variants: { low: {}, medium: {}, high: {} },
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              name: 'GPT-5.4',
+              capabilities: { toolcall: true, reasoning: true },
+              cost: { input: 0, output: 0 },
+              variants: { low: {}, medium: {}, high: {} },
+            },
           },
         },
-      },
-    ]);
-    appStore.setState('providerDefaults', { openai: 'gpt-5.4' });
+      ])
+    );
+    flushSolid();
+    appStore.setState(storePath('providerDefaults', { openai: 'gpt-5.4' }));
+    flushSolid();
     routingStore.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-5.4', variant: 'high' },
       { rememberVariant: 'high' }
     );
+    flushSolid();
     routingStore.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-5.4' },
       { sessionId: 'session-1', persistGlobal: false }
     );
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
     const operations = createOperations(sendAsync);
 
     await operations.sendMessage('Use the session default');
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -581,70 +742,88 @@ describe('SessionSendOperations', () => {
     const previous = { providerID: 'openai', modelID: 'gpt-6-luna-fast' };
     const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
     const expected = { ...selected };
-    appStore.setState('activeSessionId', sessionId);
-    appStore.setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: Object.fromEntries(
-          [previous, selected].map(({ modelID }) => [
-            modelID,
-            {
-              id: modelID,
-              name: modelID,
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              variants: { high: {} },
-            },
-          ])
-        ),
-      },
-    ]);
+    appStore.setState(storePath('activeSessionId', sessionId));
+    flushSolid();
+    appStore.setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: Object.fromEntries(
+            [previous, selected].map(({ modelID }) => [
+              modelID,
+              {
+                id: modelID,
+                name: modelID,
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+                variants: { high: {} },
+              },
+            ])
+          ),
+        },
+      ])
+    );
+    flushSolid();
     routingStore.setSelectedModel({ ...previous }, { sessionId, persistGlobal: false });
+    flushSolid();
     expect(isActiveSessionWorking()).toBe(false);
     routingStore.setSelectedModel({ ...selected }, { sessionId, selectionId: 'idle-selection' });
+    flushSolid();
     applySessionSelectedModelsSnapshot(
       { [sessionId]: { ...selected } },
       { sessionId, selectionId: 'idle-selection' }
     );
+    flushSolid();
     expect(isActiveSessionWorking()).toBe(false);
     const send = deferred<void>();
     const sendAsync = vi.fn<SendAsync>(() => send.promise);
     const operations = createOperations(sendAsync, undefined, {
-      setSessionStatusEntry: (id, status) => appStore.setState('sessionStatus', id, status),
+      setSessionStatusEntry: (id, status) =>
+        appStore.setState(storePath('sessionStatus', id, status)),
     });
     const pending = operations.sendMessage('Start the Sol turn');
+    flushSolid();
     try {
       await vi.waitFor(() => expect(sendAsync).toHaveBeenCalledOnce());
+      flushSolid();
       expect(sendAsync.mock.calls[0]?.[1]).toMatchObject({
         model: { providerID: expected.providerID, modelID: expected.modelID },
         variant: 'high',
       });
       applySessionSelectedModelsSnapshot({ [sessionId]: { ...previous } });
+      flushSolid();
 
       // The first queued message captures the composer selection during this window.
       expect(appStore.state.selectedModel).toEqual(expected);
       expect(routingStore.getSelectedModelForSession(sessionId)).toEqual(expected);
     } finally {
       send.resolve();
+      flushSolid();
       await pending;
+      flushSolid();
     }
   });
 
   it('clears sent composer attachments while the network send is pending', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     composerStore.addContextFile({
       path: '/repo/pending.ts',
       relativePath: 'pending.ts',
       type: 'file',
     });
+    flushSolid();
     composerStore.addClipboardImage({
       id: 'pending-image',
       url: 'blob:pending',
@@ -652,13 +831,17 @@ describe('SessionSendOperations', () => {
       filename: 'pending.png',
       size: 10,
     });
+    flushSolid();
     composerStore.setTerminalSelection({ text: 'npm test', terminalName: 'zsh' });
+    flushSolid();
     const send = deferred<void>();
     const sendAsync = vi.fn(() => send.promise);
     const operations = createOperations(sendAsync);
 
     const pending = operations.sendMessage('send pending context');
+    flushSolid();
     await vi.waitFor(() => expect(sendAsync).toHaveBeenCalledOnce());
+    flushSolid();
 
     expect(appStore.state.droppedFiles).toEqual([]);
     expect(appStore.state.clipboardImages).toEqual([]);
@@ -667,7 +850,9 @@ describe('SessionSendOperations', () => {
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
 
     send.resolve();
+    flushSolid();
     await pending;
+    flushSolid();
 
     expect(postMessage).toHaveBeenCalledWith({
       type: 'files/clear',
@@ -677,18 +862,23 @@ describe('SessionSendOperations', () => {
   });
 
   it('restores composer attachments when a pending send fails', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     composerStore.addContextFile({
       path: '/repo/retry.ts',
       relativePath: 'retry.ts',
       type: 'file',
     });
+    flushSolid();
     composerStore.addClipboardImage({
       id: 'retry-image',
       url: 'blob:retry',
@@ -696,17 +886,23 @@ describe('SessionSendOperations', () => {
       filename: 'retry.png',
       size: 10,
     });
+    flushSolid();
     composerStore.setTerminalSelection({ text: 'npm test', terminalName: 'zsh' });
+    flushSolid();
     const send = deferred<void>();
     const sendAsync = vi.fn(() => send.promise);
     const operations = createOperations(sendAsync);
 
     const pending = operations.sendMessage('retry context');
+    flushSolid();
     await vi.waitFor(() => expect(sendAsync).toHaveBeenCalledOnce());
+    flushSolid();
     expect(appStore.state.droppedFiles).toEqual([]);
 
     send.reject(new Error('send failed'));
+    flushSolid();
     await expect(pending).resolves.toBe(false);
+    flushSolid();
 
     expect(appStore.state.droppedFiles).toMatchObject([
       { path: '/repo/retry.ts', relativePath: 'retry.ts', type: 'file' },
@@ -720,17 +916,21 @@ describe('SessionSendOperations', () => {
   });
 
   it('shares one lazy session creation across rapid sends', async () => {
-    appStore.setState('activeSessionId', null);
-    appStore.setState('editorContext', {
-      workspacePath: null,
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', null));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: null,
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const creation = deferred<string | null>();
     const createSession = vi.fn(async () => {
       const sessionId = await creation.promise;
-      if (sessionId) appStore.setState('activeSessionId', sessionId);
+      if (sessionId) appStore.setState(storePath('activeSessionId', sessionId));
       return sessionId;
     });
     const sendAsync = vi.fn<SendAsync>(async () => {});
@@ -749,10 +949,15 @@ describe('SessionSendOperations', () => {
     });
 
     const first = operations.sendMessage('first');
+    flushSolid();
     const second = operations.sendMessage('second');
+    flushSolid();
     await vi.waitFor(() => expect(createSession).toHaveBeenCalled());
+    flushSolid();
     creation.resolve('session-new');
+    flushSolid();
     await Promise.all([first, second]);
+    flushSolid();
 
     expect(createSession).toHaveBeenCalledTimes(1);
     expect(sendAsync).toHaveBeenCalledTimes(2);
@@ -763,13 +968,17 @@ describe('SessionSendOperations', () => {
   });
 
   it('starts a separate lazy creation after the user opens another new-chat draft', async () => {
-    appStore.setState('activeSessionId', null);
-    appStore.setState('editorContext', {
-      workspacePath: null,
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', null));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: null,
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const firstCreation = deferred<string | null>();
     const secondCreation = deferred<string | null>();
     const createSession = vi
@@ -792,14 +1001,22 @@ describe('SessionSendOperations', () => {
     });
 
     const first = operations.sendMessage('first draft');
+    flushSolid();
     await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+    flushSolid();
     startNewChatDraft();
+    flushSolid();
     const second = operations.sendMessage('second draft');
+    flushSolid();
     await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(2));
+    flushSolid();
 
     secondCreation.resolve('session-second');
+    flushSolid();
     firstCreation.resolve('session-first');
+    flushSolid();
     await Promise.all([first, second]);
+    flushSolid();
 
     expect(sendAsync.mock.calls.map(([sessionId]) => sessionId).toSorted()).toEqual([
       'session-first',
@@ -810,7 +1027,8 @@ describe('SessionSendOperations', () => {
   it.each([false, true])(
     'handles image storage completing during send preparation, failure=%s',
     async (fail) => {
-      appStore.setState('activeSessionId', 'session-1');
+      appStore.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       const image = {
         id: 'pasted-image',
         url: 'data:image/png;base64,AA==',
@@ -819,6 +1037,7 @@ describe('SessionSendOperations', () => {
         size: 1,
       };
       composerStore.addClipboardImage(image);
+      flushSolid();
       const contextFile = {
         path: '/repo/image.png',
         relativePath: 'image.png',
@@ -827,14 +1046,17 @@ describe('SessionSendOperations', () => {
       let draftImageIdsDuringSend: string[] | undefined;
       const operations = createOperations(
         vi.fn(async () => {
+          flushSolid();
           draftImageIdsDuringSend = appStore.state.clipboardImages.map((item) => item.id);
           if (fail) throw new Error('Send failed');
         })
       );
       const send = operations.prepareSendMessage('Look at [Image 1]');
       setClipboardImageContextFile(image.id, contextFile);
+      flushSolid();
 
       expect(await send()).toBe(!fail);
+      flushSolid();
       expect(draftImageIdsDuringSend).toEqual([]);
       if (fail) {
         expect(appStore.state.clipboardImages).toEqual([
@@ -847,19 +1069,26 @@ describe('SessionSendOperations', () => {
           payload: { paths: [contextFile.path], deferred: true, sessionId: 'session-1' },
         });
         expect(composerStore.addClipboardImage({ ...image, id: 'next-paste' })).toBe(true);
+        flushSolid();
       }
+      flushSolid();
     }
   );
 
   it('clears sent attachments restored without inline sequences', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     replaceContextFiles([{ path: '/repo/file.ts', relativePath: 'file.ts', type: 'file' }]);
+    flushSolid();
     replaceClipboardImages([
       {
         id: 'image-1',
@@ -869,11 +1098,13 @@ describe('SessionSendOperations', () => {
         size: 10,
       },
     ]);
+    flushSolid();
     expect(appStore.state.droppedFiles[0]?.attachmentSequence).toBeUndefined();
     expect(appStore.state.clipboardImages[0]?.attachmentSequence).toBeUndefined();
     const operations = createOperations(vi.fn(async () => {}));
 
     await operations.sendMessage('send restored context');
+    flushSolid();
 
     expect(appStore.state.droppedFiles).toEqual([]);
     expect(appStore.state.clipboardImages).toEqual([]);
@@ -884,20 +1115,27 @@ describe('SessionSendOperations', () => {
   });
 
   it('clears matching composer attachments after sending to an inactive target session', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('selectedAgent', 'plan');
-    appStore.setState('sessionSelectedAgents', 'session-2', 'build');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(storePath('selectedAgent', 'plan'));
+    flushSolid();
+    appStore.setState(storePath('sessionSelectedAgents', 'session-2', 'build'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     composerStore.addContextFile({
       path: '/repo/target.ts',
       relativePath: 'target.ts',
       type: 'file',
     });
+    flushSolid();
     composerStore.addClipboardImage({
       id: 'target-image',
       url: 'blob:target',
@@ -905,11 +1143,14 @@ describe('SessionSendOperations', () => {
       filename: 'target.png',
       size: 10,
     });
+    flushSolid();
     composerStore.setTerminalSelection({ text: 'npm test', terminalName: 'zsh' });
+    flushSolid();
     const sendAsync = vi.fn(async () => {});
     const operations = createOperations(sendAsync);
 
     await operations.sendMessage('send to target', { targetSessionId: 'session-2' });
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith(
       'session-2',
@@ -921,13 +1162,17 @@ describe('SessionSendOperations', () => {
   });
 
   it('uses the visible agent when active session routing is stale', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('selectedAgent', 'build');
-    appStore.setState('sessionSelectedAgents', 'session-1', 'plan');
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(storePath('selectedAgent', 'build'));
+    flushSolid();
+    appStore.setState(storePath('sessionSelectedAgents', 'session-1', 'plan'));
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
     const operations = createOperations(sendAsync);
 
     await operations.sendMessage('implement the plan');
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -936,30 +1181,37 @@ describe('SessionSendOperations', () => {
   });
 
   it('creates a session for an explicitly captured draft despite a later active session', async () => {
-    appStore.setState('activeSessionId', 'session-later');
+    appStore.setState(storePath('activeSessionId', 'session-later'));
+    flushSolid();
     const createSession = vi.fn(async () => 'session-draft');
     const sendAsync = vi.fn<SendAsync>(async () => {});
     const operations = createOperations(sendAsync, undefined, { createSession });
 
     await operations.sendMessage('send captured draft', { targetSessionId: null });
+    flushSolid();
 
     expect(createSession).toHaveBeenCalledTimes(1);
     expect(sendAsync).toHaveBeenCalledWith('session-draft', expect.any(Object));
   });
 
   it('removes only captured attachments after a pending send succeeds', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     composerStore.addContextFile({
       path: '/repo/sent.ts',
       relativePath: 'sent.ts',
       type: 'file',
     });
+    flushSolid();
     composerStore.addClipboardImage({
       id: 'sent-image',
       url: 'blob:sent',
@@ -967,17 +1219,22 @@ describe('SessionSendOperations', () => {
       filename: 'sent.png',
       size: 10,
     });
+    flushSolid();
     composerStore.setTerminalSelection({ text: 'sent command', terminalName: 'zsh' });
+    flushSolid();
     const send = deferred<void>();
     const operations = createOperations(vi.fn(() => send.promise));
 
     const pending = operations.sendMessage('send captured context');
+    flushSolid();
     await vi.waitFor(() => expect(appStore.state.messages).toHaveLength(0));
+    flushSolid();
     composerStore.addContextFile({
       path: '/repo/new.ts',
       relativePath: 'new.ts',
       type: 'file',
     });
+    flushSolid();
     composerStore.addClipboardImage({
       id: 'new-image',
       url: 'blob:new',
@@ -985,10 +1242,15 @@ describe('SessionSendOperations', () => {
       filename: 'new.png',
       size: 10,
     });
+    flushSolid();
     composerStore.setTerminalSelection({ text: 'new command', terminalName: 'zsh' });
-    appStore.setState('activeSessionId', 'session-2');
+    flushSolid();
+    appStore.setState(storePath('activeSessionId', 'session-2'));
+    flushSolid();
     send.resolve();
+    flushSolid();
     await pending;
+    flushSolid();
 
     expect(appStore.state.droppedFiles.map((file) => file.path)).toEqual(['/repo/new.ts']);
     expect(appStore.state.clipboardImages.map((image) => image.id)).toEqual(['new-image']);
@@ -1004,13 +1266,17 @@ describe('SessionSendOperations', () => {
   });
 
   it('preserves identical attachments that were replaced while sending', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const file = { path: '/repo/file.ts', relativePath: 'file.ts', type: 'file' as const };
     const image = {
       id: 'image-1',
@@ -1021,20 +1287,32 @@ describe('SessionSendOperations', () => {
     };
     const terminalSelection = { text: 'npm test', terminalName: 'zsh' };
     composerStore.addContextFile(file);
+    flushSolid();
     composerStore.addClipboardImage(image);
+    flushSolid();
     composerStore.setTerminalSelection(terminalSelection);
+    flushSolid();
     const send = deferred<void>();
     const operations = createOperations(vi.fn(() => send.promise));
 
     const pending = operations.sendMessage('send context');
+    flushSolid();
     composerStore.removeContextFile(file.path);
+    flushSolid();
     composerStore.addContextFile(file);
+    flushSolid();
     composerStore.removeClipboardImage(image.id);
+    flushSolid();
     composerStore.addClipboardImage(image);
+    flushSolid();
     composerStore.setTerminalSelection(null);
+    flushSolid();
     composerStore.setTerminalSelection({ ...terminalSelection });
+    flushSolid();
     send.resolve();
+    flushSolid();
     await pending;
+    flushSolid();
 
     expect(appStore.state.droppedFiles.map((item) => item.path)).toEqual([file.path]);
     expect(appStore.state.clipboardImages.map((item) => item.id)).toEqual([image.id]);
@@ -1044,14 +1322,21 @@ describe('SessionSendOperations', () => {
   });
 
   it('treats a queued null terminal selection as explicitly empty', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: null,
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    appStore.setState('terminalSelection', { text: 'live command', terminalName: 'zsh' });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: null,
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('terminalSelection', { text: 'live command', terminalName: 'zsh' })
+    );
+    flushSolid();
     const sendAsync = vi.fn(async () => {});
     const operations = createOperations(sendAsync);
 
@@ -1064,6 +1349,7 @@ describe('SessionSendOperations', () => {
       },
       preserveComposer: true,
     });
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
       messageID: 'msg_queued',
@@ -1082,9 +1368,12 @@ describe('SessionSendOperations', () => {
   ])(
     'uses the queued problem-context toggle %s instead of the live toggle',
     async ({ enabled, integrationEnabled }) => {
-      appStore.setState('activeSessionId', 'session-1');
-      appStore.setState('issuesEnabled', !enabled);
-      appStore.setState('autoAttachProblems', integrationEnabled);
+      appStore.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      appStore.setState(storePath('issuesEnabled', !enabled));
+      flushSolid();
+      appStore.setState(storePath('autoAttachProblems', integrationEnabled));
+      flushSolid();
       const sendAsync = vi.fn<SendAsync>(async () => {});
       const operations = createOperations(sendAsync);
       await operations.sendMessage('queued problem question', {
@@ -1106,6 +1395,7 @@ describe('SessionSendOperations', () => {
         },
         preserveComposer: true,
       });
+      flushSolid();
       expect(sendAsync).toHaveBeenCalledOnce();
       const parts = sendAsync.mock.calls[0]![1].parts;
       expect(parts.some((part) => part.text?.includes('Original error'))).toBe(
@@ -1115,26 +1405,30 @@ describe('SessionSendOperations', () => {
   );
 
   it('builds a queued prompt from its captured editor context instead of live editor state', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: '/new-workspace',
-      activeFile: {
-        path: '/new-workspace/private.ts',
-        relativePath: 'private.ts',
-        language: 'typescript',
-      },
-      selection: null,
-      editorText: {
-        kind: 'dirty-buffer',
-        path: '/new-workspace/private.ts',
-        relativePath: 'private.ts',
-        language: 'typescript',
-        range: { startLine: 1, endLine: 1 },
-        text: 'const privateValue = true;',
-        truncated: false,
-      },
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/new-workspace',
+        activeFile: {
+          path: '/new-workspace/private.ts',
+          relativePath: 'private.ts',
+          language: 'typescript',
+        },
+        selection: null,
+        editorText: {
+          kind: 'dirty-buffer',
+          path: '/new-workspace/private.ts',
+          relativePath: 'private.ts',
+          language: 'typescript',
+          range: { startLine: 1, endLine: 1 },
+          text: 'const privateValue = true;',
+          truncated: false,
+        },
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const sendAsync = vi.fn(async () => {});
     const operations = createOperations(sendAsync);
 
@@ -1160,6 +1454,7 @@ describe('SessionSendOperations', () => {
       },
       preserveComposer: true,
     });
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
       messageID: 'msg_queued_context',
@@ -1173,9 +1468,12 @@ describe('SessionSendOperations', () => {
   it.each(['recorded', 'legacy', 'manual'] as const)(
     'respects auto-attachment opt-outs when sending a queued %s file',
     async (kind) => {
-      appStore.setState('activeSessionId', 'session-1');
-      appStore.setState('autoAttachActiveFile', false);
-      appStore.setState('autoAttachProblems', false);
+      appStore.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      appStore.setState(storePath('autoAttachActiveFile', false));
+      flushSolid();
+      appStore.setState(storePath('autoAttachProblems', false));
+      flushSolid();
       const sendAsync = vi.fn<SendAsync>(async () => {});
       const operations = createOperations(sendAsync);
       await operations.sendMessage('Review', {
@@ -1205,6 +1503,7 @@ describe('SessionSendOperations', () => {
         },
         preserveComposer: true,
       });
+      flushSolid();
       expect(sendAsync).toHaveBeenCalledOnce();
       expect(sendAsync.mock.calls[0]![1].parts).toEqual([
         { type: 'text', text: 'Review' },
@@ -1214,13 +1513,17 @@ describe('SessionSendOperations', () => {
   );
 
   it('scopes a queued dispatch to its original workspace', async () => {
-    appStore.setState('activeSessionId', 'session-2');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo-b',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-2'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-b',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
     const ensureSessionPermission = vi.fn(async () => true);
     const syncSession = vi.fn(async () => {});
@@ -1248,6 +1551,7 @@ describe('SessionSendOperations', () => {
       queuedMessageDispatch: { itemId: 'queue-1', lease: 2 },
       preserveComposer: true,
     });
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -1264,29 +1568,37 @@ describe('SessionSendOperations', () => {
   });
 
   it('uses the queued workspace vision-delegation decision', async () => {
-    appStore.setState('activeSessionId', 'session-2');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo-b',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    appStore.setState('providers', [
-      {
-        id: 'custom',
-        name: 'Current workspace',
-        source: 'custom',
-        models: {
-          text: {
-            id: 'text',
-            name: 'Text model',
-            capabilities: { vision: false, toolcall: true },
-            cost: { input: 0, output: 0 },
+    appStore.setState(storePath('activeSessionId', 'session-2'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-b',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    appStore.setState(
+      storePath('providers', [
+        {
+          id: 'custom',
+          name: 'Current workspace',
+          source: 'custom',
+          models: {
+            text: {
+              id: 'text',
+              name: 'Text model',
+              capabilities: { vision: false, toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    appStore.setState('allAgents', []);
+      ])
+    );
+    flushSolid();
+    appStore.setState(storePath('allAgents', []));
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
     const operations = createOperations(sendAsync);
 
@@ -1324,6 +1636,7 @@ describe('SessionSendOperations', () => {
       },
       preserveComposer: true,
     });
+    flushSolid();
 
     expect(sendAsync).toHaveBeenCalledWith(
       'session-1',
@@ -1342,13 +1655,17 @@ describe('SessionSendOperations', () => {
   });
 
   it('sends a same-workspace queued retry without repeating session preparation', async () => {
-    appStore.setState('activeSessionId', 'session-1');
-    appStore.setState('editorContext', {
-      workspacePath: '/repo-a',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    appStore.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    appStore.setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-a',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
     const ensureSessionPermission = vi.fn(async () => true);
     const operations = createOperations(sendAsync, ensureSessionPermission);
@@ -1360,6 +1677,7 @@ describe('SessionSendOperations', () => {
       queuedMessageDispatch: { itemId: 'queue-1', lease: 3 },
       preserveComposer: true,
     });
+    flushSolid();
 
     expect(ensureSessionPermission).not.toHaveBeenCalled();
     expect(sendAsync).toHaveBeenCalledWith(

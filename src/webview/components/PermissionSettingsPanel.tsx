@@ -1,15 +1,15 @@
 import {
   For,
-  Index,
   Show,
   createEffect,
   createMemo,
   createSignal,
   createUniqueId,
-  on,
   onCleanup,
-  onMount,
+  onSettled,
+  untrack,
 } from 'solid-js';
+import { ariaBoolean } from '../lib/aria';
 import type {
   OpenCodePermissionConfig,
   OpenCodeGlobalPermissionConfig,
@@ -240,9 +240,12 @@ function PermissionNameInput(props: { value: string; onInput: (value: string) =>
     return availableScroll > 0 ? (scrollTop() / availableScroll) * availableTrack : 0;
   });
 
-  createEffect(() => {
-    if (open() && suggestions().length > 0) queueMicrotask(updateScrollMetrics);
-  });
+  createEffect(
+    () => open() && suggestions().length > 0,
+    (update) => {
+      if (update) queueMicrotask(updateScrollMetrics);
+    }
+  );
 
   return (
     <div class="permission-name-combobox">
@@ -252,7 +255,7 @@ function PermissionNameInput(props: { value: string; onInput: (value: string) =>
         aria-label="Permission name"
         aria-autocomplete="list"
         aria-controls={listId}
-        aria-expanded={open()}
+        aria-expanded={ariaBoolean(open())}
         aria-activedescendant={open() ? `${listId}-${activeIndex()}` : undefined}
         autocomplete="off"
         spellcheck={false}
@@ -315,7 +318,7 @@ function PermissionNameInput(props: { value: string; onInput: (value: string) =>
                   id={`${listId}-${index()}`}
                   type="button"
                   role="option"
-                  aria-selected={props.value === name}
+                  aria-selected={ariaBoolean(props.value === name)}
                   class={activeIndex() === index() ? 'active' : ''}
                   onMouseEnter={(event) => {
                     setActiveIndex(index());
@@ -419,7 +422,7 @@ function PermissionActionSelect(props: {
         aria-label="Action"
         aria-haspopup="listbox"
         aria-controls={listId}
-        aria-expanded={open()}
+        aria-expanded={ariaBoolean(open())}
         onClick={() => {
           if (open()) closeMenu();
           else openMenu();
@@ -445,7 +448,7 @@ function PermissionActionSelect(props: {
                 type="button"
                 role="option"
                 data-action={action.value}
-                aria-selected={props.value === action.value}
+                aria-selected={ariaBoolean(props.value === action.value)}
                 class={activeIndex() === index() ? 'active' : ''}
                 onMouseEnter={() => setActiveIndex(index())}
                 onClick={() => selectAction(action.value)}
@@ -584,7 +587,7 @@ function GlobalPermissionRules(props: { onSaved: () => void }) {
       setSaving(false);
     }
   };
-  onMount(() => void load());
+  onSettled(() => void load());
   return (
     <section class="permission-config-section permission-global-section">
       <div class="permission-config-heading">
@@ -646,7 +649,7 @@ function GlobalPermissionRules(props: { onSaved: () => void }) {
                 <div class="permission-config-empty">No rules in this global config file.</div>
               }
             >
-              <Index each={rules()}>
+              <For keyed={false} each={rules()}>
                 {(rule, index) => (
                   <PermissionRuleRow
                     rule={rule()}
@@ -662,7 +665,7 @@ function GlobalPermissionRules(props: { onSaved: () => void }) {
                     }
                   />
                 )}
-              </Index>
+              </For>
             </Show>
           </>
         )}
@@ -958,40 +961,44 @@ export function PermissionSettingsPanel() {
     setRules((current) => current.map((item, itemIndex) => (itemIndex === index ? rule : item)));
   }
 
-  onMount(() => {
+  onSettled(() => {
     void load();
   });
 
-  createEffect(() => {
-    activePermissionMode();
-    activeSession();
-    void loadSessionLayers();
-  });
+  createEffect(
+    () => [
+      activePermissionMode(),
+      activeSession(),
+      activeSession()?.id,
+      activeSession()?.directory,
+    ],
+    () => {
+      untrack(() => void loadSessionLayers());
+    }
+  );
 
   createEffect(
-    on(
-      serverConnection,
-      () => {
-        setRemovingServerRule(null);
-        setEditingServerRule(null);
-        setConfirmingServerRule(null);
-        setSavingServerRule(false);
-        if (serverConnection()) {
-          setServerMemory(null);
-          void refreshServerMemory();
-        } else {
-          serverMemoryLoadGeneration += 1;
-          setServerMemoryLoading(false);
-          const previous = serverMemory();
-          if (previous?.supported)
-            setServerMemory({
-              ...previous,
-              stale: 'OpenCode disconnected. Reconnect to refresh saved approvals.',
-            });
-        }
-      },
-      { defer: true }
-    )
+    serverConnection,
+    () => {
+      setRemovingServerRule(null);
+      setEditingServerRule(null);
+      setConfirmingServerRule(null);
+      setSavingServerRule(false);
+      if (serverConnection()) {
+        setServerMemory(null);
+        void refreshServerMemory();
+      } else {
+        serverMemoryLoadGeneration += 1;
+        setServerMemoryLoading(false);
+        const previous = serverMemory();
+        if (previous?.supported)
+          setServerMemory({
+            ...previous,
+            stale: 'OpenCode disconnected. Reconnect to refresh saved approvals.',
+          });
+      }
+    },
+    { defer: true }
   );
 
   onCleanup(() => {
@@ -1086,7 +1093,7 @@ export function PermissionSettingsPanel() {
                   when={sessionRules().length > 0}
                   fallback={<div class="permission-config-empty">No session-specific rules.</div>}
                 >
-                  <Index each={sessionRules()}>
+                  <For keyed={false} each={sessionRules()}>
                     {(rule, index) => (
                       <PermissionRuleRow
                         rule={rule()}
@@ -1102,7 +1109,7 @@ export function PermissionSettingsPanel() {
                         }
                       />
                     )}
-                  </Index>
+                  </For>
                 </Show>
               </Show>
             </section>
@@ -1427,7 +1434,7 @@ export function PermissionSettingsPanel() {
                   </div>
                 }
               >
-                <Index each={rules()}>
+                <For keyed={false} each={rules()}>
                   {(rule, index) => (
                     <PermissionRuleRow
                       rule={rule()}
@@ -1439,7 +1446,7 @@ export function PermissionSettingsPanel() {
                       }
                     />
                   )}
-                </Index>
+                </For>
               </Show>
             </Show>
           </section>

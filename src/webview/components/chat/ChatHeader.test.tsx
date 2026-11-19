@@ -1,4 +1,6 @@
-import { render } from 'solid-js/web';
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
+import { render } from '@solidjs/web';
 import { cableTagIcon, folderIcon, gitIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -81,13 +83,20 @@ function renderHeader(
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
-  setState('sessions', [session()]);
-  setState('activeSessionId', 'session-1');
-  setState('pinnedSessionIds', []);
-  setState('siblingWorkspaceAlerts', []);
+  setState(storePath('sessions', [session()]));
+  flushSolid();
+  setState(storePath('activeSessionId', 'session-1'));
+  flushSolid();
+  setState(storePath('pinnedSessionIds', []));
+  flushSolid();
+  setState(storePath('siblingWorkspaceAlerts', []));
+  flushSolid();
   setShowSessionPicker(false);
+  flushSolid();
   setManualWorkspaceSelection(false);
-  setState('pendingWorkspaceSelectionPath', null);
+  flushSolid();
+  setState(storePath('pendingWorkspaceSelectionPath', null));
+  flushSolid();
   deleteSessionMock.mockReset();
   deleteSessionMock.mockResolvedValue(undefined);
   renameSessionMock.mockReset();
@@ -100,19 +109,32 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
-  setState('sessions', []);
-  setState('activeSessionId', null);
-  setState('pinnedSessionIds', []);
-  setState('siblingWorkspaceAlerts', []);
+  flushSolid();
+  setState(storePath('sessions', []));
+  flushSolid();
+  setState(storePath('activeSessionId', null));
+  flushSolid();
+  setState(storePath('pinnedSessionIds', []));
+  flushSolid();
+  setState(storePath('siblingWorkspaceAlerts', []));
+  flushSolid();
   setShowSessionPicker(false);
+  flushSolid();
   setManualWorkspaceSelection(false);
-  setState('pendingWorkspaceSelectionPath', null);
+  flushSolid();
+  setState(storePath('pendingWorkspaceSelectionPath', null));
+  flushSolid();
   Reflect.deleteProperty(window, '__sendToExtension');
-  setState('serverStatus', { state: 'stopped' });
+  flushSolid();
+  setState(storePath('serverStatus', { state: 'stopped' }));
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
   closeSideQuestion();
+  flushSolid();
 });
 
 describe('SessionActionFeedback icon state', () => {
@@ -124,6 +146,7 @@ describe('SessionActionFeedback icon state', () => {
       ),
       container
     );
+    flushSolid();
 
     const feedback = document.body.querySelector<HTMLElement>('.session-action-feedback');
     expect(feedback?.classList).toContain('is-error');
@@ -141,6 +164,7 @@ describe('SessionActionFeedback icon state', () => {
     expect(dismissIcon?.style.getPropertyValue('--ui-icon-width')).toBe('13px');
 
     feedback?.querySelector<HTMLButtonElement>('.session-action-feedback-dismiss')?.click();
+    flushSolid();
     expect(onDismissError).toHaveBeenCalledOnce();
   });
 });
@@ -150,20 +174,26 @@ describe('ActiveChatHeader', () => {
     'offers Copy folder path for moved folders and worktrees, worktree=%s',
     async (worktree) => {
       const copy = vi.spyOn(locationActions, 'copySessionFolderPath').mockResolvedValue();
-      setState('sessions', [
-        session({
-          directory: '/outside',
-          isGitWorktree: worktree,
-          transfer: { originDirectory: '/repo', available: true },
-        }),
-      ]);
+      setState(
+        storePath('sessions', [
+          session({
+            directory: '/outside',
+            isGitWorktree: worktree,
+            transfer: { originDirectory: '/repo', available: true },
+          }),
+        ])
+      );
+      flushSolid();
       renderHeader();
+      flushSolid();
       container.querySelector<HTMLButtonElement>('.chat-header-location')!.click();
+      flushSolid();
       const items = Array.from(
         document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       );
       expect(items.some((item) => item.textContent?.trim() === 'Merge changes')).toBe(worktree);
       items.find((item) => item.textContent?.trim() === 'Copy folder path')!.click();
+      flushSolid();
       expect(copy).toHaveBeenCalledExactlyOnceWith('/outside');
     }
   );
@@ -173,28 +203,36 @@ describe('ActiveChatHeader', () => {
     (readOnly) => {
       const merge = vi.spyOn(locationActions, 'mergeSessionWorktree').mockResolvedValue(true);
       const move = vi.spyOn(locationActions, 'moveSessionWorktreeResults').mockResolvedValue(true);
-      setState('sessions', [
-        session({
-          directory: '/worktrees/feature',
-          isGitWorktree: true,
-          transfer: { originDirectory: '/repo', available: !readOnly },
-        }),
-      ]);
+      setState(
+        storePath('sessions', [
+          session({
+            directory: '/worktrees/feature',
+            isGitWorktree: true,
+            transfer: { originDirectory: '/repo', available: !readOnly },
+          }),
+        ])
+      );
+      flushSolid();
       renderHeader();
+      flushSolid();
       container.querySelector<HTMLButtonElement>('.chat-header-location')!.click();
+      flushSolid();
       const action = Array.from(
         document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       ).find((item) => item.textContent?.trim() === 'Merge changes')!;
       expect(action.disabled).toBe(readOnly);
       action.click();
+      flushSolid();
       expect(merge).toHaveBeenCalledTimes(readOnly ? 0 : 1);
       if (!readOnly) expect(merge).toHaveBeenCalledWith('session-1', '/worktrees/feature');
       if (!readOnly) container.querySelector<HTMLButtonElement>('.chat-header-location')!.click();
+      flushSolid();
       const moveAction = Array.from(
         document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       ).find((item) => item.textContent?.trim() === 'Migrate changes')!;
       expect(moveAction.disabled).toBe(readOnly);
       moveAction.click();
+      flushSolid();
       expect(move).toHaveBeenCalledTimes(readOnly ? 0 : 1);
       if (!readOnly) expect(move).toHaveBeenCalledWith('session-1', '/worktrees/feature');
     }
@@ -204,11 +242,16 @@ describe('ActiveChatHeader', () => {
     'does not add a folder icon to an ordinary chat, returnedToOrigin=%s',
     async (returnedToOrigin) => {
       if (returnedToOrigin)
-        setState('sessions', [
-          session({ transfer: { originDirectory: '/repo', available: true } }),
-        ]);
+        setState(
+          storePath('sessions', [
+            session({ transfer: { originDirectory: '/repo', available: true } }),
+          ])
+        );
+      flushSolid();
       renderHeader();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(container.querySelector('.chat-header-location')).toBeNull();
     }
   );
@@ -217,15 +260,19 @@ describe('ActiveChatHeader', () => {
     'shows the session path in a custom tooltip with worktree=%s',
     async (isGitWorktree) => {
       const directory = isGitWorktree ? '/worktrees/feature' : '/repo';
-      setState('sessions', [
-        session({
-          directory,
-          isGitWorktree,
-          transfer: isGitWorktree ? undefined : { originDirectory: '/origin', available: true },
-        }),
-      ]);
+      setState(
+        storePath('sessions', [
+          session({
+            directory,
+            isGitWorktree,
+            transfer: isGitWorktree ? undefined : { originDirectory: '/origin', available: true },
+          }),
+        ])
+      );
+      flushSolid();
       vi.mocked(client.varro.session.location).mockResolvedValue({ directory, isGitWorktree });
       renderHeader();
+      flushSolid();
       const indicator = container.querySelector<HTMLButtonElement>('.chat-header-location')!;
       expect(
         indicator.previousElementSibling?.classList.contains('chat-header-session-title')
@@ -236,14 +283,18 @@ describe('ActiveChatHeader', () => {
           isGitWorktree ? 'Session Git worktree' : 'Session folder'
         )
       );
+      flushSolid();
       expect(
         indicator.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
       ).toBe(toCssUrl(isGitWorktree ? gitIcon : folderIcon));
       vi.useFakeTimers();
       try {
         indicator.dispatchEvent(new MouseEvent('mouseenter'));
+        flushSolid();
         vi.advanceTimersByTime(1000);
+        flushSolid();
         await Promise.resolve();
+        flushSolid();
         expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe(directory);
       } finally {
         vi.useRealTimers();
@@ -255,19 +306,28 @@ describe('ActiveChatHeader', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     // SAFETY: The fixture owns the bridge callback and removes it after each test.
     (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
-    setState('sessions', [session({ transfer: { originDirectory: '/origin', available: true } })]);
+    setState(
+      storePath('sessions', [
+        session({ transfer: { originDirectory: '/origin', available: true } }),
+      ])
+    );
+    flushSolid();
     renderHeader();
+    flushSolid();
     const indicator = container.querySelector<HTMLButtonElement>('.chat-header-location')!;
     indicator.dispatchEvent(
       new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 42, clientY: 51 })
     );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const menu = document.body.querySelector<HTMLElement>('[aria-label="Session folder actions"]')!;
     expect(menu.style.left).toBe('42px');
     expect(menu.style.top).toBe('51px');
     expect(document.body.querySelector('[aria-label="Session actions"]')).toBeNull();
     expect(document.activeElement).toBe(menu.querySelector('[role="menuitem"]'));
     menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-folder',
       payload: { sessionId: 'session-1', directory: '/repo' },
@@ -276,21 +336,34 @@ describe('ActiveChatHeader', () => {
   });
 
   it('closes the location menu on Escape, outside interaction, and session change', async () => {
-    setState('sessions', [session({ transfer: { originDirectory: '/origin', available: true } })]);
+    setState(
+      storePath('sessions', [
+        session({ transfer: { originDirectory: '/origin', available: true } }),
+      ])
+    );
+    flushSolid();
     renderHeader();
+    flushSolid();
     const indicator = () => container.querySelector<HTMLButtonElement>('.chat-header-location')!;
     indicator().click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     document.body
       .querySelector('[aria-label="Session folder actions"]')!
       .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSolid();
     expect(document.body.querySelector('[aria-label="Session folder actions"]')).toBeNull();
     expect(document.activeElement).toBe(indicator());
     indicator().click();
+    flushSolid();
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    flushSolid();
     expect(document.body.querySelector('[aria-label="Session folder actions"]')).toBeNull();
     indicator().click();
-    setState('sessions', [session({ directory: '/other' })]);
+    flushSolid();
+    setState(storePath('sessions', [session({ directory: '/other' })]));
+    flushSolid();
     expect(document.body.querySelector('[aria-label="Session folder actions"]')).toBeNull();
   });
 
@@ -302,44 +375,63 @@ describe('ActiveChatHeader', () => {
       })
     );
     renderHeader();
-    setState('sessions', [session({ directory: '/other' })]);
+    flushSolid();
+    setState(storePath('sessions', [session({ directory: '/other' })]));
+    flushSolid();
     resolve({ directory: '/repo', isGitWorktree: true });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container.querySelector('.chat-header-location')).toBeNull();
   });
 
   it.each([false, true])('opens the V2 side-question form with busy=%s', (busy) => {
-    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
-    setState('sessionStatus', busy ? { 'session-1': { type: 'busy' } } : {});
+    setState(
+      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
+    );
+    flushSolid();
+    setState(storePath('sessionStatus', busy ? { 'session-1': { type: 'busy' } } : {}));
+    flushSolid();
     setIsLoading(busy);
+    flushSolid();
     renderHeader();
+    flushSolid();
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     const action = [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-      (button) => button.textContent?.includes('Ask a side question')
+      (button) => button.textContent?.trim() === 'Ask side-question'
     );
     expect(action?.disabled).toBe(false);
     action!.click();
+    flushSolid();
     expect(sideQuestionView()).toMatchObject({
       sessionID: 'session-1',
       directory: '/repo',
       question: '',
     });
     expect(document.activeElement).toBe(container.querySelector('.chat-header-session-title'));
-    setState('serverStatus', { state: 'stopped' });
+    setState(storePath('serverStatus', { state: 'stopped' }));
+    flushSolid();
     setIsLoading(false);
-    setState('sessionStatus', {});
+    flushSolid();
+    setState(storePath('sessionStatus', {}));
+    flushSolid();
   });
 
   it('opens a single sibling workspace alert directly before status indicators', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
-    setState('siblingWorkspaceAlerts', [
-      { name: 'Repo B', path: '/repo-b', kinds: ['error'], count: 1 },
-    ]);
+    setState(
+      storePath('siblingWorkspaceAlerts', [
+        { name: 'Repo B', path: '/repo-b', kinds: ['error'], count: 1 },
+      ])
+    );
+    flushSolid();
     renderHeader(null, { showActions: true, failedCount: 1 });
+    flushSolid();
 
     const actions = container.querySelector('.chat-header-actions')!;
     const alertButton = actions.querySelector<HTMLButtonElement>('.chat-header-sibling-alerts')!;
@@ -348,6 +440,7 @@ describe('ActiveChatHeader', () => {
     ).toBe('error');
     expect(actions.firstElementChild).toBe(alertButton);
     alertButton.click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'workspace/select',
@@ -361,14 +454,20 @@ describe('ActiveChatHeader', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
-    setState('siblingWorkspaceAlerts', [
-      { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 2 },
-      { name: 'Repo C', path: '/repo-c', kinds: ['plan-ready'], count: 1 },
-    ]);
+    setState(
+      storePath('siblingWorkspaceAlerts', [
+        { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 2 },
+        { name: 'Repo C', path: '/repo-c', kinds: ['plan-ready'], count: 1 },
+      ])
+    );
+    flushSolid();
     renderHeader(null, { showActions: true });
+    flushSolid();
 
     container.querySelector<HTMLButtonElement>('.chat-header-sibling-alerts')!.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const menu = document.body.querySelector<HTMLElement>('.sibling-workspace-alerts-menu');
     expect(menu?.getAttribute('role')).toBe('menu');
@@ -376,12 +475,16 @@ describe('ActiveChatHeader', () => {
       menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []
     ).find((button) => button.textContent?.includes('Repo C'))!;
     menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    flushSolid();
     expect(document.activeElement).toBe(repoC);
     menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    flushSolid();
     expect(document.activeElement).toBe(menu?.querySelector('[role="menuitem"]'));
     menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    flushSolid();
     expect(document.activeElement).toBe(repoC);
     repoC.click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'workspace/select',
@@ -394,18 +497,25 @@ describe('ActiveChatHeader', () => {
     vi.useFakeTimers();
     try {
       renderHeader(null, { showActions: true });
+      flushSolid();
 
-      setState('siblingWorkspaceAlerts', [
-        { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
-      ]);
+      setState(
+        storePath('siblingWorkspaceAlerts', [
+          { name: 'Repo B', path: '/repo-b', kinds: ['attention'], count: 1 },
+        ])
+      );
+      flushSolid();
 
       const icon = container.querySelector('.chat-header-sibling-alert-icon')!;
       expect(icon.classList.contains('is-ringing')).toBe(true);
 
       icon.classList.remove('is-ringing');
+      flushSolid();
       vi.advanceTimersByTime(9_999);
+      flushSolid();
       expect(icon.classList.contains('is-ringing')).toBe(false);
       vi.advanceTimersByTime(1);
+      flushSolid();
       expect(icon.classList.contains('is-ringing')).toBe(true);
     } finally {
       vi.useRealTimers();
@@ -415,31 +525,39 @@ describe('ActiveChatHeader', () => {
   it('cycles the sibling workspace notification color through distinct event kinds', () => {
     vi.useFakeTimers();
     try {
-      setState('siblingWorkspaceAlerts', [
-        {
-          name: 'Repo B',
-          path: '/repo-b',
-          kinds: ['attention', 'error'],
-          count: 2,
-        },
-        {
-          name: 'Repo C',
-          path: '/repo-c',
-          kinds: ['completed', 'error', 'plan-ready'],
-          count: 3,
-        },
-      ]);
+      setState(
+        storePath('siblingWorkspaceAlerts', [
+          {
+            name: 'Repo B',
+            path: '/repo-b',
+            kinds: ['attention', 'error'],
+            count: 2,
+          },
+          {
+            name: 'Repo C',
+            path: '/repo-c',
+            kinds: ['completed', 'error', 'plan-ready'],
+            count: 3,
+          },
+        ])
+      );
+      flushSolid();
       renderHeader(null, { showActions: true });
+      flushSolid();
 
       const icon = container.querySelector('.chat-header-sibling-alert-icon')!;
       expect(icon.getAttribute('data-kind')).toBe('attention');
       vi.advanceTimersByTime(2_000);
+      flushSolid();
       expect(icon.getAttribute('data-kind')).toBe('completed');
       vi.advanceTimersByTime(2_000);
+      flushSolid();
       expect(icon.getAttribute('data-kind')).toBe('error');
       vi.advanceTimersByTime(2_000);
+      flushSolid();
       expect(icon.getAttribute('data-kind')).toBe('plan-ready');
       vi.advanceTimersByTime(2_000);
+      flushSolid();
       expect(icon.getAttribute('data-kind')).toBe('attention');
     } finally {
       vi.useRealTimers();
@@ -450,11 +568,15 @@ describe('ActiveChatHeader', () => {
     vi.useFakeTimers();
     try {
       renderHeader(null, { showActions: true });
+      flushSolid();
       container
         .querySelector<HTMLButtonElement>('[aria-label="New chat"]')!
         .dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       vi.advanceTimersByTime(1000);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]');
       expect(tooltip?.textContent).toBe('New chat');
@@ -466,6 +588,7 @@ describe('ActiveChatHeader', () => {
 
   it('opens the session context menu from the title', () => {
     renderHeader();
+    flushSolid();
 
     container.querySelector<HTMLElement>('.chat-header-session-title')!.dispatchEvent(
       new MouseEvent('contextmenu', {
@@ -475,6 +598,7 @@ describe('ActiveChatHeader', () => {
         clientY: 50,
       })
     );
+    flushSolid();
 
     const menu = document.body.querySelector<HTMLElement>('[aria-label="Session actions"]');
     expect(menu).not.toBeNull();
@@ -507,22 +631,28 @@ describe('ActiveChatHeader', () => {
   it.each([false, true])(
     'sets Rename availability for a moved session, available=%s',
     (available) => {
-      setState('sessions', [
-        session({
-          directory: '/outside',
-          transfer: { originDirectory: '/repo', available },
-        }),
-      ]);
+      setState(
+        storePath('sessions', [
+          session({
+            directory: '/outside',
+            transfer: { originDirectory: '/repo', available },
+          }),
+        ])
+      );
+      flushSolid();
       renderHeader();
+      flushSolid();
       container
         .querySelector<HTMLElement>('.chat-header-session-title')!
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      flushSolid();
 
       const rename = Array.from(
         document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       ).find((button) => button.textContent?.trim() === 'Rename')!;
       expect(rename.disabled).toBe(!available);
       rename.click();
+      flushSolid();
 
       expect(document.querySelector('.session-item-rename-form') !== null).toBe(available);
       expect(renameSessionMock).not.toHaveBeenCalled();
@@ -531,39 +661,51 @@ describe('ActiveChatHeader', () => {
 
   it('blocks a rename if the conversation becomes a read-only moved link while editing', () => {
     renderHeader();
+    flushSolid();
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Rename')!
       .click();
+    flushSolid();
     const input = document.querySelector<HTMLInputElement>('[id^="header-session-rename-"]')!;
     input.value = 'New title';
     input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
 
-    setState('sessions', [
-      session({
-        directory: '/outside',
-        transfer: { originDirectory: '/repo', available: false },
-      }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session({
+          directory: '/outside',
+          transfer: { originDirectory: '/repo', available: false },
+        }),
+      ])
+    );
+    flushSolid();
 
     const form = document.querySelector<HTMLFormElement>('.session-item-rename-form')!;
     expect(form.querySelector<HTMLInputElement>('input')?.disabled).toBe(true);
     expect(form.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled).toBe(true);
     form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
+    flushSolid();
     expect(renameSessionMock).not.toHaveBeenCalled();
     form.querySelector<HTMLButtonElement>('[type="button"]')!.click();
+    flushSolid();
     expect(document.querySelector('.session-item-rename-form')).toBeNull();
   });
 
   it('hides rename and recycle-bin actions for an active sub-agent session', () => {
-    setState('sessions', [session({ parentID: 'parent' })]);
+    setState(storePath('sessions', [session({ parentID: 'parent' })]));
+    flushSolid();
     renderHeader();
+    flushSolid();
 
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
 
     const menu = document.body.querySelector<HTMLElement>('[aria-label="Session actions"]');
     expect(menu?.textContent).not.toContain('Rename');
@@ -579,13 +721,16 @@ describe('ActiveChatHeader', () => {
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
     renderHeader();
+    flushSolid();
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
 
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Open in Editor')!
       .click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-editor',
@@ -606,10 +751,13 @@ describe('ActiveChatHeader', () => {
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: WebviewMessage) => void }).__sendToExtension = send;
     renderHeader(null, { showActions: true, onCreateSession: createActiveSession });
+    flushSolid();
 
     const activePlus = container.querySelector<HTMLButtonElement>('[aria-label="New chat"]')!;
     activePlus.click();
+    flushSolid();
     activePlus.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+    flushSolid();
 
     expect(createActiveSession).toHaveBeenCalledTimes(2);
     expect(send.mock.calls.some(([message]) => message.type === 'chat/new-editor')).toBe(false);
@@ -622,6 +770,7 @@ describe('ActiveChatHeader', () => {
         clientY: 40,
       })
     );
+    flushSolid();
     let menu = document.body.querySelector<HTMLElement>('[aria-label="New chat actions"]')!;
     expect(
       Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map((button) =>
@@ -631,24 +780,30 @@ describe('ActiveChatHeader', () => {
     expect(menu.style.left).toBe('30px');
     expect(menu.style.top).toBe('40px');
     menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    flushSolid();
     expect(createActiveSession).toHaveBeenCalledTimes(3);
 
     activePlus.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     menu = document.body.querySelector<HTMLElement>('[aria-label="New chat actions"]')!;
     Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'New Chat Editor')!
       .click();
+    flushSolid();
     expect(send).toHaveBeenCalledWith({ type: 'chat/new-editor' });
 
     activePlus.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     menu = document.body.querySelector<HTMLElement>('[aria-label="New chat actions"]')!;
     Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'New Chat Window')!
       .click();
+    flushSolid();
     expect(send).toHaveBeenCalledWith({ type: 'chat/new-window' });
     expect(document.body.querySelector('[aria-label="New chat actions"]')).toBeNull();
 
     cleanup?.();
+    flushSolid();
     cleanup = render(
       () => (
         <SessionPickerHeader
@@ -678,12 +833,16 @@ describe('ActiveChatHeader', () => {
       ),
       container
     );
+    flushSolid();
     const pickerPlus = container.querySelector<HTMLButtonElement>('[aria-label="New chat"]')!;
     pickerPlus.click();
+    flushSolid();
     pickerPlus.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+    flushSolid();
 
     expect(createPickerSession).toHaveBeenCalledTimes(2);
     pickerPlus.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     expect(document.body.querySelector('[aria-label="New chat actions"]')).not.toBeNull();
     expect(send.mock.calls.filter(([message]) => message.type === 'chat/new-editor')).toEqual([
       [{ type: 'chat/new-editor' }],
@@ -692,24 +851,30 @@ describe('ActiveChatHeader', () => {
 
   it('returns to the sessions list after deleting from the header menu', async () => {
     renderHeader();
+    flushSolid();
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
 
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Move to Recycle Bin')!
       .click();
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(deleteSessionMock).toHaveBeenCalledWith('session-1');
       expect(showSessionPicker()).toBe(true);
     });
+    flushSolid();
   });
 
   it('shows the pinned marker and toggles pinning from the context menu', async () => {
-    setState('pinnedSessionIds', ['session-1']);
+    setState(storePath('pinnedSessionIds', ['session-1']));
+    flushSolid();
     const setPinned = vi.spyOn(client.varro.session, 'setPinned').mockResolvedValueOnce([]);
     renderHeader();
+    flushSolid();
 
     const pinnedIcon = container.querySelector<HTMLElement>(
       '[aria-label="Pinned session"] .session-item-pinned-icon'
@@ -719,23 +884,29 @@ describe('ActiveChatHeader', () => {
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     const unpin = Array.from(
       document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
     ).find((button) => button.textContent === 'Unpin session');
     unpin!.click();
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(setPinned).toHaveBeenCalledWith('session-1', false, { directory: '/repo' })
     );
+    flushSolid();
     await vi.waitFor(() => {
       expect(container.querySelector('[aria-label="Pinned session"]')).toBeNull();
     });
+    flushSolid();
   });
 
   it('shows feedback after clearing an existing v1 share link from the header menu', async () => {
-    setState('sessions', [session({ share: { url: 'https://share.test/session-1' } })]);
+    setState(storePath('sessions', [session({ share: { url: 'https://share.test/session-1' } })]));
+    flushSolid();
     const unshare = vi.spyOn(client.session, 'unshare').mockResolvedValue(session());
     renderHeader();
+    flushSolid();
     const sharedMarker = container.querySelector('[aria-label="Session is shared"]');
     expect(sharedMarker?.getAttribute('title')).toBeNull();
     const sharedIcon = sharedMarker?.querySelector<HTMLElement>('.shared-session-icon');
@@ -744,9 +915,11 @@ describe('ActiveChatHeader', () => {
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Unshare session')!
       .click();
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(unshare).toHaveBeenCalledWith('session-1', { directory: '/repo' });
@@ -757,16 +930,22 @@ describe('ActiveChatHeader', () => {
       );
       expect(container.querySelector('[aria-label="Session is shared"]')).toBeNull();
     });
+    flushSolid();
   });
 
   it('hides share cleanup when the backend does not support it', () => {
-    setState('sessions', [
-      session({ sharingSupported: false, share: { url: 'https://share.test/old' } }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session({ sharingSupported: false, share: { url: 'https://share.test/old' } }),
+      ])
+    );
+    flushSolid();
     renderHeader();
+    flushSolid();
     container
       .querySelector<HTMLElement>('.chat-header-session-title')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     const menu = document.body.querySelector<HTMLElement>('[aria-label="Session actions"]');
     expect(menu?.textContent).not.toContain('Share session');
     expect(menu?.textContent).not.toContain('Unshare session');
@@ -782,11 +961,13 @@ describe('ActiveChatHeader', () => {
       activeStartedAt: null,
     });
     renderHeader('session-root');
+    flushSolid();
 
     await vi.waitFor(() => {
       const duration = container.querySelector('.chat-header-session-duration');
       expect(duration?.textContent).toBe('1m 5s');
     });
+    flushSolid();
     const duration = container.querySelector('.chat-header-session-duration');
     expect(duration?.previousElementSibling?.classList).toContain('chat-header-subagents');
     const subagentIcon = container.querySelector<HTMLElement>('.session-item-subagents-icon');
@@ -805,26 +986,36 @@ describe('ActiveChatHeader', () => {
       activeStartedAt: null,
     };
     const request = vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue(summary);
-    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+    flushSolid();
     renderHeader();
+    flushSolid();
     await vi.waitFor(() =>
       expect(container.querySelector('.chat-header-session-duration')?.textContent).toBe('10s')
     );
+    flushSolid();
     vi.useFakeTimers();
     try {
       const pausedAt = Date.now();
-      setState('sessions', 0, 'metadata', {
-        varro: { pauses: [{ messageId: 'paused', pausedAt }] },
-      });
+      setState(
+        storePath('sessions', 0, 'metadata', {
+          varro: { pauses: [{ messageId: 'paused', pausedAt }] },
+        })
+      );
+      flushSolid();
       await vi.advanceTimersByTimeAsync(3_600_000);
+      flushSolid();
       expect(request).toHaveBeenLastCalledWith('session-1', pausedAt, { directory: '/repo' });
       expect(container.querySelector('.chat-header-session-duration')?.textContent).toBe('10s');
       request.mockResolvedValue({ ...summary, activeStartedAt: Date.now() });
-      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(5_000);
+      flushSolid();
       expect(container.querySelector('.chat-header-session-duration')?.textContent).toBe('15s');
     } finally {
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
       vi.useRealTimers();
     }
   });

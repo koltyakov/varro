@@ -1,6 +1,13 @@
-import { createComponent, createEffect, createSignal, onCleanup } from 'solid-js';
+import {
+  flush as flushSolid,
+  createEffect,
+  createComponent,
+  createSignal,
+  onCleanup,
+} from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import DOMPurify from 'dompurify';
 import {
   __parseMarkdownForTests,
@@ -130,38 +137,50 @@ function expectUiIcon(element: Element | null | undefined, source: string, size:
 
 beforeEach(() => {
   __resetMarkdownCachesForTests();
-  setState('remoteImages', 'off');
+  setState(storePath('remoteImages', 'off'));
+  flushSolid();
   document.body.className = '';
   showSessionActionFeedbackMock.mockReset();
   mermaidMock.initialize.mockReset();
   mermaidMock.parse.mockReset().mockResolvedValue({ diagramType: 'flowchart' });
   mermaidMock.render.mockReset().mockResolvedValue({ svg: '<svg></svg>' });
   document.body.removeAttribute('style');
+  flushSolid();
   container = document.createElement('div');
   document.body.appendChild(container);
   delete window.__sendToExtension;
   selectSessionMock.mockReset();
   clearDirectSessionReturn();
-  setState('sessions', []);
-  setState('serverStatus', { state: 'stopped' });
-  setState('activeSessionId', null);
-  setState('editorContext', {
-    workspacePath: null,
-    workspaceFolders: [],
-    activeFile: null,
-    selection: null,
-    diagnostics: [],
-  });
+  flushSolid();
+  setState(storePath('sessions', []));
+  flushSolid();
+  setState(storePath('serverStatus', { state: 'stopped' }));
+  flushSolid();
+  setState(storePath('activeSessionId', null));
+  flushSolid();
+  setState(
+    storePath('editorContext', {
+      workspacePath: null,
+      workspaceFolders: [],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    })
+  );
+  flushSolid();
 });
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   delete window.__sendToExtension;
   vi.useRealTimers();
   vi.restoreAllMocks();
+  flushSolid();
 });
 
 describe('MarkdownRenderer', () => {
@@ -242,16 +261,21 @@ describe('MarkdownRenderer', () => {
           }),
         container!
       );
+      flushSolid();
 
       for (const next of [initial, complete, `${complete}\n\nDone.`]) {
         setContent(next);
+        flushSolid();
         await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        flushSolid();
         expect(container!.textContent).toContain(initial);
         expect(container!.querySelector('em, strong')).toBeNull();
       }
 
       setStreaming(false);
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(container!.textContent).toContain(complete);
       expect(container!.querySelector('em, strong')).toBeNull();
     }
@@ -268,7 +292,7 @@ describe('MarkdownRenderer', () => {
       ...values.map((value) => `| ${value} | A description that needs room to wrap. |`),
     ].join('\n');
     container!.innerHTML = __parseMarkdownForTests(content, { cacheByContent: true });
-    // Virtual rows can measure this HTML before MarkdownRenderer's onMount hydration runs.
+    // Virtual rows can measure this HTML before MarkdownRenderer's onSettled hydration runs.
     expect(container!.querySelector('table')?.classList.contains('table-first-col-compact')).toBe(
       compact
     );
@@ -291,9 +315,12 @@ describe('MarkdownRenderer', () => {
           }),
         container!
       );
+      flushSolid();
       for (const value of [initialLightweight, !initialLightweight, initialLightweight]) {
         setLightweight(value);
+        flushSolid();
         await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        flushSolid();
         expect(
           [...container!.querySelectorAll('a.file-path-link')].map((link) => link.textContent)
         ).toEqual([
@@ -318,7 +345,9 @@ describe('MarkdownRenderer', () => {
               marker: 'SLOTMARKER',
               render: () => {
                 mounted();
-                createEffect(() => effect(value()));
+                createEffect(value, (value) => {
+                  effect(value);
+                });
                 onCleanup(disposed);
                 return document.createElement('button');
               },
@@ -327,13 +356,17 @@ describe('MarkdownRenderer', () => {
         }),
       container!
     );
+    flushSolid();
     expect(mounted).toHaveBeenCalledOnce();
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(disposed).toHaveBeenCalledOnce();
     const effectCount = effect.mock.calls.length;
     await Promise.resolve();
+    flushSolid();
     setValue(1);
+    flushSolid();
     expect(mounted).toHaveBeenCalledOnce();
     expect(effect).toHaveBeenCalledTimes(effectCount);
     expect(disposed).toHaveBeenCalledOnce();
@@ -354,9 +387,9 @@ describe('MarkdownRenderer', () => {
         mounted(marker);
         onCleanup(() => disposed(marker));
         const button = document.createElement('button');
-        createEffect(() => {
-          effect(marker, value());
-          button.textContent = `${marker} ${value()}`;
+        createEffect(value, (value) => {
+          effect(marker, value);
+          button.textContent = `${marker} ${value}`;
         });
         return button;
       },
@@ -371,7 +404,9 @@ describe('MarkdownRenderer', () => {
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     mounted.mockClear();
     disposed.mockClear();
     const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
@@ -382,7 +417,9 @@ describe('MarkdownRenderer', () => {
     setContent(
       'First SLOTONE https://example.test/one\n\nSecond SLOTTWO https://example.test/two\n\nTail'
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(stable.firstChild).toBe(paragraph);
     expect(stable.querySelector('button')).toBe(button);
     expect(stable.querySelector('a')).toBe(link);
@@ -390,12 +427,15 @@ describe('MarkdownRenderer', () => {
     expect(mounted.mock.calls).toEqual([['SLOTTWO']]);
     expect(disposed).not.toHaveBeenCalled();
     setContent(`${content()}\n\nLast tail`);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(stable.firstChild).toBe(paragraph);
     expect(mounted).toHaveBeenCalledOnce();
     expect(disposed).not.toHaveBeenCalled();
     effect.mockClear();
     setValue(1);
+    flushSolid();
     expect(effect.mock.calls).toEqual([
       ['SLOTONE', 1],
       ['SLOTTWO', 1],
@@ -407,6 +447,7 @@ describe('MarkdownRenderer', () => {
       { type: 'vscode/open-external', payload: { url: 'https://example.test/two' } },
     ]);
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(disposed.mock.calls).toEqual([['SLOTONE'], ['SLOTTWO']]);
   });
@@ -427,7 +468,9 @@ describe('MarkdownRenderer', () => {
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
     const first = stable.firstChild;
     for (const paragraph of [
@@ -435,7 +478,9 @@ describe('MarkdownRenderer', () => {
       'Literal &lt;script&gt; text',
     ]) {
       setContent(`${content()}\n\n${paragraph}\n\nEnd`);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(stable.firstChild).toBe(first);
       expect(withoutLinkTooltipAttributes(stable.innerHTML)).toBe(
         withoutLinkTooltipAttributes(
@@ -446,7 +491,9 @@ describe('MarkdownRenderer', () => {
       );
     }
     setComplete(true);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     const tail = container!.querySelector('[data-markdown-segment="tail"]')!;
     expect(withoutLinkTooltipAttributes(stable.innerHTML + tail.innerHTML)).toBe(
       withoutLinkTooltipAttributes(__parseMarkdownForTests(content(), { cacheByContent: true }))
@@ -471,11 +518,15 @@ describe('MarkdownRenderer', () => {
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
     const first = stable.firstChild;
     setContent(next);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     if (_label === 'non-append edit') expect(stable.firstChild).not.toBe(first);
     else expect(stable.firstChild).toBe(first);
     expect(stable.innerHTML).toBe(
@@ -489,7 +540,8 @@ describe('MarkdownRenderer', () => {
     'replaces appended stable DOM after a %s change',
     async (change) => {
       vi.useFakeTimers();
-      setState('editorContext', 'workspacePath', '/old');
+      setState(storePath('editorContext', 'workspacePath', '/old'));
+      flushSolid();
       const [content, setContent] = createSignal('See src/first.ts\n\nTail');
       const [disablePathLinkify, setDisablePathLinkify] = createSignal(false);
       cleanup = render(
@@ -504,16 +556,23 @@ describe('MarkdownRenderer', () => {
           }),
         container!
       );
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
       const first = stable.firstChild;
       setContent('See src/first.ts\n\nSee src/second.ts\n\nTail');
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(stable.firstChild).toBe(first);
-      if (change === 'workspace') setState('editorContext', 'workspacePath', '/new');
+      if (change === 'workspace') setState(storePath('editorContext', 'workspacePath', '/new'));
       else setDisablePathLinkify(true);
+      flushSolid();
       setContent(`${content()}\n\nEnd`);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(stable.firstChild).not.toBe(first);
       expect(withoutLinkTooltipAttributes(stable.innerHTML)).toBe(
         withoutLinkTooltipAttributes(
@@ -559,18 +618,26 @@ describe('MarkdownRenderer', () => {
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     setContent('SLOTMARKER\n\nMore prose\n\nTail');
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     mounted.mockClear();
     disposed.mockClear();
     setSlots([makeSlot('new')]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(mounted.mock.calls).toEqual([['new']]);
     expect(disposed.mock.calls).toEqual([['old']]);
     expect(container!.querySelector('button')?.textContent).toBe('new');
     setContent('Replacement **markdown**\n\nTail');
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(disposed.mock.calls).toEqual([['old'], ['new']]);
     expect(container!.querySelector('button')).toBeNull();
   });
@@ -589,13 +656,19 @@ describe('MarkdownRenderer', () => {
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     setContent('SLOTMARKER');
+    flushSolid();
     vi.advanceTimersByTime(16);
+    flushSolid();
     expect(container!.textContent).toContain('SLOTMARKER');
     cleanup();
+    flushSolid();
     cleanup = undefined;
     await Promise.resolve();
+    flushSolid();
     expect(mounted).not.toHaveBeenCalled();
   });
 
@@ -658,6 +731,7 @@ describe('MarkdownRenderer', () => {
 
       expect(root.querySelector('.katex')).toBeNull();
       expect(root.textContent?.trim()).toBe(content.replaceAll('\\$', '$'));
+      flushSolid();
     }
   );
 
@@ -782,7 +856,9 @@ $$`,
         () => createComponent(MarkdownRenderer, { content: math, forceStreaming: true }),
         container!
       );
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
 
       expect(container?.querySelectorAll('.katex')).toHaveLength(1);
       expect(container?.querySelector('.katex-error')).toBeNull();
@@ -804,28 +880,38 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     const stableParagraph = container?.querySelector('p');
 
     for (const suffix of ['', '\n\n', 'y^2', '$']) {
       setContent(content() + suffix);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(container?.querySelector('.katex')).toBeNull();
       expect(container?.querySelector('p')).toBe(stableParagraph);
       expectStreamingIndicator(container!);
       expect(container?.textContent).not.toContain('$$');
     }
     setContent(`${content()}$`);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
     expect(container?.querySelector('annotation')?.textContent).toBe('x^2\n\ny^2');
 
     setContent(`${content()}\n\nFollowing paragraph.`);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
     const settledMath = container?.querySelector('.katex');
     setContent(`${content()} More text.`);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(container?.querySelector('.katex')).toBe(settledMath);
     expect(container?.querySelector('p')).toBe(stableParagraph);
   });
@@ -857,17 +943,22 @@ $$`,
           }),
         container!
       );
+      flushSolid();
 
       for (const chunk of chunks) {
         setContent(content() + chunk);
+        flushSolid();
         await vi.advanceTimersByTimeAsync(16);
+        flushSolid();
         expect(container?.querySelector('.katex')).toBeNull();
         expectStreamingIndicator(container!);
         expect(container?.textContent).not.toContain('$');
       }
 
       setContent(content() + closer);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(container?.querySelectorAll('.katex')).toHaveLength(1);
       expect(container?.querySelector('.katex-error')).toBeNull();
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
@@ -891,7 +982,9 @@ $$`,
       () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(container?.querySelector('.katex')).toBeNull();
     expect(container?.textContent).toContain('$');
@@ -915,11 +1008,15 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expectStreamingIndicator(container!);
 
     setCompleted(true);
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(container?.querySelector('.katex')).toBeNull();
     expect(container?.textContent).toContain(content.includes('$$') ? '$$' : '$\\frac{x}');
@@ -1003,6 +1100,7 @@ $$`,
         theme: 'base',
       })
     ).resolves.toEqual({ svg: '<svg></svg>' });
+    flushSolid();
 
     expect(mermaid.render).toHaveBeenCalledTimes(2);
     expect(mermaid.parse).toHaveBeenCalledOnce();
@@ -1022,6 +1120,7 @@ $$`,
         theme: 'base',
       })
     ).rejects.toBe(firstError);
+    flushSolid();
 
     expect(mermaid.render).toHaveBeenCalledOnce();
   });
@@ -1029,10 +1128,15 @@ $$`,
   it('uses readable VS Code colors for dark Mermaid diagrams', () => {
     document.body.className = 'vscode-dark';
     document.body.style.setProperty('--vscode-editor-background', '#202020');
+    flushSolid();
     document.body.style.setProperty('--vscode-editor-foreground', '#eeeeee');
+    flushSolid();
     document.body.style.setProperty('--vscode-input-background', '#303030');
+    flushSolid();
     document.body.style.setProperty('--vscode-widget-border', '#777777');
+    flushSolid();
     document.body.style.setProperty('--vscode-focusBorder', '#55aaff');
+    flushSolid();
 
     const config = getMermaidThemeConfigForTests();
 
@@ -1052,10 +1156,15 @@ $$`,
   it('uses restrained neutral fills for light Mermaid diagrams', () => {
     document.body.className = 'vscode-light';
     document.body.style.setProperty('--vscode-editor-background', '#ffffff');
+    flushSolid();
     document.body.style.setProperty('--vscode-editor-foreground', '#202020');
+    flushSolid();
     document.body.style.setProperty('--vscode-input-background', '#ffffff');
+    flushSolid();
     document.body.style.setProperty('--vscode-widget-border', '#b0b0b0');
+    flushSolid();
     document.body.style.setProperty('--vscode-focusBorder', '#0066b8');
+    flushSolid();
 
     const config = getMermaidThemeConfigForTests();
 
@@ -1085,6 +1194,7 @@ $$`,
     const diagram = root.querySelector<HTMLElement>('.mermaid-diagram')!;
 
     resetMermaidDiagramsForThemeForTests(root);
+    flushSolid();
 
     expect(diagram.dataset.mermaidHydrated).toBeUndefined();
     expect(diagram.querySelector('.mermaid-diagram-output')).toBeNull();
@@ -1097,6 +1207,7 @@ $$`,
 
   it('does not mount an in-flight Mermaid render from the previous theme', async () => {
     setTheme('dark');
+    flushSolid();
     document.body.className = 'vscode-dark';
     let resolveOldRender!: (value: { svg: string }) => void;
     mermaidMock.render
@@ -1111,14 +1222,21 @@ $$`,
       () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
       container!
     );
+    flushSolid();
     await vi.waitFor(() => expect(mermaidMock.render).toHaveBeenCalledOnce());
+    flushSolid();
 
     document.body.className = 'vscode-light';
     setTheme('light');
+    flushSolid();
     resolveOldRender({ svg: '<svg><text>old theme</text></svg>' });
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     await vi.waitFor(() => expect(mermaidMock.render).toHaveBeenCalledTimes(2));
+    flushSolid();
 
     expect(container?.querySelector('.mermaid-diagram-output')?.textContent).toBe('new theme');
   });
@@ -1168,6 +1286,7 @@ $$`,
     root.innerHTML = `<div class="mermaid-diagram" data-mermaid-source="${encodeURIComponent('A'.repeat(100_001))}"><div class="mermaid-diagram-status">Rendering diagram...</div><div hidden class="mermaid-diagram-fallback">source</div></div>`;
 
     await hydrateMermaidDiagramsForTests(root);
+    flushSolid();
 
     const diagram = root.querySelector<HTMLElement>('.mermaid-diagram');
     expect(mermaidMock.initialize).not.toHaveBeenCalled();
@@ -1185,9 +1304,11 @@ $$`,
       () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
       container!
     );
+    flushSolid();
     await vi.waitFor(() =>
       expect(container?.querySelector('.mermaid-diagram-toolbar')).not.toBeNull()
     );
+    flushSolid();
 
     const copyButton = container?.querySelector<HTMLButtonElement>('button[data-mermaid-copy]');
     const expandButton = container?.querySelector<HTMLButtonElement>('button[data-mermaid-expand]');
@@ -1196,6 +1317,7 @@ $$`,
     expect(container?.querySelector('.mermaid-diagram-output > svg path')).not.toBeNull();
 
     expandButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     const closeButton = document.body.querySelector<HTMLButtonElement>(
       'button[aria-label="Close diagram preview"]'
     );
@@ -1204,6 +1326,7 @@ $$`,
 
   it('owns the Mermaid portal, focus and host state only while its preview is open', async () => {
     setTheme('dark');
+    flushSolid();
     mermaidMock.render.mockResolvedValue({
       svg: '<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"></path></svg>',
     });
@@ -1219,13 +1342,16 @@ $$`,
       () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
       root
     );
+    flushSolid();
     const expandButton = () => root.querySelector<HTMLButtonElement>('[data-mermaid-expand]')!;
     await vi.waitFor(() => expect(expandButton()).not.toBeNull());
+    flushSolid();
     expect(Array.from(document.body.children)).toEqual(bodyChildren);
 
     const openPreview = async () => {
       expandButton().focus();
       expandButton().click();
+      flushSolid();
       await Promise.resolve();
       expect(document.querySelectorAll('.mermaid-preview-overlay')).toHaveLength(1);
       expect(document.body.children.length).toBe(bodyChildren.length + 1);
@@ -1258,33 +1384,45 @@ $$`,
     };
 
     await openPreview();
+    flushSolid();
     document.activeElement?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     );
+    flushSolid();
     expectClosed();
 
     (await openPreview()).click();
+    flushSolid();
     expectClosed();
 
     await openPreview();
+    flushSolid();
     setTheme('light');
+    flushSolid();
     expect(document.querySelector('.mermaid-preview-overlay')).toBeNull();
     expect(Array.from(document.body.children)).toEqual(bodyChildren);
     outsideButton.focus();
+    flushSolid();
     expect(document.activeElement).toBe(outsideButton);
     await vi.waitFor(() => expect(expandButton()).not.toBeNull());
+    flushSolid();
 
     // Keep the return target mounted when the entire Markdown instance is disposed.
     outsideButton.focus();
+    flushSolid();
     expandButton().click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Close diagram preview');
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(Array.from(document.body.children)).toEqual(bodyChildren);
     expect(document.activeElement).toBe(outsideButton);
     const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     outsideButton.dispatchEvent(escape);
+    flushSolid();
     expect(escape.defaultPrevented).toBe(false);
     expect(
       send.mock.calls.filter(([message]) => message.type === 'vscode/mermaid-preview')
@@ -1303,9 +1441,11 @@ $$`,
       () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
       container!
     );
+    flushSolid();
     await vi.waitFor(() =>
       expect(container?.querySelector('.mermaid-diagram-output > svg path')).not.toBeNull()
     );
+    flushSolid();
 
     const output = container?.querySelector('.mermaid-diagram-output');
     expect(output?.querySelector('script, foreignObject')).toBeNull();
@@ -1314,6 +1454,7 @@ $$`,
     container
       ?.querySelector<HTMLButtonElement>('button[data-mermaid-expand]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     const preview = document.body.querySelector('.mermaid-preview-canvas');
     expect(preview?.querySelector('script, foreignObject')).toBeNull();
     expect(preview?.querySelector('svg')?.hasAttribute('onload')).toBe(false);
@@ -1345,6 +1486,7 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       for (const delta of [
         `${newline}${newline}2`,
         '.',
@@ -1355,7 +1497,9 @@ $$`,
         `${newline}${newline}Following paragraph.`,
       ]) {
         setContent((previous) => previous + delta);
+        flushSolid();
         await new Promise((resolve) => requestAnimationFrame(resolve));
+        flushSolid();
         expect(container!.querySelectorAll('ol')).toHaveLength(1);
         expect(container!.querySelector('ol > li')?.textContent?.trim()).toBe('First item.');
       }
@@ -1381,6 +1525,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('script')).toBeNull();
     expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
@@ -1402,6 +1547,7 @@ $$`,
     expect(badLink?.querySelector('.external-link-icon')).toBeNull();
 
     dispatchAnchorClick(docsLink);
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-external',
@@ -1419,17 +1565,22 @@ $$`,
           MarkdownRenderer({ content: `[${label}](${href} "Old title")`, cacheByContent: true }),
         container!
       );
+      flushSolid();
       const link = container!.querySelector('a')!;
       expect(link.hasAttribute('title')).toBe(false);
       link.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(399);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
       await vi.advanceTimersByTimeAsync(1);
+      flushSolid();
       const tooltip = document.querySelector('[role="tooltip"]')!;
       expect(tooltip.textContent).toBe(href);
       expect(tooltip.classList.contains('themed-tooltip')).toBe(true);
       expect(link.getAttribute('aria-describedby')).toBe(tooltip.id);
       link.dispatchEvent(new MouseEvent('mouseleave'));
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
     }
   );
@@ -1451,41 +1602,54 @@ $$`,
     ['`C:\\work\\project\\App.tsx`', 'C:/work/project/App.tsx'],
   ])('uses the same 400 ms custom tooltip for file link %s', async (content, expected) => {
     vi.useFakeTimers();
-    setState('editorContext', 'workspacePath', '/repo');
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
     const link = container!.querySelector('a')!;
     expect(link.hasAttribute('title')).toBe(false);
     link.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(399);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(expected);
     link.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 
   it('uses a custom tooltip for session-reference links too', async () => {
     vi.useFakeTimers();
-    setState('sessions', [
-      {
-        id: 'ses_reference123',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Reference session',
-        version: '1',
-        time: { created: 0, updated: 0 },
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'ses_reference123',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Reference session',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      ])
+    );
+    flushSolid();
     cleanup = render(
       () => MarkdownRenderer({ content: 'Open session:ses_reference123', cacheByContent: true }),
       container!
     );
+    flushSolid();
     const link = container!.querySelector('a')!;
     expect(link.hasAttribute('title')).toBe(false);
     link.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(399);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
       'Open session ses_reference123'
     );
@@ -1503,11 +1667,14 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     for (const link of container!.querySelectorAll('a')) {
       expect(link.hasAttribute('aria-describedby')).toBe(false);
       link.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
     }
     await vi.advanceTimersByTimeAsync(1000);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 
@@ -1520,16 +1687,24 @@ $$`,
         MarkdownRenderer({ content: '[Docs](https://example.test/docs)', cacheByContent: true }),
       container!
     );
+    flushSolid();
     const link = container!.querySelector('a')!;
     link.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(200);
+    flushSolid();
     link.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(400);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     link.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(400);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
     dispatchAnchorClick(link);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-external',
@@ -1552,16 +1727,24 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       const oldLink = container!.querySelector('a')!;
       oldLink.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(delay);
+      flushSolid();
       setContent('[New docs](https://example.test/new)');
+      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
+      flushSolid();
       expect(oldLink.hasAttribute('aria-describedby')).toBe(false);
       await vi.advanceTimersByTimeAsync(400);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
       container!.querySelector('a')!.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(400);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
         'https://example.test/new'
       );
@@ -1583,18 +1766,24 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     expect(container!.querySelector('a')).toBeNull();
     setContent('See [Docs](https://example.test/docs)\n\n[More](https://example.test/more)');
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
     const links = container!.querySelectorAll('a');
     expect(links).toHaveLength(2);
     for (const link of links) {
       link.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(400);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
         link.getAttribute('href')
       );
       link.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
     }
   });
@@ -1609,6 +1798,7 @@ $$`,
       () => MarkdownRenderer({ content: `[${label}](https://example.test)` }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector('a.external-link');
     const formattedLabel = link?.querySelector(selector);
@@ -1631,6 +1821,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
     const link = Array.from(container?.querySelectorAll('a') || []).find((item) =>
@@ -1649,6 +1840,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.markdown-image-frame')).toBeNull();
     expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
@@ -1665,6 +1857,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelectorAll('.markdown-image-frame')).toHaveLength(0);
     expect(container?.querySelectorAll('img:not(.external-link-icon)')).toHaveLength(0);
@@ -1673,7 +1866,8 @@ $$`,
   });
 
   it('offers click-to-load placeholders only for generated Markdown image tokens', () => {
-    setState('remoteImages', 'ask');
+    setState(storePath('remoteImages', 'ask'));
+    flushSolid();
     cleanup = render(
       () =>
         MarkdownRenderer({
@@ -1686,6 +1880,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     expect(container?.querySelectorAll('[data-remote-image]')).toHaveLength(1);
     expect(container?.querySelector('.remote-markdown-image-host')?.textContent).toBe(
       'images.test'
@@ -1704,31 +1899,68 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     const host = container?.querySelector('[data-remote-image]');
     expect(container?.querySelector('button')).toBeNull();
-    setState('remoteImages', 'ask');
+    setState(storePath('remoteImages', 'ask'));
+    flushSolid();
     expect(container?.querySelector('[data-remote-image]')).toBe(host);
     expect(container?.querySelector('.rendered-markdown')?.classList).toContain(
       'remote-images-enabled'
     );
     expect(container?.querySelector('[data-remote-image-load]')?.textContent).toBe('Load image');
-    setState('remoteImages', 'off');
+    setState(storePath('remoteImages', 'off'));
+    flushSolid();
     expect(container?.querySelector('button, img')).toBeNull();
     expect(container?.textContent?.trim()).toBe('Chart');
   });
 
-  it('removes images with non-HTTPS sources', () => {
+  it.each([
+    'artifacts/status-slot-explanation/44px-activity-row.png',
+    '/workspace/screenshots/example.png',
+    'file:///workspace/screenshots/example.png',
+    'screenshots/example%20image.png',
+  ])('reserves inline local images even with remote images off: %s', (source) => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({ content: `![Local screenshot](${source})`, directory: '/workspace' }),
+      container!
+    );
+    flushSolid();
+    expect(container?.querySelectorAll('[data-local-image]')).toHaveLength(1);
+    expect(container?.querySelector('.local-markdown-image')).not.toBeNull();
+    expect(container?.textContent).toContain('Local screenshot');
+    expect(container?.querySelector('[data-remote-image]')).toBeNull();
+  });
+
+  it('does not hydrate forged local image attributes', () => {
     cleanup = render(
       () =>
         MarkdownRenderer({
           content:
-            '![Local](file:///tmp/image.png) <img src="data:image/png;base64,AA==" alt="Embedded"> <img src="javascript:alert(1)" alt="Bad">',
+            '<span data-varro-generated data-local-image="secret.png" alt="Forged">Forged</span>',
         }),
       container!
     );
+    flushSolid();
+    expect(container?.querySelector('[data-local-image]')).toBeNull();
+    expect(container?.textContent).toContain('Forged');
+  });
+
+  it('removes images with unsafe or unsupported URL schemes', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            '![Insecure](http://images.test/image.png) ![Embedded](data:image/png;base64,AA==) <img src="javascript:alert(1)" alt="Bad">',
+        }),
+      container!
+    );
+    flushSolid();
 
     expect(container?.querySelector('img')).toBeNull();
-    expect(container?.textContent).toContain('Local');
+    expect(container?.textContent).toContain('Insecure');
+    expect(container?.querySelector('[data-local-image], [data-remote-image]')).toBeNull();
   });
 
   it('strips dangerous attributes from allowed html', () => {
@@ -1740,6 +1972,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector('a');
     const path = container?.querySelector('path');
@@ -1767,12 +2000,15 @@ $$`,
     ].join('\n');
 
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const rawControl = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent === 'Forged copy'
     );
     expect(rawControl?.closest('[hidden]')).not.toBeNull();
+    flushSolid();
     expect(rawControl?.hasAttribute('data-copy')).toBe(false);
     expect(rawControl?.hasAttribute('data-copy-text')).toBe(false);
     expect(container?.querySelector('[data-mermaid-source="graph%20TD"]')).toBeNull();
@@ -1780,10 +2016,12 @@ $$`,
     expect(container?.querySelector('[data-varro-generated]')).toBeNull();
 
     rawControl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(writeText).not.toHaveBeenCalled();
 
     const generatedControl = container?.querySelector<HTMLButtonElement>('button[data-copy]');
     generatedControl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(writeText).toHaveBeenCalledWith('trusted code');
   });
 
@@ -1810,6 +2048,7 @@ $$`,
   for (const [name, payload] of mutationXssPayloads) {
     it(`does not resurrect script from a ${name} payload`, () => {
       cleanup = render(() => MarkdownRenderer({ content: payload }), container!);
+      flushSolid();
 
       const html = container?.innerHTML ?? '';
       expect(container?.querySelector('script')).toBeNull();
@@ -1833,6 +2072,7 @@ $$`,
       for (const element of Array.from(sink.querySelectorAll('*'))) {
         for (const attribute of Array.from(element.attributes)) {
           expect(attribute.name.startsWith('on')).toBe(false);
+          flushSolid();
         }
       }
       // Serializing the reparsed tree must not drift either; a tree that
@@ -1846,6 +2086,7 @@ $$`,
       '<a href=" https://example.test/docs ">Safe docs</a><svg></p><style><a id="</style><img src=1 onerror=alert(1)>">';
 
     cleanup = render(() => MarkdownRenderer({ content: payload }), container!);
+    flushSolid();
 
     assertInertWithSafeAnchor(container!);
 
@@ -1857,23 +2098,28 @@ $$`,
   it('opens local markdown file links through VS Code', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link).toBeInstanceOf(HTMLAnchorElement);
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
 
     dispatchAnchorClick(link);
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -1893,6 +2139,7 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+    flushSolid();
   });
 
   it.each([
@@ -1924,33 +2171,40 @@ $$`,
   ])('opens the file and line in Markdown target %s', (href, path, line, endLine?: number) => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('editorContext', {
-      workspacePath: '/repo',
-      workspaceFolders: [
-        { name: 'repo', path: '/repo' },
-        { name: 'other', path: '/other' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        workspaceFolders: [
+          { name: 'repo', path: '/repo' },
+          { name: 'other', path: '/other' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     cleanup = render(
       () => MarkdownRenderer({ content: `[Open query](${href})`, cacheByContent: true }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.dataset.file).toBe(JSON.stringify({ path, line, endLine }));
     const absolutePath = path.replace(/^\.\//, '/repo/');
+    flushSolid();
     if (!path.startsWith('C:'))
       expect(link?.getAttribute('href')).toBe(
         `${absolutePath}:${line}${endLine ? `-${endLine}` : ''}`
       );
+    flushSolid();
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
       varroFilePath: absolutePath,
       webviewSection: 'varroFileLink',
     });
     dispatchAnchorClick(link);
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: { path, line, endLine, kind: 'file', exact: true, requestId: expect.any(Number) },
@@ -1961,6 +2215,7 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+    flushSolid();
   });
 
   it.each([
@@ -1972,14 +2227,17 @@ $$`,
     const hostClick = vi.fn();
     window.__sendToExtension = send;
     cleanup = render(() => MarkdownRenderer({ content }), container!);
+    flushSolid();
     const link = container!.querySelector<HTMLAnchorElement>('a')!;
     const path = '/repo/reports/Varro startup performance.md';
     expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
       varroFilePath: path,
     });
     document.addEventListener('click', hostClick);
+    flushSolid();
     try {
       dispatchAnchorClick(link);
+      flushSolid();
       expect(send).toHaveBeenCalledWith({
         type: 'vscode/open',
         payload: { path, kind: 'file', exact: true, requestId: expect.any(Number) },
@@ -1991,8 +2249,10 @@ $$`,
           data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
         })
       );
+      flushSolid();
     } finally {
       document.removeEventListener('click', hostClick);
+      flushSolid();
     }
   });
 
@@ -2020,13 +2280,16 @@ $$`,
       ];
       const send = vi.fn();
       window.__sendToExtension = send;
-      setState('editorContext', {
-        workspacePath: primary,
-        workspaceFolders: [
-          { name: 'amplify', path: primary },
-          { name: 'df-data-pipelines', path: sibling },
-        ],
-      });
+      setState(
+        storePath('editorContext', {
+          workspacePath: primary,
+          workspaceFolders: [
+            { name: 'amplify', path: primary },
+            { name: 'df-data-pipelines', path: sibling },
+          ],
+        })
+      );
+      flushSolid();
       cleanup = render(
         () =>
           MarkdownRenderer({
@@ -2037,6 +2300,7 @@ $$`,
           }),
         container!
       );
+      flushSolid();
 
       const links = container!.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
       expect(links).toHaveLength(citations.length);
@@ -2048,13 +2312,17 @@ $$`,
           varroFilePath: path,
         });
         link.dispatchEvent(new MouseEvent('mouseenter'));
+        flushSolid();
         await vi.waitFor(() =>
           expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
             `${path} (line ${line})`
           )
         );
+        flushSolid();
         link.dispatchEvent(new MouseEvent('mouseleave'));
+        flushSolid();
         dispatchAnchorClick(link);
+        flushSolid();
         expect(send).toHaveBeenLastCalledWith({
           type: 'vscode/open',
           payload: { path, line, kind: 'file', exact: true, requestId: expect.any(Number) },
@@ -2065,6 +2333,7 @@ $$`,
             data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
           })
         );
+        flushSolid();
       }
     }
   );
@@ -2076,8 +2345,10 @@ $$`,
       () => MarkdownRenderer({ content: '<a href="/other/query.py#L91-L105">Open query</a>' }),
       container!
     );
+    flushSolid();
 
     dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
@@ -2095,6 +2366,7 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+    flushSolid();
   });
 
   it.each([
@@ -2108,33 +2380,40 @@ $$`,
     const send = vi.fn();
     window.__sendToExtension = send;
     cleanup = render(() => MarkdownRenderer({ content: `[Open query](${href})` }), container!);
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a');
     expect(link?.hasAttribute('href')).toBe(false);
     dispatchAnchorClick(link);
+    flushSolid();
     expect(send).not.toHaveBeenCalled();
   });
 
   it('links file references with parenthesized line numbers', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () => MarkdownRenderer({ content: 'Review go.mod (line 3).', cacheByContent: true }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('go.mod (line 3)');
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
 
     dispatchAnchorClick(link);
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
@@ -2153,6 +2432,7 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+    flushSolid();
   });
 
   it.each([
@@ -2163,29 +2443,37 @@ $$`,
   ])('preserves the relative reference and range in %s', (content) => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('editorContext', 'workspacePath', '/other-workspace');
-    setState('activeSessionId', 'different-session');
-    setState('sessions', [
-      {
-        id: 'owner-session',
-        projectID: 'project',
-        directory: '/repo/packages/app',
-        title: 'Nested session',
-        version: '1',
-        time: { created: 0, updated: 0 },
-      },
-    ]);
+    setState(storePath('editorContext', 'workspacePath', '/other-workspace'));
+    flushSolid();
+    setState(storePath('activeSessionId', 'different-session'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'owner-session',
+          projectID: 'project',
+          directory: '/repo/packages/app',
+          title: 'Nested session',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      ])
+    );
+    flushSolid();
     cleanup = render(
       () => MarkdownRenderer({ content, sessionID: 'owner-session', cacheByContent: true }),
       container!
     );
+    flushSolid();
     const link = container!.querySelector<HTMLAnchorElement>('a')!;
     expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
       content.startsWith('perceiver')
         ? '/repo/packages/app/perceiver_lang_io.py'
         : '/repo/packages/app/models/perceiver_lang_io.py'
     );
+    flushSolid();
     dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
@@ -2201,12 +2489,14 @@ $$`,
         requestId: expect.any(Number),
       },
     });
+    flushSolid();
     const requestId = send.mock.lastCall![0].payload.requestId;
     window.dispatchEvent(
       new MessageEvent('message', {
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+    flushSolid();
   });
 
   it.each(['/repo', '/repo/packages/app', '/worktrees/feature', '/scratch/no-project'])(
@@ -2214,8 +2504,10 @@ $$`,
     (directory) => {
       const send = vi.fn();
       window.__sendToExtension = send;
-      setState('activeSessionId', 'other');
-      setState('editorContext', 'workspacePath', '/other');
+      setState(storePath('activeSessionId', 'other'));
+      flushSolid();
+      setState(storePath('editorContext', 'workspacePath', '/other'));
+      flushSolid();
       cleanup = render(
         () =>
           MarkdownRenderer({
@@ -2225,7 +2517,9 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
+      flushSolid();
       expect(send).toHaveBeenCalledWith({
         type: 'vscode/open',
         payload: {
@@ -2243,6 +2537,7 @@ $$`,
           data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
         })
       );
+      flushSolid();
     }
   );
 
@@ -2254,8 +2549,10 @@ $$`,
   ])('scopes cached link metadata to each session directory for %s', async (content) => {
     vi.useFakeTimers();
     const sanitize = vi.spyOn(DOMPurify, 'sanitize');
-    setState('activeSessionId', 'other');
-    setState('editorContext', 'workspacePath', '/other-workspace');
+    setState(storePath('activeSessionId', 'other'));
+    flushSolid();
+    setState(storePath('editorContext', 'workspacePath', '/other-workspace'));
+    flushSolid();
     for (const directory of ['/repo/packages/app', '/worktrees/feature', '/repo/packages/app']) {
       cleanup = render(
         () =>
@@ -2267,6 +2564,7 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       const link = container!.querySelector<HTMLAnchorElement>('a')!;
       expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
         `${directory}/src/app.ts`
@@ -2274,13 +2572,18 @@ $$`,
       if (link.classList.contains('file-path-link')) {
         expect(link.getAttribute('href')).toBe(`${directory}/src/app.ts:10-12`);
         link.dispatchEvent(new MouseEvent('mouseenter'));
+        flushSolid();
         await vi.advanceTimersByTimeAsync(400);
+        flushSolid();
         expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
           `${directory}/src/app.ts (line 10-12)`
         );
         link.dispatchEvent(new MouseEvent('mouseleave'));
+        flushSolid();
       }
+      flushSolid();
       cleanup();
+      flushSolid();
       cleanup = undefined;
     }
     expect(sanitize).toHaveBeenCalledTimes(2);
@@ -2297,6 +2600,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     const link = container!.querySelector<HTMLAnchorElement>('a')!;
     expect(link.getAttribute('href')).toBe('/shared/src/app.ts:10-12');
     expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
@@ -2318,6 +2622,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     const linkPaths = () =>
       Array.from(container!.querySelectorAll('a')).map(
         (link) => JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath
@@ -2327,31 +2632,38 @@ $$`,
       '/repo/packages/app/src/tail.ts',
     ]);
     setDirectory('/worktrees/feature');
+    flushSolid();
     await vi.waitFor(() =>
       expect(linkPaths()).toEqual([
         '/worktrees/feature/src/stable.ts',
         '/worktrees/feature/src/tail.ts',
       ])
     );
+    flushSolid();
   });
 
   it('keeps an ambiguous link clickable after cancelling the file picker', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
     cleanup = render(() => MarkdownRenderer({ content: '`shared.ts`' }), container!);
+    flushSolid();
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     dispatchAnchorClick(link);
+    flushSolid();
     const requestId = send.mock.lastCall![0].payload.requestId;
     window.dispatchEvent(
       new MessageEvent('message', {
         data: { type: 'vscode/open-result', payload: { requestId, status: 'cancelled' } },
       })
     );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(link?.classList.contains('is-unavailable')).toBe(false);
     expect(link?.hasAttribute('href')).toBe(true);
     expect(showSessionActionFeedbackMock).not.toHaveBeenCalled();
     dispatchAnchorClick(link);
+    flushSolid();
     expect(send).toHaveBeenCalledTimes(2);
     const retryId = send.mock.lastCall![0].payload.requestId;
     window.dispatchEvent(
@@ -2359,24 +2671,30 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId: retryId, status: 'opened' } },
       })
     );
+    flushSolid();
   });
 
   it('disables a missing file link and shows warning feedback', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     cleanup = render(
       () => MarkdownRenderer({ content: '`missing-file.ts`', cacheByContent: true }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     dispatchAnchorClick(link);
+    flushSolid();
     // SAFETY: The fixture provides the { payload: { requestId: number } } fields read by this statement.
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
       .requestId;
@@ -2385,48 +2703,59 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId, status: 'unavailable' } },
       })
     );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(link?.classList.contains('is-unavailable')).toBe(true);
     expect(link?.getAttribute('aria-disabled')).toBe('true');
     expect(link?.hasAttribute('href')).toBe(false);
     expect(link?.hasAttribute('title')).toBe(false);
     link?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.waitFor(() =>
       expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
         'File not found: missing-file.ts'
       )
     );
+    flushSolid();
     link?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
       'File not found: missing-file.ts',
       'warning'
     );
 
     dispatchAnchorClick(link);
+    flushSolid();
     expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('warns when a file-path-link payload fails to parse', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link).toBeInstanceOf(HTMLAnchorElement);
     link!.dataset.file = '{invalid';
 
     dispatchAnchorClick(link);
+    flushSolid();
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith({
@@ -2446,17 +2775,21 @@ $$`,
   ])('selects a workspace session when clicking %s in Markdown', (target) => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('activeSessionId', 'ses_origin123');
-    setState('sessions', [
-      {
-        id: 'ses_found123',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Permission request states',
-        version: '1',
-        time: { created: 0, updated: 0 },
-      },
-    ]);
+    setState(storePath('activeSessionId', 'ses_origin123'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'ses_found123',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Permission request states',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -2467,6 +2800,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
     expect(link?.textContent).toBe('Permission request states');
@@ -2487,6 +2821,7 @@ $$`,
     const element = container!.querySelector(target);
     expect(element).not.toBeNull();
     element!.dispatchEvent(click);
+    flushSolid();
     expect(click.defaultPrevented).toBe(true);
     expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('ses_found123', {
       directory: '/repo',
@@ -2506,22 +2841,29 @@ $$`,
     };
     const lookup = vi.spyOn(client.varro.session, 'reference').mockResolvedValue(reference);
     const open = vi.spyOn(client.varro.session, 'openReference').mockResolvedValue();
-    setState('serverStatus', { state: 'running', url: 'http://localhost/markdown-references' });
-    setState('activeSessionId', 'ses_origin');
+    setState(
+      storePath('serverStatus', { state: 'running', url: 'http://localhost/markdown-references' })
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'ses_origin'));
+    flushSolid();
     cleanup = render(
       () => MarkdownRenderer({ content: 'Check this too ses_external123', cacheByContent: true }),
       container!
     );
+    flushSolid();
     await vi.waitFor(() =>
       expect(container?.querySelector('a.session-reference-link')?.textContent).toBe(
         'Review release · other'
       )
     );
+    flushSolid();
     const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
     expect(lookup).toHaveBeenCalledExactlyOnceWith('ses_external123');
     expect(link?.dataset.sessionDirectory).toBe('/projects/other');
     expect(link?.dataset.sessionExternal).toBe('true');
     dispatchAnchorClick(link);
+    flushSolid();
     expect(open).toHaveBeenCalledExactlyOnceWith('ses_external123');
     expect(selectSessionMock).not.toHaveBeenCalled();
     expect(getDirectSessionReturnId('ses_external123')).toBeNull();
@@ -2531,21 +2873,26 @@ $$`,
   it('updates session references when a matching workspace session is discovered', async () => {
     const content = 'Open ses_discovered123';
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
 
     expect(container?.querySelector('a.session-reference-link')).toBeNull();
     expect(container?.textContent).toContain('ses_discovered123');
 
-    setState('sessions', [
-      {
-        id: 'ses_discovered123',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Discovered session',
-        version: '1',
-        time: { created: 0, updated: 0 },
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'ses_discovered123',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Discovered session',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      ])
+    );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('a.session-reference-link')?.textContent).toBe(
       'Discovered session'
@@ -2554,22 +2901,28 @@ $$`,
 
   it('invalidates finalized multi-reference Markdown after renaming and removing sessions', async () => {
     setState(
-      'sessions',
-      ['first', 'second'].map((name) => ({
-        id: `ses_${name}`,
-        projectID: 'project-1',
-        directory: '/repo',
-        title: name,
-        version: '1',
-        time: { created: 0, updated: 0 },
-      }))
+      storePath(
+        'sessions',
+        ['first', 'second'].map((name) => ({
+          id: `ses_${name}`,
+          projectID: 'project-1',
+          directory: '/repo',
+          title: name,
+          version: '1',
+          time: { created: 0, updated: 0 },
+        }))
+      )
     );
+    flushSolid();
     const content = 'Open ses_first and session:ses_second.';
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
     expect(container?.querySelectorAll('a.session-reference-link')).toHaveLength(2);
 
-    setState('sessions', 0, 'title', 'Renamed first');
+    setState(storePath('sessions', 0, 'title', 'Renamed first'));
+    flushSolid();
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    flushSolid();
     expect(container?.querySelector('[data-session-id="ses_first"]')?.textContent).toBe(
       'Renamed first'
     );
@@ -2577,8 +2930,10 @@ $$`,
       '#session/ses_second'
     );
 
-    setState('sessions', []);
+    setState(storePath('sessions', []));
+    flushSolid();
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    flushSolid();
     expect(container?.querySelector('a.session-reference-link')).toBeNull();
     expect(container?.textContent).toContain(content);
   });
@@ -2591,11 +2946,13 @@ $$`,
       () => MarkdownRenderer({ content: '[External-ish](//example.test/path)' }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector('a');
     expect(link?.hasAttribute('href')).toBe(false);
 
     dispatchAnchorClick(link);
+    flushSolid();
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -2613,6 +2970,7 @@ $$`,
           }),
         container!
       );
+      flushSolid();
 
       const links = Array.from(container?.querySelectorAll<HTMLAnchorElement>('a') ?? []);
       expect(links).toHaveLength(3);
@@ -2627,6 +2985,7 @@ $$`,
         });
         expect(link.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
         dispatchAnchorClick(link);
+        flushSolid();
         expect(send).toHaveBeenLastCalledWith({
           type: 'vscode/open-external',
           payload: { url },
@@ -2649,16 +3008,19 @@ $$`,
           }),
         container!
       );
+      flushSolid();
 
       // VS Code's window listener forwards anchor clicks even when defaultPrevented is true.
       const hostLinkHandler = vi.fn();
       window.addEventListener('click', hostLinkHandler);
+      flushSolid();
       try {
         const links = container!.querySelectorAll<HTMLAnchorElement>('a.external-link');
         expect(links).toHaveLength(3);
         for (const link of links) {
           const event = new MouseEvent('click', { bubbles: true, cancelable: true });
           link.querySelector('.link-leading-label')!.dispatchEvent(event);
+          flushSolid();
           expect(event.defaultPrevented).toBe(true);
         }
         expect(send.mock.calls).toEqual(
@@ -2667,6 +3029,7 @@ $$`,
         expect(hostLinkHandler).not.toHaveBeenCalled();
       } finally {
         window.removeEventListener('click', hostLinkHandler);
+        flushSolid();
       }
     }
   );
@@ -2676,18 +3039,23 @@ $$`,
       () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('a.file-path-link')?.getAttribute('href')).toBe(
       './src/webview/App.tsx'
     );
 
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const link = container?.querySelector('a.file-path-link');
     expect(link?.getAttribute('href')).toBe('/repo/src/webview/App.tsx');
@@ -2767,6 +3135,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     for (const complete of [false, true]) {
       if (complete) {
@@ -2774,9 +3143,13 @@ $$`,
           'The new regressions pass, including the two `app.ts` example paths and ordinary references that should stay clickable. ' +
             'All 341 renderer tests pass, and both type checks are clean.'
         );
+        flushSolid();
         setStreaming(false);
+        flushSolid();
       }
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(container!.querySelector('code')?.textContent).toBe('app.ts');
       expect(container!.querySelector('a.file-path-link')).toBeNull();
     }
@@ -2803,12 +3176,15 @@ $$`,
   it('links file-only inline code but not ordinary inline or fenced code', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -2818,7 +3194,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(1);
@@ -2832,6 +3210,7 @@ $$`,
     expect(container?.textContent).toContain('spotlight');
 
     dispatchAnchorClick(link);
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
@@ -2850,15 +3229,19 @@ $$`,
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+    flushSolid();
   });
 
   it('does not linkify dotted API identifiers as files', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -2869,6 +3252,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('a.file-path-link')).toBeNull();
     expect(container?.textContent).toContain('workspace.fs');
@@ -2925,13 +3309,17 @@ $$`,
       path: '/repo/README.md',
     },
   ])('provides a native copy-path target for $content', ({ content, label, path }) => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
 
     const link = container!.querySelector('a.file-path-link');
     expect(link?.textContent).toBe(label);
@@ -2944,12 +3332,15 @@ $$`,
   });
 
   it('linkifies only text nodes and leaves path-looking attributes unchanged', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const html = __parseMarkdownForTests(
       '<span title="src/webview/App.tsx" aria-label="docs/guide.md">Metadata</span> and src/shared/protocol.ts.',
       { cacheByContent: false }
@@ -2976,6 +3367,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     const link = container!.querySelector('a');
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
@@ -2995,11 +3387,14 @@ $$`,
 
     const oversized = 'A'.repeat(25_000);
     cleanup = render(() => MarkdownRenderer({ content: '```txt\nplaceholder\n```' }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const button = container?.querySelector<HTMLButtonElement>('button[data-copy]');
     button!.dataset.copyText = `line%201%0D%0Aline%202%00${encodeURIComponent(oversized)}`;
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(writeText).toHaveBeenCalledTimes(1);
     const copied = writeText.mock.calls[0]?.[0];
@@ -3020,7 +3415,9 @@ $$`,
       () => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const button = container?.querySelector<HTMLButtonElement>('button[data-copy]');
     expect(button).toBeTruthy();
@@ -3028,9 +3425,11 @@ $$`,
 
     vi.useFakeTimers();
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expectUiIcon(button?.firstElementChild, checkIcon, 14);
 
     vi.advanceTimersByTime(1500);
+    flushSolid();
     expectUiIcon(button?.firstElementChild, copyIcon, 14);
   });
 
@@ -3039,7 +3438,9 @@ $$`,
       () => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }),
       container!
     );
+    flushSolid();
     await vi.waitFor(() => expect(container?.querySelector('.hljs-keyword')).not.toBeNull());
+    flushSolid();
 
     const code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.classList.contains('hljs')).toBe(true);
@@ -3055,7 +3456,9 @@ $$`,
     ['cpp', '#include <iostream>\nint main() { return 0; }'],
   ])('highlights common language %s', async (lang, source) => {
     await requestHighlight(source, lang);
+    flushSolid();
     expect(renderHighlightedCodeHtml(source, lang)).toContain('hljs-');
+    flushSolid();
   });
 
   it.each([
@@ -3066,11 +3469,14 @@ $$`,
     ['yml', 'key: value', 'hljs-attr'],
   ])('highlights language alias %s', async (lang, source, expectedClass) => {
     await requestHighlight(source, lang);
+    flushSolid();
     expect(renderHighlightedCodeHtml(source, lang)).toContain(expectedClass);
+    flushSolid();
   });
 
   it('handles explicit plain text languages without highlighting', () => {
     expect(renderHighlightedCodeHtml('plain <text>', 'txt')).toBe('plain &lt;text&gt;');
+    flushSolid();
   });
 
   it('reuses sanitized html for cached finalized content across remounts', async () => {
@@ -3078,30 +3484,39 @@ $$`,
     const content = 'Finalized cache test `7mwnc`';
 
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(sanitizeSpy).toHaveBeenCalledTimes(1);
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
 
     container = document.createElement('div');
     document.body.appendChild(container);
 
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(sanitizeSpy).toHaveBeenCalledTimes(1);
   });
 
   it('separates finalized markdown cache entries by render options', async () => {
     await requestHighlight('const value = 1;', 'ts');
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     const pathContent = 'See (./src/example.ts)';
     const withoutPathLinks = __parseMarkdownForTests(pathContent, {
@@ -3130,21 +3545,28 @@ $$`,
 
   it('separates code block cache entries by highlighting mode', async () => {
     await requestHighlight('const value = 1;', 'ts');
+    flushSolid();
     const params = { text: 'const value = 1;', lang: 'ts' };
     expect(renderCodeBlockHtml({ ...params, disableHighlighting: true })).not.toContain(
       'hljs-keyword'
     );
+    flushSolid();
     expect(renderCodeBlockHtml(params)).toContain('hljs-keyword');
+    flushSolid();
   });
 
   it('does not cache a pending code block as a completed highlighted block', async () => {
     const params = { text: 'const pendingCacheValue = 2;', lang: 'ts' };
     expect(renderCodeBlockHtml(params)).toContain('data-highlight-lang');
+    flushSolid();
     await requestHighlight(params.text, params.lang);
+    flushSolid();
     const completed = renderCodeBlockHtml(params);
+    flushSolid();
     expect(completed).toContain('hljs-keyword');
     expect(completed).not.toContain('data-highlight-lang');
     expect(renderCodeBlockHtml(params)).toBe(completed);
+    flushSolid();
   });
 
   it('does not cache transient sanitization across remounts', async () => {
@@ -3152,19 +3574,24 @@ $$`,
     const content = 'Streaming cache bypass test `d9q2p`';
 
     cleanup = render(() => MarkdownRenderer({ content }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const callsAfterFirstMount = sanitizeSpy.mock.calls.length;
     expect(callsAfterFirstMount).toBeGreaterThan(0);
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
 
     container = document.createElement('div');
     document.body.appendChild(container);
 
     cleanup = render(() => MarkdownRenderer({ content }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(sanitizeSpy.mock.calls.length).toBe(callsAfterFirstMount + 1);
   });
@@ -3174,7 +3601,9 @@ $$`,
       () => MarkdownRenderer({ content: 'First paragraph\n\nSecond paragraph' }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const stableSegment = container?.querySelector('[data-markdown-segment="stable"]');
     const tailSegment = container?.querySelector('[data-markdown-segment="tail"]');
@@ -3194,7 +3623,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.textContent).toContain('Status follows.');
     expect(container?.textContent).toContain('No.');
@@ -3204,13 +3635,17 @@ $$`,
     expect(container?.querySelector('table')).toBeNull();
 
     setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.textContent).toContain('Action');
     expect(container?.querySelector('.streaming-markdown-pending')).not.toBeNull();
     expect(container?.querySelector('table')).toBeNull();
 
     setContent('Status follows.\n\n| No. | Area | State | Lead | Action |\n|---|---|---|---|---|');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('table')).not.toBeNull();
     expect(container?.querySelector('thead')?.textContent).toContain('Action');
@@ -3234,7 +3669,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('table')).not.toBeNull();
     expect(container?.querySelectorAll('tbody tr')).toHaveLength(0);
@@ -3244,7 +3681,9 @@ $$`,
       'Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Active |\n| Next | ' +
         'Still streaming a long description. '.repeat(30)
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelectorAll('tbody tr')).toHaveLength(1);
     expect(container?.querySelector('tbody')?.textContent).toContain('Renderer');
@@ -3252,7 +3691,9 @@ $$`,
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
     setContent('Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Active |\n');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('tbody')?.textContent).toContain('Renderer');
     expect(container?.querySelector('tbody')?.textContent).toContain('Active');
@@ -3261,11 +3702,15 @@ $$`,
     setContent(
       'Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Active |\n| Final | Done |'
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelectorAll('tbody tr')).toHaveLength(1);
 
     setCompleted(true);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelectorAll('tbody tr')).toHaveLength(2);
     expect(container?.querySelector('tbody')?.textContent).toContain('Done');
   });
@@ -3275,7 +3720,9 @@ $$`,
       () => MarkdownRenderer({ content: 'Status follows.\n\n| Name | State\n| --- | ---' }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('table')).not.toBeNull();
     expect(container?.querySelector('thead')?.textContent).toContain('State');
@@ -3287,7 +3734,9 @@ $$`,
         MarkdownRenderer({ content: 'Status follows.\n\n| Name \\| Alias | State\n| --- | ---' }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('table')).not.toBeNull();
     expect(container?.querySelector('thead')?.textContent).toContain('Name | Alias');
@@ -3301,7 +3750,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('table')).not.toBeNull();
   });
@@ -3317,18 +3768,24 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('h2')).toBeNull();
     expect(container?.querySelector('.streaming-markdown-pending')?.textContent.trim()).toBe('##');
 
     setContent('Stable text.\n\n## 40. Delivery\n\n```ts\nconst ready = true;\n``');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('h2')?.textContent).toBe('40. Delivery');
     expect(container?.querySelector('code')?.textContent?.trim()).toBe('const ready = true;');
     expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe('``');
 
     setContent('Stable text.\n\n## 40. Delivery\n\n```ts\nconst ready = true;\n```');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('code')?.textContent?.trim()).toBe('const ready = true;');
   });
 
@@ -3345,13 +3802,17 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(container?.textContent).toContain('6');
 
     setContent(`${base}\n\n6.`);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const marker = container?.querySelector('.streaming-markdown-pending');
     expect(marker?.textContent).toBe('6.');
@@ -3359,13 +3820,17 @@ $$`,
     expect(marker?.classList).not.toContain('streaming-markdown-pending-hidden');
 
     setContent(`${base}\n\n6. A bounded task identifies`);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('ol li')?.textContent).toBe('A bounded task identifies');
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
     setContent(`${base}\n\n6. A bounded task identifies\n`);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('ol li')?.textContent).toBe('A bounded task identifies');
   });
@@ -3383,14 +3848,18 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const stableSegment = container?.querySelector('[data-markdown-segment="stable"]');
     const initialStableHtml = stableSegment?.innerHTML;
     const initialSanitizeCalls = sanitizeSpy.mock.calls.length;
 
     setContent('First paragraph\n\nSecond paragraph extended');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('[data-markdown-segment="stable"]')?.innerHTML).toBe(
       initialStableHtml
@@ -3400,17 +3869,22 @@ $$`,
   });
 
   it('linkifies complete file references in the streaming tail', async () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     cleanup = render(
       () => MarkdownRenderer({ content: 'Stable paragraph\n\n`./src/webview/App.tsx`' }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const stableLinks = container?.querySelectorAll(
       '[data-markdown-segment="stable"] a.file-path-link'
@@ -3429,12 +3903,15 @@ $$`,
     const [content, setContent] = createSignal(
       'The related tests are in `src/webview/components/Markdown'
     );
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -3445,7 +3922,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const paragraph = container?.querySelector('[data-markdown-segment="tail"] p');
     expect(paragraph?.textContent).not.toContain('src/webview/components/Markdown');
@@ -3453,12 +3932,16 @@ $$`,
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.textContent).not.toContain('MarkdownRenderer.test.ts');
     expect(container?.querySelector('.streaming-markdown-pending')).not.toBeNull();
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts`');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('src/webview/components/MarkdownRenderer.test.ts');
@@ -3497,7 +3980,9 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
 
       // The pending block shows dots without painting an orphan list marker.
       const paintedItems = () =>
@@ -3509,7 +3994,9 @@ $$`,
       expect(paintedItems()).toHaveLength(pendingItems);
 
       setContent(`${content()}tor\` is not a model-change event.`);
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(container?.querySelector('.streaming-markdown-pending-block')).toBeNull();
       expect(paintedItems()).toHaveLength(visibleItems + 1);
       expect(container?.querySelector('li:last-child code')?.textContent).toBe('Open as Editor');
@@ -3530,7 +4017,9 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
 
       // An empty item paints an orphan marker and gives the paragraph list spacing that
       // disappears again when the item's first token is still hidden.
@@ -3544,7 +4033,9 @@ $$`,
       ).toBe('');
 
       setContent(`Two corrections:\n\n- \`Open as Edi`);
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(visibleItems()).toHaveLength(0);
       expectStreamingIndicator(container!);
       expect(
@@ -3553,7 +4044,9 @@ $$`,
       expect(container?.querySelector('p.streaming-markdown-pending-list')).not.toBeNull();
 
       setContent(`Two corrections:\n\n- \`Open as Editor\` is not a model-change event.`);
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(visibleItems()).toHaveLength(1);
       expect(visibleItems()[0]?.querySelector('code')?.textContent).toBe('Open as Editor');
     }
@@ -3577,10 +4070,13 @@ $$`,
           }),
         container!
       );
+      flushSolid();
 
       for (const chunk of ['', ...chunks]) {
         setContent(content() + chunk);
+        flushSolid();
         await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        flushSolid();
         expectStreamingIndicator(container!);
         expect(Array.from(container!.querySelectorAll('code'), (code) => code.textContent)).toEqual(
           ['npm run lint']
@@ -3589,7 +4085,9 @@ $$`,
 
       // The double-backtick case receives the first closing backtick in a separate delta.
       setContent(`${content()}\` now.`);
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
       expect(Array.from(container!.querySelectorAll('code'), (code) => code.textContent)).toEqual([
         'npm run lint',
@@ -3613,11 +4111,15 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(container?.textContent).not.toContain(tag);
       expect(container?.textContent).toContain('Stable paragraph.');
       setCompleted(true);
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     }
   );
@@ -3629,7 +4131,9 @@ $$`,
         () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
         container!
       );
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
       expect(container?.textContent).toContain(content === 'a < 3' ? 'a < 3' : '<details');
     }
@@ -3645,7 +4149,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.textContent).toBe('Literal <details\n');
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
   });
@@ -3661,12 +4167,16 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expectStreamingIndicator(container!);
     expect(container?.textContent).not.toContain('`npm run test');
 
     setContent(`${content()}\``);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(container?.querySelector('ol li code')?.textContent).toBe('npm run test');
   });
@@ -3683,11 +4193,15 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expectStreamingIndicator(container!);
 
     setCompleted(true);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(container?.querySelector('code')).toBeNull();
     expect(container?.textContent).toContain('Malformed `inline content');
@@ -3697,12 +4211,15 @@ $$`,
     const [content, setContent] = createSignal(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation'
     );
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -3713,7 +4230,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.textContent).not.toContain('the renderer implementation');
     expectStreamingIndicator(container!);
@@ -3722,20 +4241,26 @@ $$`,
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation]'
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.textContent).not.toContain('the renderer implementation');
     expectStreamingIndicator(container!);
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/'
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.textContent).not.toContain('src/webview/components/');
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/MarkdownRenderer.tsx) or [its test'
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.textContent).toContain('the renderer implementation');
     expect(container?.textContent).not.toContain('its test');
     expectStreamingIndicator(container!);
@@ -3744,7 +4269,9 @@ $$`,
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/MarkdownRenderer.tsx) or [its test suite](src/webview/components/MarkdownRenderer.test.ts)'
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
@@ -3755,12 +4282,15 @@ $$`,
   });
 
   it('reserves trailing bare paths and linkifies them when complete', async () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const cases = [
       {
         partial: 'packages/client/components/FileTypeIcon',
@@ -3800,14 +4330,18 @@ $$`,
           }),
         container!
       );
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
 
       expect(container?.textContent).not.toContain(testCase.partial);
       expectStreamingIndicator(container!);
       expect(container?.querySelector('a.file-path-link')).toBeNull();
 
       setContent(`Bare path: ${testCase.complete} `);
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
 
       const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
       expect(link?.textContent).toBe(testCase.complete);
@@ -3815,6 +4349,7 @@ $$`,
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
       cleanup();
+      flushSolid();
       cleanup = undefined;
       container!.innerHTML = '';
     }
@@ -3831,14 +4366,18 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expectStreamingIndicator(container!);
     expect(container?.textContent).not.toContain('https://example.test/reference/Mark');
     expect(container?.querySelector('a[href^="https://example.test"]')).toBeNull();
 
     setContent('Docs: https://example.test/reference/Markdown ');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(
@@ -3857,31 +4396,40 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expectStreamingIndicator(container!);
     expect(container?.textContent).not.toContain('MarkdownRenderer.t');
     expect(container?.querySelector('a.file-path-link')).toBeNull();
 
     setContent('File: MarkdownRenderer.tsx ');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(container?.querySelector('a.file-path-link')?.textContent).toBe('MarkdownRenderer.tsx');
   });
 
   it('links Windows paths while reserving a trailing URL', async () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const content =
       'Windows: `C:\\work\\project\\App.tsx` and [open it](C:\\work\\project\\App.tsx)\n\nURL: https://example.test/folder/App';
 
     cleanup = render(() => MarkdownRenderer({ content }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
@@ -3902,7 +4450,9 @@ $$`,
     ].join('\n');
 
     cleanup = render(() => MarkdownRenderer({ content }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.textContent).toContain('An escaped `backtick remains visible.');
     expect(container?.textContent).toContain('src/webview/components/Markdown');
@@ -3914,7 +4464,9 @@ $$`,
       () => MarkdownRenderer({ content: 'Malformed `inline content', cacheByContent: true }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(container?.textContent).toContain('Malformed `inline content');
   });
@@ -3923,12 +4475,15 @@ $$`,
     const [completed, setCompleted] = createSignal(false);
     const content =
       '- Core protocol: `src/shared/protocol.ts` - shared contracts\n- Start with `docs/onboarding-verification.md` for onboarding.';
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -3940,14 +4495,18 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     const streamingLinks = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(streamingLinks).toHaveLength(2);
     expect(streamingLinks?.[0]?.textContent).toBe('src/shared/protocol.ts');
     expect(streamingLinks?.[1]?.textContent).toBe('docs/onboarding-verification.md');
 
     setCompleted(true);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
     expect(links).toHaveLength(2);
@@ -3972,16 +4531,21 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(resolve));
+    flushSolid();
     const stable = container!.querySelector<HTMLElement>('[data-markdown-segment="stable"]')!;
     const first = stable.firstElementChild;
     expect(stable.dataset.markdownTailTag).toBe('p');
     const mutations: MutationRecord[] = [];
     const observer = new MutationObserver((records) => mutations.push(...records));
     observer.observe(stable, { attributes: true, attributeFilter: ['data-markdown-tail-tag'] });
+    flushSolid();
     try {
       setContent('Stable paragraph.\n\nLive paragraph. More text.');
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(resolve));
+      flushSolid();
       expect(stable.firstElementChild).toBe(first);
       expect(mutations).toHaveLength(0);
       for (const [tail, tag] of [
@@ -3990,11 +4554,15 @@ $$`,
         ['# Heading', 'h1'],
       ]) {
         setContent(`Stable paragraph.\n\n${tail}`);
+        flushSolid();
         await new Promise((resolve) => requestAnimationFrame(resolve));
+        flushSolid();
         expect(stable.dataset.markdownTailTag).toBe(tag);
       }
       setContent('');
+      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(resolve));
+      flushSolid();
       expect(stable.dataset.markdownTailTag).toBe('');
     } finally {
       observer.disconnect();
@@ -4004,12 +4572,15 @@ $$`,
   it('preserves stable markdown DOM when streaming completes', async () => {
     const [completed, setCompleted] = createSignal(false);
     const content = 'Stable paragraph.\n\nReview `src/shared/protocol.ts`.';
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -4021,7 +4592,9 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const stableSegment = container?.querySelector<HTMLElement>('[data-markdown-segment="stable"]');
     const stableParagraph = stableSegment?.firstElementChild;
@@ -4030,7 +4603,9 @@ $$`,
     expect(streamingLink?.textContent).toBe('src/shared/protocol.ts');
 
     setCompleted(true);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expect(stableSegment?.firstElementChild).toBe(stableParagraph);
     expect(stableSegment?.style.display).toBe('contents');
@@ -4040,12 +4615,15 @@ $$`,
   it('does not revert final rendering when completion briefly regresses', async () => {
     const [completed, setCompleted] = createSignal(false);
     const content = 'Stable paragraph.\n\nReview `src/shared/protocol.ts`.';
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -4057,21 +4635,29 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     const streamingLink = container?.querySelector('a.file-path-link');
     expect(streamingLink?.textContent).toBe('src/shared/protocol.ts');
 
     setCompleted(true);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     const finalLink = container?.querySelector('a.file-path-link');
     expect(finalLink).toBe(streamingLink);
 
     setCompleted(false);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('a.file-path-link')).toBe(finalLink);
 
     setCompleted(true);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
     expect(container?.querySelector('a.file-path-link')).toBe(finalLink);
   });
 
@@ -4092,11 +4678,16 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     setForceStreaming(true);
+    flushSolid();
     setContent('Files: `src/webview/components/MarkdownRenderer');
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     expectStreamingIndicator(container!);
     expect(container?.textContent).not.toContain('MarkdownRenderer');
@@ -4104,12 +4695,15 @@ $$`,
   });
 
   it('canonicalizes explicit path labels containing inline-code backticks', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -4119,6 +4713,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('protocol.ts');
@@ -4128,12 +4723,15 @@ $$`,
   });
 
   it('renders the target session file formats as isolated canonical links', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const content = [
       '- Type declaration: [`src/webview/global.d.ts`](src/webview/global.d.ts) - browser globals',
       '- Main readme: [`README.md`](README.md) - project overview',
@@ -4144,6 +4742,7 @@ $$`,
     ].join('\n');
 
     cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+    flushSolid();
 
     const links = Array.from(
       container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link') ?? []
@@ -4163,12 +4762,15 @@ $$`,
   });
 
   it('removes escaped backticks around plain file references', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -4178,6 +4780,7 @@ $$`,
         }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('src/webview/global.d.ts');
@@ -4190,7 +4793,9 @@ $$`,
     let content = 'Before\n\n```ts\nconst value = 1;';
 
     cleanup = render(() => MarkdownRenderer({ content }), container!);
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     let code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.classList.contains('hljs')).toBe(true);
@@ -4199,9 +4804,12 @@ $$`,
 
     content = 'Before\n\n```ts\nconst value = 1;\n```';
     cleanup?.();
+    flushSolid();
     container!.innerHTML = '';
     cleanup = render(() => MarkdownRenderer({ content }), container!);
+    flushSolid();
     await vi.waitFor(() => expect(container?.querySelector('.hljs-keyword')).not.toBeNull());
+    flushSolid();
 
     code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
@@ -4221,10 +4829,14 @@ $$`,
         }),
       container!
     );
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
 
     setContent('Stable paragraph\n\n```ts\nconst value = 1;\n```');
+    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
 
     let code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.classList.contains('hljs')).toBe(true);
@@ -4232,6 +4844,7 @@ $$`,
     expect(code?.textContent).toBe('const value = 1;');
 
     await vi.advanceTimersByTimeAsync(100);
+    flushSolid();
 
     code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.querySelector('.hljs-keyword')?.textContent).toBe('const');
@@ -4243,7 +4856,9 @@ $$`,
       () => MarkdownRenderer({ content: '```definitely-not-a-lang\nconst value = 1;\n```' }),
       container!
     );
+    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
 
     const code = container?.querySelector('.interactive-result-code-block code');
     expect(code?.classList.contains('hljs')).toBe(true);

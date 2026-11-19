@@ -1,15 +1,16 @@
+import { ariaBoolean } from '../lib/aria';
 import {
+  createEffect,
   For,
   Show,
-  batch,
-  createEffect,
   createMemo,
   createSignal,
   createUniqueId,
   onCleanup,
-  onMount,
+  onSettled,
+  untrack,
 } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import {
   MAX_SIDE_QUESTION_LENGTH,
   MAX_SIDE_QUESTION_ANSWER_LENGTH,
@@ -26,7 +27,7 @@ import type {
 import { apiCall } from '../lib/bridge';
 import { createComposerHistory, getComposerHistoryAction } from '../lib/composer-history';
 import type { ComposerHistoryAction, ComposerSnapshot } from '../lib/composer-history';
-import { trapModalFocus } from '../lib/modal-focus';
+import { modalFocus } from '../lib/modal-focus';
 import {
   sideQuestionPromptUnavailableReason,
   sideQuestionUnavailableReason,
@@ -54,8 +55,9 @@ export function SideQuestionDialog(props: {
   onClose: () => void;
 }) {
   const titleID = createUniqueId();
-  const [question, setQuestion] = createSignal(props.question);
-  const [caret, setCaret] = createSignal(props.question.length);
+  const initialQuestion = untrack(() => props.question);
+  const [question, setQuestion] = createSignal(initialQuestion);
+  const [caret, setCaret] = createSignal(initialQuestion.length);
   const [focused, setFocused] = createSignal(false);
   const [turns, setTurns] = createSignal<TimedSideQuestionTurn[]>([]);
   const [submittedQuestion, setSubmittedQuestion] = createSignal('');
@@ -78,33 +80,29 @@ export function SideQuestionDialog(props: {
   let closeRef: HTMLButtonElement | undefined;
   let bodyRef: HTMLDivElement | undefined;
   const composerHistory = createComposerHistory();
-  const snapshot = (): ComposerSnapshot => ({
-    text: question(),
-    caret: caret(),
+  const snapshot = (text: string, offset: number): ComposerSnapshot => ({
+    text,
+    caret: offset,
     files: [],
     images: [],
   });
-  composerHistory.reset(snapshot());
+  composerHistory.reset(snapshot(initialQuestion, initialQuestion.length));
 
   function resetDraft(text: string) {
-    batch(() => {
-      setQuestion(text);
-      setCaret(text.length);
-      composerHistory.reset(snapshot());
-    });
+    setQuestion(text);
+    setCaret(text.length);
+    composerHistory.reset(snapshot(text, text.length));
   }
 
   function updateDraft(text: string, offset: number) {
-    batch(() => {
-      setQuestion(text.slice(0, MAX_SIDE_QUESTION_LENGTH));
-      setCaret(Math.min(offset, MAX_SIDE_QUESTION_LENGTH));
-      composerHistory.record(snapshot());
-    });
+    const nextText = setQuestion(text.slice(0, MAX_SIDE_QUESTION_LENGTH));
+    const nextCaret = setCaret(Math.min(offset, MAX_SIDE_QUESTION_LENGTH));
+    composerHistory.record(snapshot(nextText, nextCaret));
   }
 
   function rememberCaret(offset: number) {
     setCaret(offset);
-    composerHistory.record(snapshot());
+    composerHistory.record(snapshot(question(), offset));
   }
 
   function handlePaste(event: ClipboardEvent) {
@@ -126,10 +124,8 @@ export function SideQuestionDialog(props: {
   function restoreDraft(action: ComposerHistoryAction) {
     const value = action === 'undo' ? composerHistory.undo() : composerHistory.redo();
     if (!value) return;
-    batch(() => {
-      setQuestion(value.text);
-      setCaret(value.caret);
-    });
+    setQuestion(value.text);
+    setCaret(value.caret);
   }
 
   const focusInput = () =>
@@ -153,29 +149,35 @@ export function SideQuestionDialog(props: {
     setMinimumHeight((previous) => Math.max(previous, height));
   }
 
-  createEffect(() => {
-    if (!showWelcome() || !dialogRef) return;
-    rememberWelcomeHeight();
+  createEffect(showWelcome, (welcome) => {
+    if (!welcome || !dialogRef) return;
+    untrack(rememberWelcomeHeight);
     const observer = new ResizeObserver(rememberWelcomeHeight);
     observer.observe(dialogRef);
-    onCleanup(() => observer.disconnect());
+    return () => observer.disconnect();
   });
 
-  createEffect(() => {
-    const reason = sideQuestionUnavailableReason(false);
-    if (reason && pending()) {
-      controller?.abort();
-      controller = undefined;
-      setPending(false);
-      setError(reason);
-      if (!question()) resetDraft(submittedDraft());
-      setSubmittedQuestion('');
+  createEffect(
+    () => {
+      const reason = sideQuestionUnavailableReason(false);
+      if (!reason || !pending()) return;
+      return { reason, restore: !question() ? submittedDraft() : undefined };
+    },
+    (interruption) => {
+      if (interruption) {
+        controller?.abort();
+        controller = undefined;
+        setPending(false);
+        setError(interruption.reason);
+        if (interruption.restore !== undefined) resetDraft(interruption.restore);
+        setSubmittedQuestion('');
+      }
     }
-  });
+  );
 
   async function ask() {
     const draft = question().trim();
-    if (!draft || pending()) return;
+    if (!draft || controller) return;
     const promptReason = sideQuestionPromptUnavailableReason(draft);
     const text = [draft, contextSent() ? '' : props.context].filter(Boolean).join('\n\n');
     if (promptReason || text.length > MAX_SIDE_QUESTION_LENGTH) {
@@ -261,9 +263,10 @@ export function SideQuestionDialog(props: {
     }
   }
 
-  onMount(() => {
+  const focus = modalFocus({ preventScrollOnRestore: true });
+  onSettled(() => {
     focusInput();
-    if (props.question.trim()) void ask();
+    if (initialQuestion.trim()) void ask();
   });
 
   async function copyAnswer(index: number) {
@@ -295,7 +298,7 @@ export function SideQuestionDialog(props: {
           }}
           ref={(element) => {
             dialogRef = element;
-            onCleanup(trapModalFocus(element, { preventScrollOnRestore: true }));
+            focus(element);
           }}
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return;
@@ -319,12 +322,11 @@ export function SideQuestionDialog(props: {
             </button>
           </header>
           <div
-            class="side-question-body"
-            classList={{ 'is-empty': showWelcome() }}
+            class={['side-question-body', { 'is-empty': showWelcome() }]}
             ref={(element) => {
               bodyRef = element;
             }}
-            aria-busy={pending()}
+            aria-busy={ariaBoolean(pending())}
           >
             <Show when={showWelcome()}>
               <div class="side-question-empty-state">
@@ -363,8 +365,11 @@ export function SideQuestionDialog(props: {
                         <div class="assistant-dialog-summary-turn-actions">
                           <button
                             type="button"
-                            class="assistant-dialog-summary-turn-action assistant-dialog-summary-copy side-question-copy"
-                            classList={{ 'is-copied': copied() === index() }}
+
+                            class={[
+                              'assistant-dialog-summary-turn-action assistant-dialog-summary-copy side-question-copy',
+                              { 'is-copied': copied() === index() },
+                            ]}
                             aria-label={copied() === index() ? 'Answer copied' : 'Copy answer'}
                             title={copied() === index() ? 'Copied' : 'Copy answer'}
                             onClick={() => void copyAnswer(index())}
@@ -404,7 +409,7 @@ export function SideQuestionDialog(props: {
           </div>
           <Show when={!pending() || turns().length > 0}>
             <div class="side-question-composer">
-              <div class="chat-input-container" classList={{ focused: focused() }}>
+              <div class={['chat-input-container', { focused: focused() }]}>
                 <RichComposerArea
                   editorRef={(element) => {
                     inputRef = element;

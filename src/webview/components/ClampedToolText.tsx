@@ -1,5 +1,5 @@
-import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import type { JSX } from 'solid-js';
+import { createEffect, createMemo, createSignal } from 'solid-js';
+import { type JSX } from '@solidjs/web';
 import { postMessage } from '../lib/bridge';
 
 /** Logical lines shown before a value is clamped. Deliberately short: the
@@ -79,17 +79,31 @@ export function ClampedToolText(props: {
     if (preRef) setWrapped(preRef.scrollHeight > preRef.clientHeight + 1);
   };
 
-  createEffect(() => {
-    // Re-measure when the text changes, e.g. streaming output.
-    void props.content;
-    if (!preRef) return;
-    measure();
-    queueMicrotask(measure);
-    if (globalThis.ResizeObserver === undefined) return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(preRef);
-    onCleanup(() => observer.disconnect());
-  });
+  createEffect(
+    () => props.content,
+    () => {
+      const cleanups: Array<() => void> = [];
+
+      // Re-measure when the text changes, e.g. streaming output.
+      if (!preRef)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      measure();
+      queueMicrotask(measure);
+      if (globalThis.ResizeObserver === undefined)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      const observer = new ResizeObserver(measure);
+      observer.observe(preRef);
+      cleanups.push(() => observer.disconnect());
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
 
   const truncated = () => result().clamped || wrapped();
 
@@ -115,8 +129,8 @@ export function ClampedToolText(props: {
     <pre
       id={props.id}
       ref={(el) => (preRef = el)}
-      class={`${props.class ?? ''} tool-text-clamped`}
-      classList={{ 'is-truncated': truncated() }}
+
+      class={[`${props.class ?? ''} tool-text-clamped`, { 'is-truncated': truncated() }]}
       onClick={openUnlessSelecting}
       title={
         truncated()

@@ -1,7 +1,9 @@
-import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { ariaBoolean } from '../../lib/aria';
+import { createEffect, Show, createSignal } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import { postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
+import { setState } from '../../lib/state';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { folderIcon, gitIcon } from '../../lib/ui-icons';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
@@ -26,33 +28,46 @@ export function SessionLocationIndicator(props: {
   let menu: HTMLDivElement | undefined;
   const close = () => setPosition(null);
 
-  createEffect(() => {
-    const sessionId = props.sessionId;
-    const directory = props.directory;
-    close();
-    setIsGitWorktree(false);
-    if (props.isGitWorktree !== undefined) {
-      setIsGitWorktree(props.isGitWorktree);
-      return;
+  createEffect(
+    () => [props.sessionId, props.directory] as const,
+    () => {
+      close();
     }
-    let cancelled = false;
-    void client.varro.session
-      .location(sessionId, { directory })
-      .then((location) => {
-        if (!cancelled && isSameWorkspacePath(location.directory, directory)) {
-          setIsGitWorktree(location.isGitWorktree);
-        }
-      })
-      .catch(() => {
-        // The known session path remains useful if optional worktree metadata is unavailable.
-      });
-    onCleanup(() => {
-      cancelled = true;
-    });
-  });
+  );
 
-  createEffect(() => {
-    if (!position()) return;
+  createEffect(
+    () => [props.sessionId, props.directory, props.isGitWorktree] as const,
+    ([sessionId, directory, knownWorktree]) => {
+      setIsGitWorktree(false);
+      if (knownWorktree !== undefined) {
+        setIsGitWorktree(knownWorktree);
+        return;
+      }
+      let cancelled = false;
+      void client.varro.session
+        .location(sessionId, { directory })
+        .then((location) => {
+          if (!cancelled && isSameWorkspacePath(location.directory, directory)) {
+            setIsGitWorktree(location.isGitWorktree);
+            setState((draft) => {
+              const session = draft.sessions.find(
+                (entry) => entry.id === sessionId && isSameWorkspacePath(entry.directory, directory)
+              );
+              if (session) session.isGitWorktree = location.isGitWorktree;
+            });
+          }
+        })
+        .catch(() => {
+          // The known session path remains useful if optional worktree metadata is unavailable.
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+  );
+
+  createEffect(position, (shown) => {
+    if (!shown) return;
     const closeOutside = (event: Event) => {
       if (
         event.target instanceof Node &&
@@ -64,16 +79,17 @@ export function SessionLocationIndicator(props: {
     window.addEventListener('pointerdown', closeOutside, true);
     window.addEventListener('contextmenu', closeOutside, true);
     window.addEventListener('focusin', closeOutside);
-    onCleanup(() => {
-      window.removeEventListener('pointerdown', closeOutside, true);
-      window.removeEventListener('contextmenu', closeOutside, true);
-      window.removeEventListener('focusin', closeOutside);
-    });
     queueMicrotask(() => {
       if (!menu) return;
       clampPopupToViewport(menu);
       menu.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
     });
+
+    return () => {
+      window.removeEventListener('pointerdown', closeOutside, true);
+      window.removeEventListener('contextmenu', closeOutside, true);
+      window.removeEventListener('focusin', closeOutside);
+    };
   });
 
   return (
@@ -87,7 +103,7 @@ export function SessionLocationIndicator(props: {
           class="chat-header-btn chat-header-location"
           aria-label={isGitWorktree() ? 'Session Git worktree' : 'Session folder'}
           aria-haspopup="menu"
-          aria-expanded={position() ? 'true' : undefined}
+          aria-expanded={ariaBoolean(position() ? 'true' : undefined)}
           onClick={() => {
             const rect = button!.getBoundingClientRect();
             setPosition({ x: rect.left, y: rect.bottom });

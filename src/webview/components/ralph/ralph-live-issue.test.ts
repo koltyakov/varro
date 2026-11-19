@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RalphIteration } from '../../../shared/ralph';
 import { setState } from '../../lib/state';
@@ -26,9 +28,9 @@ function createRetryStatus(message: string, attempt: number) {
 }
 
 function resetState() {
-  setState('sessionStatus', {});
-  setState('sessionUsageLimits', {});
-  setState('failedSessionIds', []);
+  setState(storePath('sessionStatus', {}));
+  setState(storePath('sessionUsageLimits', {}));
+  setState(storePath('failedSessionIds', []));
 }
 
 beforeEach(resetState);
@@ -46,46 +48,64 @@ describe('getRalphIterationLiveIssue', () => {
   });
 
   it('surfaces a displayable usage limit ahead of any failure state', () => {
-    setState('sessionUsageLimits', { 'child-1': createNotice('Rate limit reached', null) });
+    setState(
+      storePath('sessionUsageLimits', { 'child-1': createNotice('Rate limit reached', null) })
+    );
+    flushSolid();
 
     expect(getRalphIterationLiveIssue(createIteration())).toBe('Rate limit reached');
   });
 
   it('ignores a usage limit that is still being retried silently', () => {
-    setState('sessionUsageLimits', { 'child-1': createNotice('Service unavailable', 1) });
+    setState(
+      storePath('sessionUsageLimits', { 'child-1': createNotice('Service unavailable', 1) })
+    );
+    flushSolid();
 
     expect(getRalphIterationLiveIssue(createIteration())).toBeNull();
   });
 
   it('reports a generic failure once the child session is marked failed', () => {
-    setState('failedSessionIds', ['child-1']);
+    setState(storePath('failedSessionIds', ['child-1']));
+    flushSolid();
 
     expect(getRalphIterationLiveIssue(createIteration())).toBe('Iteration failed');
   });
 
   it('prefers the retry status message for a failed retrying session', () => {
-    setState('failedSessionIds', ['child-1']);
-    setState('sessionStatus', { 'child-1': createRetryStatus('Upstream returned 500', 2) });
+    setState(storePath('failedSessionIds', ['child-1']));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', { 'child-1': createRetryStatus('Upstream returned 500', 2) })
+    );
+    flushSolid();
 
     expect(getRalphIterationLiveIssue(createIteration())).toBe('Upstream returned 500');
   });
 
   it('falls back to a generic retry message when the retry carries no text', () => {
-    setState('failedSessionIds', ['child-1']);
-    setState('sessionStatus', { 'child-1': createRetryStatus('   ', 2) });
+    setState(storePath('failedSessionIds', ['child-1']));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'child-1': createRetryStatus('   ', 2) }));
+    flushSolid();
 
     expect(getRalphIterationLiveIssue(createIteration())).toBe('Iteration retry failed');
   });
 
   it('stays quiet while a retry is still inside the silent service-retry window', () => {
-    setState('failedSessionIds', ['child-1']);
-    setState('sessionStatus', { 'child-1': createRetryStatus('Service unavailable', 1) });
+    setState(storePath('failedSessionIds', ['child-1']));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', { 'child-1': createRetryStatus('Service unavailable', 1) })
+    );
+    flushSolid();
 
     expect(getRalphIterationLiveIssue(createIteration())).toBeNull();
   });
 
   it('scopes the lookup to the iteration own child session', () => {
-    setState('failedSessionIds', ['child-2']);
+    setState(storePath('failedSessionIds', ['child-2']));
+    flushSolid();
 
     expect(getRalphIterationLiveIssue(createIteration())).toBeNull();
     expect(getRalphIterationLiveIssue(createIteration({ childSessionId: 'child-2' }))).toBe(

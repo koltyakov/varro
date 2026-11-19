@@ -1,7 +1,8 @@
-import { batch } from 'solid-js';
-import { produce } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+
 import type { AssistantMessage, Message, MessageEntry, Part } from '../types';
 import {
+  readLatestActiveSessionId,
   defaultAppState,
   messageIndex,
   messageStructureVersion,
@@ -42,17 +43,18 @@ export function upsertMessage(msg: MessageEntry) {
     trackPendingOptimisticUserMessage(msg.info.sessionID, msg.info.id);
   }
   setState(
-    'messages',
-    produce((msgs) => {
+    storePath('messages', (msgs) => {
       const idx = messageIndex.findMessageIndex(msgs, msg.info.id);
       if (idx !== -1) {
-        if (areMessageEntriesEquivalent(msgs[idx]!, msg)) return;
+        if (areMessageEntriesEquivalent(msgs[idx]!, msg)) return msgs;
         msgs[idx] = msg;
         messageIndex.invalidate();
       } else {
         msgs.push(msg);
         messageIndex.appendMessage(msgs);
       }
+
+      return msgs;
     })
   );
 }
@@ -60,8 +62,7 @@ export function upsertMessage(msg: MessageEntry) {
 export function upsertMessageInfo(info: Message) {
   recordProviderAuthSuccess(info);
   setState(
-    'messages',
-    produce((msgs) => {
+    storePath('messages', (msgs) => {
       const idx = messageIndex.findMessageIndex(msgs, info.id);
       if (idx !== -1) {
         if (isOptimisticUserMessage(msgs[idx]!) && info.role === 'user') {
@@ -71,10 +72,10 @@ export function upsertMessageInfo(info: Message) {
             parts: getAcknowledgedOptimisticParts(optimisticEntry, info),
           };
           messageIndex.invalidate();
-          return;
+          return msgs;
         }
         const previous = msgs[idx]!.info;
-        if (areMessageInfosEquivalent(previous, info)) return;
+        if (areMessageInfosEquivalent(previous, info)) return msgs;
         const layoutChanged = !isMessageLayoutInfoEquivalent(previous, info);
         if (!layoutChanged && previous.role === 'assistant' && info.role === 'assistant') {
           // Preserve the info object so role/session/grouping readers do not subscribe to usage churn.
@@ -82,11 +83,13 @@ export function upsertMessageInfo(info: Message) {
           previous.tokens = info.tokens;
         } else msgs[idx]!.info = info;
         messageIndex.notifyInfoChange(layoutChanged);
-        return;
+        return msgs;
       } else {
         msgs.push({ info, parts: [] });
         messageIndex.appendMessage(msgs);
       }
+
+      return msgs;
     })
   );
 }
@@ -144,85 +147,83 @@ function isPendingOptimisticUserMessage(entry: MessageEntry) {
 
 export function upsertPart(part: Part) {
   flushPendingStreamingDeltas();
-  const nextPart = materializeStreamingTextInPart(part, getStreamingTextSnapshot());
-  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
-  const msgId = (nextPart as { messageID: string }).messageID;
-  batch(() => {
-    setState(
-      'messages',
-      produce((msgs) => {
-        const idx = messageIndex.findMessageIndex(msgs, msgId);
-        if (idx === -1) return;
-        // Repeated server updates must not consume another pending optimistic part.
-        const location = messageIndex.findPartLocation(msgs, nextPart.id, idx);
-        if (location) {
-          const currentPart = msgs[idx]!.parts[location.partIdx];
-          const mergedPart = mergePartUpdate(currentPart, nextPart);
-          msgs[idx]!.parts[location.partIdx] = mergedPart;
-          if (
-            getAssistantDialogPartSignature(currentPart) !==
-              getAssistantDialogPartSignature(mergedPart) ||
-            isPartRenderVisibilityChanged(currentPart, mergedPart)
-          ) {
+  setState((draft) => {
+    const nextPart = materializeStreamingTextInPart(part, getStreamingTextSnapshot(draft));
+    // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
+    const msgId = (nextPart as { messageID: string }).messageID;
+    const msgs = draft.messages;
+    const update = () => {
+      const idx = messageIndex.findMessageIndex(msgs, msgId);
+      if (idx === -1) return msgs;
+      // Repeated server updates must not consume another pending optimistic part.
+      const location = messageIndex.findPartLocation(msgs, nextPart.id, idx);
+      if (location) {
+        const currentPart = msgs[idx]!.parts[location.partIdx];
+        const mergedPart = mergePartUpdate(currentPart, nextPart);
+        msgs[idx]!.parts[location.partIdx] = mergedPart;
+        if (
+          getAssistantDialogPartSignature(currentPart) !==
+            getAssistantDialogPartSignature(mergedPart) ||
+          isPartRenderVisibilityChanged(currentPart, mergedPart)
+        ) {
+          messageIndex.notifyPartContentChange();
+        }
+        return msgs;
+      }
+      if (isOptimisticUserMessage(msgs[idx]!) && !isLocalOptimisticPartId(nextPart.id, msgId)) {
+        const combinedTextIds = getCombinedOptimisticTextPartIds(msgs[idx]!, [nextPart]);
+        if (combinedTextIds) {
+          const firstId = combinedTextIds.values().next().value;
+          msgs[idx]!.parts = msgs[idx]!.parts.flatMap((currentPart) =>
+            !combinedTextIds.has(currentPart.id)
+              ? [currentPart]
+              : currentPart.id === firstId
+                ? [nextPart]
+                : []
+          );
+          messageIndex.invalidate();
+          return msgs;
+        }
+        const optimisticPartIndex = findMatchingOptimisticPartIndex(msgs[idx]!, nextPart);
+        if (optimisticPartIndex !== -1) {
+          const currentPart = msgs[idx]!.parts[optimisticPartIndex];
+          msgs[idx]!.parts[optimisticPartIndex] = nextPart;
+          messageIndex.invalidate();
+          if (isPartRenderVisibilityChanged(currentPart, nextPart)) {
             messageIndex.notifyPartContentChange();
           }
-          return;
+          return msgs;
         }
-        if (isOptimisticUserMessage(msgs[idx]!) && !isLocalOptimisticPartId(nextPart.id, msgId)) {
-          const combinedTextIds = getCombinedOptimisticTextPartIds(msgs[idx]!, [nextPart]);
-          if (combinedTextIds) {
-            const firstId = combinedTextIds.values().next().value;
-            msgs[idx]!.parts = msgs[idx]!.parts.flatMap((currentPart) =>
-              !combinedTextIds.has(currentPart.id)
-                ? [currentPart]
-                : currentPart.id === firstId
-                  ? [nextPart]
-                  : []
-            );
-            messageIndex.invalidate();
-            return;
-          }
-          const optimisticPartIndex = findMatchingOptimisticPartIndex(msgs[idx]!, nextPart);
-          if (optimisticPartIndex !== -1) {
-            const currentPart = msgs[idx]!.parts[optimisticPartIndex];
-            msgs[idx]!.parts[optimisticPartIndex] = nextPart;
-            messageIndex.invalidate();
-            if (isPartRenderVisibilityChanged(currentPart, nextPart)) {
-              messageIndex.notifyPartContentChange();
-            }
-            return;
-          }
-        }
-        if (isPendingOptimisticUserMessage(msgs[idx]!) && nextPart.type === 'text') {
-          const acknowledgedTextIndex = msgs[idx]!.parts.findIndex(
-            (currentPart) =>
-              currentPart.id !== nextPart.id && areMatchingOptimisticParts(currentPart, nextPart)
-          );
-          if (acknowledgedTextIndex !== -1) {
-            msgs[idx]!.parts[acknowledgedTextIndex] = nextPart;
-            messageIndex.invalidate();
-            return;
-          }
-        }
-        const optimisticImageIndex = removeAcknowledgedOptimisticImageFilePart(
-          msgs[idx]!,
-          nextPart
+      }
+      if (isPendingOptimisticUserMessage(msgs[idx]!) && nextPart.type === 'text') {
+        const acknowledgedTextIndex = msgs[idx]!.parts.findIndex(
+          (currentPart) =>
+            currentPart.id !== nextPart.id && areMatchingOptimisticParts(currentPart, nextPart)
         );
-        if (optimisticImageIndex !== -1) {
-          msgs[idx]!.parts.splice(optimisticImageIndex, 0, nextPart);
+        if (acknowledgedTextIndex !== -1) {
+          msgs[idx]!.parts[acknowledgedTextIndex] = nextPart;
           messageIndex.invalidate();
-          return;
+          return msgs;
         }
-        msgs[idx]!.parts.push(nextPart);
-        messageIndex.appendPart(msgs, nextPart.id, {
-          msgIdx: idx,
-          partIdx: msgs[idx]!.parts.length - 1,
-        });
-      })
-    );
-    if (state.streamingPartId === nextPart.id) {
-      setState('streamingPartId', null);
-      setState('streamingText', '');
+      }
+      const optimisticImageIndex = removeAcknowledgedOptimisticImageFilePart(msgs[idx]!, nextPart);
+      if (optimisticImageIndex !== -1) {
+        msgs[idx]!.parts.splice(optimisticImageIndex, 0, nextPart);
+        messageIndex.invalidate();
+        return msgs;
+      }
+      msgs[idx]!.parts.push(nextPart);
+      messageIndex.appendPart(msgs, nextPart.id, {
+        msgIdx: idx,
+        partIdx: msgs[idx]!.parts.length - 1,
+      });
+
+      return msgs;
+    };
+    update();
+    if (draft.streamingPartId === nextPart.id) {
+      draft.streamingPartId = null;
+      draft.streamingText = '';
     }
   });
 }
@@ -371,15 +372,16 @@ export function updateMessagePart(part: Part) {
   flushPendingStreamingDeltas();
   const partId = part.id;
   setState(
-    'messages',
-    produce((msgs) => {
+    storePath('messages', (msgs) => {
       const location = messageIndex.findPartLocation(msgs, partId);
-      if (!location) return;
+      if (!location) return msgs;
       const msg = msgs[location.msgIdx];
       if (msg) {
         msg.parts[location.partIdx] = part;
         messageIndex.notifyPartContentChange();
       }
+
+      return msgs;
     })
   );
 }
@@ -417,71 +419,68 @@ export function applyMessagePartDelta(
     flushPendingStreamingDeltas();
   }
 
-  messageIndex.ensureIndex(state.messages);
-  const location = messageIndex.getIndexedPartLocation(partId);
-  const message =
-    location && state.messages[location.msgIdx]?.info.id === messageId
-      ? state.messages[location.msgIdx]
-      : state.messages.find((item) => item.info.id === messageId);
-  if (!message) return;
+  setState((draft) => {
+    messageIndex.ensureIndex(draft.messages);
+    const location = messageIndex.getIndexedPartLocation(partId);
+    const message =
+      location && draft.messages[location.msgIdx]?.info.id === messageId
+        ? draft.messages[location.msgIdx]
+        : draft.messages.find((item) => item.info.id === messageId);
+    if (!message) return;
 
-  const existingPart =
-    location && message.parts[location.partIdx]?.id === partId
-      ? message.parts[location.partIdx]
-      : message.parts.find((item) => item.id === partId);
-  const existingText =
-    existingPart && (existingPart.type === 'text' || existingPart.type === 'reasoning')
-      ? existingPart.text
-      : '';
-  const currentStreamingText =
-    state.streamingPartId === partId ? state.streamingText : existingText;
-  streamingDeltaQueue.set({
-    messageId,
-    partId,
-    partType:
-      existingPart?.type === 'text' || existingPart?.type === 'reasoning'
-        ? existingPart.type
-        : fallbackPartType,
-    partStartedAt: Date.now(),
-    sessionId,
-    text: currentStreamingText + delta,
+    const existingPart =
+      location && message.parts[location.partIdx]?.id === partId
+        ? message.parts[location.partIdx]
+        : message.parts.find((item) => item.id === partId);
+    const existingText =
+      existingPart && (existingPart.type === 'text' || existingPart.type === 'reasoning')
+        ? existingPart.text
+        : '';
+    const currentStreamingText =
+      draft.streamingPartId === partId ? draft.streamingText : existingText;
+    streamingDeltaQueue.set({
+      messageId,
+      partId,
+      partType:
+        existingPart?.type === 'text' || existingPart?.type === 'reasoning'
+          ? existingPart.type
+          : fallbackPartType,
+      partStartedAt: Date.now(),
+      sessionId,
+      text: currentStreamingText + delta,
+    });
+    streamingDeltaQueue.scheduleFlush();
   });
-  streamingDeltaQueue.scheduleFlush();
 }
 
 export function finishMessageStreaming(messageId: string) {
-  batch(() => {
-    flushPendingStreamingDeltas();
-    const partId = state.streamingPartId;
+  flushPendingStreamingDeltas();
+  setState((draft) => {
+    const partId = draft.streamingPartId;
     if (!partId) return;
 
-    const location = messageIndex.findPartLocation(state.messages, partId);
+    const location = messageIndex.findPartLocation(draft.messages, partId);
     if (!location) return;
 
-    const message = state.messages[location.msgIdx];
+    const message = draft.messages[location.msgIdx];
     if (!message || message.info.id !== messageId) return;
 
     streamingDeltaQueue.reset();
-    setState('messages', location.msgIdx, 'parts', location.partIdx, (currentPart) => {
-      if (currentPart.type !== 'text' && currentPart.type !== 'reasoning') return currentPart;
-      if (currentPart.text === state.streamingText) return currentPart;
-      return {
-        ...currentPart,
-        text: state.streamingText,
-      };
-    });
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    const part = message.parts[location.partIdx];
+    if (part && (part.type === 'text' || part.type === 'reasoning')) {
+      part.text = draft.streamingText;
+    }
+    draft.streamingPartId = null;
+    draft.streamingText = '';
     messageIndex.notifyPartContentChange();
   });
 }
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
   flushPendingStreamingDeltas();
-  batch(() => {
+  (() => {
     setState(
-      'messages',
-      produce((msgs) => {
+      storePath('messages', (msgs) => {
         const idx = messageIndex.findMessageIndex(msgs, messageId);
         if (idx !== -1 && msgs[idx]!.info.sessionID === sessionId) {
           const location = messageIndex.findPartLocation(msgs, partId);
@@ -490,13 +489,15 @@ export function removeMessagePart(sessionId: string, messageId: string, partId: 
             messageIndex.removePart(msgs, partId, location);
           }
         }
+
+        return msgs;
       })
     );
     if (state.streamingPartId === partId) {
-      setState('streamingPartId', null);
-      setState('streamingText', '');
+      setState(storePath('streamingPartId', null));
+      setState(storePath('streamingText', ''));
     }
-  });
+  })();
 }
 
 export function removeMessage(sessionId: string, messageId: string) {
@@ -510,40 +511,41 @@ export function removeMessage(sessionId: string, messageId: string) {
     (part) => part.id === state.streamingPartId
   );
   if (removedStreamingPart) streamingDeltaQueue.reset();
-  batch(() => {
+  (() => {
     setState(
-      'messages',
-      produce((messages) => {
+      storePath('messages', (messages) => {
         messages.splice(messageIndexToRemove, 1);
+
+        return messages;
       })
     );
     if (removedStreamingPart) {
-      setState('streamingPartId', null);
-      setState('streamingText', '');
+      setState(storePath('streamingPartId', null));
+      setState(storePath('streamingText', ''));
     }
-  });
+  })();
   messageIndex.invalidate();
   recordSettledAssistantMarkers(state.messages);
 }
 
 export function clearStreamingState() {
   streamingDeltaQueue.reset();
-  batch(() => {
-    setState('streamingPartId', null);
-    setState('streamingText', '');
-  });
+  (() => {
+    setState(storePath('streamingPartId', null));
+    setState(storePath('streamingText', ''));
+  })();
 }
 
 export function clearMessages() {
   streamingDeltaQueue.reset();
   pendingOptimisticUserMessageKeys.clear();
-  batch(() => {
-    setState('messages', []);
-    setState('todos', []);
-    setState('diffs', []);
-    setState('streamingPartId', null);
-    setState('streamingText', '');
-  });
+  (() => {
+    setState(storePath('messages', []));
+    setState(storePath('todos', []));
+    setState(storePath('diffs', []));
+    setState(storePath('streamingPartId', null));
+    setState(storePath('streamingText', ''));
+  })();
   messageIndex.invalidate();
 }
 
@@ -552,16 +554,15 @@ type StreamingTextSnapshot = { partId: string; text: string } | null;
 export function replaceMessages(incoming: MessageEntry[]) {
   for (const message of incoming) recordProviderAuthSuccess(message.info);
   flushPendingStreamingDeltas();
-  const streamingSnapshot = getStreamingTextSnapshot();
   const nextMessages = cloneMessageEntries(incoming);
-  materializeStreamingText(nextMessages, streamingSnapshot);
   streamingDeltaQueue.reset();
-  batch(() => {
-    setState('messages', nextMessages);
-    if (state.streamingPartId !== null) setState('streamingPartId', null);
-    if (state.streamingText !== '') setState('streamingText', '');
+  setState((draft) => {
+    materializeStreamingText(nextMessages, getStreamingTextSnapshot(draft));
+    draft.messages = nextMessages;
+    draft.streamingPartId = null;
+    draft.streamingText = '';
+    messageIndex.invalidate();
   });
-  messageIndex.invalidate();
   recordSettledAssistantMarkers(nextMessages);
 }
 
@@ -588,13 +589,13 @@ export function pruneMessagesFrom(sessionId: string, messageId: string): (() => 
     entry.parts.some((part) => part.id === state.streamingPartId)
   );
   if (removedStreamingPart) streamingDeltaQueue.reset();
-  batch(() => {
-    setState('messages', retainedMessages);
+  (() => {
+    setState(storePath('messages', retainedMessages));
     if (removedStreamingPart) {
-      setState('streamingPartId', null);
-      setState('streamingText', '');
+      setState(storePath('streamingPartId', null));
+      setState(storePath('streamingText', ''));
     }
-  });
+  })();
   messageIndex.invalidate();
   recordSettledAssistantMarkers(retainedMessages);
   return () => restorePrunedSessionMessages(previousMessages, removedMessageKeys);
@@ -626,7 +627,7 @@ function restorePrunedSessionMessages(
     if (!consumed.has(getMessageEntryKey(current))) restored.push(current);
   }
 
-  setState('messages', restored);
+  setState(storePath('messages', restored));
   messageIndex.invalidate();
   recordSettledAssistantMarkers(restored);
 }
@@ -647,13 +648,13 @@ export function removeMessagesForSessions(sessionIds: Iterable<string>) {
   const retainedMessages = state.messages.filter(
     (entry) => !removedSessionIds.has(entry.info.sessionID)
   );
-  batch(() => {
-    setState('messages', retainedMessages);
+  (() => {
+    setState(storePath('messages', retainedMessages));
     if (removedStreamingPart) {
-      setState('streamingPartId', null);
-      setState('streamingText', '');
+      setState(storePath('streamingPartId', null));
+      setState(storePath('streamingText', ''));
     }
-  });
+  })();
   messageIndex.invalidate();
   recordSettledAssistantMarkers(retainedMessages);
 }
@@ -667,90 +668,81 @@ export function setMessagesIncremental(
   options?: { preserveExtraParts?: boolean }
 ) {
   flushPendingStreamingDeltas();
-  const current = state.messages;
   for (const message of incoming) recordProviderAuthSuccess(message.info);
-  incoming = preserveMissingOptimisticUserMessages(current, incoming);
-  const streamingSnapshot = getStreamingTextSnapshot();
-  if (current === incoming) return;
-  if (current.length === 0 || incoming.length === 0) {
-    replaceMessages(incoming);
-    return;
-  }
+  setState((draft) => {
+    const msgs = draft.messages;
+    incoming = preserveMissingOptimisticUserMessages(msgs, incoming);
+    const streamingSnapshot = getStreamingTextSnapshot(draft);
+    streamingDeltaQueue.reset();
+    draft.streamingPartId = null;
+    draft.streamingText = '';
+    if (msgs.length === 0 || incoming.length === 0) {
+      const nextMessages = cloneMessageEntries(incoming);
+      materializeStreamingText(nextMessages, streamingSnapshot);
+      draft.messages = nextMessages;
+      messageIndex.invalidate();
+      return;
+    }
+    const insertion = getMessageInsertion(msgs, incoming);
+    if (insertion) {
+      reconcileMessageInsertion(msgs, incoming, insertion, options, streamingSnapshot);
+      return;
+    }
+    const sharedPrefixLength = getSharedMessagePrefixLength(msgs, incoming);
+    if (sharedPrefixLength === 0) {
+      draft.messages = reconcileMessagesByIdentity(msgs, incoming, options, streamingSnapshot);
+      messageIndex.invalidate();
+      return;
+    }
+    let changed = false;
+    for (let i = 0; i < incoming.length; i++) {
+      const next = incoming[i]!;
+      const currentEntry = msgs[i];
+      if (
+        currentEntry &&
+        areMessageEntriesEquivalent(currentEntry, next) &&
+        !hasExtraMessagePartsToPreserve(currentEntry, next, options) &&
+        !hasStreamingTextToMaterialize(currentEntry, next, options, streamingSnapshot)
+      ) {
+        continue;
+      }
 
-  const insertion = getMessageInsertion(current, incoming);
-  if (insertion) {
-    reconcileMessageInsertion(incoming, insertion, options, streamingSnapshot);
-    recordSettledAssistantMarkers(incoming);
-    return;
-  }
-
-  const sharedPrefixLength = getSharedMessagePrefixLength(current, incoming);
-
-  if (sharedPrefixLength === 0) {
-    reconcileMessagesByIdentity(incoming, options, streamingSnapshot);
-    recordSettledAssistantMarkers(incoming);
-    return;
-  }
-
-  streamingDeltaQueue.reset();
-  batch(() => {
-    if (state.streamingPartId !== null) setState('streamingPartId', null);
-    if (state.streamingText !== '') setState('streamingText', '');
-
-    setState(
-      'messages',
-      produce((msgs) => {
-        let changed = false;
-        for (let i = 0; i < incoming.length; i++) {
-          const next = incoming[i]!;
-          // Compare retained read-store identities, but still materialize pending streamed text.
-          const currentEntry = current[i];
-          if (
-            currentEntry &&
-            areMessageEntriesEquivalent(currentEntry, next) &&
-            !hasExtraMessagePartsToPreserve(currentEntry, next, options) &&
-            !hasStreamingTextToMaterialize(currentEntry, next, options, streamingSnapshot)
-          ) {
-            continue;
-          }
-
-          const nextEntry = mergeMessageEntry(currentEntry, next, options, streamingSnapshot);
-          if (i < sharedPrefixLength) {
-            if (!areMessageEntriesEquivalent(currentEntry!, nextEntry)) {
-              msgs[i] = nextEntry;
-              changed = true;
-            }
-            continue;
-          }
-
-          if (i < msgs.length) {
-            if (!areMessageEntriesEquivalent(msgs[i]!, nextEntry)) {
-              msgs[i] = nextEntry;
-              changed = true;
-            }
-          } else {
-            msgs.push(nextEntry);
-            changed = true;
-          }
-        }
-        if (msgs.length !== incoming.length) {
-          msgs.length = incoming.length;
+      const nextEntry = mergeMessageEntry(currentEntry, next, options, streamingSnapshot);
+      if (i < sharedPrefixLength) {
+        if (!areMessageEntriesEquivalent(currentEntry!, nextEntry)) {
+          msgs[i] = nextEntry;
           changed = true;
         }
-        if (changed) messageIndex.invalidate();
-      })
-    );
+        continue;
+      }
+
+      if (i < msgs.length) {
+        if (!areMessageEntriesEquivalent(msgs[i]!, nextEntry)) {
+          msgs[i] = nextEntry;
+          changed = true;
+        }
+      } else {
+        msgs.push(nextEntry);
+        changed = true;
+      }
+    }
+    if (msgs.length !== incoming.length) {
+      msgs.length = incoming.length;
+      changed = true;
+    }
+    if (changed) messageIndex.invalidate();
   });
   recordSettledAssistantMarkers(incoming);
 }
 
 function reconcileMessagesByIdentity(
+  currentMessages: MessageEntry[],
   incoming: MessageEntry[],
   options: { preserveExtraParts?: boolean } | undefined,
   streamingSnapshot: StreamingTextSnapshot
 ) {
   const currentByKey = new Map(
-    state.messages.map((entry) => [getMessageEntryKey(entry), entry] as const)
+    currentMessages.map((entry) => [getMessageEntryKey(entry), entry] as const)
   );
   const nextMessages = incoming.map((next) => {
     const current = currentByKey.get(getMessageEntryKey(next));
@@ -765,13 +757,7 @@ function reconcileMessagesByIdentity(
     return mergeMessageEntry(current, next, options, streamingSnapshot);
   });
 
-  streamingDeltaQueue.reset();
-  batch(() => {
-    if (state.streamingPartId !== null) setState('streamingPartId', null);
-    if (state.streamingText !== '') setState('streamingText', '');
-    setState('messages', nextMessages);
-  });
-  messageIndex.invalidate();
+  return nextMessages;
 }
 
 function getMessageInsertion(current: MessageEntry[], incoming: MessageEntry[]) {
@@ -796,42 +782,31 @@ function sameMessageIdentity(left: MessageEntry | undefined, right: MessageEntry
 }
 
 function reconcileMessageInsertion(
+  msgs: MessageEntry[],
   incoming: MessageEntry[],
   insertion: { count: number; index: number },
   options: { preserveExtraParts?: boolean } | undefined,
   streamingSnapshot: StreamingTextSnapshot
 ) {
-  streamingDeltaQueue.reset();
-  batch(() => {
-    if (state.streamingPartId !== null) setState('streamingPartId', null);
-    if (state.streamingText !== '') setState('streamingText', '');
+  const inserted = incoming
+    .slice(insertion.index, insertion.index + insertion.count)
+    .map((entry) => mergeMessageEntry(undefined, entry, options, streamingSnapshot));
+  msgs.splice(insertion.index, 0, ...inserted);
 
-    setState(
-      'messages',
-      produce((msgs) => {
-        const inserted = incoming
-          .slice(insertion.index, insertion.index + insertion.count)
-          .map((entry) => mergeMessageEntry(undefined, entry, options, streamingSnapshot));
-        msgs.splice(insertion.index, 0, ...inserted);
-
-        for (let index = 0; index < incoming.length; index += 1) {
-          if (index >= insertion.index && index < insertion.index + insertion.count) continue;
-          // History-window merges retain read-store proxies, not produce proxies.
-          const currentEntry = state.messages[index]!;
-          const next = incoming[index]!;
-          if (
-            areMessageEntriesEquivalent(currentEntry, next) &&
-            !hasExtraMessagePartsToPreserve(currentEntry, next, options) &&
-            !hasStreamingTextToMaterialize(currentEntry, next, options, streamingSnapshot)
-          ) {
-            continue;
-          }
-          msgs[index] = mergeMessageEntry(currentEntry, next, options, streamingSnapshot);
-        }
-        messageIndex.invalidate();
-      })
-    );
-  });
+  for (let index = 0; index < incoming.length; index += 1) {
+    if (index >= insertion.index && index < insertion.index + insertion.count) continue;
+    const currentEntry = msgs[index]!;
+    const next = incoming[index]!;
+    if (
+      areMessageEntriesEquivalent(currentEntry, next) &&
+      !hasExtraMessagePartsToPreserve(currentEntry, next, options) &&
+      !hasStreamingTextToMaterialize(currentEntry, next, options, streamingSnapshot)
+    ) {
+      continue;
+    }
+    msgs[index] = mergeMessageEntry(currentEntry, next, options, streamingSnapshot);
+  }
+  messageIndex.invalidate();
 }
 
 function preserveMissingOptimisticUserMessages(current: MessageEntry[], incoming: MessageEntry[]) {
@@ -867,16 +842,18 @@ function recordSettledAssistantMarkers(messages: MessageEntry[]) {
   const settledMessages = getSettledLatestAssistantMessages(messages);
   if (settledMessages.size === 0) return;
 
-  batch(() => {
+  // A session and its history can be published in the same tick.
+  const activeSessionId = readLatestActiveSessionId();
+  (() => {
     for (const [sessionId, message] of settledMessages) {
       if (message.error) continue;
-      if (state.activeSessionId === sessionId && !showSessionPicker()) {
+      if (activeSessionId === sessionId && !showSessionPicker()) {
         markSessionSeen(sessionId, message.time.completed);
       } else {
         markSessionResponseCompleted(sessionId, message.time.completed);
       }
     }
-  });
+  })();
 }
 
 function getSettledLatestAssistantMessages(messages: MessageEntry[]) {
@@ -1110,9 +1087,9 @@ function getToolStateDurationMs(toolState: Extract<Part, { type: 'tool' }>['stat
   return Math.max(0, toolState.time.end - toolState.time.start);
 }
 
-function getStreamingTextSnapshot(): StreamingTextSnapshot {
-  return state.streamingPartId
-    ? { partId: state.streamingPartId, text: state.streamingText }
+function getStreamingTextSnapshot(source = state): StreamingTextSnapshot {
+  return source.streamingPartId
+    ? { partId: source.streamingPartId, text: source.streamingText }
     : null;
 }
 

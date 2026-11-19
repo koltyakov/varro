@@ -1,13 +1,6 @@
-import {
-  Show,
-  createEffect,
-  createMemo,
-  createSignal,
-  createUniqueId,
-  on,
-  onCleanup,
-} from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { ariaBoolean } from '../lib/aria';
+import { Show, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import type { Permission } from '../types';
 import {
   alwaysAllowPermissionForProject,
@@ -87,15 +80,13 @@ export function PermissionPrompt(props: {
       return 'Each pattern must be 2000 characters or fewer.';
     return 'One pattern per line. * matches any text.';
   };
-  createEffect(
-    on(currentPermissionId, () => {
-      setCommandExpanded(false);
-      setReviewScope(undefined);
-      setPatternDraft('');
-      setAlwaysMenuOpen(false);
-      setResponseError(undefined);
-    })
-  );
+  createEffect(currentPermissionId, () => {
+    setCommandExpanded(false);
+    setReviewScope(undefined);
+    setPatternDraft('');
+    setAlwaysMenuOpen(false);
+    setResponseError(undefined);
+  });
   const [responseError, setResponseError] = createSignal<string>();
   const [alwaysMenuPosition, setAlwaysMenuPosition] = createSignal({ left: 0, top: 0 });
   let alwaysMenuButton: HTMLButtonElement | undefined;
@@ -182,8 +173,13 @@ export function PermissionPrompt(props: {
     }
   };
 
-  createEffect(() => {
-    if (!alwaysMenuOpen()) return;
+  createEffect(alwaysMenuOpen, (open) => {
+    const cleanups: Array<() => void> = [];
+
+    if (!open)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const closeOnPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
@@ -198,10 +194,14 @@ export function PermissionPrompt(props: {
     };
     window.addEventListener('pointerdown', closeOnPointerDown);
     window.addEventListener('keydown', closeOnEscape, true);
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('pointerdown', closeOnPointerDown);
       window.removeEventListener('keydown', closeOnEscape, true);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   const shellCommand = createMemo(() => {
@@ -279,10 +279,12 @@ export function PermissionPrompt(props: {
                   const text = formatMetadataValue(value);
                   return (
                     <div
-                      class="permission-meta-entry"
-                      classList={{
-                        'permission-command-expanded': key === 'command' && commandExpanded(),
-                      }}
+                      class={[
+                        'permission-meta-entry',
+                        {
+                          'permission-command-expanded': key === 'command' && commandExpanded(),
+                        },
+                      ]}
                     >
                       <span class="permission-meta-key">{key}</span>
                       <div class="permission-meta-value-shell">
@@ -293,7 +295,7 @@ export function PermissionPrompt(props: {
                         <button
                           type="button"
                           class="permission-command-toggle"
-                          aria-expanded={commandExpanded()}
+                          aria-expanded={ariaBoolean(commandExpanded())}
                           onClick={() => setCommandExpanded((expanded) => !expanded)}
                         >
                           {commandExpanded() ? 'Collapse command' : 'Expand command'}
@@ -385,7 +387,7 @@ export function PermissionPrompt(props: {
                   ref={(element) => queueMicrotask(() => element.focus())}
                   aria-label="Approval resource patterns"
                   aria-describedby={patternHintId}
-                  aria-invalid={!validPatterns()}
+                  aria-invalid={ariaBoolean(!validPatterns())}
                   rows={2}
                   value={patternDraft()}
                   disabled={responding()}
@@ -395,8 +397,8 @@ export function PermissionPrompt(props: {
               </label>
               <div
                 id={patternHintId}
-                class="permission-approval-hint"
-                classList={{ 'is-invalid': !validPatterns() }}
+
+                class={['permission-approval-hint', { 'is-invalid': !validPatterns() }]}
               >
                 {patternHint()}
               </div>
@@ -444,7 +446,7 @@ export function PermissionPrompt(props: {
             type="button"
             aria-label="Allow always"
             aria-haspopup="menu"
-            aria-expanded={alwaysMenuOpen()}
+            aria-expanded={ariaBoolean(alwaysMenuOpen())}
             title="Choose where to allow matching requests"
             disabled={responding() || props.permission.recoveredIncomplete}
             onClick={() => {

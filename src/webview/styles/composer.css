@@ -397,25 +397,37 @@
   color: var(--color-vscode-input-placeholder);
 }
 
-.composer-completion-menu {
-  --composer-completion-scrollbar-inset: 0px;
+.composer-completion-popup {
   position: absolute;
   left: -6px;
   right: -6px;
   bottom: calc(100% + 2px);
   z-index: var(--z-popup);
-  max-height: 220px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 14%, transparent);
-  border-radius: var(--chat-radius-popover);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
-  background: var(--color-vscode-surface-raised);
-  box-shadow: var(--chat-shadow-popover);
-  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   animation: fade-in 0.1s ease-out;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.composer-completion-menu,
+.composer-completion-help {
+  min-height: 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  background: var(--color-vscode-surface-raised);
+  box-shadow: var(--chat-shadow-popover);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 14%, transparent);
+}
+
+.composer-completion-menu {
+  --composer-completion-scrollbar-inset: 0px;
+  position: relative;
+  max-height: 220px;
+  border-radius: var(--chat-radius-popover);
+  padding: 4px;
 }
 
 .composer-completion-header {
@@ -458,11 +470,14 @@
 }
 
 .composer-completion-help {
-  padding: 7px 8px;
-  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  flex-shrink: 0;
+  max-height: 140px;
+  padding: 9px 10px;
+  border-radius: var(--radius-card);
   color: var(--color-vscode-fg-muted);
   font-size: 11px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .composer-completion-item:hover {
@@ -3060,7 +3075,7 @@
   object-fit: contain;
 }
 
-.chat-attachment-chip .chip-label {
+:is(.chat-attachment-chip, .inline-chip) .chip-label {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3092,18 +3107,18 @@
   color: var(--color-vscode-fg-muted);
 }
 
-.chat-attachment-chip .chip-label-with-extension {
+:is(.chat-attachment-chip, .inline-chip) .chip-label-with-extension {
   display: flex;
   text-overflow: clip;
 }
 
-.chat-attachment-chip .chip-label-stem {
+:is(.chat-attachment-chip, .inline-chip) .chip-label-stem {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-attachment-chip .chip-label-extension {
+:is(.chat-attachment-chip, .inline-chip) .chip-label-extension {
   flex-shrink: 0;
 }
 

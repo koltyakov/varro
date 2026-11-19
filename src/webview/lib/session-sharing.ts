@@ -1,3 +1,4 @@
+import { storePath } from '@solidjs/signals';
 import type { Session } from '../types';
 import { client } from './client';
 import {
@@ -12,13 +13,15 @@ import { writeClipboard } from './write-clipboard';
 
 function updateSessionShare(sessionID: string, share: Session['share'], updatedAt: number) {
   setState(
-    'sessions',
-    (session) => session.id === sessionID,
-    (current) => ({
-      ...current,
-      share,
-      time: { ...current.time, updated: updatedAt },
-    })
+    storePath(
+      'sessions',
+      (session) => session.id === sessionID,
+      (current) => ({
+        ...current,
+        share,
+        time: { ...current.time, updated: updatedAt },
+      })
+    )
   );
 }
 

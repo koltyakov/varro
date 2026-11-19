@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { createChatAnnotation, getChatAnnotationLabel } from '../../../shared/chat-annotation';
 import { QueuedMessages, type QueuedMessageItem } from './QueuedMessages';
 

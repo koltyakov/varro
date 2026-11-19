@@ -1,14 +1,5 @@
-import {
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  onCleanup,
-  onMount,
-  Show,
-  untrack,
-} from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
+import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import { DEFAULT_RESET_WARNING_DAYS } from '../../../shared/provider-limit-config';
 import { useSecondClock } from '../../lib/clock';
@@ -43,10 +34,12 @@ export function ProviderQuotaWarning(props: {
     getLowQuotaWindows(props.limit, props.modelID, props.modelName, props.forceShow)
   );
   const [debugDismissed, setDebugDismissed] = createSignal(false);
-  createEffect(() => {
-    void props.forceShow;
-    setDebugDismissed(false);
-  });
+  createEffect(
+    () => props.forceShow,
+    () => {
+      setDebugDismissed(false);
+    }
+  );
   const resetCredits = createMemo(() => {
     const limit = props.limit;
     return limit?.status === 'available' && (limit.usageLimitResets?.availableCount ?? 0) > 0
@@ -97,12 +90,15 @@ export function ProviderQuotaWarning(props: {
   const [showResetPopup, setShowResetPopup] = createSignal(false);
   let resetPopupAnchor: HTMLDivElement | undefined;
   let resetPopupButton: HTMLButtonElement | undefined;
-  createEffect(() => {
-    if (availableResets() === 0 || (visibleWindows().length === 0 && expiringResets().length === 0))
-      setShowResetPopup(false);
-  });
-  createEffect(() => {
-    if (!showResetPopup()) return;
+  createEffect(
+    () =>
+      availableResets() === 0 || (visibleWindows().length === 0 && expiringResets().length === 0),
+    (empty) => {
+      if (empty) setShowResetPopup(false);
+    }
+  );
+  createEffect(showResetPopup, (shown) => {
+    if (!shown) return;
     const onPointerDown = (event: PointerEvent) => {
       if (event.target instanceof Node && resetPopupAnchor?.contains(event.target)) return;
       setShowResetPopup(false);
@@ -116,10 +112,10 @@ export function ProviderQuotaWarning(props: {
     };
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown, true);
-    onCleanup(() => {
+    return () => {
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown, true);
-    });
+    };
   });
   const isCritical = createMemo(() =>
     visibleWindows().some((window) => getProviderLimitTone(props.limit, window) === 'error')
@@ -128,34 +124,42 @@ export function ProviderQuotaWarning(props: {
   const warningMode = createMemo(() =>
     visibleWindows().length === 0 ? 'resets' : expiringResets().length > 0 ? 'rotate' : 'quota'
   );
-  createEffect(() => {
-    const mode = warningMode();
+  createEffect(warningMode, (mode) => {
     setShowResetExpirations(mode === 'resets');
     if (mode !== 'rotate') return;
     const timer = window.setInterval(() => setShowResetExpirations((value) => !value), 15_000);
-    onCleanup(() => window.clearInterval(timer));
+    return () => window.clearInterval(timer);
   });
   const refreshedResets = new Set<string>();
 
-  createEffect(() => {
-    const limit = props.limit;
-    if (!limit) return;
-    // An expired snapshot must not reappear as a fresh warning at the reset boundary.
-    // Request once per window cycle; normal provider polling handles retries/reporting delays.
-    const expired = lowWindows().filter(
-      (window) => window.resetAt !== null && window.resetAt <= now()
-    );
-    let refresh = false;
-    for (const window of expired) {
-      const key = JSON.stringify([limit.providerID, props.modelID, window.id, window.resetAt]);
-      if (refreshedResets.has(key)) continue;
-      refreshedResets.add(key);
-      refresh = true;
+  createEffect(
+    () => {
+      const limit = props.limit;
+      if (!limit) return;
+      // An expired snapshot must not reappear as a fresh warning at the reset boundary.
+      // Request once per window cycle; normal provider polling handles retries/reporting delays.
+      const expired = lowWindows().filter(
+        (window) => window.resetAt !== null && window.resetAt <= now()
+      );
+      return expired.map((window) =>
+        JSON.stringify([limit.providerID, props.modelID, window.id, window.resetAt])
+      );
+    },
+    (keys) => {
+      if (!keys) return;
+      let refresh = false;
+      for (const key of keys) {
+        if (refreshedResets.has(key)) continue;
+        refreshedResets.add(key);
+        refresh = true;
+      }
+      if (refresh) untrack(props.onRefresh);
     }
-    if (refresh) untrack(props.onRefresh);
-  });
+  );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const onStorage = (event: StorageEvent) => {
       if (event.key === null || event.key === STORAGE_KEYS.quotaWarningDismissals)
         quotaWarningDismissals.reload();
@@ -163,9 +167,13 @@ export function ProviderQuotaWarning(props: {
         resetWarningDismissals.reload();
     };
     window.addEventListener('storage', onStorage);
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('storage', onStorage);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
@@ -173,12 +181,14 @@ export function ProviderQuotaWarning(props: {
       <CodexLoginWarning limit={props.limit} />
       <Show when={visibleWindows().length > 0 || expiringResets().length > 0}>
         <div
-          class="chat-quota-warning"
-          classList={{
-            error: showResetExpirations()
-              ? (expiringResets()[0]?.[0] ?? Infinity) - now() <= 24 * 60 * 60_000
-              : isCritical(),
-          }}
+          class={[
+            'chat-quota-warning',
+            {
+              error: showResetExpirations()
+                ? (expiringResets()[0]?.[0] ?? Infinity) - now() <= 24 * 60 * 60_000
+                : isCritical(),
+            },
+          ]}
         >
           <div class="chat-quota-warning-copy" role="status" aria-live="polite">
             <Show when={!showResetExpirations()}>
@@ -218,7 +228,7 @@ export function ProviderQuotaWarning(props: {
                   ref={(el) => (resetPopupButton = el)}
                   type="button"
                   class="chat-quota-warning-usage"
-                  aria-expanded={showResetPopup()}
+                  aria-expanded={ariaBoolean(showResetPopup())}
                   onClick={() => setShowResetPopup((visible) => !visible)}
                 >
                   {resetLabel()}
@@ -253,10 +263,10 @@ export function ProviderQuotaWarning(props: {
                   const windows = visibleWindows();
                   const expirations = expiringResets().map(([expiresAt]) => expiresAt);
                   const dismissedAt = Date.now();
-                  batch(() => {
+                  (() => {
                     quotaWarningDismissals.dismiss(providerID, windows, dismissedAt);
                     resetWarningDismissals.dismiss(providerID, expirations, dismissedAt);
-                  });
+                  })();
                 }
               }}
             >

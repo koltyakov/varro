@@ -1,4 +1,5 @@
-import { createComputed, createRoot } from 'solid-js';
+import { flush as flushSolid, createEffect, createRoot } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Session } from '../types';
 import { resetDefaultAppState, setState, state } from './state';
@@ -29,28 +30,36 @@ const resolvers = [
 
 describe('session references', () => {
   it('resolves external metadata without adding it to the workspace catalog', () => {
-    setState('sessionLookups', 'ses_other', {
-      id: 'ses_other',
-      title: 'Other project investigation',
-      directory: '/projects/other',
-      external: true,
-    });
+    setState(
+      storePath('sessionLookups', 'ses_other', {
+        id: 'ses_other',
+        title: 'Other project investigation',
+        directory: '/projects/other',
+        external: true,
+      })
+    );
+    flushSolid();
     expect(resolveSessionReference('ses_other')).toMatchObject({
       title: 'Other project investigation',
       directory: '/projects/other',
       folderLabel: 'other',
       external: true,
     });
+    flushSolid();
     expect(splitSessionReferenceText('ses_other session:ses_other')).toEqual([
       { type: 'session', reference: resolveSessionReference('ses_other', 'ses_other') },
       { type: 'text', content: ' ' },
       { type: 'session', reference: resolveSessionReference('ses_other', 'session:ses_other') },
     ]);
+    flushSolid();
     expect(getSessionReferenceContextKey('ses_other')).toContain(':other:external');
     expect(state.sessions).toEqual([]);
-    setState('sessions', [session('ses_other', 'Live catalog title')]);
+    setState(storePath('sessions', [session('ses_other', 'Live catalog title')]));
+    flushSolid();
     expect(resolveSessionReference('ses_other')?.title).toBe('Live catalog title');
+    flushSolid();
     expect(resolveSessionReference('ses_other')?.external).toBeUndefined();
+    flushSolid();
   });
   it.each(resolvers)(
     '$name traverses the catalog at most once for many references',
@@ -58,21 +67,25 @@ describe('session references', () => {
       let idReads = 0;
       const count = 1000;
       setState(
-        'sessions',
-        Array.from({ length: count }, (_, index) => ({
-          ...session(`ses_${index}`),
-          get id() {
-            idReads += 1;
-            return `ses_${index}`;
-          },
-        }))
+        storePath(
+          'sessions',
+          Array.from({ length: count }, (_, index) => ({
+            ...session(`ses_${index}`),
+            get id() {
+              idReads += 1;
+              return `ses_${index}`;
+            },
+          }))
+        )
       );
+      flushSolid();
       const content = Array.from(
         { length: 40 },
         (_, index) => `session:ses_${count - index - 1}`
       ).join(' ');
       idReads = 0;
       resolve(content);
+      flushSolid();
       expect(idReads).toBeLessThan(count * 2);
     }
   );
@@ -81,34 +94,45 @@ describe('session references', () => {
     '$name preserves zero-reference and single-reference short circuits',
     ({ resolve }) => {
       let unrelatedReads = 0;
-      setState('sessions', [
-        session('ses_first'),
-        {
-          ...session('ses_other'),
-          get id() {
-            unrelatedReads += 1;
-            return 'ses_other';
+      setState(
+        storePath('sessions', [
+          session('ses_first'),
+          {
+            ...session('ses_other'),
+            get id() {
+              unrelatedReads += 1;
+              return 'ses_other';
+            },
           },
-        },
-      ]);
+        ])
+      );
+      flushSolid();
       unrelatedReads = 0;
       resolve('Plain text without references');
+      flushSolid();
       resolve('See ses_first');
+      flushSolid();
       expect(unrelatedReads).toBe(0);
     }
   );
 
   it('matches the previous context-key contract for mixed and repeated markers', () => {
-    setState('editorContext', 'workspaceFolders', [
-      { name: 'repo', path: '/repo' },
-      { name: 'other', path: '/other' },
-    ]);
-    setState('sessions', [
-      ...Array.from({ length: 30 }, (_, index) =>
-        session(`ses_${index}`, index % 3 ? `Title ${index}` : '', index % 2 ? '/other' : '/repo')
-      ),
-      session('ses_0', 'Duplicate must not win'),
-    ]);
+    setState(
+      storePath('editorContext', 'workspaceFolders', [
+        { name: 'repo', path: '/repo' },
+        { name: 'other', path: '/other' },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        ...Array.from({ length: 30 }, (_, index) =>
+          session(`ses_${index}`, index % 3 ? `Title ${index}` : '', index % 2 ? '/other' : '/repo')
+        ),
+        session('ses_0', 'Duplicate must not win'),
+      ])
+    );
+    flushSolid();
     for (let round = 0; round < 100; round++) {
       const content = Array.from(
         { length: round % 50 },
@@ -130,11 +154,14 @@ describe('session references', () => {
   });
 
   it('preserves segment order, missing text, repeated markers, and first duplicate ownership', () => {
-    setState('sessions', [
-      session('ses_a', 'First'),
-      session('ses_a', 'Duplicate'),
-      session('ses_b', 'Second'),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('ses_a', 'First'),
+        session('ses_a', 'Duplicate'),
+        session('ses_b', 'Second'),
+      ])
+    );
+    flushSolid();
     expect(splitSessionReferenceText('ses_a ses_missing session:ses_b ses_a')).toEqual([
       { type: 'session', reference: resolveSessionReference('ses_a', 'ses_a') },
       { type: 'text', content: ' ses_missing ' },
@@ -142,35 +169,49 @@ describe('session references', () => {
       { type: 'text', content: ' ' },
       { type: 'session', reference: resolveSessionReference('ses_a', 'ses_a') },
     ]);
+    flushSolid();
     expect(getSessionReferenceContextKey('ses_a ses_b')).toContain('found:ses_a:/repo:First:');
   });
 
   it('reacts to discovery, renaming, folder changes, reordering, and removal', () => {
     let key = '';
     const dispose = createRoot((cleanup) => {
-      createComputed(() => {
-        key = getSessionReferenceContextKey('ses_a ses_b');
-      });
+      createEffect(
+        () => getSessionReferenceContextKey('ses_a ses_b'),
+        (value) => {
+          key = value;
+        }
+      );
       return cleanup;
     });
+    flushSolid();
     try {
       expect(key).toBe('missing:ses_a\u0000missing:ses_b');
-      setState('sessions', [session('ses_a', 'Original'), session('ses_b', 'Other')]);
+      setState(storePath('sessions', [session('ses_a', 'Original'), session('ses_b', 'Other')]));
+      flushSolid();
       expect(key).toContain('found:ses_a:/repo:Original:');
-      setState('sessions', 0, 'title', 'Renamed');
+      setState(storePath('sessions', 0, 'title', 'Renamed'));
+      flushSolid();
       expect(key).toContain('found:ses_a:/repo:Renamed:');
-      setState('editorContext', 'workspaceFolders', [
-        { name: 'repo', path: '/repo' },
-        { name: 'other', path: '/other' },
-      ]);
-      setState('sessions', 0, 'directory', '/other');
+      setState(
+        storePath('editorContext', 'workspaceFolders', [
+          { name: 'repo', path: '/repo' },
+          { name: 'other', path: '/other' },
+        ])
+      );
+      flushSolid();
+      setState(storePath('sessions', 0, 'directory', '/other'));
+      flushSolid();
       expect(key).toContain('found:ses_a:/other:Renamed:other');
-      setState('sessions', [state.sessions[1]!, state.sessions[0]!]);
+      setState(storePath('sessions', [state.sessions[1]!, state.sessions[0]!]));
+      flushSolid();
       expect(key).toContain('found:ses_a:/other:Renamed:other');
-      setState('sessions', [state.sessions[0]!]);
+      setState(storePath('sessions', [state.sessions[0]!]));
+      flushSolid();
       expect(key).toContain('missing:ses_a');
     } finally {
       dispose();
+      flushSolid();
     }
   });
 });

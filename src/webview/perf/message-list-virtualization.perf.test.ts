@@ -1,5 +1,6 @@
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type * as AssistantDialogModule from '../components/message-list/assistant-dialog';
 import type * as MessageRowsModule from '../components/message-list/MessageRows';
 import type * as StickyPreviewModule from '../components/message-list/sticky-preview';
@@ -24,11 +25,11 @@ const {
 /* oxlint-disable anti-slop/no-module-mocking -- This benchmark isolates MessageList module integration from unrelated render work. */
 vi.mock('../components/message-list/MessageRows', async (importOriginal) => {
   const actual = await importOriginal<typeof MessageRowsModule>();
-  const { onCleanup, onMount } = await import('solid-js');
+  const { onCleanup, onSettled } = await import('solid-js');
   return {
     ...actual,
     MessageRow: (props: Parameters<typeof actual.MessageRow>[0]) => {
-      onMount(() => {
+      onSettled(() => {
         messageRowMounts.current += 1;
         messageRowMounts.peak = Math.max(messageRowMounts.peak, messageRowMounts.current);
       });
@@ -364,7 +365,7 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
       })
     );
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
 
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
@@ -407,7 +408,7 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
       }),
     ];
     replaceMessages(messages.slice(0, 49));
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
     cleanup = render(() => MessageList(), container!);
     await settleMicrotasks();
     expect(container?.querySelector('.interactive-item-render-empty')).not.toBeNull();
@@ -523,16 +524,16 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
         createTextPart('streaming-text', messageId, ''),
       ]),
     ]);
-    setState('activeSessionId', 'session-1');
-    setState('streamingPartId', 'streaming-text');
-    setState('streamingText', 'First visible token');
+    setState(storePath('activeSessionId', 'session-1'));
+    setState(storePath('streamingPartId', 'streaming-text'));
+    setState(storePath('streamingText', 'First visible token'));
 
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
     const initialGroupingPasses = activityGroupingPasses.value;
 
     for (let index = 0; index < 20; index += 1) {
-      setState('streamingText', `First visible token ${'x'.repeat(index + 1)}`);
+      setState(storePath('streamingText', `First visible token ${'x'.repeat(index + 1)}`));
       await settlePerfEffects();
     }
 
@@ -561,7 +562,7 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
       })
     );
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
 
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
@@ -595,7 +596,7 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
       })
     );
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
 
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
@@ -649,7 +650,7 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
       })
     );
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
 
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
@@ -701,7 +702,7 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
       })
     );
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
     cleanup = render(() => MessageList(), container!);
     await settlePerfEffects();
     list = container!.querySelector<HTMLElement>('.interactive-list')!;
@@ -724,8 +725,10 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
     }
     expect(stickyPreviewSelectionPasses.value).toBe(0);
 
-    setState('messages', stickyMessageIndex, 'parts', 0, (part) =>
-      part.type === 'text' ? { ...part, text: 'Updated prompt' } : part
+    setState(
+      storePath('messages', stickyMessageIndex, 'parts', 0, (part) =>
+        part.type === 'text' ? { ...part, text: 'Updated prompt' } : part
+      )
     );
     await settlePerfEffects();
     expect(stickyPreviewSelectionPasses.value).toBeGreaterThan(0);
@@ -796,7 +799,7 @@ describe('MessageList virtualization perf guards', { timeout: 60_000 }, () => {
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
       })
     );
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
 
     cleanup = render(() => MessageList(), container!);
     // Let cold tail measurements and initial range selection settle before observing reflow.

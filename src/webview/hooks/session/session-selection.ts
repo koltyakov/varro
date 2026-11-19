@@ -1,4 +1,3 @@
-import { batch } from 'solid-js';
 import {
   isMissingWorkspaceDirectoryMessage,
   workspaceDirectoryRecoveryMessage,
@@ -97,7 +96,7 @@ export async function selectSessionWithDependencies(
     options?.preserveTranscript === true && deps.getActiveSessionId() === id;
   let persistedAgent: string | null = null;
   let persistedModel: SelectedModel | null = null;
-  batch(() => {
+  (() => {
     if (!preserveTranscript && (options?.markSeen ?? true)) deps.captureFollowupOpening?.(id);
     if (!preserveTranscript) {
       deps.clearDraftCurrentDocumentState();
@@ -132,7 +131,7 @@ export async function selectSessionWithDependencies(
     deps.resetTodoSync();
     if (!preserveTranscript) deps.clearMessages();
     deps.setMessagesLoading?.(true);
-  });
+  })();
 
   const mcpSync = deps.syncSessionMcps(id).catch(() => {});
   const statusSnapshotStartedAt = captureSessionStatusSnapshotTime();
@@ -190,10 +189,10 @@ export async function selectSessionWithDependencies(
   if (options?.markSeen ?? true) {
     deps.markSessionSeen(id);
   }
-  const todoSync = batch(() => {
+  const todoSync = (() => {
     deps.setMessagesIncremental(messages);
     return deps.syncTodosForSession(id, messages).catch(() => {});
-  });
+  })();
   deps.syncFailedSessionsFromMessages(messages);
 
   const inferredAgent = deps.deriveSelectedAgentFromMessages(messages);

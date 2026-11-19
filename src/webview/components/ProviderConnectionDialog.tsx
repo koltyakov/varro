@@ -1,14 +1,6 @@
-import {
-  For,
-  Show,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onCleanup,
-  onMount,
-} from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { ariaBoolean } from '../lib/aria';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onSettled } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import type {
   ProviderAuthMethod,
   ProviderAuthAuthorization,
@@ -19,7 +11,7 @@ import type { Provider } from '../types';
 import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
 import { codexLoginWarningDismissal } from '../lib/codex-login-warning';
-import { trapModalFocus } from '../lib/modal-focus';
+import { modalFocus } from '../lib/modal-focus';
 import { resolveProviderAuthFailure } from '../lib/provider-connection-state';
 import { openProviderSetup } from '../lib/provider-setup';
 import { state } from '../lib/state';
@@ -120,14 +112,20 @@ export function ProviderConnectionDialog(props: {
     props.onClose();
   }
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       close();
     };
     document.addEventListener('keydown', onKeyDown);
-    onCleanup(() => document.removeEventListener('keydown', onKeyDown));
+    cleanups.push(() => document.removeEventListener('keydown', onKeyDown));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   function chooseProvider(id: string) {
@@ -142,25 +140,32 @@ export function ProviderConnectionDialog(props: {
     setErrorMessage('');
   }
 
-  createEffect(() => {
-    if (initialProviderApplied || props.isLoadingProviders) return;
-    initialProviderApplied = true;
-    const id = props.initialProviderID?.trim();
-    if (id && providers().some((provider) => provider.id === id)) {
-      chooseProvider(id);
-      const initialMethodID = props.initialMethodID;
-      if (initialMethodID) {
-        const index = selectedProvider()?.methods.findIndex(
-          (method) =>
-            method.id === initialMethodID ||
-            (!method.id &&
-              initialMethodID === 'chatgpt-browser' &&
-              authMethodPresentation(id, method).label === 'ChatGPT via Codex')
-        );
-        if (index !== undefined && index >= 0) chooseMethod(index);
+  createEffect(
+    () => ({
+      loading: props.isLoadingProviders,
+      id: props.initialProviderID?.trim(),
+      methodID: props.initialMethodID,
+      providers: providers(),
+    }),
+    ({ loading, id, methodID, providers }) => {
+      if (initialProviderApplied || loading) return;
+      initialProviderApplied = true;
+      const provider = providers.find((provider) => provider.id === id);
+      if (id && provider) {
+        chooseProvider(id);
+        if (methodID) {
+          const index = provider.methods.findIndex(
+            (method) =>
+              method.id === methodID ||
+              (!method.id &&
+                methodID === 'chatgpt-browser' &&
+                authMethodPresentation(id, method).label === 'ChatGPT via Codex')
+          );
+          if (index >= 0) chooseMethod(index, provider.methods[index]);
+        }
       }
     }
-  });
+  );
 
   function handleProviderSearchKeyDown(event: KeyboardEvent) {
     const options = filteredProviders();
@@ -181,12 +186,12 @@ export function ProviderConnectionDialog(props: {
     }
   }
 
-  function chooseMethod(index: number) {
+  function chooseMethod(index: number, method = selectedProvider()?.methods[index]) {
     cancelAuthorization();
     setMethodIndex(index);
     setInputs(
       Object.fromEntries(
-        (selectedMethod()?.prompts ?? []).flatMap((prompt) =>
+        (method?.prompts ?? []).flatMap((prompt) =>
           !prompt.hidden && prompt.default !== undefined ? [[prompt.key, prompt.default]] : []
         )
       )
@@ -405,7 +410,7 @@ export function ProviderConnectionDialog(props: {
     <Portal>
       <div class="provider-connect-overlay">
         <div
-          ref={(element) => onCleanup(trapModalFocus(element))}
+          ref={modalFocus()}
           class="provider-connect-dialog"
           role="dialog"
           aria-modal="true"
@@ -425,7 +430,7 @@ export function ProviderConnectionDialog(props: {
             </button>
           </div>
 
-          <div class="provider-connect-body" classList={{ 'is-provider-list': !providerID() }}>
+          <div class={['provider-connect-body', { 'is-provider-list': !providerID() }]}>
             <Show
               when={providerID()}
               fallback={
@@ -495,8 +500,11 @@ export function ProviderConnectionDialog(props: {
                         {(entry) => (
                           <button
                             type="button"
-                            class="provider-connect-method"
-                            classList={{ 'has-description': Boolean(entry.description) }}
+
+                            class={[
+                              'provider-connect-method',
+                              { 'has-description': Boolean(entry.description) },
+                            ]}
                             onClick={() => chooseMethod(entry.index)}
                           >
                             <span class="provider-connect-method-copy">
@@ -648,7 +656,7 @@ export function ProviderConnectionDialog(props: {
                                     class="provider-connect-url-input"
                                     type="text"
                                     value={auth().url}
-                                    readOnly
+                                    readonly
                                     onFocus={(event) => event.currentTarget.select()}
                                   />
                                   <CopyIconButton text={auth().url} label="authorization URL" />
@@ -874,19 +882,26 @@ function ProviderOptions(props: {
     setScrollHeight(optionsRef.scrollHeight);
   };
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     updateScrollMetrics();
-    if (!optionsRef) return;
+    if (!optionsRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const observer = new ResizeObserver(updateScrollMetrics);
     observer.observe(optionsRef);
-    onCleanup(() => observer.disconnect());
+    cleanups.push(() => observer.disconnect());
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   createEffect(
-    on(
-      () => props.providers.length,
-      () => queueMicrotask(updateScrollMetrics)
-    )
+    () => props.providers.length,
+    () => queueMicrotask(updateScrollMetrics)
   );
 
   const thumbHeight = createMemo(() => {
@@ -915,7 +930,7 @@ function ProviderOptions(props: {
               type="button"
               class={`provider-connect-option ${index() === props.activeIndex ? 'is-active' : ''}`}
               role="option"
-              aria-selected={provider.id === props.selectedProviderID}
+              aria-selected={ariaBoolean(provider.id === props.selectedProviderID)}
               onPointerMove={() => props.onActivate(index())}
               onClick={() => props.onSelect(provider.id)}
             >
@@ -975,21 +990,27 @@ function PromptSelect(props: {
     );
   const selectedOption = () => props.prompt.options.find((option) => option.value === props.value);
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     bodyRef = rootRef?.closest<HTMLElement>('.provider-connect-body') ?? null;
     const onPointerDown = (event: PointerEvent) => {
       // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
       if (!rootRef?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener('pointerdown', onPointerDown);
-    onCleanup(() => {
+    cleanups.push(() => {
       document.removeEventListener('pointerdown', onPointerDown);
       bodyRef?.classList.remove('has-open-select');
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
-  createEffect(() => {
-    bodyRef?.classList.toggle('has-open-select', open());
+  createEffect(open, (isOpen) => {
+    bodyRef?.classList.toggle('has-open-select', isOpen);
   });
 
   function openMenu() {
@@ -1044,7 +1065,7 @@ function PromptSelect(props: {
         class={`provider-connect-select-trigger ${open() ? 'is-open' : ''}`}
         role="combobox"
         aria-haspopup="listbox"
-        aria-expanded={open()}
+        aria-expanded={ariaBoolean(open())}
         aria-controls={listboxID}
         aria-activedescendant={open() ? `${listboxID}-${activeIndex()}` : undefined}
         disabled={props.disabled}
@@ -1065,7 +1086,7 @@ function PromptSelect(props: {
                 type="button"
                 class={`provider-connect-select-option ${index() === activeIndex() ? 'is-active' : ''}`}
                 role="option"
-                aria-selected={option.value === props.value}
+                aria-selected={ariaBoolean(option.value === props.value)}
                 onPointerMove={() => setActiveIndex(index())}
                 onClick={() => choose(index())}
               >

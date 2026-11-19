@@ -1,4 +1,4 @@
-import { createEffect, createMemo, on, onCleanup } from 'solid-js';
+import { createEffect, createMemo } from 'solid-js';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import type { SessionStatus } from '../../types';
@@ -184,45 +184,48 @@ export function registerLoadingStatusPollEffect(deps: {
     return tracked;
   };
 
-  createEffect(() => {
-    const loading = deps.isLoading();
-    const sessionId = deps.getActiveSessionId();
-    const visible = deps.isDocumentVisible();
-    const eventStreamState = deps.getEventStreamState();
-    if (!loading || !sessionId || !visible) return;
-
-    let cancelled = false;
-    let timer: number | undefined;
-    let nextDelay =
-      eventStreamState === 'healthy'
-        ? HEALTHY_LOADING_STATUS_POLL_INITIAL_MS
-        : DEGRADED_LOADING_STATUS_POLL_MS;
-    const schedule = () => {
-      timer = window.setTimeout(() => {
-        void poll();
-      }, nextDelay);
-    };
-    const poll = async () => {
-      const activeSessionId = deps.getActiveSessionId();
-      if (cancelled || !deps.isLoading() || !activeSessionId || !deps.isDocumentVisible()) return;
-      try {
-        await recheck(activeSessionId);
-      } catch (err) {
-        deps.logError?.('loadingStatusPoll', err);
-      }
-      if (cancelled) return;
-      if (eventStreamState === 'healthy') {
-        nextDelay = Math.min(nextDelay * 2, HEALTHY_LOADING_STATUS_POLL_MAX_MS);
-      }
+  createEffect(
+    () => ({
+      loading: deps.isLoading(),
+      sessionId: deps.getActiveSessionId(),
+      visible: deps.isDocumentVisible(),
+      eventStreamState: deps.getEventStreamState(),
+    }),
+    ({ loading, sessionId, visible, eventStreamState }) => {
+      if (!loading || !sessionId || !visible) return undefined;
+      let cancelled = false;
+      let timer: number | undefined;
+      let nextDelay =
+        eventStreamState === 'healthy'
+          ? HEALTHY_LOADING_STATUS_POLL_INITIAL_MS
+          : DEGRADED_LOADING_STATUS_POLL_MS;
+      const schedule = () => {
+        timer = window.setTimeout(() => {
+          void poll();
+        }, nextDelay);
+      };
+      const poll = async () => {
+        const activeSessionId = deps.getActiveSessionId();
+        if (cancelled || !deps.isLoading() || !activeSessionId || !deps.isDocumentVisible()) return;
+        try {
+          await recheck(activeSessionId);
+        } catch (err) {
+          deps.logError?.('loadingStatusPoll', err);
+        }
+        if (cancelled) return;
+        if (eventStreamState === 'healthy') {
+          nextDelay = Math.min(nextDelay * 2, HEALTHY_LOADING_STATUS_POLL_MAX_MS);
+        }
+        schedule();
+      };
       schedule();
-    };
-    schedule();
 
-    onCleanup(() => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    });
-  });
+      return () => {
+        cancelled = true;
+        if (timer !== undefined) window.clearTimeout(timer);
+      };
+    }
+  );
 }
 
 export function registerEventStreamRecoveryEffect(deps: {
@@ -232,16 +235,14 @@ export function registerEventStreamRecoveryEffect(deps: {
   recheckSessionStatus(sessionId: string): Promise<void>;
   logError(context: string, cause: unknown): void;
 }) {
-  createEffect(
-    on(deps.getEventStreamState, (current, previous) => {
-      if (previous !== 'degraded' || current !== 'healthy') return;
-      const sessionId = deps.getActiveSessionId();
-      if (!sessionId || !deps.isLoading()) return;
-      void deps
-        .recheckSessionStatus(sessionId)
-        .catch((err) => deps.logError('eventStreamRecovery', err));
-    })
-  );
+  createEffect(deps.getEventStreamState, (current, previous) => {
+    if (previous !== 'degraded' || current !== 'healthy') return;
+    const sessionId = deps.getActiveSessionId();
+    if (!sessionId || !deps.isLoading()) return;
+    void deps
+      .recheckSessionStatus(sessionId)
+      .catch((err) => deps.logError('eventStreamRecovery', err));
+  });
 }
 
 export function registerVisibleRunningSessionSyncEffect(deps: {
@@ -272,97 +273,102 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
   });
 
   let refreshInFlight: Promise<void> | null = null;
-  createEffect(
-    on(syncTarget, (target) => {
-      if (!target) return;
-      const [runningSessionIdsText = '', activeRunningSessionId = '', eventStreamState] =
-        target.split(RUNNING_SESSION_SYNC_KEY_SEPARATOR, 3);
-      const runningSessionIds = runningSessionIdsText
-        .split('\n')
-        .filter((sessionId) => sessionId.length > 0);
-      const messageSyncSessionIds = activeRunningSessionId
-        ? [
-            activeRunningSessionId,
-            ...runningSessionIds.filter((sessionId) => sessionId !== activeRunningSessionId),
-          ]
-        : runningSessionIds;
-      const hasRunningSessions = messageSyncSessionIds.length > 0;
-      const runningSessionIdSet = new Set(runningSessionIds);
+  createEffect(syncTarget, (target) => {
+    const cleanups: Array<() => void> = [];
 
-      let cancelled = false;
-      const refresh = (): Promise<void> => {
-        if (cancelled || !deps.isDocumentVisible()) return Promise.resolve();
-        if (refreshInFlight) return refreshInFlight;
-
-        const tracked = (async () => {
-          const results: PromiseSettledResult<void>[] = [];
-          results.push(await settleVoid(deps.hydrateSessionStatuses()));
-          const latestRunningIds = Object.entries(deps.getSessionStatuses())
-            .filter(([, status]) => status?.type === 'busy' || status?.type === 'retry')
-            .map(([sessionId]) => sessionId)
-            .toSorted();
-          if (latestRunningIds.length === 0) {
-            for (const result of results) {
-              if (result.status === 'rejected') deps.logError('runningSessionSync', result.reason);
-            }
-            return;
-          }
-
-          results.push(await settleVoid(deps.loadSessions()));
-          results.push(await settleVoid(deps.loadQuestions()));
-          if (deps.loadPendingPermissions) {
-            results.push(await settleVoid(deps.loadPendingPermissions()));
-          }
-          const latestActiveSessionId = deps.getActiveSessionId();
-          const latestMessageSyncSessionIds =
-            latestActiveSessionId && latestRunningIds.includes(latestActiveSessionId)
-              ? [
-                  latestActiveSessionId,
-                  ...latestRunningIds.filter((sessionId) => sessionId !== latestActiveSessionId),
-                ]
-              : latestRunningIds;
-          // Healthy SSE owns transcript delivery. Hydration only recovers transcripts for running
-          // sessions that SSE failed to reveal; degraded polling continues to reconcile every one.
-          const transcriptSyncSessionIds =
-            eventStreamState === 'healthy'
-              ? latestMessageSyncSessionIds.filter(
-                  (sessionId) => !runningSessionIdSet.has(sessionId)
-                )
-              : latestMessageSyncSessionIds;
-          for (const sessionId of transcriptSyncSessionIds) {
-            results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
-          }
-          for (const result of results) {
-            if (result.status === 'rejected') {
-              deps.logError('runningSessionSync', result.reason);
-            }
-          }
-        })().finally(() => {
-          refreshInFlight = null;
-        });
-        refreshInFlight = tracked;
-        return tracked;
+    if (!target)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
       };
+    const [runningSessionIdsText = '', activeRunningSessionId = '', eventStreamState] =
+      target.split(RUNNING_SESSION_SYNC_KEY_SEPARATOR, 3);
+    const runningSessionIds = runningSessionIdsText
+      .split('\n')
+      .filter((sessionId) => sessionId.length > 0);
+    const messageSyncSessionIds = activeRunningSessionId
+      ? [
+          activeRunningSessionId,
+          ...runningSessionIds.filter((sessionId) => sessionId !== activeRunningSessionId),
+        ]
+      : runningSessionIds;
+    const hasRunningSessions = messageSyncSessionIds.length > 0;
+    const runningSessionIdSet = new Set(runningSessionIds);
 
-      const timer = window.setInterval(
-        () => {
-          void refresh().catch((err) => deps.logError('runningSessionSync', err));
-        },
-        hasRunningSessions
-          ? eventStreamState === 'healthy'
-            ? HEALTHY_RUNNING_SESSION_SYNC_INTERVAL_MS
-            : DEGRADED_RUNNING_SESSION_SYNC_INTERVAL_MS
-          : eventStreamState === 'healthy'
-            ? HEALTHY_IDLE_STATUS_SYNC_INTERVAL_MS
-            : DEGRADED_IDLE_STATUS_SYNC_INTERVAL_MS
-      );
+    let cancelled = false;
+    const refresh = (): Promise<void> => {
+      if (cancelled || !deps.isDocumentVisible()) return Promise.resolve();
+      if (refreshInFlight) return refreshInFlight;
 
-      onCleanup(() => {
-        cancelled = true;
-        window.clearInterval(timer);
+      const tracked = (async () => {
+        const results: PromiseSettledResult<void>[] = [];
+        results.push(await settleVoid(deps.hydrateSessionStatuses()));
+        const latestRunningIds = Object.entries(deps.getSessionStatuses())
+          .filter(([, status]) => status?.type === 'busy' || status?.type === 'retry')
+          .map(([sessionId]) => sessionId)
+          .toSorted();
+        if (latestRunningIds.length === 0) {
+          for (const result of results) {
+            if (result.status === 'rejected') deps.logError('runningSessionSync', result.reason);
+          }
+          return;
+        }
+
+        results.push(await settleVoid(deps.loadSessions()));
+        results.push(await settleVoid(deps.loadQuestions()));
+        if (deps.loadPendingPermissions) {
+          results.push(await settleVoid(deps.loadPendingPermissions()));
+        }
+        const latestActiveSessionId = deps.getActiveSessionId();
+        const latestMessageSyncSessionIds =
+          latestActiveSessionId && latestRunningIds.includes(latestActiveSessionId)
+            ? [
+                latestActiveSessionId,
+                ...latestRunningIds.filter((sessionId) => sessionId !== latestActiveSessionId),
+              ]
+            : latestRunningIds;
+        // Healthy SSE owns transcript delivery. Hydration only recovers transcripts for running
+        // sessions that SSE failed to reveal; degraded polling continues to reconcile every one.
+        const transcriptSyncSessionIds =
+          eventStreamState === 'healthy'
+            ? latestMessageSyncSessionIds.filter((sessionId) => !runningSessionIdSet.has(sessionId))
+            : latestMessageSyncSessionIds;
+        for (const sessionId of transcriptSyncSessionIds) {
+          results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
+        }
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            deps.logError('runningSessionSync', result.reason);
+          }
+        }
+      })().finally(() => {
+        refreshInFlight = null;
       });
-    })
-  );
+      refreshInFlight = tracked;
+      return tracked;
+    };
+
+    const timer = window.setInterval(
+      () => {
+        void refresh().catch((err) => deps.logError('runningSessionSync', err));
+      },
+      hasRunningSessions
+        ? eventStreamState === 'healthy'
+          ? HEALTHY_RUNNING_SESSION_SYNC_INTERVAL_MS
+          : DEGRADED_RUNNING_SESSION_SYNC_INTERVAL_MS
+        : eventStreamState === 'healthy'
+          ? HEALTHY_IDLE_STATUS_SYNC_INTERVAL_MS
+          : DEGRADED_IDLE_STATUS_SYNC_INTERVAL_MS
+    );
+
+    cleanups.push(() => {
+      cancelled = true;
+      window.clearInterval(timer);
+    });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
+  });
 }
 
 async function settleVoid(promise: Promise<void>): Promise<PromiseSettledResult<void>> {
@@ -414,7 +420,6 @@ export function registerProviderLimitRefreshEffect(deps: {
         pollIntervalMs: resolveProviderLimitPollIntervalMs(pollIntervalMs, working),
       };
     },
-    null,
     {
       equals: (a, b) =>
         a?.providerID === b?.providerID &&
@@ -424,60 +429,62 @@ export function registerProviderLimitRefreshEffect(deps: {
         a?.pollIntervalMs === b?.pollIntervalMs,
     }
   );
-  createEffect(
-    on(pollingTarget, (target, previous) => {
-      if (!target) return;
+  let refreshCurrent: (() => Promise<void>) | undefined;
+  createEffect(pollingTarget, (target, previous) => {
+    if (!target) return undefined;
 
-      let cancelled = false;
-      let inFlight = false;
-      const refresh = async (completion = false) => {
-        if (
-          cancelled ||
-          inFlight ||
-          (!completion && !target.working && !deps.isDocumentVisible()) ||
-          target.scope !== deps.getRequestScope()
-        )
-          return;
-        inFlight = true;
-        try {
-          const limit = await deps.loadProviderLimit(target.providerID, target.modelID);
-          if (!cancelled && target.scope === deps.getRequestScope()) {
-            deps.setProviderLimit(target.providerID, target.modelID, limit);
-          }
-        } catch (err) {
-          deps.logError('loadProviderLimit', err);
-        } finally {
-          inFlight = false;
+    let cancelled = false;
+    let inFlight = false;
+    const refresh = async (completion = false) => {
+      if (
+        cancelled ||
+        inFlight ||
+        (!completion && !target.working && !deps.isDocumentVisible()) ||
+        target.scope !== deps.getRequestScope()
+      )
+        return;
+      inFlight = true;
+      try {
+        const limit = await deps.loadProviderLimit(target.providerID, target.modelID);
+        if (!cancelled && target.scope === deps.getRequestScope()) {
+          deps.setProviderLimit(target.providerID, target.modelID, limit);
         }
-      };
+      } catch (err) {
+        deps.logError('loadProviderLimit', err);
+      } finally {
+        inFlight = false;
+      }
+    };
 
-      const shouldPoll = createMemo(() => target.working || deps.isDocumentVisible());
-      createEffect(
-        on(shouldPoll, (enabled) => {
-          if (!enabled) return;
-          void refresh();
-          const timer = window.setInterval(() => {
-            void refresh();
-          }, target.pollIntervalMs);
-          onCleanup(() => window.clearInterval(timer));
-        })
-      );
-      // Wait beyond the backend's 30-second TTL for final usage, even while hidden.
-      const completionTimer =
-        previous?.working &&
-        !target.working &&
-        previous.providerID === target.providerID &&
-        previous.modelID === target.modelID &&
-        previous.scope === target.scope
-          ? window.setTimeout(() => {
-              void refresh(true);
-            }, PROVIDER_LIMIT_COMPLETION_REFRESH_DELAY_MS)
-          : undefined;
+    refreshCurrent = refresh;
+    // Wait beyond the backend's 30-second TTL for final usage, even while hidden.
+    const completionTimer =
+      previous?.working &&
+      !target.working &&
+      previous.providerID === target.providerID &&
+      previous.modelID === target.modelID &&
+      previous.scope === target.scope
+        ? window.setTimeout(() => {
+            void refresh(true);
+          }, PROVIDER_LIMIT_COMPLETION_REFRESH_DELAY_MS)
+        : undefined;
 
-      onCleanup(() => {
-        cancelled = true;
-        if (completionTimer !== undefined) window.clearTimeout(completionTimer);
-      });
-    })
+    return () => {
+      cancelled = true;
+      refreshCurrent = undefined;
+      if (completionTimer !== undefined) window.clearTimeout(completionTimer);
+    };
+  });
+  createEffect(
+    () => {
+      const target = pollingTarget();
+      return target && (target.working || deps.isDocumentVisible()) ? target : null;
+    },
+    (target) => {
+      if (!target) return undefined;
+      void refreshCurrent?.();
+      const timer = window.setInterval(() => void refreshCurrent?.(), target.pollIntervalMs);
+      return () => window.clearInterval(timer);
+    }
   );
 }

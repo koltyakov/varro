@@ -1,39 +1,26 @@
+import { flush as flushSolid } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
-import type { MockedObject } from 'vitest';
-import type * as StateModule from '../lib/state';
-import type { Message, MessageEntry, SessionStatus } from '../types';
+import { setState, state } from '../lib/state';
+import type { AssistantMessage, Message, MessageEntry, SessionStatus } from '../types';
 
-// SAFETY: The fixture provides the complete domain shape read by this statement.
-const { setSessionUsageLimitState, setState, startLoading, stopLoading, state } = vi.hoisted(
-  () => ({
-    setSessionUsageLimitState: vi.fn(),
-    setState: vi.fn(),
-    startLoading: vi.fn(),
-    stopLoading: vi.fn(),
-    state: {
-      sessionStatus: {} as Record<string, SessionStatus>,
-      sessionBackgroundServices: {} as Record<string, number>,
-      sessionUsageLimits: {} as UnknownRecord,
-      messages: [] as Array<unknown>,
-    },
-  })
-);
+const { setSessionUsageLimitState, startLoading, stopLoading } = vi.hoisted(() => ({
+  setSessionUsageLimitState: vi.fn(),
+  startLoading: vi.fn(),
+  stopLoading: vi.fn(),
+}));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise session-status integration with the state module. */
-vi.mock('../lib/state', async () => {
-  // SAFETY: The test installs the typed mock implementation before this statement.
-  const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
+vi.mock(import('../lib/state'), async (importOriginal) => {
+  const actual = await importOriginal();
   return {
     ...actual,
     setSessionUsageLimit: setSessionUsageLimitState,
-    setState,
     startLoading,
     stopLoading,
-    state,
   };
 });
 
-function completedAssistantMessage(): Message {
+function completedAssistantMessage(): AssistantMessage {
   return {
     id: 'assistant-1',
     sessionID: 'session-1',
@@ -78,7 +65,6 @@ import {
   shouldIgnorePendingAbortStatusWithDependencies,
   updateUsageLimitStateWithDependencies,
 } from './session/session-status';
-import type { UnknownRecord } from '../../shared/type-utils';
 
 describe('session status helpers', () => {
   it('tracks pending abort retries and clears them', () => {
@@ -92,7 +78,9 @@ describe('session status helpers', () => {
     };
 
     markPendingAbortWithDependencies(deps, 'session-1');
+    flushSolid();
     markPendingAbortTreeWithDependencies(deps, ['session-2']);
+    flushSolid();
 
     expect(hasPendingAbortWithDependencies({ pendingAbortRetryAttempts }, 'session-1')).toBe(true);
     expect(hasPendingAbortWithDependencies({ pendingAbortRetryAttempts }, 'session-2')).toBe(true);
@@ -100,7 +88,9 @@ describe('session status helpers', () => {
     expect(pendingAbortRetryAttempts.get('session-2')).toBeNull();
 
     clearPendingAbortWithDependencies({ pendingAbortRetryAttempts }, 'session-1');
+    flushSolid();
     clearPendingAbortTreeWithDependencies({ pendingAbortRetryAttempts }, ['session-2']);
+    flushSolid();
 
     expect(pendingAbortRetryAttempts.size).toBe(0);
   });
@@ -154,6 +144,7 @@ describe('session status helpers', () => {
       'session-1',
       { type: 'busy' }
     );
+    flushSolid();
 
     expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
 
@@ -174,6 +165,7 @@ describe('session status helpers', () => {
       'session-1',
       { type: 'busy' }
     );
+    flushSolid();
 
     expect(setSessionUsageLimit).not.toHaveBeenCalled();
   });
@@ -199,6 +191,7 @@ describe('session status helpers', () => {
         modelID: 'gpt-4o',
       }
     );
+    flushSolid();
 
     expect(setSessionUsageLimit).toHaveBeenCalledWith(
       'session-1',
@@ -228,6 +221,7 @@ describe('session status helpers', () => {
       },
       []
     );
+    flushSolid();
 
     expect(applyUsageLimitNotice).toHaveBeenCalledWith(
       'session-1',
@@ -239,6 +233,72 @@ describe('session status helpers', () => {
       }),
       { preserveExistingOnNull: false }
     );
+  });
+
+  it.each(['MessageAbortedError', 'APIError'])(
+    'clears a cached idle limit when the latest assistant has a non-limit %s',
+    (name) => {
+      const setSessionUsageLimit = vi.fn();
+      updateUsageLimitStateWithDependencies(
+        {
+          deriveUsageLimitNoticeContext: () => null,
+          applyUsageLimitNotice: (sessionId, notice, options) =>
+            applyUsageLimitNoticeWithDependencies(
+              { setSessionUsageLimit, refreshProviderLimit: vi.fn(async () => {}) },
+              sessionId,
+              notice,
+              options
+            ),
+        },
+        'session-1',
+        { type: 'idle' },
+        [
+          {
+            info: {
+              ...completedAssistantMessage(),
+              error: { name, data: { message: 'Connection closed' } },
+            },
+            parts: [],
+          },
+        ]
+      );
+      flushSolid();
+
+      expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
+    }
+  );
+
+  it('preserves cached idle limits when no authoritative session messages were loaded', () => {
+    const applyUsageLimitNotice = vi.fn();
+    updateUsageLimitStateWithDependencies(
+      { deriveUsageLimitNoticeContext: () => null, applyUsageLimitNotice },
+      'session-1',
+      { type: 'idle' },
+      []
+    );
+    flushSolid();
+
+    expect(applyUsageLimitNotice).toHaveBeenCalledWith('session-1', null, {
+      preserveExistingOnNull: true,
+    });
+  });
+
+  it('preserves an idle limit received before the current assistant message is loaded', () => {
+    const applyUsageLimitNotice = vi.fn();
+    updateUsageLimitStateWithDependencies(
+      { deriveUsageLimitNoticeContext: () => null, applyUsageLimitNotice },
+      'session-1',
+      { type: 'idle' },
+      [
+        { info: completedAssistantMessage(), parts: [] },
+        { info: { ...userMessage(), id: 'user-2', time: { created: 3 } }, parts: [] },
+      ]
+    );
+    flushSolid();
+
+    expect(applyUsageLimitNotice).toHaveBeenCalledWith('session-1', null, {
+      preserveExistingOnNull: true,
+    });
   });
 
   it('rechecks status by resyncing idle sessions and starting loading for busy ones', async () => {
@@ -270,6 +330,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(setSessionStatuses).toHaveBeenCalledWith(
@@ -312,6 +373,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', {
       type: 'retry',
@@ -348,6 +410,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(loadSessionStatuses).not.toHaveBeenCalled();
 
@@ -370,6 +433,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(logError).toHaveBeenCalledWith('recheckSessionStatus', expect.any(Error));
   });
@@ -381,30 +445,23 @@ describe('session status helpers', () => {
     const syncSessionMessages = vi.fn(async () => {});
     const onSessionSettled = vi.fn();
 
-    state.sessionStatus = {
-      'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
-    };
-    Object.assign(state, {
-      activeSessionId: null,
-      completedSessionResponses: {},
-      failedSessionIds: [],
-      lastSeenSessions: {},
-      permissions: [],
-      questionResponsePendingSessionIds: [],
-      questions: [],
-      sessions: [],
-    });
-    state.sessionUsageLimits = {
-      'session-1': {
+    setState((draft) => {
+      draft.sessionStatus['session-1'] = {
+        type: 'retry',
+        attempt: 2,
+        message: '429 usage limit reached',
+        next: 8,
+      };
+      draft.sessionUsageLimits['session-1'] = {
         source: 'status',
         statusCode: 429,
         message: '429 usage limit reached',
         unit: 'messages',
         retryAt: 1,
         attempt: 2,
-      },
-    };
-    state.messages = [];
+      };
+    });
+    flushSolid();
 
     const operations = new SessionStatusOperations({
       pendingAbortRetryAttempts,
@@ -420,23 +477,27 @@ describe('session status helpers', () => {
       logError: vi.fn(),
     });
 
-    operations.setSessionStatusEntry('session-1', { type: 'idle' });
-    expect(onSessionSettled).toHaveBeenCalledWith('session-1');
-
-    operations.setSessionStatusEntry('session-1', { type: 'busy' });
-    expect(setState).toHaveBeenCalledWith('sessionStatus', expect.any(Function));
-
     operations.markPendingAbortTree(['session-1']);
     expect(pendingAbortRetryAttempts.get('session-1')).toBe(2);
 
+    operations.setSessionStatusEntry('session-1', { type: 'idle' });
+    flushSolid();
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    expect(onSessionSettled).toHaveBeenCalledWith('session-1');
+
+    operations.setSessionStatusEntry('session-1', { type: 'busy' });
+    flushSolid();
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+
     operations.clearUsageLimitOnResumedProgress('session-1', { type: 'busy' });
+    flushSolid();
     expect(setSessionUsageLimitState).toHaveBeenCalledWith('session-1', null);
 
     setSessionUsageLimitState.mockClear();
     stopLoading.mockClear();
-    state.sessionStatus = { 'session-1': { type: 'idle' } };
 
     await operations.recheckSessionStatus('session-1');
+    flushSolid();
 
     expect(stopLoading).toHaveBeenCalledTimes(1);
     expect(syncSession).toHaveBeenCalledWith('session-1');
@@ -468,6 +529,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(stopLoadingSpy).not.toHaveBeenCalled();
     expect(startLoadingSpy).not.toHaveBeenCalled();
@@ -500,6 +562,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(startLoadingSpy).toHaveBeenCalledTimes(1);
     expect(stopLoadingSpy).not.toHaveBeenCalled();
@@ -547,6 +610,7 @@ describe('session status helpers', () => {
         },
         'session-1'
       );
+      flushSolid();
       expect(startLoadingSpy).toHaveBeenCalledTimes(status === 'running' ? 1 : 0);
       expect(stopLoadingSpy).toHaveBeenCalledTimes(status === 'running' ? 0 : 1);
     }
@@ -578,6 +642,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(startLoadingSpy).toHaveBeenCalledTimes(1);
     expect(stopLoadingSpy).not.toHaveBeenCalled();
@@ -614,6 +679,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
@@ -642,6 +708,7 @@ describe('session status helpers', () => {
       },
       'session-2'
     );
+    flushSolid();
 
     expect(setSessionStatuses).toHaveBeenCalledWith(
       { 'session-2': { type: 'idle' } },
@@ -694,9 +761,11 @@ describe('session status helpers', () => {
         'session-1'
       );
       await syncStarted;
+      flushSolid();
       currentStatus = status;
       finishSync();
       await recheck;
+      flushSolid();
       expect(setSessionStatusEntry).not.toHaveBeenCalled();
       expect(stopLoadingSpy).not.toHaveBeenCalled();
       expect(startLoadingSpy).toHaveBeenCalledOnce();
@@ -736,6 +805,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(updateUsageLimitState).toHaveBeenCalledWith('session-1', retryStatus);
   });
@@ -764,6 +834,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(startLoadingSpy).toHaveBeenCalledTimes(1);
     expect(stopLoadingSpy).not.toHaveBeenCalled();
@@ -802,6 +873,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(syncBusySessionMessages).toHaveBeenCalledWith('session-1');
     expect(syncSessionMessages).not.toHaveBeenCalled();
@@ -838,6 +910,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(stopLoadingSpy).toHaveBeenCalledTimes(1);
@@ -869,6 +942,7 @@ describe('session status helpers', () => {
       },
       'session-1'
     );
+    flushSolid();
 
     expect(startLoadingSpy).toHaveBeenCalledTimes(1);
     expect(stopLoadingSpy).not.toHaveBeenCalled();

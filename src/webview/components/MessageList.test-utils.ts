@@ -1,5 +1,6 @@
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, vi } from 'vitest';
-import { reconcile } from 'solid-js/store';
+import { reconcile } from 'solid-js';
 import {
   setExpandThinking,
   setState,
@@ -76,25 +77,49 @@ export function installMessageListTestEnvironment(
     vi.useRealTimers();
     environment.getContainer()?.remove();
     environment.setContainer(null);
-    setState('messages', []);
-    setState('sessions', []);
-    setState('permissions', []);
-    setState('questions', []);
-    setState('activeSessionId', null);
-    setState('messagesLoading', false);
-    setState('pendingSessionSelectionId', null);
-    setState('providers', []);
-    setState('agents', []);
-    setState('allAgents', []);
-    setState('queuedMessages', []);
-    setState('streamingPartId', null);
-    setState('streamingText', '');
+    setState(storePath('messages', []));
+    setState(storePath('sessions', []));
+    setState(storePath('permissions', []));
+    setState(storePath('questions', []));
+    setState(storePath('activeSessionId', null));
+    setState(storePath('messagesLoading', false));
+    setState(storePath('pendingSessionSelectionId', null));
+    setState(storePath('providers', []));
+    setState(storePath('agents', []));
+    setState(storePath('allAgents', []));
+    setState(storePath('queuedMessages', []));
+    setState(storePath('streamingPartId', null));
+    setState(storePath('streamingText', ''));
     resetMessageWindowState();
     resetToolCallExpansionState();
-    setState('sessionSelectedAgents', reconcile({}));
-    setState('sessionStatus', reconcile({}));
-    setState('sessionAutoPermissionCounts', reconcile({}));
-    setState('skippedPlanSessions', reconcile({}));
+    setState((draft) => {
+      const current = draft['sessionSelectedAgents'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionSelectedAgents'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    setState((draft) => {
+      const current = draft['sessionStatus'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionStatus'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    setState((draft) => {
+      const current = draft['sessionAutoPermissionCounts'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['sessionAutoPermissionCounts'] = incoming;
+      else reconcile(incoming)(current);
+    });
+    setState((draft) => {
+      const current = draft['skippedPlanSessions'];
+      const incoming = {} satisfies typeof current;
+      if (incoming === null || incoming === undefined || current === null || current === undefined)
+        draft['skippedPlanSessions'] = incoming;
+      else reconcile(incoming)(current);
+    });
     setShowFileDiffs(false);
     setShowEmptyStateHistogram(false);
     setExpandThinking(false);

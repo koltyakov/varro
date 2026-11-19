@@ -1,3 +1,4 @@
+import { ariaBoolean } from '../../lib/aria';
 import { Show, createSignal, onCleanup } from 'solid-js';
 import { formatClockTime } from '../../lib/message-time';
 import { compressIcon } from '../../lib/ui-icons';
@@ -66,8 +67,8 @@ export function CompactionDivider(props: {
           </div>
           <time
             class={`message-sent-time${props.showTimestamp || isHoverIntentActive() ? ' is-visible' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
-            dateTime={new Date(props.timestamp).toISOString()}
-            aria-hidden={!props.showTimestamp && !isHoverIntentActive()}
+            datetime={new Date(props.timestamp).toISOString()}
+            aria-hidden={ariaBoolean(!props.showTimestamp && !isHoverIntentActive())}
           >
             {formatClockTime(props.timestamp)}
           </time>
@@ -82,7 +83,7 @@ export function CompactionDivider(props: {
         <div class="assistant-dialog-summary-content">
           <time
             class={`assistant-dialog-summary-completed-time${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
-            dateTime={new Date(props.timestamp).toISOString()}
+            datetime={new Date(props.timestamp).toISOString()}
           >
             <span class="assistant-dialog-summary-completed-time-text">
               {formatClockTime(props.timestamp)}

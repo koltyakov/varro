@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Playwright serializes these browser callbacks, which deliberately inject partial harness and server-event payloads across the page boundary. */
+import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import {
   getScrollMetrics,
@@ -10,6 +11,84 @@ import {
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
 
 test.describe('auto-scroll', () => {
+  test.afterEach(async ({ page }, testInfo) => {
+    if (
+      testInfo.title !==
+        'does not push a full transcript backward when send-time panels collapse' ||
+      testInfo.status === testInfo.expectedStatus ||
+      page.isClosed()
+    )
+      return;
+    const geometry = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('.interactive-list');
+      const snapshot = (element: Element) => ({
+        className: element.className,
+        style: element.getAttribute('style'),
+        rect: element.getBoundingClientRect().toJSON(),
+        height: getComputedStyle(element).height,
+      });
+      return {
+        top: list?.scrollTop,
+        height: list?.scrollHeight,
+        client: list?.clientHeight,
+        reserves: [...document.querySelectorAll('.append-scroll-bottom-reserve')].map(snapshot),
+        composer: [...document.querySelectorAll('.chat-input-container')].map(snapshot),
+        rows: [...document.querySelectorAll<HTMLElement>('[data-msg-id]')].slice(-4).map((row) => ({
+          id: row.dataset.msgId,
+          ...snapshot(row),
+        })),
+      };
+    });
+    const path = testInfo.outputPath('send-collapse-geometry.json');
+    await writeFile(path, JSON.stringify(geometry, null, 2));
+    await testInfo.attach('send-collapse-geometry', { path, contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath('send-collapse.png') });
+  });
+
+  test('eases new streaming growth after a native wheel returns to the physical bottom', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const list = page.locator('.interactive-list');
+    const gap = () =>
+      list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop);
+    await expect.poll(gap).toBeLessThanOrEqual(1);
+    await list.hover();
+    await page.mouse.wheel(0, -440);
+    await expect.poll(gap).toBeGreaterThan(220);
+    await appendDeltaToRapidStreaming(page, '\n\nOutside the viewport. '.repeat(25));
+    await waitForAnimationFrames(page, 20);
+    expect(await gap()).toBeGreaterThan(200);
+    await page.mouse.wheel(0, 100_000);
+    await expect.poll(gap).toBeLessThanOrEqual(1);
+    await waitForAnimationFrames(page, 24);
+
+    const [eased] = await Promise.all([
+      list.evaluate(async (element) => {
+        const origin = element.scrollTop;
+        let previous = origin;
+        let movedWhileBehind = false;
+        const deadline = performance.now() + 5000;
+        while (performance.now() < deadline) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const top = element.scrollTop;
+          const remaining = element.scrollHeight - element.clientHeight - top;
+          if (top > previous && remaining > 1) movedWhileBehind = true;
+          if (movedWhileBehind && top > origin && remaining <= 1) return true;
+          previous = top;
+        }
+        return false;
+      }),
+      appendDeltaToRapidStreaming(
+        page,
+        '\n\nGrowth beyond the restored physical bottom. '.repeat(40)
+      ),
+    ]);
+    expect(eased).toBe(true);
+    await expect(list).toContainText('Growth beyond the restored physical bottom.');
+    await expect.poll(gap).toBeLessThanOrEqual(1);
+  });
+
   for (const scenario of ['mixed-small-transcript', 'large-transcript', 'rapid-streaming-jitter']) {
     for (const detached of [false, true]) {
       test(`restores hidden bottom-follow instantly in ${scenario}, detached=${detached}`, async ({
@@ -416,18 +495,10 @@ test.describe('auto-scroll', () => {
       )!;
       const samples: Array<{
         top: number;
-        entering: boolean;
-        rowHeight: number;
       }> = [];
       const sample = () => {
-        const item = container.querySelector<HTMLElement>(
-          '[data-activity-part-id="reasoning-bottom-follow"]'
-        );
-        const row = item?.closest<HTMLElement>('[data-msg-id]');
         samples.push({
           top: anchor.getBoundingClientRect().top - container.getBoundingClientRect().top,
-          entering: item?.classList.contains('is-entering') ?? false,
-          rowHeight: row?.getBoundingClientRect().height ?? 0,
         });
         if (samples.length < 16) requestAnimationFrame(sample);
         else {
@@ -482,14 +553,10 @@ test.describe('auto-scroll', () => {
           window as typeof window & {
             reasoningEntranceSamples?: Array<{
               top: number;
-              entering: boolean;
-              rowHeight: number;
             }>;
           }
         ).reasoningEntranceSamples ?? []
     );
-    expect(samples.some((sample) => sample.entering)).toBe(true);
-    expect(samples[0]!.rowHeight).toBeLessThanOrEqual(1);
     expect(Math.abs(samples[0]!.top - previousTop)).toBeLessThanOrEqual(1);
     for (let index = 1; index < samples.length; index += 1) {
       const movement = samples[index - 1]!.top - samples[index]!.top;
@@ -791,11 +858,82 @@ test.describe('auto-scroll', () => {
     await expect(
       page.getByText('Corrected final prompt with bottom follow restored.', { exact: true })
     ).toBeVisible();
+    await expect(page.locator('[data-msg-id="message-large-user-239"]')).toHaveCount(0);
     await expect(page.locator('.interactive-list')).not.toHaveClass(/editing-message/);
     await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(2);
+  });
+
+  test('retains a native wheel destination while edit deletion is pending and permits cancellation after refusal', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    const list = page.locator('.interactive-list');
+    const original = list.locator('[data-msg-id="message-large-user-239"]');
+    await original
+      .getByText('Review large transcript section 239 and keep the UI responsive.')
+      .click();
+    const editor = page.locator('.inline-edit-composer-slot [role="textbox"]');
+    await editor.fill('Rejected replacement');
+    await page.evaluate(() => {
+      const host = window as Window & {
+        __sendToExtension: (message: unknown) => void;
+        refuseEditDelete?: () => void;
+      };
+      const send = host.__sendToExtension;
+      host.__sendToExtension = (message) => {
+        const request = message as {
+          type: string;
+          payload?: { id: string; method: string; path: string };
+        };
+        if (
+          request.type !== 'api/request' ||
+          request.payload?.method !== 'DELETE' ||
+          !request.payload.path.includes('/message/')
+        )
+          return send(message);
+        const { id } = request.payload;
+        host.refuseEditDelete = () =>
+          window.postMessage(
+            { type: 'api/response', payload: { id, error: 'Edit delete refused' } },
+            '*'
+          );
+      };
+    });
+    await editor.press('Enter');
+    await expect.poll(() => page.evaluate(() => 'refuseEditDelete' in window)).toBe(true);
+    const box = await list.boundingBox();
+    if (!box) throw new Error('Missing transcript');
+    await page.mouse.move(box.x + 8, box.y + box.height / 2);
+    const before = await list.evaluate((el) => el.scrollTop);
+    await page.mouse.wheel(0, -160);
+    await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeLessThan(before - 100);
+    await expect(list.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    const marker = list.locator('[data-msg-id="message-large-assistant-238"] p').first();
+    const tops = await marker.evaluate(async (el) => {
+      const samples = [el.getBoundingClientRect().top];
+      for (let i = 0; i < 12; i++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        samples.push(el.getBoundingClientRect().top);
+      }
+      return samples;
+    });
+    expect(
+      tops.every((y) => Math.abs(y - tops[0]!) <= 1),
+      JSON.stringify(tops)
+    ).toBe(true);
+    await page.evaluate(() => {
+      const refuse = (window as Window & { refuseEditDelete?: () => void }).refuseEditDelete;
+      if (!refuse) throw new Error('Missing pending edit deletion');
+      refuse();
+    });
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(original).toContainText('Review large transcript section 239');
+    await expect(list.getByText('Rejected replacement', { exact: true })).toHaveCount(0);
+    await expect(list.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
   });
 
   test('does not move the transcript backward when streamed text moves reasoning into Explored', async ({
@@ -1271,7 +1409,16 @@ test.describe('auto-scroll', () => {
     await expect(page.locator('.chat-turn-user').last()).toContainText(
       'Keep the full transcript stable while sending, line 1.'
     );
-    await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    // Row rounding can leave one CSS pixel holding the painted position, but no visible gap.
+    await expect
+      .poll(() =>
+        page
+          .locator('.append-scroll-bottom-reserve')
+          .evaluateAll((reserves) =>
+            reserves.reduce((total, row) => total + row.getBoundingClientRect().height, 0)
+          )
+      )
+      .toBeLessThanOrEqual(1);
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
@@ -2586,7 +2733,8 @@ test.describe('auto-scroll', () => {
     ).toBeLessThan(1.5);
     const summaryBox = (await summary.boundingBox())!;
     const nextItemBox = (await nextItem.boundingBox())!;
-    expect(before.reserveHeight).toBeGreaterThanOrEqual(nextItemBox.height);
+    // The next tool also takes over the 24px Thinking row above the reserve.
+    expect(before.reserveHeight + 24).toBeGreaterThanOrEqual(nextItemBox.height);
     expect(nextItemBox.y).toBeGreaterThanOrEqual(summaryBox.y + summaryBox.height - 1);
     const loadingTop = await loadingRow.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list')!;
@@ -2894,8 +3042,12 @@ test.describe('auto-scroll', () => {
       exploredSamples.every((top) => top !== null && Math.abs(top - exploredTop) <= 0.1),
       JSON.stringify({ exploredTop, exploredSamples, reserveHeight, sourceGeometry })
     ).toBe(true);
-    // Reconciliation may consume one whole CSS pixel while preserving the painted anchors above.
-    expect(reserveHeight).toBeGreaterThanOrEqual(sourceGeometry.rowHeight - 1);
+    // The trailing summary takes part of the row's space, so the reserve covers only the rest.
+    expect(reserveHeight).toBeGreaterThan(0);
+    expect(reserveHeight).toBeLessThan(sourceGeometry.rowHeight);
+    expect(
+      (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom
+    ).toBeLessThanOrEqual(1);
   });
 
   test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({

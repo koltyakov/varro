@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getPersistedSelectedAgent,
@@ -38,24 +40,31 @@ function deferred<T>() {
 describe('open code runtime synchronization', () => {
   it('retains the active transcript and pagination when transfer activation changes the workspace', () => {
     const sessionId = 'session-1';
-    setState('activeSessionId', sessionId);
-    setState('messages', [
-      {
-        info: {
-          id: 'message-1',
-          sessionID: sessionId,
-          role: 'user',
-          agent: 'build',
-          model: { providerID: 'openai', modelID: 'test' },
-          time: { created: 1 },
+    setState(storePath('activeSessionId', sessionId));
+    flushSolid();
+    setState(
+      storePath('messages', [
+        {
+          info: {
+            id: 'message-1',
+            sessionID: sessionId,
+            role: 'user',
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'test' },
+            time: { created: 1 },
+          },
+          parts: [],
         },
-        parts: [],
-      },
-    ]);
+      ])
+    );
+    flushSolid();
     setInputText('Unsent draft');
+    flushSolid();
     setSessionHistoryCursor(sessionId, 'cursor-1');
+    flushSolid();
     const messages = state.messages;
     resetWorkspaceDerivedState({ preserveWorkspaceCatalog: true, preserveTranscript: true });
+    flushSolid();
     expect(state.activeSessionId).toBe(sessionId);
     expect(state.messages).toBe(messages);
     expect(inputText()).toBe('Unsent draft');
@@ -63,15 +72,18 @@ describe('open code runtime synchronization', () => {
   });
   beforeEach(() => {
     resetDefaultAppState();
+    flushSolid();
   });
 
   afterEach(() => {
     flushInputDraft();
+    flushSolid();
   });
 
   it('retains the original request timestamp for cached status snapshots', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
+    flushSolid();
     const pendingStatuses = deferred<Record<string, SessionStatus>>();
     const loadSessionStatuses = vi.fn(() => pendingStatuses.promise);
     const snapshots = createSessionStatusSnapshotCoordinator(loadSessionStatuses);
@@ -79,15 +91,22 @@ describe('open code runtime synchronization', () => {
     try {
       const firstLoad = snapshots.load();
       await Promise.resolve();
+      flushSolid();
       expect(loadSessionStatuses).toHaveBeenCalledTimes(1);
 
       vi.setSystemTime(2_000);
+      flushSolid();
       sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+      flushSolid();
       pendingStatuses.resolve({ 'session-1': { type: 'idle' } });
+      flushSolid();
       const firstSnapshot = await firstLoad;
+      flushSolid();
 
       vi.setSystemTime(2_050);
+      flushSolid();
       const cachedSnapshot = await snapshots.load();
+      flushSolid();
 
       expect(cachedSnapshot).toBe(firstSnapshot);
       expect(cachedSnapshot.startedAt).toBe(1_000);
@@ -96,6 +115,7 @@ describe('open code runtime synchronization', () => {
       sessionStore.setSessionStatuses(cachedSnapshot.statuses, {
         snapshotStartedAt: cachedSnapshot.startedAt,
       });
+      flushSolid();
       expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     } finally {
       vi.useRealTimers();
@@ -114,12 +134,18 @@ describe('open code runtime synchronization', () => {
       });
 
     const syncA = sync('session-a', sessionA.promise);
+    flushSolid();
     const syncB = sync('session-b', sessionB.promise);
+    flushSolid();
 
     sessionB.resolve();
+    flushSolid();
     await expect(syncB).resolves.toBe(true);
+    flushSolid();
     sessionA.resolve();
+    flushSolid();
     await expect(syncA).resolves.toBe(true);
+    flushSolid();
 
     expect(applied).toEqual(['session-b', 'session-a']);
   });
@@ -136,11 +162,17 @@ describe('open code runtime synchronization', () => {
       });
 
     const syncA = sync('a', responseA.promise);
+    flushSolid();
     const syncB = sync('b', responseB.promise);
+    flushSolid();
     responseB.resolve();
+    flushSolid();
     await expect(syncB).resolves.toBe(true);
+    flushSolid();
     responseA.resolve();
+    flushSolid();
     await expect(syncA).resolves.toBe(false);
+    flushSolid();
 
     expect(applied).toEqual(['b']);
   });
@@ -153,11 +185,15 @@ describe('open code runtime synchronization', () => {
       await response.promise;
       if (generations.isCurrent(token)) applied();
     });
+    flushSolid();
 
     generations.clear();
+    flushSolid();
     response.resolve();
+    flushSolid();
 
     await expect(sync).resolves.toBe(false);
+    flushSolid();
     expect(applied).not.toHaveBeenCalled();
   });
 
@@ -178,10 +214,14 @@ describe('open code runtime synchronization', () => {
     });
 
     const reconciliation = operations.syncSessionMcps('session-old');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     operations.invalidate();
     connection.resolve();
+    flushSolid();
     await reconciliation;
+    flushSolid();
 
     expect(loadMcps).toHaveBeenCalledOnce();
   });
@@ -197,77 +237,118 @@ describe('open code runtime synchronization', () => {
     };
     const globalModel = { providerID: 'openai', modelID: 'global' };
     const sessionModel = { providerID: 'openai', modelID: 'session' };
-    setState('editorContext', {
-      workspacePath: '/repo-next',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-next',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     setSelectedAgent('global-agent');
+    flushSolid();
     setSelectedModel(globalModel);
+    flushSolid();
     setSelectedAgent('session-agent', { sessionId: oldSession.id, persistGlobal: false });
+    flushSolid();
     setSelectedModel(sessionModel, { sessionId: oldSession.id, persistGlobal: false });
-    setState('sessions', [oldSession]);
-    setState('activeSessionId', oldSession.id);
-    setState('sessionStatus', oldSession.id, { type: 'busy' });
-    setState('permissions', [
-      {
-        id: 'permission-old',
-        sessionID: oldSession.id,
-        messageID: 'message-old',
-        type: 'edit',
-        pattern: '*',
-        title: 'Edit files',
-        metadata: {},
-        time: { created: 0 },
-      },
-    ]);
-    setState('questions', [{ id: 'question-old', sessionID: oldSession.id, questions: [] }]);
-    setState('sessionPermissionModes', oldSession.id, 'full');
-    setState('currentDocumentEnabledBySession', oldSession.id, false);
-    setState('queuedMessages', [
-      { id: 'queued-old', sessionId: oldSession.id, text: 'preserve me' },
-    ]);
-    setState('queuedMessageDispatchingId', 'queued-old');
-    setState('failedQueuedMessageIds', ['queued-old']);
-    setState('queuedMessageEdit', { id: 'queued-old', sessionId: oldSession.id });
-    setState('lastSeenSessions', oldSession.id, 10);
-    setState('hiddenProviders', ['hidden-provider']);
-    setState('agents', [
-      {
-        name: 'build',
-        description: 'Build agent',
-        mode: 'primary',
-        builtIn: true,
-        permission: [],
-        tools: {},
-      },
-    ]);
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5': {
-            id: 'gpt-5',
-            name: 'GPT-5',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
+    flushSolid();
+    setState(storePath('sessions', [oldSession]));
+    flushSolid();
+    setState(storePath('activeSessionId', oldSession.id));
+    flushSolid();
+    setState(storePath('sessionStatus', oldSession.id, { type: 'busy' }));
+    flushSolid();
+    setState(
+      storePath('permissions', [
+        {
+          id: 'permission-old',
+          sessionID: oldSession.id,
+          messageID: 'message-old',
+          type: 'edit',
+          pattern: '*',
+          title: 'Edit files',
+          metadata: {},
+          time: { created: 0 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('questions', [{ id: 'question-old', sessionID: oldSession.id, questions: [] }])
+    );
+    flushSolid();
+    setState(storePath('sessionPermissionModes', oldSession.id, 'full'));
+    flushSolid();
+    setState(storePath('currentDocumentEnabledBySession', oldSession.id, false));
+    flushSolid();
+    setState(
+      storePath('queuedMessages', [
+        { id: 'queued-old', sessionId: oldSession.id, text: 'preserve me' },
+      ])
+    );
+    flushSolid();
+    setState(storePath('queuedMessageDispatchingId', 'queued-old'));
+    flushSolid();
+    setState(storePath('failedQueuedMessageIds', ['queued-old']));
+    flushSolid();
+    setState(storePath('queuedMessageEdit', { id: 'queued-old', sessionId: oldSession.id }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', oldSession.id, 10));
+    flushSolid();
+    setState(storePath('hiddenProviders', ['hidden-provider']));
+    flushSolid();
+    setState(
+      storePath('agents', [
+        {
+          name: 'build',
+          description: 'Build agent',
+          mode: 'primary',
+          builtIn: true,
+          permission: [],
+          tools: {},
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5': {
+              id: 'gpt-5',
+              name: 'GPT-5',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    setState('providerDefaults', { openai: 'gpt-5' });
-    setState('providersLoaded', true);
-    setState('providerLimits', { 'openai:session': null });
-    setState('mcpStatus', { docs: { status: 'connected' } });
+      ])
+    );
+    flushSolid();
+    setState(storePath('providerDefaults', { openai: 'gpt-5' }));
+    flushSolid();
+    setState(storePath('providersLoaded', true));
+    flushSolid();
+    setState(storePath('providerLimits', { 'openai:session': null }));
+    flushSolid();
+    setState(storePath('mcpStatus', { docs: { status: 'connected' } }));
+    flushSolid();
     setInputText('old draft');
+    flushSolid();
     startEditingMessage('message-old', oldSession.id, 'old message');
+    flushSolid();
     setSessionHistoryCursor(oldSession.id, 'cursor-old');
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
 
     resetWorkspaceDerivedState();
+    flushSolid();
 
     expect(state.editorContext.workspacePath).toBe('/repo-next');
     expect(state.sessions).toEqual([]);

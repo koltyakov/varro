@@ -1,6 +1,9 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { editingMessage, resetMessageEditState, startEditingMessage } from './message-edit-state';
 import { newChatDraftKey, startNewChatDraft } from './new-chat-draft';
+import { getPersistedLastOpenedView } from './state-view-persistence';
 import {
   getPersistedSelectedAgent,
   getPersistedSelectedModel,
@@ -42,55 +45,84 @@ declare global {
 describe('startNewChatDraft', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    flushSolid();
     resetMessageEditState();
+    flushSolid();
     window.__sendToExtension = vi.fn();
   });
 
   afterEach(() => {
     resetMessageEditState();
+    flushSolid();
     delete window.__sendToExtension;
   });
 
   it('publishes a fresh draft key even when already in an empty new chat', () => {
     const before = newChatDraftKey();
     startNewChatDraft();
+    flushSolid();
     const first = newChatDraftKey();
     expect(first).toBeGreaterThan(before);
     expect(state.activeSessionId).toBeNull();
     startNewChatDraft();
+    flushSolid();
     expect(newChatDraftKey()).toBeGreaterThan(first);
     expect(state.activeSessionId).toBeNull();
   });
 
-  it('preserves the complete composer draft', () => {
-    setState('activeSessionId', 'session-1');
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Existing session',
-        version: '1',
-        time: { created: 1, updated: 2 },
-      },
-    ]);
-    setInputText('Use this history prompt [image.png]');
-    setState('droppedFiles', [
-      { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
-    ]);
-    setState('clipboardImages', [
-      { id: 'image-1', url: 'blob:image', mime: 'image/png', filename: 'image.png', size: 10 },
-      {
-        id: 'image-2',
-        url: 'blob:image-2',
-        mime: 'image/png',
-        filename: 'image-2.png',
-        size: 20,
-      },
-    ]);
-    setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
+  it('remembers the new chat instead of the session it just left', () => {
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(getPersistedLastOpenedView()?.type).toBe('new-session');
+  });
+
+  it('preserves the complete composer draft', () => {
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Existing session',
+          version: '1',
+          time: { created: 1, updated: 2 },
+        },
+      ])
+    );
+    flushSolid();
+    setInputText('Use this history prompt [image.png]');
+    flushSolid();
+    setState(
+      storePath('droppedFiles', [
+        { path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('clipboardImages', [
+        { id: 'image-1', url: 'blob:image', mime: 'image/png', filename: 'image.png', size: 10 },
+        {
+          id: 'image-2',
+          url: 'blob:image-2',
+          mime: 'image/png',
+          filename: 'image-2.png',
+          size: 20,
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('terminalSelection', { text: 'npm test', terminalName: 'zsh' }));
+    flushSolid();
+
+    startNewChatDraft();
+    flushSolid();
 
     expect(inputText()).toBe('Use this history prompt [image.png]');
     expect(state.activeSessionId).toBeNull();
@@ -115,11 +147,15 @@ describe('startNewChatDraft', () => {
   });
 
   it('exits message edit mode without replacing the crafted text', () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setInputText('Start a separate conversation');
+    flushSolid();
     startEditingMessage('message-1', 'session-1', 'Edit old message');
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
 
     expect(inputText()).toBe('Start a separate conversation');
     expect(editingMessage()).toBeNull();
@@ -128,14 +164,20 @@ describe('startNewChatDraft', () => {
   it.each(['ask', 'plan', 'custom'])(
     'remembers %s without changing the previous session',
     (agent) => {
-      setState('agents', [
-        { name: agent, mode: 'primary', builtIn: false, permission: {}, tools: {} },
-        { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
-      ]);
-      setState('activeSessionId', 'session-1');
+      setState(
+        storePath('agents', [
+          { name: agent, mode: 'primary', builtIn: false, permission: {}, tools: {} },
+          { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
+        ])
+      );
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
       setSelectedAgent(agent, { sessionId: 'session-1' });
+      flushSolid();
 
       startNewChatDraft();
+      flushSolid();
 
       expect(state.activeSessionId).toBeNull();
       expect(state.selectedAgent).toBe(agent);
@@ -145,15 +187,22 @@ describe('startNewChatDraft', () => {
   );
 
   it('restores the last explicit choice instead of a loaded session agent', () => {
-    setState('agents', [
-      { name: 'custom', mode: 'primary', builtIn: false, permission: {}, tools: {} },
-      { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
-    ]);
+    setState(
+      storePath('agents', [
+        { name: 'custom', mode: 'primary', builtIn: false, permission: {}, tools: {} },
+        { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
+      ])
+    );
+    flushSolid();
     setSelectedAgent('custom');
-    setState('activeSessionId', 'session-1');
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     setSelectedAgent('build', { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
 
     expect(state.selectedAgent).toBe('custom');
     expect(getSelectedAgentForSession('session-1')).toBe('build');
@@ -161,22 +210,30 @@ describe('startNewChatDraft', () => {
   });
 
   it('falls back without overwriting an unavailable saved agent', () => {
-    setState('agents', [
-      { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
-    ]);
+    setState(
+      storePath('agents', [
+        { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
+      ])
+    );
+    flushSolid();
     setSelectedAgent('custom');
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
 
     expect(state.selectedAgent).toBe('build');
     expect(getPersistedSelectedAgent()).toBe('custom');
   });
 
   it('clears message loading immediately when a slow session load is abandoned', () => {
-    setState('activeSessionId', 'session-1');
-    setState('messagesLoading', true);
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
 
     expect(state.activeSessionId).toBeNull();
     expect(state.messagesLoading).toBe(false);
@@ -191,23 +248,28 @@ describe('startNewChatDraft', () => {
         frameCallbacks.push(callback);
         return frameCallbacks.length;
       });
-    setState('activeSessionId', 'session-1');
-    setState('messages', [
-      {
-        info: {
-          id: 'message-1',
-          sessionID: 'session-1',
-          role: 'user',
-          time: { created: 1 },
-          agent: 'build',
-          model: { providerID: 'openai', modelID: 'gpt-5' },
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('messages', [
+        {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 1 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-5' },
+          },
+          parts: [],
         },
-        parts: [],
-      },
-    ]);
+      ])
+    );
+    flushSolid();
 
     try {
       startNewChatDraft();
+      flushSolid();
 
       expect(state.activeSessionId).toBeNull();
       expect(state.messages).toHaveLength(1);
@@ -215,6 +277,7 @@ describe('startNewChatDraft', () => {
 
       frameCallbacks[0]!(0);
       vi.runAllTimers();
+      flushSolid();
 
       expect(state.messages).toEqual([]);
     } finally {
@@ -232,40 +295,50 @@ describe('startNewChatDraft', () => {
         frameCallbacks.push(callback);
         return frameCallbacks.length;
       });
-    setState('activeSessionId', 'session-1');
-    setState('messages', [
-      {
-        info: {
-          id: 'message-1',
-          sessionID: 'session-1',
-          role: 'user',
-          time: { created: 1 },
-          agent: 'build',
-          model: { providerID: 'openai', modelID: 'gpt-5' },
-        },
-        parts: [],
-      },
-    ]);
-
-    try {
-      startNewChatDraft();
-      setState('activeSessionId', 'session-2');
-      setState('messages', [
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('messages', [
         {
           info: {
-            id: 'message-2',
-            sessionID: 'session-2',
+            id: 'message-1',
+            sessionID: 'session-1',
             role: 'user',
-            time: { created: 2 },
+            time: { created: 1 },
             agent: 'build',
             model: { providerID: 'openai', modelID: 'gpt-5' },
           },
           parts: [],
         },
-      ]);
+      ])
+    );
+    flushSolid();
+
+    try {
+      startNewChatDraft();
+      flushSolid();
+      setState(storePath('activeSessionId', 'session-2'));
+      flushSolid();
+      setState(
+        storePath('messages', [
+          {
+            info: {
+              id: 'message-2',
+              sessionID: 'session-2',
+              role: 'user',
+              time: { created: 2 },
+              agent: 'build',
+              model: { providerID: 'openai', modelID: 'gpt-5' },
+            },
+            parts: [],
+          },
+        ])
+      );
+      flushSolid();
 
       frameCallbacks[0]!(0);
       vi.runAllTimers();
+      flushSolid();
 
       expect(state.messages.map((message) => message.info.id)).toEqual(['message-2']);
     } finally {
@@ -275,46 +348,61 @@ describe('startNewChatDraft', () => {
   });
 
   it('does not reuse a blank-looking session while its messages are loading', () => {
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'New session',
-        version: '1',
-        time: { created: 1, updated: 1 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
-    setState('messagesLoading', true);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'New session',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
 
     expect(state.activeSessionId).toBeNull();
     expect(state.messagesLoading).toBe(false);
   });
 
   it('focuses the composer and remembers the agent when reusing an untouched blank session', () => {
-    setState('agents', [
-      { name: 'ask', mode: 'primary', builtIn: false, permission: {}, tools: {} },
-      { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
-    ]);
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'New session',
-        version: '1',
-        time: { created: 1, updated: 1 },
-      },
-    ]);
-    setState('activeSessionId', 'session-1');
+    setState(
+      storePath('agents', [
+        { name: 'ask', mode: 'primary', builtIn: false, permission: {}, tools: {} },
+        { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'New session',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const previousFocusKey = composerFocusKey();
 
     setSelectedAgent('ask', { sessionId: 'session-1' });
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
 
     expect(state.activeSessionId).toBe('session-1');
     expect(state.selectedAgent).toBe('ask');
@@ -333,21 +421,28 @@ describe('startNewChatDraft', () => {
       modelID: 'gpt-4o',
       variant: 'high',
     };
-    setState('activeSessionId', 'session-1');
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Existing session',
-        version: '1',
-        time: { created: 1, updated: 2 },
-      },
-    ]);
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Existing session',
+          version: '1',
+          time: { created: 1, updated: 2 },
+        },
+      ])
+    );
+    flushSolid();
     setSelectedModel({ ...defaultModel });
+    flushSolid();
     setSelectedModel({ ...sessionModel }, { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
 
     startNewChatDraft();
+    flushSolid();
 
     expect(state.activeSessionId).toBeNull();
     expect(state.selectedModel).toEqual(defaultModel);

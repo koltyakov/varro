@@ -1,5 +1,6 @@
+import { storePath } from '@solidjs/signals';
 import { createComponent, createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import hljs from 'highlight.js/lib/core';
 import { marked } from 'marked';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -88,12 +89,14 @@ describe('MarkdownRenderer perf guards', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     __resetMarkdownCachesForTests();
-    setState('editorContext', {
-      workspacePath: null,
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: null,
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
   });
 
   afterEach(() => {

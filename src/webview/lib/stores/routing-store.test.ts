@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, WebviewMessage } from '../../../shared/protocol';
 import { ModelPreferencesStore } from '../../../extension/model-preferences-store';
@@ -68,7 +70,9 @@ function createProvider(id: string): Provider {
 describe('routingStore', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    flushSolid();
     resetDefaultAppState();
+    flushSolid();
   });
 
   it('updates routing state and exposes helper queries', () => {
@@ -87,17 +91,25 @@ describe('routingStore', () => {
     };
 
     routingStore.setAllAgents(agents);
+    flushSolid();
     routingStore.setPrimaryAgents([agents[0]!]);
+    flushSolid();
     routingStore.setProvidersLoaded(true);
+    flushSolid();
     routingStore.setProviders([createProvider('provider-1')]);
+    flushSolid();
     routingStore.setProviderDefaults({ 'provider-1': 'model-1' });
+    flushSolid();
     routingStore.setCommands([command]);
+    flushSolid();
     routingStore.setMcpStatus({
       zebra: { status: 'connected' },
       alpha: { status: 'connected' },
       beta: { status: 'failed' },
     });
+    flushSolid();
     routingStore.setProviderLimitStatus('provider-1', 'model-1', limit);
+    flushSolid();
 
     expect(state.allAgents).toEqual(agents);
     expect(state.agents).toEqual([agents[0]]);
@@ -109,24 +121,33 @@ describe('routingStore', () => {
   });
 
   it('releases a workspace reload lock only after every send catalog loads', () => {
-    setState('workspaceCatalogReloadPending', true);
+    setState(storePath('workspaceCatalogReloadPending', true));
+    flushSolid();
 
     routingStore.setProvidersLoaded(true);
+    flushSolid();
     expect(state.workspaceCatalogReloadPending).toBe(true);
     routingStore.setPrimaryAgents([]);
+    flushSolid();
     expect(state.workspaceCatalogReloadPending).toBe(true);
     routingStore.setCommands([]);
+    flushSolid();
 
     expect(state.workspaceCatalogReloadPending).toBe(false);
   });
 
   it('can release a workspace reload lock with empty replacement catalogs', () => {
-    setState('workspaceCatalogReloadPending', true);
-    setState('providers', []);
-    setState('agents', []);
-    setState('commands', []);
+    setState(storePath('workspaceCatalogReloadPending', true));
+    flushSolid();
+    setState(storePath('providers', []));
+    flushSolid();
+    setState(storePath('agents', []));
+    flushSolid();
+    setState(storePath('commands', []));
+    flushSolid();
 
     routingStore.finishWorkspaceCatalogReload();
+    flushSolid();
 
     expect(state.workspaceCatalogReloadPending).toBe(false);
     expect(state.providers).toEqual([]);
@@ -138,8 +159,11 @@ describe('routingStore', () => {
     const provider = createProvider('provider-1');
 
     routingStore.setProviders([provider]);
+    flushSolid();
     routingStore.setSelectedModel({ providerID: 'provider-1', modelID: 'model-1' });
+    flushSolid();
     routingStore.setModelVisible('provider-1', 'model-1', false);
+    flushSolid();
 
     expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(false);
     expect(Object.keys(routingStore.getVisibleProviders(state.providers)[0]?.models ?? {})).toEqual(
@@ -148,6 +172,7 @@ describe('routingStore', () => {
     expect(state.selectedModel).toBeNull();
 
     routingStore.setProviderVisible('provider-1', false);
+    flushSolid();
 
     expect(routingStore.isProviderVisible('provider-1')).toBe(false);
     expect(routingStore.getVisibleProviders(state.providers)).toEqual([]);
@@ -156,13 +181,17 @@ describe('routingStore', () => {
   it('shows published models while preserving explicit catalog removals and visibility choices', () => {
     const provider = createProvider('provider-1');
     routingStore.setProviders([provider]);
+    flushSolid();
     routingStore.setModelsAdded(provider.id, ['model-2']);
+    flushSolid();
     routingStore.setModelVisible(provider.id, 'model-2', false);
+    flushSolid();
     const refreshed = {
       ...provider,
       models: { ...provider.models, 'model-3': { ...provider.models['model-2']!, id: 'model-3' } },
     };
     routingStore.setProviders([refreshed]);
+    flushSolid();
     expect(routingStore.isModelVisible(provider.id, 'model-1')).toBe(false);
     expect(routingStore.isModelVisible(provider.id, 'model-2')).toBe(false);
     expect(routingStore.isModelVisible(provider.id, 'model-3')).toBe(true);
@@ -171,8 +200,10 @@ describe('routingStore', () => {
       state.removedModels
     );
     routingStore.setModelsAdded(provider.id, ['model-2', 'model-3']);
+    flushSolid();
     expect(routingStore.isModelVisible(provider.id, 'model-2')).toBe(false);
     routingStore.setModelAdded(provider.id, 'model-1', true);
+    flushSolid();
     expect(routingStore.isModelVisible(provider.id, 'model-1')).toBe(true);
     expect(routingStore.isModelVisible(provider.id, 'model-3')).toBe(true);
   });
@@ -191,12 +222,15 @@ describe('routingStore', () => {
     };
 
     routingStore.setProviders([connected], {}, ['provider-1']);
+    flushSolid();
 
     expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(false);
     expect(routingStore.isModelVisible('provider-1', 'model-2')).toBe(true);
 
     routingStore.setModelVisible('provider-1', 'model-1', true);
+    flushSolid();
     routingStore.setProviders([connected]);
+    flushSolid();
 
     expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
   });
@@ -213,9 +247,11 @@ describe('routingStore', () => {
       family: 'model',
       release_date: '2026-01-01',
     };
-    setState('hiddenModels', ['provider-1:existing', 'provider-1:existing']);
+    setState(storePath('hiddenModels', ['provider-1:existing', 'provider-1:existing']));
+    flushSolid();
 
     routingStore.setProviders([connected], {}, ['provider-1']);
+    flushSolid();
 
     expect(state.hiddenModels).toEqual(['provider-1:existing', 'provider-1:model-1']);
     expect(JSON.parse(window.localStorage.getItem('varro.hiddenModels') ?? 'null')).toEqual(
@@ -228,6 +264,7 @@ describe('routingStore', () => {
     async (syncBeforeToggle) => {
       const host = new ModelPreferencesStore({ get: vi.fn(), set: vi.fn(), remove: vi.fn() });
       await host.migrateLegacy(getModelPreferencesSnapshot());
+      flushSolid();
       const sent: WebviewMessage[] = [];
       const disposeHost = registerHostExtension({
         apiVersion: 1,
@@ -256,24 +293,32 @@ describe('routingStore', () => {
           release_date: '2026-01-01',
         };
         routingStore.setProviders([connected], {}, ['provider-1']);
+        flushSolid();
         expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(false);
         if (syncBeforeToggle) await syncPreferences();
+        flushSolid();
 
         routingStore.setModelVisible('provider-1', 'model-2', false);
+        flushSolid();
         await syncPreferences();
+        flushSolid();
 
         expect(state.hiddenModels).toEqual(['provider-1:model-1', 'provider-1:model-2']);
         expect(host.get().hiddenModels).toEqual(state.hiddenModels);
         expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(false);
 
         routingStore.setModelVisible('provider-1', 'model-1', true);
+        flushSolid();
         await syncPreferences();
+        flushSolid();
         routingStore.setProviders([connected]);
+        flushSolid();
         expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
         expect(routingStore.isModelVisible('provider-1', 'model-2')).toBe(false);
         expect(sent).toEqual([]);
       } finally {
         disposeHost();
+        flushSolid();
       }
     }
   );
@@ -292,6 +337,7 @@ describe('routingStore', () => {
     };
 
     routingStore.setProviders([connected], { 'provider-1': 'model-1' }, ['provider-1']);
+    flushSolid();
 
     expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
   });
@@ -309,8 +355,11 @@ describe('routingStore', () => {
       release_date: '2026-01-01',
     };
     routingStore.setProviders([connected], {}, ['provider-1']);
+    flushSolid();
     routingStore.setModelVisible('provider-1', 'model-1', true);
+    flushSolid();
     routingStore.setModelVisible('provider-1', 'model-2', false);
+    flushSolid();
 
     const refreshed = createProvider('provider-1');
     refreshed.models = {
@@ -323,6 +372,7 @@ describe('routingStore', () => {
       },
     };
     routingStore.setProviders([refreshed]);
+    flushSolid();
 
     expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
     expect(routingStore.isModelVisible('provider-1', 'model-2')).toBe(false);

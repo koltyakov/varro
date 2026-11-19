@@ -5,11 +5,10 @@ import {
   createMemo,
   createSignal,
   createUniqueId,
-  on,
-  onCleanup,
-  onMount,
+  onSettled,
   untrack,
 } from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
 import type { MessageEntry } from '../../types';
 import { client } from '../../lib/client';
 import {
@@ -46,6 +45,8 @@ export function SessionSearch(props: {
   const [history, setHistory] = createSignal<SessionSearchDocument[]>([]);
   const [searching, setSearching] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [navigationError, setNavigationError] = createSignal('');
+  const visibleError = () => navigationError() || error();
   const [activeIndex, setActiveIndex] = createSignal(0);
   const [resultLimit, setResultLimit] = createSignal(RESULT_PAGE_SIZE);
   const listId = createUniqueId();
@@ -137,107 +138,130 @@ export function SessionSearch(props: {
     setActiveIndex(index);
   };
 
-  createEffect(() => {
-    const value = query();
+  createEffect(query, (value) => {
+    const cleanups: Array<() => void> = [];
+
     const timer = setTimeout(() => setSearchQuery(value), 120);
-    onCleanup(() => clearTimeout(timer));
+    cleanups.push(() => clearTimeout(timer));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   createEffect(
-    on([searchQuery, allPrompts], () => {
+    () => [searchQuery(), allPrompts()] as const,
+    () => {
       setActiveIndex(0);
       setResultLimit(RESULT_PAGE_SIZE);
       resultsScrollTop = 0;
       if (resultsContainer) resultsContainer.scrollTop = 0;
-    })
+    }
   );
   createEffect(
-    on(
-      () => props.sessionId,
-      () => {
-        setOpen(false);
-        setQuery('');
-        setSearchQuery('');
-        setAllPrompts(false);
-        setError('');
-        navigationEpoch += 1;
-        resultsScrollTop = 0;
-        previousFocus = null;
-      },
-      { defer: true }
-    )
+    () => props.sessionId,
+    () => {
+      setOpen(false);
+      setQuery('');
+      setSearchQuery('');
+      setAllPrompts(false);
+      setError('');
+      setNavigationError('');
+      navigationEpoch += 1;
+      resultsScrollTop = 0;
+      previousFocus = null;
+    },
+    { defer: true }
   );
 
   // Searching never prepends transcript rows or changes its pagination cursor.
-  createEffect(() => {
-    const sessionId = props.sessionId;
-    const version = sessionId ? getSessionMessageWindowStateVersion(sessionId) : 0;
-    const directory = props.directory;
-    if (
-      historyCache &&
-      (historyCache.sessionId !== sessionId ||
-        historyCache.version !== version ||
-        historyCache.directory !== directory)
-    ) {
-      historyCache = undefined;
-      setHistory([]);
-    }
-    if (!open() || !hasSearch() || !sessionId || props.loading) {
-      setSearching(false);
-      if (!hasSearch() || !sessionId) setError('');
-      return;
-    }
-    const controller = new AbortController();
-    onCleanup(() => controller.abort());
-    setError('');
-    historyCache ??= {
-      sessionId,
-      version,
-      directory,
-      cursor: untrack(() => getSessionHistoryCursor(sessionId)),
-    };
-    const cache = historyCache;
-    if (!cache.cursor) {
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const isCurrent = () =>
-      !controller.signal.aborted &&
-      props.sessionId === sessionId &&
-      getSessionMessageWindowStateVersion(sessionId) === version;
-    void (async () => {
-      const seen = new Set<string>();
-      const collected = new Map(untrack(history).map((document) => [document.id, document]));
-      try {
-        while (cache.cursor && isCurrent()) {
-          if (seen.has(cache.cursor))
-            throw new Error('History pagination did not advance. Reopen search to retry.');
-          seen.add(cache.cursor);
-          const page = await client.session.messages(sessionId, {
-            limit: MESSAGE_HISTORY_WINDOW,
-            before: cache.cursor,
-            directory,
-            signal: controller.signal,
-          });
-          if (!isCurrent()) return;
-          for (const document of getSessionSearchDocuments(page, sessionId))
-            collected.set(document.id, document);
-          setHistory([...collected.values()]);
-          cache.cursor = page.nextCursor;
-        }
-      } catch (cause: unknown) {
-        if (isCurrent())
-          setError(
-            `History search incomplete: ${cause instanceof Error ? cause.message : String(cause)}`
-          );
-      } finally {
-        if (isCurrent()) setSearching(false);
+  createEffect(
+    () => ({
+      sessionId: props.sessionId,
+      version: props.sessionId ? getSessionMessageWindowStateVersion(props.sessionId) : 0,
+      directory: props.directory,
+      isOpen: open(),
+      searchEnabled: hasSearch(),
+      loading: props.loading,
+    }),
+    ({ sessionId, version, directory, isOpen, searchEnabled, loading }) => {
+      const cleanups: Array<() => void> = [];
+
+      if (
+        historyCache &&
+        (historyCache.sessionId !== sessionId ||
+          historyCache.version !== version ||
+          historyCache.directory !== directory)
+      ) {
+        historyCache = undefined;
+        setHistory([]);
       }
-    })();
-  });
+      if (!isOpen || !searchEnabled || !sessionId || loading) {
+        setSearching(false);
+        if (!searchEnabled || !sessionId) setError('');
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      }
+      const controller = new AbortController();
+      cleanups.push(() => controller.abort());
+      setError('');
+      historyCache ??= {
+        sessionId,
+        version,
+        directory,
+        cursor: untrack(() => getSessionHistoryCursor(sessionId)),
+      };
+      const cache = historyCache;
+      if (!cache.cursor) {
+        setSearching(false);
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      }
+      setSearching(true);
+      const isCurrent = () =>
+        !controller.signal.aborted &&
+        props.sessionId === sessionId &&
+        getSessionMessageWindowStateVersion(sessionId) === version;
+      void (async () => {
+        const seen = new Set<string>();
+        const collected = new Map(untrack(history).map((document) => [document.id, document]));
+        try {
+          while (cache.cursor && isCurrent()) {
+            if (seen.has(cache.cursor))
+              throw new Error('History pagination did not advance. Reopen search to retry.');
+            seen.add(cache.cursor);
+            const page = await client.session.messages(sessionId, {
+              limit: MESSAGE_HISTORY_WINDOW,
+              before: cache.cursor,
+              directory,
+              signal: controller.signal,
+            });
+            if (!isCurrent()) return;
+            for (const document of getSessionSearchDocuments(page, sessionId))
+              collected.set(document.id, document);
+            setHistory([...collected.values()]);
+            cache.cursor = page.nextCursor;
+          }
+        } catch (cause: unknown) {
+          if (isCurrent())
+            setError(
+              `History search incomplete: ${cause instanceof Error ? cause.message : String(cause)}`
+            );
+        } finally {
+          if (isCurrent()) setSearching(false);
+        }
+      })();
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
 
   const show = () => {
     if (!props.sessionId) return;
+    setNavigationError('');
     if (!open())
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setOpen(true);
@@ -260,16 +284,22 @@ export function SessionSearch(props: {
     close();
     const epoch = ++navigationEpoch;
     setError('');
+    setNavigationError('');
     try {
+      // Publish the closed panel before a route loader can replace its rows.
+      await Promise.resolve();
+      if (epoch !== navigationEpoch) return;
       await props.onNavigate(id);
     } catch (cause: unknown) {
       if (epoch === navigationEpoch) {
         show();
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setNavigationError(cause instanceof Error ? cause.message : String(cause));
       }
     }
   };
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const handleKeydown = (event: KeyboardEvent) => {
       if (
         !event.isComposing &&
@@ -293,11 +323,15 @@ export function SessionSearch(props: {
     };
     window.addEventListener('keydown', handleKeydown, true);
     document.addEventListener('pointerdown', handleOutsidePointerDown);
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('keydown', handleKeydown, true);
       document.removeEventListener('pointerdown', handleOutsidePointerDown);
       navigationEpoch += 1;
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
@@ -316,7 +350,7 @@ export function SessionSearch(props: {
             <button
               type="button"
               class="session-search-prompts-toggle"
-              aria-pressed={allPrompts()}
+              aria-pressed={ariaBoolean(allPrompts())}
               aria-controls={listId}
               title="Browse all prompts in this session"
               onClick={() => {
@@ -397,9 +431,9 @@ export function SessionSearch(props: {
                 : ''}
             </Show>
           </div>
-          <Show when={error()}>
+          <Show when={visibleError()}>
             <div class="session-search-error" role="alert">
-              {error()}
+              {visibleError()}
             </div>
           </Show>
           <div
@@ -416,8 +450,7 @@ export function SessionSearch(props: {
                 <Show when={group.items().length > 0}>
                   <div class="session-search-result-group" role="group" aria-label={group.label}>
                     <div
-                      class="session-search-group"
-                      classList={{ 'is-prompt-group': group.role === 'user' }}
+                      class={['session-search-group', { 'is-prompt-group': group.role === 'user' }]}
                       role="presentation"
                     >
                       <span class="session-search-group-label">
@@ -434,12 +467,15 @@ export function SessionSearch(props: {
                             id={`${listId}-${resultIndex()}`}
                             type="button"
                             role="option"
-                            class="session-search-result"
-                            classList={{
-                              'is-selected': selectedIndex() === resultIndex(),
-                              'is-prompt': result.role === 'user',
-                            }}
-                            aria-selected={selectedIndex() === resultIndex()}
+
+                            class={[
+                              'session-search-result',
+                              {
+                                'is-selected': selectedIndex() === resultIndex(),
+                                'is-prompt': result.role === 'user',
+                              },
+                            ]}
+                            aria-selected={ariaBoolean(selectedIndex() === resultIndex())}
                             aria-label={`${result.role === 'user' ? 'Prompt' : 'Response'}: ${result.before}${result.match}${result.after}`}
                             onPointerMove={(event) => selectResultWithPointer(event, resultIndex())}
                             onClick={() => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
+import { createSignal } from 'solid-js';
 import type { AssistantMessage, Part, TextPart, ToolPart } from '../types';
 import { AssistantMessageContent } from '../components/message/AssistantMessageContent';
 import { resetDefaultAppState } from '../lib/state';
@@ -228,5 +229,47 @@ describe('AssistantMessageContent perf guards', { timeout: 30_000 }, () => {
     expect(document.querySelectorAll('.assistant-activity-summary-measure')).toHaveLength(20);
     expect(resizeObserverConstructCount).toBe(1);
     expect(observedElementCount).toBe(1);
+  });
+
+  it('retains summary counters and icons when tool snapshots or counts change', async () => {
+    const [parts, setParts] = createSignal<Part[]>(
+      Array.from({ length: 30 }, (_, index) => createReadPart(index))
+    );
+    cleanup = render(
+      () =>
+        AssistantMessageContent({
+          info: createAssistantMessage(),
+          get parts() {
+            return parts();
+          },
+          textForPart: () => null,
+        }),
+      container!
+    );
+    await settlePerfEffects();
+    const item = container!.querySelector('.assistant-activity-summary-item');
+    const measuredItem = document.querySelector(
+      '.assistant-activity-summary-measure .assistant-activity-summary-item'
+    );
+    expect(item).not.toBeNull();
+    expect(measuredItem).not.toBeNull();
+
+    for (let update = 0; update < 20; update += 1) {
+      setParts(
+        Array.from({ length: 30 + Math.floor(update / 5) }, (_, index) => {
+          const part = createReadPart(index);
+          if (part.state.status !== 'completed') throw new Error('Expected completed read fixture');
+          return { ...part, state: { ...part.state, output: `Snapshot ${update}` } };
+        })
+      );
+      await settlePerfEffects();
+      expect(container!.querySelector('.assistant-activity-summary-item')).toBe(item);
+      expect(
+        document.querySelector(
+          '.assistant-activity-summary-measure .assistant-activity-summary-item'
+        )
+      ).toBe(measuredItem);
+    }
+    expect(item?.textContent).toContain('33');
   });
 });

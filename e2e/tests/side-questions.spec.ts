@@ -735,7 +735,7 @@ for (const width of [390, 1100]) {
     const scrollTop = await list.evaluate((element) => element.scrollTop);
     const title = page.locator('.chat-header-session-title:visible');
     await title.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Ask a side question…' }).click();
+    await page.getByRole('menuitem', { name: 'Ask side-question', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Side question' });
     await expect(dialog).toBeVisible();
     const header = await dialog.locator('.side-question-header').evaluate((element) => {

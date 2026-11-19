@@ -1,3 +1,4 @@
+import { storePath } from '@solidjs/signals';
 import { asRecord } from '../../shared/type-utils';
 import { isSessionResumeMessage, readSessionPauses } from '../../shared/session-pauses';
 import type { MessageEntry, Session } from '../types';
@@ -97,5 +98,5 @@ export async function recordSessionPause(sessionId: string): Promise<void> {
     },
     { directory }
   );
-  setState('sessions', (entry) => entry.id === sessionId, 'metadata', updated.metadata);
+  setState(storePath('sessions', (entry) => entry.id === sessionId, 'metadata', updated.metadata));
 }

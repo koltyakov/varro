@@ -1,5 +1,5 @@
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { flush as flushSolid, createSignal } from 'solid-js';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFileTypeIcon } from '../FileTypeIcon';
 import { AttachmentChip } from './AttachmentChip';
@@ -17,8 +17,11 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   container.remove();
+  flushSolid();
   document.querySelector('.chat-attachment-image-preview')?.remove();
+  flushSolid();
 });
 
 describe('AttachmentChip', () => {
@@ -27,6 +30,7 @@ describe('AttachmentChip', () => {
       () => <AttachmentChip label="Please clarify" icon="message-text" />,
       container
     );
+    flushSolid();
     const icon = container.querySelector<HTMLElement>('.chip-icon.ui-icon');
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(messageTextIcon));
     expect(container.querySelector('.file-type-icon')).toBeNull();
@@ -46,14 +50,18 @@ describe('AttachmentChip', () => {
       ),
       container
     );
+    flushSolid();
     const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
     chip.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(document.querySelector('.chat-attachment-image-preview')).not.toBeNull();
     setError('Could not decode the image');
+    flushSolid();
     expect(chip.title).toBe('Could not decode the image');
     expect(chip.classList.contains('disabled')).toBe(true);
     expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
     chip.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
   });
 
@@ -72,16 +80,19 @@ describe('AttachmentChip', () => {
       ),
       container
     );
+    flushSolid();
     const indicator = container.querySelector<HTMLElement>('.chip-image-size')!;
     expect(indicator.tagName).toBe('SPAN');
     expect(indicator.title).toContain('3.0 MB');
     expect(container.querySelector('.image-size-warning')).not.toBeNull();
     indicator.click();
+    flushSolid();
     expect(onCompress).not.toHaveBeenCalled();
     expect(onClick).toHaveBeenCalledTimes(1);
     container
       .querySelector('.chat-attachment-chip')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    flushSolid();
     expect(onCompress).toHaveBeenCalledTimes(1);
   });
   it('keeps an off current-document toggle operable without announcing it as disabled', () => {
@@ -97,16 +108,20 @@ describe('AttachmentChip', () => {
       ),
       container
     );
+    flushSolid();
     const chip = container.querySelector<HTMLElement>('[role="button"]')!;
     expect(chip.tabIndex).toBe(0);
     expect(chip.getAttribute('aria-pressed')).toBe('false');
     expect(chip.hasAttribute('aria-disabled')).toBe(false);
     expect(chip.classList.contains('disabled')).toBe(true);
     chip.click();
+    flushSolid();
     expect(chip.getAttribute('aria-pressed')).toBe('true');
     chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    flushSolid();
     expect(chip.getAttribute('aria-pressed')).toBe('false');
     chip.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    flushSolid();
     expect(chip.getAttribute('aria-pressed')).toBe('true');
   });
 
@@ -117,15 +132,18 @@ describe('AttachmentChip', () => {
       () => <AttachmentChip label="app.ts" toggle onClick={onClick} onPin={onPin} />,
       container
     );
+    flushSolid();
     const pinButton = container.querySelector<HTMLButtonElement>('.chip-pin')!;
     expect(pinButton.getAttribute('aria-label')).toBe('Keep app.ts attached');
     pinButton.click();
+    flushSolid();
     expect(onPin).toHaveBeenCalledOnce();
     expect(onClick).not.toHaveBeenCalled();
   });
 
   it('still announces an unsupported attachment as disabled', () => {
     cleanup = render(() => <AttachmentChip label="diagram.png" icon="image" disabled />, container);
+    flushSolid();
     const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
     expect(chip.getAttribute('aria-disabled')).toBe('true');
     expect(chip.hasAttribute('aria-pressed')).toBe(false);
@@ -143,6 +161,7 @@ describe('AttachmentChip', () => {
       ),
       container
     );
+    flushSolid();
     const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     container.getBoundingClientRect = () => ({ left: 10, right: 510, width: 500 }) as DOMRect;
@@ -150,6 +169,7 @@ describe('AttachmentChip', () => {
     chip.getBoundingClientRect = () => ({ left: 20, right: 120, top: 400, width: 100 }) as DOMRect;
 
     chip.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
 
     const preview = document.querySelector<HTMLElement>('.chat-attachment-image-preview');
     expect(preview?.querySelector('img')?.getAttribute('src')).toBe('blob:diagram');
@@ -158,6 +178,7 @@ describe('AttachmentChip', () => {
     expect(preview?.style.getPropertyValue('--attachment-preview-tail-offset')).not.toBe('0px');
 
     chip.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
   });
 
@@ -172,11 +193,14 @@ describe('AttachmentChip', () => {
       ),
       container
     );
+    flushSolid();
     const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
     chip.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(document.querySelector('.chat-attachment-image-preview')).not.toBeNull();
 
     dismissComposerOverlays();
+    flushSolid();
 
     expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
   });
@@ -186,6 +210,7 @@ describe('AttachmentChip', () => {
       () => <AttachmentChip label="diagram.png" icon="image" title="diagram.png" />,
       container
     );
+    flushSolid();
     const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
     const stem = chip.querySelector<HTMLElement>('.chip-label-stem')!;
 
@@ -196,6 +221,7 @@ describe('AttachmentChip', () => {
       scrollWidth: { configurable: true, value: 80 },
     });
     chip.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
 
     expect(chip.title).toBe('diagram.png');
   });
@@ -205,6 +231,7 @@ describe('AttachmentChip', () => {
       () => <AttachmentChip label="app.ts" icon="file" title="src/app.ts L4-8" />,
       container
     );
+    flushSolid();
 
     expect(container.querySelector<HTMLElement>('.chat-attachment-chip')?.title).toBe(
       'src/app.ts L4-8'
@@ -219,6 +246,7 @@ describe('AttachmentChip', () => {
       () => <AttachmentChip label="diagram.png" path="images/diagram.png" icon="image" />,
       container
     );
+    flushSolid();
 
     expect(container.querySelector<HTMLImageElement>('.file-type-icon')?.src).toBe(
       getFileTypeIcon('images/diagram.png')

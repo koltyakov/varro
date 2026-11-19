@@ -335,6 +335,7 @@ test.describe('viewport content coverage', () => {
       .toBe(true);
 
     type HeightSample = {
+      measuredRows: Array<[string, number]>;
       accountedHeight: number;
       terminalRows: number;
       terminalFramesBounded: boolean;
@@ -364,6 +365,10 @@ test.describe('viewport content coverage', () => {
           (block) => block.querySelector('.code-block-detail')?.textContent === '1 line'
         );
         return {
+          measuredRows: rows.map((row): [string, number] => [
+            row.dataset.msgId!,
+            row.getBoundingClientRect().height,
+          ]),
           accountedHeight:
             (topSpacer?.getBoundingClientRect().height ?? 0) +
             rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
@@ -397,6 +402,24 @@ test.describe('viewport content coverage', () => {
 
     const hydrationSamples: HeightSample[] = [];
     for (const ratio of ratios) hydrationSamples.push(await sampleAt(ratio));
+    // Scroll ratios depend on the provisional prefix. Visit overlapping ranges and verify
+    // every fixture ID acquired a real height before comparing remounts.
+    const expectedIds = await page.evaluate(() =>
+      (
+        window as Window & {
+          __varroE2E?: { getSessionMessages(id: string): Array<{ info: { id: string } }> };
+        }
+      )
+        .__varroE2E!.getSessionMessages('session-heterogeneous-large-transcript')
+        .map(({ info }) => info.id)
+    );
+    const exact = new Map<string, number>();
+    for (let step = 0; step <= 48; step++) {
+      const sample = await sampleAt(step / 48);
+      expect(sample.renderedRows).toBeLessThan(40);
+      for (const [id, height] of sample.measuredRows) exact.set(id, height);
+    }
+    expect([...exact.keys()].toSorted()).toEqual(expectedIds.toSorted());
     const samples: HeightSample[] = [];
     for (const ratio of ratios) samples.push(await sampleAt(ratio));
 
@@ -411,8 +434,9 @@ test.describe('viewport content coverage', () => {
       expect(sample.shortTerminalFramesFit).toBe(true);
     }
 
-    const expectedHeight = samples[0]!.accountedHeight;
+    const expectedHeight = [...exact.values()].reduce((sum, height) => sum + height, 0);
     for (const sample of samples) {
+      for (const [id, height] of sample.measuredRows) expect(height, id).toBe(exact.get(id));
       expect(
         Math.abs(sample.accountedHeight - expectedHeight),
         JSON.stringify(samples)
@@ -739,29 +763,46 @@ test.describe('viewport content coverage', () => {
         element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * targetRatio);
         element.dispatchEvent(new Event('scroll'));
       }, ratio);
-      await waitForAnimationFrames(page, 4);
 
-      const sample = await list.evaluate((element, targetRatio) => {
-        const containerRect = element.getBoundingClientRect();
-        const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
-        const firstVisible = rows.find((row) => {
-          const rect = row.getBoundingClientRect();
-          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-        });
-        const id = firstVisible?.dataset.msgId ?? '';
-        const match = /message-huge-(user|assistant)-(\d+)/.exec(id);
-        return {
-          ratio: targetRatio,
-          firstIndex: match ? Number(match[2]) * 2 + (match[1] === 'assistant' ? 1 : 0) : -1,
-          renderedRowCount: rows.length,
-          topSpacerHeight:
-            element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
-              .height ?? 0,
-          bottomSpacerHeight:
-            element.querySelector<HTMLElement>('.virtual-spacer-bottom')?.getBoundingClientRect()
-              .height ?? 0,
-        };
-      }, ratio);
+      // Estimated rows are remeasured and re-anchored after a jump. Sample only once the
+      // anchor, range and first visible row hold still, so a loaded runner cannot read a
+      // frame where the new scrollTop is applied before the rows above it were measured.
+      const readSample = () =>
+        list.evaluate((element, targetRatio) => {
+          const containerRect = element.getBoundingClientRect();
+          const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+          const firstVisible = rows.find((row) => {
+            const rect = row.getBoundingClientRect();
+            return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+          });
+          const id = firstVisible?.dataset.msgId ?? '';
+          const match = /message-huge-(user|assistant)-(\d+)/.exec(id);
+          return {
+            ratio: targetRatio,
+            firstIndex: match ? Number(match[2]) * 2 + (match[1] === 'assistant' ? 1 : 0) : -1,
+            renderedRowCount: rows.length,
+            topSpacerHeight:
+              element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
+                .height ?? 0,
+            bottomSpacerHeight:
+              element.querySelector<HTMLElement>('.virtual-spacer-bottom')?.getBoundingClientRect()
+                .height ?? 0,
+            scrollTop: element.scrollTop,
+            scrollHeight: element.scrollHeight,
+          };
+        }, ratio);
+      await waitForAnimationFrames(page, 4);
+      let sample = await readSample();
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await waitForAnimationFrames(page, 2);
+        const next = await readSample();
+        const settled =
+          next.firstIndex === sample.firstIndex &&
+          next.scrollTop === sample.scrollTop &&
+          next.scrollHeight === sample.scrollHeight;
+        sample = next;
+        if (settled) break;
+      }
       samples.push(sample);
     }
 

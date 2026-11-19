@@ -1,5 +1,5 @@
-import { untrack } from 'solid-js';
-import { produce, reconcile } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+import { untrack, reconcile } from 'solid-js';
 import type { SessionLookup } from '../../shared/protocol';
 import { isMissingWorkspaceDirectoryMessage } from '../../shared/workspace-directory-error';
 import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
@@ -20,7 +20,7 @@ let active = 0;
 let scope = '';
 let generation = 0;
 
-function getLookupScope(): string | null {
+export function getSessionReferenceLookupScope(): string | null {
   const server = state.serverStatus;
   if (server.state !== 'running') return null;
   const roots = (state.editorContext.workspaceFolders ?? []).map((folder) =>
@@ -39,14 +39,22 @@ function syncLookupScope(nextScope: string | null) {
   generation += 1;
   pending.clear();
   settled.clear();
-  setState('sessionLookups', reconcile({}));
+  setState((draft) => {
+    const current = draft['sessionLookups'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionLookups'] = incoming;
+    else reconcile(incoming)(current);
+  });
 }
 
-export function lookupSessionReferences(content: string): void {
+export function lookupSessionReferences(
+  content: string,
+  nextScope = getSessionReferenceLookupScope()
+): void {
   const matches = content.matchAll(SESSION_ID_RE);
   const first = matches.next();
   if (first.done) return;
-  const nextScope = getLookupScope();
   untrack(() => {
     syncLookupScope(nextScope);
     if (nextScope === null) return;
@@ -58,7 +66,7 @@ export function lookupSessionReferences(content: string): void {
 }
 
 export function lookupSessionReference(id: string): Promise<SessionLookup | null> {
-  const nextScope = getLookupScope();
+  const nextScope = getSessionReferenceLookupScope();
   syncLookupScope(nextScope);
   return nextScope === null ? Promise.resolve(null) : lookupSessionReferenceInScope(id, nextScope);
 }
@@ -80,7 +88,8 @@ function lookupSessionReferenceInScope(
   // Bound queued work as well as cached metadata for arbitrary pasted transcripts.
   if (pending.size >= CACHE_LIMIT) return Promise.resolve(null);
   const currentGeneration = generation;
-  const isCurrent = () => generation === currentGeneration && getLookupScope() === nextScope;
+  const isCurrent = () =>
+    generation === currentGeneration && getSessionReferenceLookupScope() === nextScope;
   const request = (async () => {
     // Let the pending map own the request even if a transport throws synchronously.
     await Promise.resolve();
@@ -94,13 +103,12 @@ function lookupSessionReferenceInScope(
       if (!isCurrent()) return null;
       const session = await client.varro.session.reference(id);
       if (!isCurrent()) return null;
-      setState('sessionLookups', id, session);
+      setState((draft) => {
+        draft.sessionLookups[id] = session;
+        const ids = Object.keys(draft.sessionLookups);
+        if (ids.length > CACHE_LIMIT) delete draft.sessionLookups[ids[0]!];
+      });
       outcome = 'found';
-      const ids = Object.keys(state.sessionLookups);
-      if (ids.length > CACHE_LIMIT) {
-        const { [ids[0]!]: _oldest, ...remaining } = state.sessionLookups;
-        setState('sessionLookups', reconcile(remaining));
-      }
       return session;
     } catch (error) {
       if (!isCurrent()) return null;
@@ -111,9 +119,10 @@ function lookupSessionReferenceInScope(
       ) {
         outcome = 'missing';
         setState(
-          'sessionLookups',
-          produce((lookups) => {
+          storePath('sessionLookups', (lookups) => {
             delete lookups[id];
+
+            return lookups;
           })
         );
         return null;

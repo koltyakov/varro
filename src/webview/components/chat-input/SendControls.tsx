@@ -1,3 +1,4 @@
+import { ariaBoolean } from '../../lib/aria';
 import { Show } from 'solid-js';
 import { Tooltip } from '../Tooltip';
 
@@ -67,7 +68,7 @@ export function SendControls(props: {
               class="send-mode-options"
               onClick={props.onToggleBusyMenu}
               aria-label="More send options"
-              aria-expanded={props.busyMenuOpen}
+              aria-expanded={ariaBoolean(props.busyMenuOpen)}
             >
               <svg
                 width="12"

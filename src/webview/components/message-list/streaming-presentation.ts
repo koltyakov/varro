@@ -1,5 +1,6 @@
-import { batch, createSignal, untrack } from 'solid-js';
-import type { Accessor, Setter } from 'solid-js';
+import { createSignal, untrack, type Accessor, type SignalOptions } from 'solid-js';
+
+import { isFunction } from '../../lib/runtime-values';
 import { isWorkspaceDirectoryText } from '../../lib/part-utils';
 import type { Part } from '../../types';
 
@@ -48,9 +49,10 @@ type Entry = {
   arrivedAt: number;
   admitted: boolean;
   text: Accessor<string>;
-  setText: Setter<string>;
+  currentText: Accessor<string>;
+  setText(value: string): void;
   pending: Accessor<boolean>;
-  setPending: Setter<boolean>;
+  setPending(value: boolean): void;
   target: string;
   catchupAt: number | null;
   nextTextAt: number;
@@ -93,6 +95,32 @@ function sameMap(previous: ReadonlyMap<string, string>, next: ReadonlyMap<string
   );
 }
 
+type PresentationValue =
+  | string
+  | number
+  | boolean
+  | ReadonlySet<string>
+  | ReadonlyMap<string, string>;
+
+// Deadlines are an imperative state machine. Its current values must advance
+// together inside one update, while Solid publishes the resulting UI atomically.
+function createPresentationState<T extends PresentationValue>(
+  initial: T,
+  options?: SignalOptions<T>
+): readonly [Accessor<T>, (next: T | ((previous: T) => T)) => void, Accessor<T>] {
+  let current = initial;
+  // SAFETY: This private controller state contains only scalar values, Sets, or Maps, never computation functions.
+  const [read, publish] = createSignal<T>(initial as Exclude<T, Function>, options);
+  return [
+    read,
+    (next) => {
+      current = isFunction(next) ? next(current) : next;
+      publish(() => current);
+    },
+    () => current,
+  ];
+}
+
 // Prefer readable chunks without waiting for a closing Markdown construct or splitting a code point.
 function nextTextEnd(text: string, start: number, count: number) {
   let end = Math.min(text.length, start + count);
@@ -115,47 +143,45 @@ export class StreamingPresentation {
   private turn: string | null = null;
   private initialized = false;
   private disposed = false;
-  private readingSource = false;
-  private updating = false;
   private immediate = false;
   private keepRunningVisible = false;
   private toolRotation: ToolRotation | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private generation = 0;
   private lastTextReleaseAt = Number.NEGATIVE_INFINITY;
-  private readonly membership = createSignal(0);
-  private readonly revision = createSignal(0);
-  private readonly pendingState = createSignal(false);
-  private readonly visibleState = createSignal<ReadonlySet<string>>(new Set(), { equals: sameSet });
-  private readonly retainedState = createSignal<ReadonlySet<string>>(new Set(), {
+  private readonly membership = createPresentationState<number>(0);
+  private readonly revision = createPresentationState<number>(0);
+  private readonly pendingState = createPresentationState<boolean>(false);
+  private readonly visibleState = createPresentationState<ReadonlySet<string>>(new Set(), {
     equals: sameSet,
   });
-  private readonly exitingState = createSignal<ReadonlySet<string>>(new Set(), { equals: sameSet });
-  private readonly hiddenState = createSignal<ReadonlySet<string>>(new Set(), { equals: sameSet });
-  private readonly textGeometryState = createSignal<ReadonlyMap<string, string>>(new Map(), {
-    equals: sameMap,
+  private readonly retainedState = createPresentationState<ReadonlySet<string>>(new Set(), {
+    equals: sameSet,
   });
+  private readonly exitingState = createPresentationState<ReadonlySet<string>>(new Set(), {
+    equals: sameSet,
+  });
+  private readonly hiddenState = createPresentationState<ReadonlySet<string>>(new Set(), {
+    equals: sameSet,
+  });
+  private readonly textGeometryState = createPresentationState<ReadonlyMap<string, string>>(
+    new Map(),
+    {
+      equals: sameMap,
+    }
+  );
 
   readonly version = this.revision[0];
-  readonly pending = () => {
-    this.readSource();
-    return this.pendingState[0]();
-  };
+  readonly pending = this.pendingState[0];
   readonly visibleActivity = this.visibleState[0];
   readonly retainedActivity = this.retainedState[0];
   readonly exitingActivity = this.exitingState[0];
-  readonly hiddenParts = () => {
-    this.readSource();
-    return this.hiddenState[0]();
-  };
-  readonly textGeometry = () => {
-    this.readSource();
-    return this.textGeometryState[0]();
-  };
+  readonly hiddenParts = this.hiddenState[0];
+  readonly textGeometry = this.textGeometryState[0];
 
   constructor(
     private readonly callbacks: {
-      beforeRead?: () => void;
+      awaitingTextAdmission?: (part: Part, scope: string | null) => boolean;
       beforeExit: (keys: ReadonlySet<string>) => void;
       beforeGroup: (keys: ReadonlySet<string>) => void;
       beforeReplaceActivity?: (key: string) => void;
@@ -166,22 +192,30 @@ export class StreamingPresentation {
   ) {}
 
   readonly textForPart = (part: Part): string | undefined => {
-    this.readSource();
     this.membership[0]();
     const entry = this.entries.get(getPresentationPartKey(part));
-    return entry?.item.kind === 'text' ? entry.text() : undefined;
+    if (entry?.item.kind === 'text') return entry.text();
+    // A newly committed part can reach a row before the controller applies its source.
+    // Membership notifies this reader when pacing takes over; don't briefly expose
+    // the canonical text and unmount it again when the first paced value is empty.
+    if (
+      !entry &&
+      this.initialized &&
+      part.type === 'text' &&
+      this.callbacks.awaitingTextAdmission?.(part, this.scope)
+    )
+      return '';
+    return undefined;
   };
 
   // The full text queued for display, which can lead the paced prefix by one or more releases.
   readonly targetTextForPart = (part: Part): string | undefined => {
-    this.readSource();
     this.membership[0]();
     const entry = this.entries.get(getPresentationPartKey(part));
     return entry?.item.kind === 'text' ? entry.target : undefined;
   };
 
   readonly isPartPending = (part: Part): boolean => {
-    this.readSource();
     this.membership[0]();
     const entry = this.entries.get(getPresentationPartKey(part));
     return entry?.pending() ?? false;
@@ -196,152 +230,131 @@ export class StreamingPresentation {
     keepRunningVisible?: boolean;
   }): void {
     if (this.disposed) return;
-    this.updating = true;
-    try {
-      untrack(() =>
-        batch(() => {
-          const reset = this.scope !== input.scope;
-          const initial = !this.initialized || reset;
-          const replaced = reset || this.turn !== input.turn;
-          if (replaced) {
-            if (!reset)
-              this.callbacks.beforeGroup(
-                new Set([...this.visibleActivity(), ...this.retainedActivity()])
-              );
-            this.clearTimer();
-            this.lastTextReleaseAt = Number.NEGATIVE_INFINITY;
-            this.entries.clear();
-            this.ordered = [];
-            this.scheduled = [];
-            this.promotedActivities.clear();
-            this.inspectedActivities.clear();
-            this.toolRotation = null;
-            this.generation += 1;
-          }
-          this.scope = input.scope;
-          this.turn = input.turn;
-          this.initialized = true;
-          this.immediate = input.immediate;
-          this.keepRunningVisible = input.keepRunningVisible ?? false;
-          const now = Date.now();
-          let nextOrder: Entry[] | undefined;
-          let itemIndex = 0;
-          let membershipChanged = replaced;
-          let previousBurst: Burst | null = null;
-          for (const item of input.items) {
-            let entry = this.entries.get(item.key);
-            if (entry && entry.item.kind !== item.kind) entry = undefined;
-            if (!entry) {
-              const paced = !initial && input.live && !input.immediate;
-              const activity = item.kind === 'activity' && (paced || (item.running && item.active));
-              const text = item.kind === 'text' && !paced ? item.text : '';
-              const [displayed, setDisplayed] = createSignal(text);
-              const [pending, setPending] = createSignal(false);
-              const burst: Burst | null = activity
-                ? (previousBurst ?? {
-                    showAt: now + (initial ? INITIAL_ACTIVITY_DELAY_MS : COLLECT_MS),
-                    visibleAt: null,
-                    duration: initial ? INITIAL_PREVIEW_MS : PREVIEW_MS,
-                    nextAdmissionAt: 0,
-                    pendingPaintKey: null,
-                    paintDeadline: 0,
-                  })
-                : null;
-              entry = {
-                item,
-                arrivedAt: now,
-                admitted: !paced,
-                text: displayed,
-                setText: setDisplayed,
-                pending,
-                setPending,
-                target: text,
-                catchupAt: null,
-                nextTextAt: now,
-                showAt:
-                  burst?.visibleAt !== null && burst?.visibleAt !== undefined
-                    ? now + COLLECT_MS
-                    : (burst?.showAt ?? now),
-                burst,
-                queuedActivity: paced && item.kind === 'activity',
+    untrack(() => {
+      const reset = this.scope !== input.scope;
+      const initial = !this.initialized || reset;
+      const replaced = reset || this.turn !== input.turn;
+      if (replaced) {
+        if (!reset)
+          this.callbacks.beforeGroup(
+            new Set([...this.visibleState[2](), ...this.retainedState[2]()])
+          );
+        this.clearTimer();
+        this.lastTextReleaseAt = Number.NEGATIVE_INFINITY;
+        this.entries.clear();
+        this.ordered = [];
+        this.scheduled = [];
+        this.promotedActivities.clear();
+        this.inspectedActivities.clear();
+        this.toolRotation = null;
+        this.generation += 1;
+      }
+      this.scope = input.scope;
+      this.turn = input.turn;
+      this.initialized = true;
+      this.immediate = input.immediate;
+      this.keepRunningVisible = input.keepRunningVisible ?? false;
+      const now = Date.now();
+      let nextOrder: Entry[] | undefined;
+      let itemIndex = 0;
+      let membershipChanged = replaced;
+      let previousBurst: Burst | null = null;
+      for (const item of input.items) {
+        let entry = this.entries.get(item.key);
+        if (entry && entry.item.kind !== item.kind) entry = undefined;
+        if (!entry) {
+          const paced = !initial && input.live && !input.immediate;
+          const activity = item.kind === 'activity' && (paced || (item.running && item.active));
+          const text = item.kind === 'text' && !paced ? item.text : '';
+          const [displayed, setDisplayed, currentText] = createPresentationState(text);
+          const [pending, setPending] = createPresentationState<boolean>(false);
+          const burst: Burst | null = activity
+            ? (previousBurst ?? {
+                showAt: now + (initial ? INITIAL_ACTIVITY_DELAY_MS : COLLECT_MS),
                 visibleAt: null,
-                previewUntil: null,
-                phase: activity ? 'delayed' : 'grouped',
-                exitDeadline: 0,
-                exitGeneration: 0,
-              };
-            }
-            entry.item = item;
-            if (
-              item.kind === 'activity' &&
-              !item.running &&
-              !input.live &&
-              entry.phase === 'delayed'
-            ) {
-              entry.phase = 'grouped';
-            }
-            if (item.kind === 'activity' && this.promotedActivities.delete(item.key)) {
-              entry.phase = 'delayed';
-              entry.admitted = true;
-              entry.showAt = now;
-              entry.queuedActivity = false;
-              entry.burst = {
-                showAt: now,
-                visibleAt: now,
-                duration: PREVIEW_MS,
-                nextAdmissionAt: now + ACTIVITY_ADMISSION_MS,
+                duration: initial ? INITIAL_PREVIEW_MS : PREVIEW_MS,
+                nextAdmissionAt: 0,
                 pendingPaintKey: null,
                 paintDeadline: 0,
-              };
-            }
-            if (item.kind === 'text') {
-              if (!item.text.startsWith(entry.target)) {
-                // Canonical corrections supersede any queued suffix, including shorter snapshots.
-                entry.setText(item.text);
-                entry.catchupAt = null;
-                entry.admitted = true;
-              }
-              entry.target = item.text;
-              if (!input.live) entry.setText(item.text);
-            }
-            if (item.kind === 'activity')
-              previousBurst = entry.phase === 'grouped' ? null : entry.burst;
-            else previousBurst = null;
-            if (this.entries.get(item.key) !== entry) {
-              this.entries.set(item.key, entry);
-              membershipChanged = true;
-            }
-            if (!nextOrder && this.ordered[itemIndex] !== entry)
-              nextOrder = this.ordered.slice(0, itemIndex);
-            nextOrder?.push(entry);
-            itemIndex += 1;
+              })
+            : null;
+          entry = {
+            item,
+            arrivedAt: now,
+            admitted: !paced,
+            text: displayed,
+            currentText,
+            setText: setDisplayed,
+            pending,
+            setPending,
+            target: text,
+            catchupAt: null,
+            nextTextAt: now,
+            showAt:
+              burst?.visibleAt !== null && burst?.visibleAt !== undefined
+                ? now + COLLECT_MS
+                : (burst?.showAt ?? now),
+            burst,
+            queuedActivity: paced && item.kind === 'activity',
+            visibleAt: null,
+            previewUntil: null,
+            phase: activity ? 'delayed' : 'grouped',
+            exitDeadline: 0,
+            exitGeneration: 0,
+          };
+        }
+        entry.item = item;
+        if (item.kind === 'activity' && !item.running && !input.live && entry.phase === 'delayed') {
+          entry.phase = 'grouped';
+        }
+        if (item.kind === 'activity' && this.promotedActivities.delete(item.key)) {
+          entry.phase = 'delayed';
+          entry.admitted = true;
+          entry.showAt = now;
+          entry.queuedActivity = false;
+          entry.burst = {
+            showAt: now,
+            visibleAt: now,
+            duration: PREVIEW_MS,
+            nextAdmissionAt: now + ACTIVITY_ADMISSION_MS,
+            pendingPaintKey: null,
+            paintDeadline: 0,
+          };
+        }
+        if (item.kind === 'text') {
+          if (!item.text.startsWith(entry.target)) {
+            // Canonical corrections supersede any queued suffix, including shorter snapshots.
+            entry.setText(item.text);
+            entry.catchupAt = null;
+            entry.admitted = true;
           }
-          if (itemIndex !== this.ordered.length) nextOrder ??= this.ordered.slice(0, itemIndex);
-          if (nextOrder) {
-            this.ordered = nextOrder;
-            if (this.entries.size !== nextOrder.length) {
-              this.entries = new Map(nextOrder.map((entry) => [entry.item.key, entry]));
-              membershipChanged = true;
-            }
-          }
-          this.refreshScheduled();
-          if (membershipChanged) this.membership[1]((value) => value + 1);
-          this.advance(now, false);
-        })
-      );
-    } finally {
-      this.updating = false;
-    }
-  }
-
-  private readSource() {
-    if (this.updating || this.readingSource || this.disposed) return;
-    this.readingSource = true;
-    try {
-      this.callbacks.beforeRead?.();
-    } finally {
-      this.readingSource = false;
-    }
+          entry.target = item.text;
+          if (!input.live) entry.setText(item.text);
+        }
+        if (item.kind === 'activity')
+          previousBurst = entry.phase === 'grouped' ? null : entry.burst;
+        else previousBurst = null;
+        if (this.entries.get(item.key) !== entry) {
+          this.entries.set(item.key, entry);
+          membershipChanged = true;
+        }
+        if (!nextOrder && this.ordered[itemIndex] !== entry)
+          nextOrder = this.ordered.slice(0, itemIndex);
+        nextOrder?.push(entry);
+        itemIndex += 1;
+      }
+      if (itemIndex !== this.ordered.length) nextOrder ??= this.ordered.slice(0, itemIndex);
+      if (nextOrder) {
+        this.ordered = nextOrder;
+        if (this.entries.size !== nextOrder.length) {
+          this.entries = new Map(nextOrder.map((entry) => [entry.item.key, entry]));
+          membershipChanged = true;
+        }
+      }
+      this.refreshScheduled();
+      if (membershipChanged) this.membership[1]((value) => value + 1);
+      this.advance(now, false);
+    });
   }
 
   /** Permission removal hands an already painted tool to the next available tray slot. */
@@ -439,10 +452,10 @@ export class StreamingPresentation {
     )
       return;
     untrack(() =>
-      batch(() => {
+      (() => {
         entry.phase = 'grouped';
         this.advance(Date.now(), true);
-      })
+      })()
     );
   }
 
@@ -562,7 +575,7 @@ export class StreamingPresentation {
     if (this.disposed) return;
     this.clearTimer();
     untrack(() =>
-      batch(() => {
+      (() => {
         const visible = new Set<string>();
         const retained = new Set<string>();
         const exiting = new Set<string>();
@@ -762,15 +775,17 @@ export class StreamingPresentation {
             continue;
           }
 
-          const displayed = entry.text();
+          const displayed = entry.currentText();
           if (displayed !== entry.target && !wait) {
-            entry.catchupAt ??= now + TEXT_CATCHUP_MS;
-            if (this.immediate || now >= entry.catchupAt) {
+            // Start the catch-up window when text can first be released. Time spent waiting for
+            // a paint or preview would otherwise compress the reveal into a few large jumps.
+            if (releaseText) entry.catchupAt ??= now + TEXT_CATCHUP_MS;
+            if (this.immediate || (entry.catchupAt !== null && now >= entry.catchupAt)) {
               entry.setText(entry.target);
             } else if (releaseText && now >= entry.nextTextAt) {
               const remainingTicks = Math.max(
                 1,
-                Math.ceil((entry.catchupAt - now) / TEXT_INTERVAL_MS)
+                Math.ceil(((entry.catchupAt ?? now) - now) / TEXT_INTERVAL_MS)
               );
               const count = Math.max(
                 24,
@@ -782,7 +797,7 @@ export class StreamingPresentation {
               entry.nextTextAt = now + TEXT_INTERVAL_MS;
             }
           }
-          const text = entry.text();
+          const text = entry.currentText();
           if (text !== displayed) this.lastTextReleaseAt = now;
           const textPending = text !== entry.target;
           entry.setPending(textPending);
@@ -796,7 +811,7 @@ export class StreamingPresentation {
             !text.trim() ? '' : isWorkspaceDirectoryText(text) ? '[Working directory:' : 'x'
           );
         }
-        const previousPreviews = new Set([...this.visibleActivity(), ...this.retainedActivity()]);
+        const previousPreviews = new Set([...this.visibleState[2](), ...this.retainedState[2]()]);
         if (previousPreviews.size > 0) {
           for (const key of [...visible, ...retained]) {
             if (!previousPreviews.has(key)) this.callbacks.beforeReplaceActivity?.(key);
@@ -807,7 +822,7 @@ export class StreamingPresentation {
         this.visibleState[1](visible);
         this.retainedState[1](retained);
         // Hand off the last disappearing row's reserve before publishing its removal.
-        if (this.exitingActivity().size > 0 && exiting.size === 0) this.callbacks.beforeLastExit();
+        if (this.exitingState[2]().size > 0 && exiting.size === 0) this.callbacks.beforeLastExit();
         this.exitingState[1](exiting);
         this.hiddenState[1](hidden);
         this.textGeometryState[1](textGeometry);
@@ -828,7 +843,7 @@ export class StreamingPresentation {
             Math.max(1, nextAt - now)
           );
         }
-      })
+      })()
     );
   }
 }

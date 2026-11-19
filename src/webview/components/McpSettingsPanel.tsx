@@ -1,13 +1,6 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  on,
-  onCleanup,
-  onMount,
-  Show,
-} from 'solid-js';
+import { storePath } from '@solidjs/signals';
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show } from 'solid-js';
+import { ariaBoolean } from '../lib/aria';
 import { refreshSessionMcps } from '../hooks/useOpenCode';
 import { parseMcpConfigSnippet } from '../../shared/mcp-config';
 import type { McpConfigScope } from '../../shared/mcp-config';
@@ -177,7 +170,7 @@ export function McpSettingsPanel() {
     const next = MCP_SCOPES.find((item) => item.scope !== scope());
     if (!next) return;
     setScope(next.scope);
-    tabList?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
+    tabList?.querySelector<HTMLButtonElement>(`#mcp-settings-tab-${next.scope}`)?.focus();
   }
 
   async function load() {
@@ -224,21 +217,19 @@ export function McpSettingsPanel() {
   }
 
   createEffect(
-    on(
-      () => state.editorContext.workspacePath,
-      (workspacePath, previous) => {
-        // Startup values belong to the workspace that loaded them.
-        if (previous !== undefined && previous !== workspacePath) {
-          setState('mcpDefaults', null);
-          setConfigJson('');
-          setConfigName('');
-          setAddedMessage('');
-        }
-        void load();
+    () => state.editorContext.workspacePath,
+    (workspacePath, previous) => {
+      // Startup values belong to the workspace that loaded them.
+      if (previous !== undefined && previous !== workspacePath) {
+        setState(storePath('mcpDefaults', null));
+        setConfigJson('');
+        setConfigName('');
+        setAddedMessage('');
       }
-    )
+      void load();
+    }
   );
-  onMount(() => backButton?.focus());
+  onSettled(() => backButton?.focus());
   onCleanup(() => {
     disposed = true;
     generation += 1;
@@ -330,9 +321,9 @@ export function McpSettingsPanel() {
                       type="button"
                       role="tab"
                       id={`mcp-settings-tab-${item.scope}`}
-                      aria-selected={scope() === item.scope}
+                      aria-selected={ariaBoolean(scope() === item.scope)}
                       aria-controls="mcp-settings-tabpanel"
-                      tabIndex={scope() === item.scope ? 0 : -1}
+                      tabindex={scope() === item.scope ? 0 : -1}
                       disabled={saving() || openingConfig()}
                       onClick={() => setScope(item.scope)}
                     >
@@ -359,7 +350,7 @@ export function McpSettingsPanel() {
                 when={names().length > 0}
                 fallback={<p class="mcp-settings-note">No MCP servers configured.</p>}
               >
-                <div class="mcp-settings-servers" aria-busy={saving() || loading()}>
+                <div class="mcp-settings-servers" aria-busy={ariaBoolean(saving() || loading())}>
                   <For each={names()}>
                     {(name) => (
                       <div class="mcp-settings-server">

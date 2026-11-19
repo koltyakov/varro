@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +15,7 @@ import { thumbnailWorkerBuildOptions } from '../../scripts/build-thumbnail-worke
 import { smokeThumbnailWorker } from '../../scripts/verify-extension-bundle.mjs';
 import { ThumbnailWorkerClient } from './image-thumbnail-worker-client';
 import { ImageThumbnails } from './image-thumbnails';
+import { LocalImages } from './local-images';
 
 let directory: string;
 let client: ThumbnailWorkerClient;
@@ -66,6 +67,36 @@ afterAll(async () => {
 });
 
 describe('WASM thumbnails', () => {
+  it('renders a workspace-local PNG through the real thumbnail worker', async () => {
+    const original = source(MagickFormat.Png, 'png');
+    const path = join(directory, 'local-markdown.png');
+    await writeFile(path, Buffer.from(original.split(',')[1]!, 'base64'));
+    const images = new LocalImages(
+      {
+        resolvePath: async () => ({ path, relativePath: 'local-markdown.png', type: 'file' }),
+      },
+      service()
+    );
+    try {
+      const preview = await images.load(
+        'local-markdown.png',
+        directory,
+        new AbortController().signal
+      );
+      expect(preview.mime).toBe('image/webp');
+      expect(preview.url.length).toBeLessThan(350_000);
+      expect(decode(preview.url)).toMatchObject({ width: 384, height: 240 });
+      const full = await images.load(
+        'local-markdown.png',
+        directory,
+        new AbortController().signal,
+        true
+      );
+      expect(full.url).toBe(original);
+    } finally {
+      images.dispose();
+    }
+  });
   it.each<[MagickFormat, string]>([
     [MagickFormat.Png, 'png'],
     [MagickFormat.Jpeg, 'jpeg'],

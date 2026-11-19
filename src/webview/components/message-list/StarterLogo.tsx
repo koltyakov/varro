@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount } from 'solid-js';
+import { createSignal, onSettled } from 'solid-js';
 import chatLogoUri from '../../../../assets/icon.png?inline';
 import { toCssUrl } from '../UiIcon';
 import { TileWaves } from './TileWaves';
@@ -13,18 +13,25 @@ export function StarterLogo(props: { contained?: boolean } = {}) {
   let waves: TileWaves | undefined;
   const [position, setPosition] = createSignal<{ top: string; left: string }>();
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     if (props.contained && canvasRef) {
       waves = new TileWaves(canvasRef);
-      onCleanup(() => waves?.dispose());
-      return;
+      cleanups.push(() => waves?.dispose());
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     }
     const logo = logoRef;
     const area = logo?.closest<HTMLElement>('.interactive-list-shell');
     const hints = logo
       ?.closest('.chat-empty-state')
       ?.querySelector<HTMLElement>('.chat-empty-hints');
-    if (!logo || !area || !hints || !canvasRef) return;
+    if (!logo || !area || !hints || !canvasRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     waves = new TileWaves(canvasRef);
 
     const updateOverlap = () => {
@@ -55,18 +62,21 @@ export function StarterLogo(props: { contained?: boolean } = {}) {
     observer.observe(logo);
     observer.observe(hints);
     window.addEventListener('resize', updatePosition);
-    onCleanup(() => {
+    cleanups.push(() => {
       waves?.dispose();
       observer.disconnect();
       window.removeEventListener('resize', updatePosition);
       hints.classList.remove('is-logo-overlapping');
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
     <span
-      class="chat-empty-logo-shell"
-      classList={{ 'is-contained': props.contained }}
+      class={['chat-empty-logo-shell', { 'is-contained': props.contained }]}
       style={position()}
       aria-hidden="true"
     >

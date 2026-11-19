@@ -317,8 +317,13 @@ export function updateUsageLimitStateWithDependencies(
           modelID: rawNotice.modelID || context.modelID,
         }
       : rawNotice;
+  const latestMessage = messages.findLast(
+    ({ info }) => info.sessionID === sessionID && !(info.role === 'user' && info.pendingDelivery)
+  );
   deps.applyUsageLimitNotice(sessionID, notice, {
-    preserveExistingOnNull: status?.type === 'idle',
+    // A status-only load or a prompt awaiting its assistant cannot disprove a
+    // cached limit. The current assistant's outcome can.
+    preserveExistingOnNull: status?.type === 'idle' && latestMessage?.info.role !== 'assistant',
   });
 }
 

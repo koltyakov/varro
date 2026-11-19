@@ -1,14 +1,14 @@
 import {
-  children,
   createEffect,
+  children,
   createSignal,
   createUniqueId,
   onCleanup,
-  onMount,
+  onSettled,
   Show,
 } from 'solid-js';
-import type { JSX } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { type JSX, Portal } from '@solidjs/web';
+
 import { registerComposerOverlayDismiss } from './chat-input/composer-overlay-dismiss';
 
 export const DEFAULT_TOOLTIP_DELAY = 1000;
@@ -106,32 +106,41 @@ export function Tooltip(props: {
   };
 
   const show = () => {
-    if (props.disabled || trigger?.getAttribute('aria-expanded') === 'true') return;
     if (showTimer) clearTimeout(showTimer);
     unregisterComposerDismiss ??= registerComposerOverlayDismiss(hide);
     showTimer = setTimeout(() => {
       showTimer = undefined;
+      // The trigger can stage its truncation measurement during the same hover event.
+      if (props.disabled || trigger?.getAttribute('aria-expanded') === 'true') {
+        hide();
+        return;
+      }
       setVisible(true);
       queueMicrotask(updatePosition);
     }, props.delay ?? DEFAULT_TOOLTIP_DELAY);
   };
 
-  createEffect(() => {
-    if (props.disabled) {
-      hide();
-      return;
+  createEffect(
+    () => ({ disabled: props.disabled, isVisible: visible() }),
+    ({ disabled, isVisible }) => {
+      if (disabled) {
+        hide();
+        return undefined;
+      }
+      if (!isVisible) return undefined;
+      const reposition = () => updatePosition();
+      window.addEventListener('resize', reposition);
+      window.addEventListener('scroll', reposition, true);
+      return () => {
+        window.removeEventListener('resize', reposition);
+        window.removeEventListener('scroll', reposition, true);
+      };
     }
-    if (!visible()) return;
-    const reposition = () => updatePosition();
-    window.addEventListener('resize', reposition);
-    window.addEventListener('scroll', reposition, true);
-    onCleanup(() => {
-      window.removeEventListener('resize', reposition);
-      window.removeEventListener('scroll', reposition, true);
-    });
-  });
+  );
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const resolved = props.target ?? resolvedChildren();
     if (!(resolved instanceof HTMLElement)) {
       throw new Error('Tooltip requires a single HTML element child');
@@ -163,7 +172,7 @@ export function Tooltip(props: {
       attributes: true,
       attributeFilter: ['aria-expanded'],
     });
-    onCleanup(() => {
+    cleanups.push(() => {
       triggerElement.removeEventListener('mouseenter', show);
       triggerElement.removeEventListener('mouseleave', hide);
       triggerElement.removeEventListener('focusin', show);
@@ -177,6 +186,10 @@ export function Tooltip(props: {
         triggerElement.removeAttribute('aria-describedby');
       }
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   onCleanup(hide);
@@ -191,14 +204,17 @@ export function Tooltip(props: {
               tooltip = element;
             }}
             id={tooltipId}
-            class="themed-tooltip"
-            classList={{
-              visible: position() !== null,
-              top: position()?.placement === 'top',
-              bottom: position()?.placement === 'bottom',
-              left: position()?.placement === 'left',
-              right: position()?.placement === 'right',
-            }}
+
+            class={[
+              'themed-tooltip',
+              {
+                visible: position() !== null,
+                top: position()?.placement === 'top',
+                bottom: position()?.placement === 'bottom',
+                left: position()?.placement === 'left',
+                right: position()?.placement === 'right',
+              },
+            ]}
             role="tooltip"
             style={{ left: `${position()?.left ?? 0}px`, top: `${position()?.top ?? 0}px` }}
           >

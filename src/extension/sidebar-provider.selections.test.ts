@@ -6,9 +6,53 @@ import {
   attachTestView,
   createServer,
   createSidebarProviderInstance,
+  createWorkspaceState,
 } from './sidebar-provider.test-support';
 
 describe('session selection metadata', () => {
+  it('broadcasts a committed pin after its API caller cancels', async () => {
+    const workspaceState = createWorkspaceState();
+    const update = workspaceState.update;
+    let finishWrite: (() => void) | undefined;
+    workspaceState.update = vi.fn(async (key: string, value: unknown) => {
+      if (key === 'varro.pinnedSessionIds') {
+        await new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        });
+      }
+      await update(key, value);
+    });
+    const server = createServer({
+      request: vi.fn(async () => ({ id: 'session-1', directory: '/repo' })),
+    });
+    const { provider } = await createSidebarProviderInstance({ workspaceState, server });
+    const { posted } = attachTestView(provider);
+    const pending = provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 1,
+        cancelKey: 'pin-request',
+        method: 'POST',
+        path: '/varro/session/session-1/pin',
+        body: { pinned: true },
+      },
+    });
+    await vi.waitFor(() => expect(finishWrite).toBeDefined());
+    expect(posted.some((message) => asRecord(message)?.type === 'pinned-sessions/sync')).toBe(
+      false
+    );
+    await provider.handleMessage({
+      type: 'api/cancel',
+      payload: { id: 1, cancelKey: 'pin-request' },
+    });
+    finishWrite?.();
+    await pending;
+    expect(posted.filter((message) => asRecord(message)?.type === 'pinned-sessions/sync')).toEqual([
+      { type: 'pinned-sessions/sync', payload: { sessionIds: ['session-1'] } },
+    ]);
+    expect(workspaceState.update).toHaveBeenCalledWith('varro.pinnedSessionIds', ['session-1']);
+  });
+
   it('acknowledges each rapid agent switch with its originating selection id', async () => {
     let metadata = {};
     const request = vi.fn(async (method: string, _path: string, body?: unknown) => {

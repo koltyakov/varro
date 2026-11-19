@@ -1,4 +1,5 @@
-import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { ariaBoolean } from '../lib/aria';
+import { createEffect, Show, createSignal, onCleanup, untrack } from 'solid-js';
 import { parseRemoteImageUrl } from '../../shared/remote-images';
 import type { RemoteImageResponse } from '../../shared/remote-images';
 import { state } from '../lib/state';
@@ -22,8 +23,11 @@ export function RemoteMarkdownImage(props: {
   alt: string;
   onLoadAll?: () => void;
 }) {
-  const source = parseRemoteImageUrl(props.source);
-  const key = `${state.editorContext.workspacePath ?? ''}\u0000${state.activeSessionId ?? ''}\u0000${source?.href ?? ''}`;
+  const source = untrack(() => parseRemoteImageUrl(props.source));
+  const key = untrack(
+    () =>
+      `${state.editorContext.workspacePath ?? ''}\u0000${state.activeSessionId ?? ''}\u0000${source?.href ?? ''}`
+  );
   const [image, setImage] = createSignal<RemoteImageResponse | null>(getRemoteImagePreview(key));
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
@@ -45,24 +49,26 @@ export function RemoteMarkdownImage(props: {
     setLoading(false);
   };
   onCleanup(cancel);
-  createEffect(() => {
-    if (state.remoteImages !== 'on' && automaticRequest) cancel();
-    if (state.remoteImages === 'off') {
-      cancel();
-      clearRemoteImagePreviews();
-      setImage(null);
-      setPreview(null);
-      setError('');
+  createEffect(
+    () => state.remoteImages,
+    (mode) => {
+      if (mode !== 'on' && automaticRequest) cancel();
+      if (mode === 'off') {
+        cancel();
+        clearRemoteImagePreviews();
+        setImage(null);
+        setPreview(null);
+        setError('');
+      }
     }
-  });
+  );
   createImagePreviewEffect(
     () => preview() !== null,
     () => setPreview(null)
   );
 
   const load = async (automatic = false) => {
-    if (!source || loading() || image() || state.remoteImages === 'off') return;
-    if (automatic && state.remoteImages !== 'on') return;
+    if (!source || controller || (!automatic && (image() || state.remoteImages === 'off'))) return;
     const current = new AbortController();
     controller = current;
     automaticRequest = automatic;
@@ -94,29 +100,46 @@ export function RemoteMarkdownImage(props: {
     copyTimeout = setTimeout(() => setCopied(false), 1500);
   };
 
-  createEffect(() => {
-    setNearViewport(false);
-    if (state.remoteImages !== 'on' || !element) return;
-    if (typeof IntersectionObserver === 'undefined') {
-      setNearViewport(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        setNearViewport(true);
-        observer.disconnect();
-      },
-      { rootMargin: '200px' }
-    );
-    observer.observe(element);
-    onCleanup(() => observer.disconnect());
-  });
+  // A markdown link may wrap the image. Handle actions at the element before
+  // that link's native listener runs, rather than at Solid's delegated root.
+  function imageAction(action: () => void) {
+    return (buttonOrLink: HTMLElement) => {
+      buttonOrLink.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        action();
+      });
+    };
+  }
 
-  createEffect(() => {
-    if (state.remoteImages === 'on' && nearViewport() && !image() && !loading() && !error())
-      void load(true);
-  });
+  createEffect(
+    () => state.remoteImages,
+    (mode) => {
+      setNearViewport(false);
+      if (mode !== 'on' || !element) return;
+      if (typeof IntersectionObserver === 'undefined') {
+        setNearViewport(true);
+        return;
+      }
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          setNearViewport(true);
+          observer.disconnect();
+        },
+        { rootMargin: '200px' }
+      );
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+  );
+
+  createEffect(
+    () => state.remoteImages === 'on' && nearViewport() && !image() && !loading() && !error(),
+    (ready) => {
+      if (ready) void load(true);
+    }
+  );
 
   return (
     <Show when={state.remoteImages !== 'off' && source} fallback={props.alt}>
@@ -129,7 +152,7 @@ export function RemoteMarkdownImage(props: {
         <Show
           when={image()}
           fallback={
-            <span class="remote-markdown-image-placeholder" aria-busy={loading()}>
+            <span class="remote-markdown-image-placeholder" aria-busy={ariaBoolean(loading())}>
               <span class="remote-markdown-image-heading">
                 <span class="remote-markdown-image-icon" aria-hidden="true">
                   <UiIcon source={mediaImageIcon} width={20} height={20} />
@@ -148,12 +171,10 @@ export function RemoteMarkdownImage(props: {
                   data-external="true"
                   data-vscode-context={getExternalLinkContext(source?.href ?? '')}
                   title={source?.href}
-                  on:click={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
+                  ref={imageAction(() => {
                     if (source)
                       postMessage({ type: 'vscode/open-external', payload: { url: source.href } });
-                  }}
+                  })}
                 >
                   {source?.href}
                 </a>
@@ -162,11 +183,7 @@ export function RemoteMarkdownImage(props: {
                   class="remote-markdown-image-copy-url"
                   aria-label={copied() ? 'Image URL copied' : 'Copy image URL'}
                   title={copied() ? 'Copied' : 'Copy image URL'}
-                  on:click={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void copyUrl();
-                  }}
+                  ref={imageAction(() => void copyUrl())}
                 >
                   <UiIcon
                     source={copied() ? checkIcon : copyIcon}
@@ -189,11 +206,7 @@ export function RemoteMarkdownImage(props: {
                     class="remote-markdown-image-load"
                     disabled={loading()}
                     title="Load this image. Shares the URL and extension host's IP with the image server."
-                    on:click={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      void load();
-                    }}
+                    ref={imageAction(() => void load())}
                   >
                     {loading() ? 'Loading...' : error() ? 'Retry image' : 'Load image'}
                   </button>
@@ -202,11 +215,7 @@ export function RemoteMarkdownImage(props: {
                       type="button"
                       class="remote-markdown-image-load-all"
                       title="Load all images in this response. Shares the URLs and extension host's IP with the image servers."
-                      on:click={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        props.onLoadAll?.();
-                      }}
+                      ref={imageAction(() => props.onLoadAll?.())}
                     >
                       Load all
                     </button>
@@ -222,16 +231,14 @@ export function RemoteMarkdownImage(props: {
               class="remote-markdown-image-preview"
               title={source?.href}
               aria-label={`Open image preview: ${props.alt || source?.hostname}`}
-              on:click={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
+              ref={imageAction(() => {
                 setPreview({
                   url: loaded().url,
                   alt: props.alt,
                   title: `${props.alt || 'Remote image'} · ${loaded().hostname}`,
                   mime: 'image/webp',
                 });
-              }}
+              })}
             >
               <img src={loaded().url} alt={props.alt} />
             </button>

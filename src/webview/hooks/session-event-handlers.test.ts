@@ -1,3 +1,4 @@
+import { flush as flushSolid } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
@@ -326,6 +327,7 @@ describe('registerSessionEventHandlers', () => {
     'reconciles idle with trailing pending %s even after native todo handoff',
     (delivery) => {
       const handlers = installHandlers();
+      flushSolid();
       const assistant = createAssistantEntry();
       const steering = createUserEntry({ id: 'steering-1', pendingDelivery: delivery });
       const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
@@ -351,6 +353,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('attaches interruption to the assistant behind pending input, not another session', () => {
     const handlers = installHandlers();
+    flushSolid();
     const assistant = createAssistantEntry();
     const steering = createUserEntry({ id: 'steering-1', pendingDelivery: 'steer' });
     const child = createAssistantEntry({ id: 'child-assistant', sessionID: 'child-1' });
@@ -376,6 +379,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('records an unread interruption from a background assistant update', () => {
     const handlers = installHandlers();
+    flushSolid();
     const assistant = createAssistantEntry({
       time: { created: 100, completed: 500 },
       error: { name: 'MessageAbortedError', data: {} },
@@ -395,6 +399,7 @@ describe('registerSessionEventHandlers', () => {
   it('judges auto-approve permissions without showing a prompt', async () => {
     addPermission.mockClear();
     const handlers = installHandlers();
+    flushSolid();
     const judgePermission = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -411,7 +416,9 @@ describe('registerSessionEventHandlers', () => {
       title: 'Run git status',
     };
     handlers.get('permission.asked')?.({ properties: payload });
+    flushSolid();
     handlers.get('permission.updated')?.({ properties: payload });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(judgePermission).toHaveBeenCalledOnce();
@@ -419,12 +426,14 @@ describe('registerSessionEventHandlers', () => {
         expect.objectContaining({ id: 'perm-auto', sessionID: 'session-1', type: 'bash' })
       );
     });
+    flushSolid();
     expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-auto' }));
   });
 
   it('never automates a recovered permission with incomplete details', async () => {
     addPermission.mockClear();
     const handlers = installHandlers();
+    flushSolid();
     const judgePermission = vi.fn().mockResolvedValue(undefined);
     const respondPermission = vi.fn().mockResolvedValue(undefined);
     registerSessionEventHandlers(
@@ -445,6 +454,7 @@ describe('registerSessionEventHandlers', () => {
         recoveredIncomplete: true,
       },
     });
+    flushSolid();
 
     expect(addPermission).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'perm-restored', recoveredIncomplete: true })
@@ -455,6 +465,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores a stale sequenced session deletion until canonical repair', () => {
     const handlers = installHandlers();
+    flushSolid();
     const removeDeletedSessionTree = vi.fn();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     registerSessionEventHandlers(createDefaultDeps({ removeDeletedSessionTree, syncSession }));
@@ -474,6 +485,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('removes a gapped session deletion when canonical recovery reports it missing', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const removeDeletedSessionTree = vi.fn();
     const syncSession = vi.fn().mockRejectedValue(new Error('404 Session not found'));
     const cleanups = registerSessionEventHandlers(
@@ -490,8 +502,10 @@ describe('registerSessionEventHandlers', () => {
         properties: { info: { id: 'session-1' } },
       });
       await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+      flushSolid();
 
       await vi.waitFor(() => expect(removeDeletedSessionTree).toHaveBeenCalledWith('session-1'));
+      flushSolid();
     } finally {
       for (const cleanup of cleanups) cleanup();
     }
@@ -499,6 +513,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores a delayed not-found recovery after a newer gap supersedes it', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const removeDeletedSessionTree = vi.fn();
     let rejectRecovery!: (error: Error) => void;
     const recovery = new Promise<void>((_resolve, reject) => {
@@ -522,6 +537,7 @@ describe('registerSessionEventHandlers', () => {
         properties: { info: { id: 'session-1' } },
       });
       await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+      flushSolid();
 
       emitServerEvent(handlers, 'session.updated', {
         seq: 5,
@@ -529,7 +545,9 @@ describe('registerSessionEventHandlers', () => {
       });
 
       rejectRecovery(new Error('404 Session not found'));
+      flushSolid();
       await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSolid();
 
       expect(removeDeletedSessionTree).not.toHaveBeenCalled();
     } finally {
@@ -542,6 +560,7 @@ describe('registerSessionEventHandlers', () => {
     async (type) => {
       addPermission.mockClear();
       const handlers = installHandlers();
+      flushSolid();
       const respondPermission = vi.fn().mockResolvedValue(undefined);
 
       registerSessionEventHandlers(createDefaultDeps({ respondPermission }));
@@ -553,12 +572,14 @@ describe('registerSessionEventHandlers', () => {
           title: type,
         },
       });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(respondPermission).toHaveBeenCalledWith('session-1', `perm-${type}`, 'once', {
           rethrow: true,
         });
       });
+      flushSolid();
       expect(addPermission).not.toHaveBeenCalledWith(
         expect.objectContaining({ id: `perm-${type}` })
       );
@@ -568,6 +589,7 @@ describe('registerSessionEventHandlers', () => {
   it('shows auto-approve permissions when judging fails', async () => {
     addPermission.mockClear();
     const handlers = installHandlers();
+    flushSolid();
     const judgePermission = vi.fn().mockRejectedValue(new Error('judge failed'));
 
     registerSessionEventHandlers(
@@ -585,12 +607,14 @@ describe('registerSessionEventHandlers', () => {
         title: 'Run git status',
       },
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(addPermission).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'perm-auto-failed', sessionID: 'session-1' })
       );
     });
+    flushSolid();
   });
 
   it('keeps full-access permission prompts hidden when auto-approval races or fails', async () => {
@@ -640,12 +664,14 @@ describe('registerSessionEventHandlers', () => {
         title: 'Run Bash command',
       },
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-1', 'once', {
         rethrow: true,
       });
     });
+    flushSolid();
     expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-1' }));
   });
 
@@ -698,6 +724,7 @@ describe('registerSessionEventHandlers', () => {
         title: 'Run Bash command',
       },
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(addPermission).toHaveBeenCalledWith(
@@ -708,6 +735,7 @@ describe('registerSessionEventHandlers', () => {
         })
       );
     });
+    flushSolid();
   });
 
   it('removes permissions when a reply only includes id', () => {
@@ -751,6 +779,7 @@ describe('registerSessionEventHandlers', () => {
         sessionID: 'session-1',
       },
     });
+    flushSolid();
 
     expect(removePermission).toHaveBeenCalledWith('perm-1');
   });
@@ -759,6 +788,7 @@ describe('registerSessionEventHandlers', () => {
     addPermission.mockClear();
     removePermission.mockClear();
     const handlers = installHandlers();
+    flushSolid();
 
     registerSessionEventHandlers(createDefaultDeps());
 
@@ -771,6 +801,7 @@ describe('registerSessionEventHandlers', () => {
         source: { type: 'tool', messageID: 'msg-1', callID: 'call-1' },
       },
     });
+    flushSolid();
     handlers.get('permission.v2.replied')?.({
       properties: {
         sessionID: 'session-1',
@@ -778,6 +809,7 @@ describe('registerSessionEventHandlers', () => {
         reply: 'once',
       },
     });
+    flushSolid();
 
     expect(addPermission).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -796,6 +828,7 @@ describe('registerSessionEventHandlers', () => {
     upsertQuestion.mockClear();
     removeResolvedQuestion.mockClear();
     const handlers = installHandlers();
+    flushSolid();
 
     registerSessionEventHandlers(createDefaultDeps());
 
@@ -811,12 +844,15 @@ describe('registerSessionEventHandlers', () => {
       ],
     };
     handlers.get('question.v2.asked')?.({ properties: question });
+    flushSolid();
     handlers.get('question.v2.replied')?.({
       properties: { sessionID: 'session-1', requestID: 'question-v2', answers: [] },
     });
+    flushSolid();
     handlers.get('question.v2.rejected')?.({
       properties: { sessionID: 'session-1', requestID: 'question-v3' },
     });
+    flushSolid();
 
     expect(upsertQuestion).toHaveBeenCalledWith(question);
     expect(removeResolvedQuestion).toHaveBeenNthCalledWith(1, 'question-v2');
@@ -825,6 +861,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('syncs pending permissions after shell progress events in case permission events were missed', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncPendingPermissions = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -837,12 +874,14 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.shell.started')?.({
       properties: { sessionID: 'session-1' },
     });
+    flushSolid();
 
     expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
   });
 
   it('reconciles server state after the event stream reconnects', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const reconcileServerState = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -855,8 +894,11 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('server.connected')?.({});
+    flushSolid();
     handlers.get('server.connected')?.({});
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(reconcileServerState).toHaveBeenCalledTimes(1);
     expect(syncSessionMessages).toHaveBeenCalledOnce();
@@ -865,6 +907,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('marks session.error events failed and stops active loading', () => {
     const handlers = installHandlers();
+    flushSolid();
     const deps = createDefaultDeps({ getActiveSessionId: () => 'session-1' });
 
     setSessionFailed.mockClear();
@@ -878,6 +921,7 @@ describe('registerSessionEventHandlers', () => {
         error: { name: 'UnknownError', data: { message: 'Command failed' } },
       },
     });
+    flushSolid();
 
     expect(deps.setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(deps.clearPendingAbort).toHaveBeenCalledWith('session-1');
@@ -891,7 +935,9 @@ describe('registerSessionEventHandlers', () => {
   it('waits and retries an interrupted turn after a transient connection failure', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
+    flushSolid();
     const handlers = installHandlers();
+    flushSolid();
     const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
     const deps = createDefaultDeps({
       getActiveSessionId: () => 'session-1',
@@ -913,6 +959,7 @@ describe('registerSessionEventHandlers', () => {
           },
         },
       });
+      flushSolid();
 
       expect(deps.setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', {
         type: 'retry',
@@ -925,11 +972,13 @@ describe('registerSessionEventHandlers', () => {
       expect(continueInterruptedSession).not.toHaveBeenCalled();
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      flushSolid();
       expect(deps.setSessionStatusEntry).not.toHaveBeenLastCalledWith('session-1', {
         type: 'idle',
       });
 
       await vi.advanceTimersByTimeAsync(5_000);
+      flushSolid();
       expect(continueInterruptedSession).toHaveBeenCalledWith('session-1', {
         messageID: expect.stringMatching(/^msg_/),
       });
@@ -942,7 +991,9 @@ describe('registerSessionEventHandlers', () => {
   it('backs off provider failures and stops after three automatic retries', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
+    flushSolid();
     const handlers = installHandlers();
+    flushSolid();
     const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
     const deps = createDefaultDeps({
       getActiveSessionId: () => 'session-1',
@@ -968,19 +1019,23 @@ describe('registerSessionEventHandlers', () => {
           next: Date.now() + delay,
         });
         await vi.advanceTimersByTimeAsync(delay - 1);
+        flushSolid();
         // Duplicate error notifications must not postpone the retry or consume its budget.
         fail();
         expect(continueInterruptedSession).toHaveBeenCalledTimes(index);
         await vi.advanceTimersByTimeAsync(1);
+        flushSolid();
         expect(continueInterruptedSession).toHaveBeenCalledTimes(index + 1);
         fail();
       }
       expect(deps.getSessionStatus('session-1')).toEqual({ type: 'idle' });
       await vi.advanceTimersByTimeAsync(120_000);
+      flushSolid();
       expect(continueInterruptedSession).toHaveBeenCalledTimes(3);
       handlers.get('message.updated')?.({
         properties: { info: createUserEntry({ id: 'new-request' }).info },
       });
+      flushSolid();
       fail();
       expect(deps.getSessionStatus('session-1')).toMatchObject({ type: 'retry', attempt: 1 });
     } finally {
@@ -994,6 +1049,7 @@ describe('registerSessionEventHandlers', () => {
     async (reason) => {
       vi.useFakeTimers();
       const handlers = installHandlers();
+      flushSolid();
       const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
       let aborted = false;
       let owner = true;
@@ -1014,11 +1070,14 @@ describe('registerSessionEventHandlers', () => {
             },
           },
         });
+        flushSolid();
         if (reason === 'abort') {
           aborted = true;
           handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+          flushSolid();
         } else if (reason === 'new request') {
           handlers.get('message.updated')?.({ properties: { info: createUserEntry().info } });
+          flushSolid();
         } else if (reason === 'server retry') {
           handlers.get('session.status')?.({
             properties: {
@@ -1031,9 +1090,12 @@ describe('registerSessionEventHandlers', () => {
               },
             },
           });
+          flushSolid();
         } else if (reason === 'ownership loss') owner = false;
         else cleanups.forEach((cleanup) => cleanup());
+        flushSolid();
         await vi.advanceTimersByTimeAsync(60_000);
+        flushSolid();
         expect(continueInterruptedSession).not.toHaveBeenCalled();
       } finally {
         cleanups.forEach((cleanup) => cleanup());
@@ -1045,6 +1107,7 @@ describe('registerSessionEventHandlers', () => {
   it('keeps the retry budget across automatically submitted continuation messages', async () => {
     vi.useFakeTimers();
     const handlers = installHandlers();
+    flushSolid();
     let messages: MessageEntry[] = [createAssistantEntry()];
     const continueInterruptedSession = vi.fn(
       async (_sessionId: string, options?: { messageID: string }) => {
@@ -1067,11 +1130,13 @@ describe('registerSessionEventHandlers', () => {
             },
           },
         });
+        flushSolid();
         expect(deps.getSessionStatus('session-1')).toMatchObject({
           type: 'retry',
           attempt: index + 1,
         });
         await vi.advanceTimersByTimeAsync(delay);
+        flushSolid();
         messages = [...messages, createAssistantEntry({ id: `attempt-${index}` })];
       }
       handlers.get('session.error')?.({
@@ -1083,7 +1148,9 @@ describe('registerSessionEventHandlers', () => {
           },
         },
       });
+      flushSolid();
       await vi.advanceTimersByTimeAsync(60_000);
+      flushSolid();
       expect(continueInterruptedSession).toHaveBeenCalledTimes(3);
     } finally {
       cleanups.forEach((cleanup) => cleanup());
@@ -1094,7 +1161,9 @@ describe('registerSessionEventHandlers', () => {
   it('bounds failed retry submissions', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
+    flushSolid();
     const handlers = installHandlers();
+    flushSolid();
     const continueInterruptedSession = vi.fn().mockRejectedValue(new Error('Connection refused'));
     const deps = createDefaultDeps({ continueInterruptedSession });
     const cleanups = registerSessionEventHandlers(deps);
@@ -1108,7 +1177,9 @@ describe('registerSessionEventHandlers', () => {
           },
         },
       });
+      flushSolid();
       await vi.advanceTimersByTimeAsync(120_000);
+      flushSolid();
       expect(continueInterruptedSession).toHaveBeenCalledTimes(3);
       expect(deps.getSessionStatus('session-1')).toEqual({ type: 'idle' });
     } finally {
@@ -1120,6 +1191,7 @@ describe('registerSessionEventHandlers', () => {
   it('does not automatically retry authentication failures', async () => {
     vi.useFakeTimers();
     const handlers = installHandlers();
+    flushSolid();
     const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
     const cleanups = registerSessionEventHandlers(
       createDefaultDeps({ continueInterruptedSession })
@@ -1134,7 +1206,9 @@ describe('registerSessionEventHandlers', () => {
           },
         },
       });
+      flushSolid();
       await vi.advanceTimersByTimeAsync(120_000);
+      flushSolid();
       expect(continueInterruptedSession).not.toHaveBeenCalled();
     } finally {
       cleanups.forEach((cleanup) => cleanup());
@@ -1144,6 +1218,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('shows session.error on a completed assistant before message resync finishes', () => {
     const handlers = installHandlers();
+    flushSolid();
     const assistant = createCompletedAssistantEntry(1, 2);
     const syncSessionMessages = vi.fn(() => new Promise<void>(() => {}));
     const deps = createDefaultDeps({
@@ -1163,6 +1238,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.error')?.({
       properties: { sessionID: 'session-1', error },
     });
+    flushSolid();
 
     expect(upsertMessageInfo).toHaveBeenCalledWith({ ...assistant.info, error });
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
@@ -1171,6 +1247,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('reconciles inactive session.error events against persisted messages', () => {
     const handlers = installHandlers();
+    flushSolid();
     const deps = createDefaultDeps({ getActiveSessionId: () => 'session-2' });
 
     registerSessionEventHandlers(deps);
@@ -1181,6 +1258,7 @@ describe('registerSessionEventHandlers', () => {
         error: { name: 'UnknownError', data: { message: 'Command failed' } },
       },
     });
+    flushSolid();
 
     expect(deps.syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
@@ -1245,18 +1323,21 @@ describe('registerSessionEventHandlers', () => {
         title: 'Edit file',
       },
     });
+    flushSolid();
     handlers.get('session.status')?.({
       properties: {
         sessionID: 'session-1',
         status: { type: 'busy' },
       },
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-2', 'once', {
         rethrow: true,
       });
     });
+    flushSolid();
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
   });
 
@@ -1316,6 +1397,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(handoffTodosToMessages).not.toHaveBeenCalled();
     expect(applyUsageLimitNotice).toHaveBeenCalledWith(
@@ -1329,6 +1411,33 @@ describe('registerSessionEventHandlers', () => {
     expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
     expect(upsertMessageInfo).not.toHaveBeenCalled();
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('does not treat an aborted message update with retained limit text as a new limit', () => {
+    const handlers = installHandlers();
+    flushSolid();
+    const applyUsageLimitNotice = vi.fn();
+    const cleanups = registerSessionEventHandlers(createDefaultDeps({ applyUsageLimitNotice }));
+    setSessionUsageLimit.mockClear();
+
+    try {
+      emitServerEvent(handlers, 'message.updated', {
+        properties: {
+          info: createAssistantEntry({
+            error: {
+              name: 'MessageAbortedError',
+              data: { message: 'The usage limit has been reached' },
+            },
+          }).info,
+        },
+      });
+      flushSolid();
+
+      expect(applyUsageLimitNotice).not.toHaveBeenCalled();
+      expect(setSessionUsageLimit).toHaveBeenCalledWith('session-1', null);
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+    }
   });
 
   it('rejects malformed user message.updated payloads with parent ids', () => {
@@ -1379,12 +1488,14 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(setState).not.toHaveBeenCalledWith('messages', expect.any(Function));
   });
 
   it('resyncs completed active assistant messages when local parts are missing', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -1402,6 +1513,7 @@ describe('registerSessionEventHandlers', () => {
         info: createAssistantEntry({ time: { created: 1, completed: 2 } }).info,
       },
     });
+    flushSolid();
 
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'assistant-1', sessionID: 'session-1' })
@@ -1411,6 +1523,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('finishes streaming for partial active assistant completion updates without marking idle', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     finishMessageStreaming.mockClear();
@@ -1434,6 +1547,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1495,6 +1609,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(syncTodosFromMessages).not.toHaveBeenCalled();
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
@@ -1502,6 +1617,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('resyncs before applying complete part updates when the parent message is missing', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const assistantEntry = createAssistantEntry({ id: 'assistant-2' });
     let messages: MessageEntry[] = [createUserEntry({ id: 'user-2' })];
     const syncSessionMessages = vi.fn(async () => {
@@ -1529,6 +1645,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(upsertPart).not.toHaveBeenCalled();
@@ -1538,10 +1655,12 @@ describe('registerSessionEventHandlers', () => {
         expect.objectContaining({ id: 'part-1', messageID: 'assistant-2' })
       );
     });
+    flushSolid();
   });
 
   it('recovers a missing child message before applying its part update', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const childEntry = createAssistantEntry({ id: 'child-assistant', sessionID: 'child-1' });
     let messages: MessageEntry[] = [createUserEntry({ id: 'parent-user', sessionID: 'session-1' })];
     const syncSessionMessages = vi.fn(async (sessionId: string) => {
@@ -1570,17 +1689,20 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(upsertPart).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'child-text', sessionID: 'child-1' })
       );
     });
+    flushSolid();
     expect(syncSessionMessages).toHaveBeenCalledWith('child-1');
   });
 
   it('uses tool execution event timestamps when applying completed tool parts', () => {
     const handlers = installHandlers();
+    flushSolid();
     const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
@@ -1595,9 +1717,11 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.shell.started')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 1_000 },
     });
+    flushSolid();
     handlers.get('session.next.shell.ended')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 12_380 },
     });
+    flushSolid();
     handlers.get('message.part.updated')?.({
       properties: {
         part: {
@@ -1618,6 +1742,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1629,6 +1754,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('updates existing completed tool parts when execution end events arrive later', () => {
     const handlers = installHandlers();
+    flushSolid();
     const toolPart: Part = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1660,9 +1786,11 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.shell.started')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 1_000 },
     });
+    flushSolid();
     handlers.get('session.next.shell.ended')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 12_380 },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1674,6 +1802,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not reuse a settled execution end timestamp when a call ID starts again', () => {
     const handlers = installHandlers();
+    flushSolid();
     const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
@@ -1686,12 +1815,15 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.shell.started')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 1_000 },
     });
+    flushSolid();
     handlers.get('session.next.shell.ended')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 2_000 },
     });
+    flushSolid();
     handlers.get('session.next.shell.started')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', timestamp: 3_000 },
     });
+    flushSolid();
     upsertPart.mockClear();
     handlers.get('message.part.updated')?.({
       properties: {
@@ -1713,6 +1845,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1785,6 +1918,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(markLoadingActivity).toHaveBeenCalled();
     expect(upsertMessageInfo).toHaveBeenCalledWith(
@@ -1796,6 +1930,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('resyncs a child transcript when that child becomes idle under the active parent', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -1809,12 +1944,15 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-child' } });
+    flushSolid();
 
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledWith('session-child'));
+    flushSolid();
   });
 
   it('keeps completed inactive assistant messages running until session idle', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
 
@@ -1837,6 +1975,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(markSessionResponseCompleted).toHaveBeenCalledWith('session-1', 2);
@@ -1846,6 +1985,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps partial inactive assistant completion updates running until session idle', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     stopLoading.mockClear();
@@ -1861,6 +2001,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
     handlers.get('message.updated')?.({
       properties: {
         info: {
@@ -1870,6 +2011,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'busy' });
     expect(markSessionResponseCompleted).toHaveBeenCalledWith('session-1', 2);
@@ -1878,6 +2020,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('merges partial session title updates and partial completion updates for inactive sessions', () => {
     const handlers = installHandlers();
+    flushSolid();
     const upsertSession = vi.fn();
     const setSessionStatusEntry = vi.fn();
 
@@ -1912,6 +2055,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
     handlers.get('session.updated')?.({
       properties: {
         info: {
@@ -1921,6 +2065,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
     handlers.get('message.updated')?.({
       properties: {
         info: {
@@ -1930,6 +2075,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertSession).toHaveBeenCalledWith({
       id: 'session-1',
@@ -1947,6 +2093,7 @@ describe('registerSessionEventHandlers', () => {
     'refreshes full session state without transcript work for %s',
     async (type) => {
       const handlers = installHandlers();
+      flushSolid();
       const syncSession = vi.fn().mockResolvedValue(undefined);
       const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
       const setSessionStatusEntry = vi.fn();
@@ -1954,6 +2101,7 @@ describe('registerSessionEventHandlers', () => {
         createDefaultDeps({ syncSession, syncSessionMessages, setSessionStatusEntry })
       );
       handlers.get(type)?.({ properties: { sessionID: 'session-1' } });
+      flushSolid();
       expect(syncSession).toHaveBeenCalledWith('session-1', { shouldApply: expect.any(Function) });
       expect(syncSessionMessages).not.toHaveBeenCalled();
       expect(setSessionStatusEntry).not.toHaveBeenCalled();
@@ -1962,6 +2110,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not apply an older archive snapshot after restore, deletion, or disposal', () => {
     const handlers = installHandlers();
+    flushSolid();
     const guards: Array<() => boolean> = [];
     const syncSession = vi.fn((_id: string, options?: { shouldApply(): boolean }) => {
       guards.push(options!.shouldApply);
@@ -1969,32 +2118,40 @@ describe('registerSessionEventHandlers', () => {
     });
     const dispose = registerSessionEventHandlers(createDefaultDeps({ syncSession }));
     handlers.get('session.archived')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
     expect(guards[0]!()).toBe(true);
     handlers.get('session.unarchived')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
     expect(guards[0]!()).toBe(false);
     expect(guards[1]!()).toBe(true);
     handlers.get('session.deleted')?.({
       properties: { sessionID: 'session-1', info: { id: 'session-1' } },
     });
+    flushSolid();
     expect(guards[1]!()).toBe(false);
     handlers.get('session.unarchived')?.({ properties: { sessionID: 'session-2' } });
+    flushSolid();
     dispose.forEach((cleanup) => cleanup());
     expect(guards[2]!()).toBe(false);
   });
 
   it('logs a failed archive refresh without changing session status', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const failure = new Error('network failed');
     const syncSession = vi.fn().mockRejectedValue(failure);
     const logError = vi.fn();
     registerSessionEventHandlers(createDefaultDeps({ syncSession, logError }));
     handlers.get('session.unarchived')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(logError).toHaveBeenCalledWith('syncSession after archive change', failure);
   });
 
   it('clears optional fields omitted from complete session updates', () => {
     const handlers = installHandlers();
+    flushSolid();
     const upsertSession = vi.fn();
 
     state.sessions = [
@@ -2022,6 +2179,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertSession).toHaveBeenCalledWith({
       id: 'session-1',
@@ -2035,8 +2193,10 @@ describe('registerSessionEventHandlers', () => {
 
   it('suppresses stale share URLs from complete events after unsharing', () => {
     const handlers = installHandlers();
+    flushSolid();
     const upsertSession = vi.fn();
     markSessionUnshared('session-1');
+    flushSolid();
 
     try {
       state.sessions = [
@@ -2064,12 +2224,14 @@ describe('registerSessionEventHandlers', () => {
           },
         },
       });
+      flushSolid();
 
       expect(upsertSession).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'session-1', share: undefined })
       );
     } finally {
       resetSessionShareOverridesForTests();
+      flushSolid();
     }
   });
 
@@ -2137,6 +2299,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(upsertPart).toHaveBeenCalledWith(
@@ -2209,6 +2372,7 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
 
     expect(markLoadingActivity).toHaveBeenCalledTimes(1);
     expect(startLoading).toHaveBeenCalledTimes(1);
@@ -2223,6 +2387,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('uses indexed reads for part deltas instead of scanning the transcript', () => {
     const handlers = installHandlers();
+    flushSolid();
     const message = createAssistantEntry({ id: 'assistant-1', sessionID: 'session-1' });
     const part: Part = {
       id: 'part-1',
@@ -2263,6 +2428,7 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
 
     expect(findMessageById).toHaveBeenCalledWith('assistant-1');
     expect(findMessagePart).toHaveBeenCalledWith('assistant-1', 'part-1');
@@ -2272,6 +2438,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('treats synchronized message parts as canonical when a delta targets a missing part', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const logError = vi.fn();
 
@@ -2295,11 +2462,13 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
 
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
+    flushSolid();
 
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalled();
@@ -2313,6 +2482,7 @@ describe('registerSessionEventHandlers', () => {
     'recovers initial $type deltas without duplicating canonical text "$canonicalText"',
     async ({ type, canonicalText }) => {
       const handlers = installHandlers();
+      flushSolid();
       const message = createAssistantEntry();
       let resolveInitialSync: (() => void) | undefined;
       const syncSessionMessages = vi
@@ -2358,7 +2528,9 @@ describe('registerSessionEventHandlers', () => {
       emitDelta('Opening paragraph.\n\n');
       emitDelta('| Candidate | Files |\n');
       resolveInitialSync?.();
+      flushSolid();
       await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
+      flushSolid();
       if (canonicalText) {
         expect(applyMessagePartDelta).not.toHaveBeenCalled();
       } else {
@@ -2384,6 +2556,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('backs off before recovering a delta that arrives after the follow-up snapshot', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     let messages: ReturnType<typeof createAssistantEntry>[] = [];
     let serverText = 'first second';
@@ -2459,6 +2632,7 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
     handlers.get('message.part.delta')?.({
       properties: {
         sessionID: 'session-1',
@@ -2468,12 +2642,15 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledTimes(1);
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
 
     resolveInitialSync?.();
+    flushSolid();
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
+    flushSolid();
 
     serverText = 'first second third';
     handlers.get('message.part.delta')?.({
@@ -2485,12 +2662,16 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
     expect(syncSessionMessages).toHaveBeenCalledTimes(2);
 
     resolveFollowUpSync?.();
+    flushSolid();
     await vi.waitFor(() => expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 100));
+    flushSolid();
     expect(syncSessionMessages).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(4));
+    flushSolid();
 
     expect(messages[0]?.parts[0]).toMatchObject({ text: 'first second third' });
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
@@ -2504,6 +2685,7 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledTimes(4);
     expect(applyMessagePartDelta).toHaveBeenCalledWith(
@@ -2518,6 +2700,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('creates and streams reasoning parts from session.next reasoning events', () => {
     const handlers = installHandlers();
+    flushSolid();
     state.messages = [createAssistantEntry({ id: 'assistant-2', sessionID: 'session-1' })];
 
     upsertPart.mockClear();
@@ -2538,6 +2721,7 @@ describe('registerSessionEventHandlers', () => {
         delta: 'Thinking through the change',
       },
     });
+    flushSolid();
 
     expect(markLoadingActivity).toHaveBeenCalledTimes(1);
     expect(upsertPart).toHaveBeenCalledWith(
@@ -2561,6 +2745,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('attaches reasoning to the message named by assistantMessageID, not just the latest active assistant', () => {
     const handlers = installHandlers();
+    flushSolid();
     state.messages = [
       createAssistantEntry({ id: 'assistant-early', sessionID: 'session-1' }),
       createAssistantEntry({ id: 'assistant-late', sessionID: 'session-1' }),
@@ -2584,6 +2769,7 @@ describe('registerSessionEventHandlers', () => {
         delta: 'Reasoning for the earlier step',
       },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2604,6 +2790,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('syncs messages before applying session.next reasoning when no active assistant is loaded', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn(async () => {
       state.messages = [createAssistantEntry({ id: 'assistant-3', sessionID: 'session-1' })];
     });
@@ -2634,6 +2821,7 @@ describe('registerSessionEventHandlers', () => {
         delta: 'New thinking',
       },
     });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
@@ -2643,6 +2831,7 @@ describe('registerSessionEventHandlers', () => {
         expect.objectContaining({ id: 'reason-2', messageID: 'assistant-3', type: 'reasoning' })
       )
     );
+    flushSolid();
     expect(applyMessagePartDelta).toHaveBeenCalledWith(
       'assistant-3',
       'reason-2',
@@ -2655,6 +2844,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('clears stale failures and marks progress without resyncing active messages', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
     const setSessionStatusEntry = vi.fn();
@@ -2682,6 +2872,7 @@ describe('registerSessionEventHandlers', () => {
         delta: 'streaming response',
       },
     });
+    flushSolid();
 
     expect(markLoadingActivity).toHaveBeenCalledTimes(1);
     expect(startLoading).toHaveBeenCalledTimes(1);
@@ -2693,6 +2884,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('starts loading for progress events from child sessions in the active tree', () => {
     const handlers = installHandlers();
+    flushSolid();
     const assistantEntry = createAssistantEntry({
       id: 'assistant-child-1',
       sessionID: 'session-child',
@@ -2719,6 +2911,7 @@ describe('registerSessionEventHandlers', () => {
       },
       seq: 1,
     });
+    flushSolid();
 
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(markLoadingActivity).toHaveBeenCalledTimes(1);
@@ -2726,6 +2919,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('skips the defensive active-message resync for in-order v2 progress events (seq present)', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
 
@@ -2741,16 +2935,19 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
       seq: 1,
     });
+    flushSolid();
     handlers.get('session.next.tool.called')?.({
       properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-2' },
       seq: 2,
     });
+    flushSolid();
 
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
   it('accepts a contiguous coalesced sequence range without gap recovery', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     registerSessionEventHandlers(
@@ -2766,6 +2963,7 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-1', callID: 'call-1' },
       seq: 1,
     });
+    flushSolid();
     handlers.get('*')?.({
       type: 'session.next.tool.progress',
       properties: { sessionID: 'session-1', callID: 'call-1' },
@@ -2773,6 +2971,7 @@ describe('registerSessionEventHandlers', () => {
       sequenceOnly: true,
       sequenceStart: 2,
     });
+    flushSolid();
 
     expect(syncSession).not.toHaveBeenCalled();
     expect(syncSessionMessages).not.toHaveBeenCalled();
@@ -2786,6 +2985,7 @@ describe('registerSessionEventHandlers', () => {
     'session.next.compaction.ended',
   ])('resyncs transcript records for an in-order %s event', async (eventName) => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -2803,16 +3003,19 @@ describe('registerSessionEventHandlers', () => {
       },
       seq: 1,
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     });
+    flushSolid();
   });
 
   it.each(['active', 'background'] as const)(
     'rechecks %s manual compaction completion without restarting progress',
     (view) => {
       const handlers = installHandlers();
+      flushSolid();
       const syncSession = vi.fn().mockResolvedValue(undefined);
       const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
       const deps = createDefaultDeps({
@@ -2828,6 +3031,7 @@ describe('registerSessionEventHandlers', () => {
         handlers.get('session.next.compaction.ended')?.({
           properties: { sessionID: 'session-1', reason: 'manual' },
         });
+        flushSolid();
 
         expect(setSessionCompactingStore).toHaveBeenCalledWith('session-1', false);
         expect(deps.setSessionStatusEntry).not.toHaveBeenCalled();
@@ -2843,17 +3047,20 @@ describe('registerSessionEventHandlers', () => {
 
   it('preserves running work when automatic compaction ends', () => {
     const handlers = installHandlers();
+    flushSolid();
     const deps = createDefaultDeps({ getActiveSessionId: () => 'session-1' });
     const cleanups = registerSessionEventHandlers(deps);
     try {
       handlers.get('session.next.compaction.started')?.({
         properties: { sessionID: 'session-1', reason: 'auto' },
       });
+      flushSolid();
       vi.mocked(deps.setSessionStatusEntry).mockClear();
       stopLoading.mockClear();
       handlers.get('session.next.compaction.ended')?.({
         properties: { sessionID: 'session-1', reason: 'auto' },
       });
+      flushSolid();
 
       expect(deps.getSessionStatus('session-1')).toEqual({ type: 'busy' });
       expect(deps.setSessionStatusEntry).not.toHaveBeenCalled();
@@ -2866,6 +3073,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('runs a trailing transcript sync when shell completion arrives during a sync', async () => {
     const handlers = installHandlers();
+    flushSolid();
     let resolveFirstSync: (() => void) | undefined;
     const syncSessionMessages = vi
       .fn()
@@ -2888,20 +3096,25 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
       seq: 1,
     });
+    flushSolid();
     handlers.get('session.next.shell.ended')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', output: 'done' },
       seq: 2,
     });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledTimes(1);
     resolveFirstSync?.();
+    flushSolid();
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
+    flushSolid();
   });
 
   it.each(['session.next.synthetic', 'session.next.shell.started', 'session.next.shell.ended'])(
     'fetches %s records even when the loaded assistant has finished',
     async (eventName) => {
       const handlers = installHandlers();
+      flushSolid();
       const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
       loadingStartedAt.mockReturnValue(1);
       registerSessionEventHandlers(
@@ -2912,13 +3125,16 @@ describe('registerSessionEventHandlers', () => {
         })
       );
       handlers.get(eventName)?.({ properties: { sessionID: 'session-1', timestamp: 3 }, seq: 1 });
+      flushSolid();
       await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledWith('session-1'));
+      flushSolid();
       loadingStartedAt.mockReturnValue(null);
     }
   );
 
   it('does not run a trailing transcript sync after cleanup', async () => {
     const handlers = installHandlers();
+    flushSolid();
     let resolveFirstSync: (() => void) | undefined;
     const syncSessionMessages = vi
       .fn()
@@ -2940,20 +3156,25 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
       seq: 1,
     });
+    flushSolid();
     handlers.get('session.next.shell.ended')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', output: 'done' },
       seq: 2,
     });
+    flushSolid();
     for (const cleanup of cleanups) cleanup();
 
     resolveFirstSync?.();
+    flushSolid();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledOnce();
   });
 
   it('reconciles session metadata and messages when a sequence gap reveals a missed event', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
@@ -2971,11 +3192,13 @@ describe('registerSessionEventHandlers', () => {
       properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
       seq: 1,
     });
+    flushSolid();
     // seq jumps from 1 to 3 - event 2 was missed, so a targeted resync is expected.
     handlers.get('session.next.tool.called')?.({
       properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-3' },
       seq: 3,
     });
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledOnce();
     expect(syncSession).toHaveBeenCalledWith('session-1', expect.anything());
@@ -2985,6 +3208,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('reconciles a lower sequence as a reset, then accepts the new sequence', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -2997,14 +3221,18 @@ describe('registerSessionEventHandlers', () => {
       });
     }
     await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     emitServerEvent(handlers, 'session.next.step.ended', {
       properties: { sessionID: 'session-1', assistantMessageID: 'assistant-2' },
       seq: 2,
     });
     await Promise.resolve();
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledOnce();
     expect(syncSessionMessages).toHaveBeenCalledOnce();
@@ -3012,6 +3240,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not rewind the sequence cursor for a stale lower replay', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -3024,14 +3253,18 @@ describe('registerSessionEventHandlers', () => {
       });
     }
     await vi.waitFor(() => expect(syncSession).toHaveBeenCalledOnce());
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     emitServerEvent(handlers, 'session.next.step.ended', {
       properties: { sessionID: 'session-1', assistantMessageID: 'assistant-11' },
       seq: 11,
     });
     await Promise.resolve();
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledOnce();
     expect(syncSessionMessages).toHaveBeenCalledOnce();
@@ -3039,6 +3272,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('reconciles a gap observed from sequence-only upgrades', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const upsertSession = vi.fn();
@@ -3054,6 +3288,7 @@ describe('registerSessionEventHandlers', () => {
         seq,
         sequenceOnly: true,
       });
+      flushSolid();
     }
 
     expect(syncSession).toHaveBeenCalledOnce();
@@ -3063,6 +3298,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps a failed gap dirty and retries both reconciliations on a later durable event', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const failure = new Error('metadata unavailable');
     const syncSession = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
@@ -3091,6 +3327,7 @@ describe('registerSessionEventHandlers', () => {
       expect(syncSessionMessages).toHaveBeenCalledOnce();
       expect(logError).toHaveBeenCalledWith('syncSession', failure);
     });
+    flushSolid();
 
     emitServerEvent(handlers, 'session.next.step.started', {
       properties: { sessionID: 'background-session', assistantMessageID: 'assistant-2' },
@@ -3100,12 +3337,14 @@ describe('registerSessionEventHandlers', () => {
       expect(syncSession).toHaveBeenCalledTimes(2);
       expect(syncSessionMessages).toHaveBeenCalledTimes(2);
     });
+    flushSolid();
 
     emitServerEvent(handlers, 'session.next.step.ended', {
       properties: { sessionID: 'background-session', assistantMessageID: 'assistant-2' },
       seq: 5,
     });
     await Promise.resolve();
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledTimes(2);
     expect(syncSessionMessages).toHaveBeenCalledTimes(2);
@@ -3113,6 +3352,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('coalesces later durable events while gap reconciliation is in flight', async () => {
     const handlers = installHandlers();
+    flushSolid();
     let rejectSession: ((error: Error) => void) | undefined;
     let resolveMessages: (() => void) | undefined;
     const syncSession = vi
@@ -3153,11 +3393,14 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledOnce();
 
     rejectSession?.(new Error('offline'));
+    flushSolid();
     resolveMessages?.();
+    flushSolid();
     await vi.waitFor(() => {
       expect(syncSession).toHaveBeenCalledTimes(2);
       expect(syncSessionMessages).toHaveBeenCalledTimes(2);
     });
+    flushSolid();
 
     emitServerEvent(handlers, 'session.next.step.ended', {
       properties: { sessionID: 'background-session', assistantMessageID: 'assistant-5' },
@@ -3170,6 +3413,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('runs one trailing reconciliation after a durable event arrives during success', async () => {
     const handlers = installHandlers();
+    flushSolid();
     let resolveSession: (() => void) | undefined;
     let resolveMessages: (() => void) | undefined;
     const syncSession = vi
@@ -3207,11 +3451,14 @@ describe('registerSessionEventHandlers', () => {
     }
 
     resolveSession?.();
+    flushSolid();
     resolveMessages?.();
+    flushSolid();
     await vi.waitFor(() => {
       expect(syncSession).toHaveBeenCalledTimes(2);
       expect(syncSessionMessages).toHaveBeenCalledTimes(2);
     });
+    flushSolid();
 
     emitServerEvent(handlers, 'session.next.step.ended', {
       properties: { sessionID: 'background-session', assistantMessageID: 'assistant-4' },
@@ -3225,6 +3472,7 @@ describe('registerSessionEventHandlers', () => {
   it('retries terminal gap failures with bounded backoff without another event', async () => {
     vi.useFakeTimers();
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi
       .fn()
       .mockRejectedValueOnce(new Error('offline-1'))
@@ -3248,16 +3496,22 @@ describe('registerSessionEventHandlers', () => {
       seq: 3,
     });
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     await vi.advanceTimersByTimeAsync(99);
+    flushSolid();
     expect(syncSession).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(syncSession).toHaveBeenCalledTimes(2);
 
     await vi.advanceTimersByTimeAsync(199);
+    flushSolid();
     expect(syncSession).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1);
+    flushSolid();
     expect(syncSession).toHaveBeenCalledTimes(3);
     expect(syncSessionMessages).toHaveBeenCalledTimes(3);
     vi.useRealTimers();
@@ -3266,6 +3520,7 @@ describe('registerSessionEventHandlers', () => {
   it('cancels a scheduled terminal gap retry on cleanup', async () => {
     vi.useFakeTimers();
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockRejectedValue(new Error('offline'));
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const cleanups = registerSessionEventHandlers(
@@ -3280,10 +3535,13 @@ describe('registerSessionEventHandlers', () => {
       seq: 3,
     });
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     for (const cleanup of cleanups) cleanup();
 
     await vi.advanceTimersByTimeAsync(10_000);
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledOnce();
     expect(syncSessionMessages).toHaveBeenCalledOnce();
@@ -3292,6 +3550,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('guards metadata application after cleanup', async () => {
     const handlers = installHandlers();
+    flushSolid();
     let finishMetadataSync: (() => void) | undefined;
     const applied = vi.fn();
     const syncSession = vi.fn(
@@ -3327,12 +3586,14 @@ describe('registerSessionEventHandlers', () => {
 
     finishMetadataSync?.();
     await Promise.resolve();
+    flushSolid();
 
     expect(applied).not.toHaveBeenCalled();
   });
 
   it('does not retry dirty gap reconciliation after cleanup', async () => {
     const handlers = installHandlers();
+    flushSolid();
     let resolveSession: (() => void) | undefined;
     let resolveMessages: (() => void) | undefined;
     const syncSession = vi.fn(
@@ -3364,8 +3625,11 @@ describe('registerSessionEventHandlers', () => {
     for (const cleanup of cleanups) cleanup();
 
     resolveSession?.();
+    flushSolid();
     resolveMessages?.();
+    flushSolid();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledOnce();
     expect(syncSessionMessages).toHaveBeenCalledOnce();
@@ -3373,6 +3637,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('reconciles a session when its bounded sequence cursor was evicted', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     registerSessionEventHandlers(createDefaultDeps({ syncSession, syncSessionMessages }));
@@ -3384,6 +3649,7 @@ describe('registerSessionEventHandlers', () => {
         seq: 1,
         sequenceOnly: true,
       });
+      flushSolid();
     }
     handlers.get('*')?.({
       type: 'session.updated',
@@ -3391,6 +3657,7 @@ describe('registerSessionEventHandlers', () => {
       seq: 2,
       sequenceOnly: true,
     });
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledOnce();
     expect(syncSession).toHaveBeenCalledWith('session-0', expect.anything());
@@ -3401,6 +3668,7 @@ describe('registerSessionEventHandlers', () => {
   it('does not evict unresolved dirty sessions when dirty tracking reaches capacity', async () => {
     vi.useFakeTimers();
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockRejectedValue(new Error('offline'));
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     registerSessionEventHandlers(
@@ -3415,11 +3683,15 @@ describe('registerSessionEventHandlers', () => {
           seq,
           sequenceOnly: true,
         });
+        flushSolid();
       }
     }
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await vi.advanceTimersByTimeAsync(100);
+    flushSolid();
 
     const sessionZeroCalls = syncSession.mock.calls.filter(
       ([sessionId]) => sessionId === 'session-0'
@@ -3430,6 +3702,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('advances one session sequence across message and v2 progress events', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
 
@@ -3459,6 +3732,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('advances the sequence for durable session events without dedicated handlers', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
 
@@ -3488,6 +3762,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('advances the shared sequence through reasoning events', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
 
@@ -3521,6 +3796,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('recovers a sequence gap on message.part.updated', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
 
@@ -3556,6 +3832,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('recovers a sequence gap before stale progress returns early', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     loadingStartedAt.mockReturnValue(null);
@@ -3582,6 +3859,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('recovers a sequence gap for an inactive session before returning', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -3606,6 +3884,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps the defensive resync for ephemeral progress events that carry no seq', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -3620,12 +3899,14 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.tool.input.delta')?.({
       properties: { sessionID: 'session-1', callID: 'call-1', delta: '{' },
     });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('projects v2 text deltas without defensive message resync when the assistant exists', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
 
@@ -3648,6 +3929,7 @@ describe('registerSessionEventHandlers', () => {
         delta: 'Hello',
       },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3670,6 +3952,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('projects v2 tool calls without defensive message resync when the assistant exists', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry();
 
@@ -3693,6 +3976,7 @@ describe('registerSessionEventHandlers', () => {
         timestamp: 10,
       },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3714,6 +3998,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('loads the next v2 step after a completed tool step and streams its final answer', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const completed = createCompletedAssistantEntry(1, 2);
     const next = createAssistantEntry({ id: 'assistant-2', time: { created: 3 } });
     let messages = [completed];
@@ -3747,6 +4032,7 @@ describe('registerSessionEventHandlers', () => {
       },
     });
     await Promise.resolve();
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     emitServerEvent(handlers, 'session.next.text.delta', {
@@ -3780,6 +4066,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores stale active progress events after the assistant already completed', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const clearUsageLimitOnResumedProgress = vi.fn();
 
@@ -3800,6 +4087,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.text.ended')?.({
       properties: { sessionID: 'session-1' },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(clearUsageLimitOnResumedProgress).not.toHaveBeenCalled();
@@ -3810,6 +4098,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('reconciles final server text after local completion without reviving busy state', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const message = createCompletedAssistantEntry(1, 2);
@@ -3852,6 +4141,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not mark active full assistant completion updates idle', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -3872,6 +4162,7 @@ describe('registerSessionEventHandlers', () => {
         info: createAssistantEntry({ time: { created: 1, completed: 2 } }).info,
       },
     });
+    flushSolid();
 
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
@@ -3881,6 +4172,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('accepts busy status after the latest reply completed', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     loadingStartedAt.mockReturnValue(1);
@@ -3898,6 +4190,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
     expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
@@ -3909,6 +4202,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('marks the session busy on a fresh busy status before the reply has finished', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     loadingStartedAt.mockReturnValue(5);
@@ -3928,6 +4222,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
     expect(startLoading).toHaveBeenCalledTimes(1);
@@ -3937,6 +4232,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps an already-working session busy when a completed assistant step is followed by busy status', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     let messages: MessageEntry[] = [createAssistantEntry()];
 
@@ -3955,6 +4251,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
     setSessionStatusEntry.mockClear();
     startLoading.mockClear();
     messages = [createCompletedAssistantEntry(1, 2)];
@@ -3962,6 +4259,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
     expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
@@ -3975,6 +4273,7 @@ describe('registerSessionEventHandlers', () => {
     'accepts busy after a terminal assistant finish when the previous status is %s',
     (previousStatus) => {
       const handlers = installHandlers();
+      flushSolid();
       const setSessionStatusEntry = vi.fn();
       const terminalAssistant = createCompletedAssistantEntry(1, 2);
       terminalAssistant.info.finish = 'stop';
@@ -3998,6 +4297,7 @@ describe('registerSessionEventHandlers', () => {
       handlers.get('session.status')?.({
         properties: { sessionID: 'session-1', status: { type: 'busy' } },
       });
+      flushSolid();
 
       expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
       expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
@@ -4008,6 +4308,7 @@ describe('registerSessionEventHandlers', () => {
       handlers.get('session.status')?.({
         properties: { sessionID: 'session-1', status: { type: 'idle' } },
       });
+      flushSolid();
       expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
 
       loadingStartedAt.mockReturnValue(null);
@@ -4016,6 +4317,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps a terminal response pending when background work is reported', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const terminalAssistant = createCompletedAssistantEntry(1, 2);
     terminalAssistant.info.finish = 'stop';
@@ -4041,6 +4343,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', {
       type: 'busy',
       background: true,
@@ -4055,6 +4358,7 @@ describe('registerSessionEventHandlers', () => {
 
   it.each(['idle', 'busy'] as const)('retains validated service counts in %s events', (type) => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -4065,6 +4369,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type, backgroundServices: 2 } },
     });
+    flushSolid();
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', {
       type,
       backgroundServices: 2,
@@ -4073,6 +4378,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type, backgroundServices: 0 } },
     });
+    flushSolid();
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', {
       type,
       backgroundServices: 0,
@@ -4081,6 +4387,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type, backgroundServices: -1 } },
     });
+    flushSolid();
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type });
   });
 
@@ -4088,6 +4395,7 @@ describe('registerSessionEventHandlers', () => {
     vi.useFakeTimers();
     try {
       const handlers = installHandlers();
+      flushSolid();
       const setSessionStatusEntry = vi.fn();
       const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
       let assistantEntry: MessageEntry = {
@@ -4123,6 +4431,7 @@ describe('registerSessionEventHandlers', () => {
       handlers.get('session.next.text.ended')?.({
         properties: { sessionID: 'session-1' },
       });
+      flushSolid();
 
       // Nothing rechecks until the quiet window elapses.
       expect(finishMessageStreaming).not.toHaveBeenCalled();
@@ -4131,6 +4440,7 @@ describe('registerSessionEventHandlers', () => {
       startLoading.mockClear();
 
       vi.advanceTimersByTime(600);
+      flushSolid();
 
       expect(finishMessageStreaming).not.toHaveBeenCalled();
       expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
@@ -4140,6 +4450,7 @@ describe('registerSessionEventHandlers', () => {
       handlers.get('session.next.tool.called')?.({
         properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
       });
+      flushSolid();
 
       expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
       expect(startLoading).toHaveBeenCalledTimes(1);
@@ -4152,6 +4463,7 @@ describe('registerSessionEventHandlers', () => {
     vi.useFakeTimers();
     try {
       const handlers = installHandlers();
+      flushSolid();
       const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
       const assistantEntry: MessageEntry = {
         ...createAssistantEntry(),
@@ -4179,12 +4491,15 @@ describe('registerSessionEventHandlers', () => {
       handlers.get('session.next.text.ended')?.({
         properties: { sessionID: 'session-1' },
       });
+      flushSolid();
       // A tool call arrives before the quiet window elapses - the turn is not done.
       handlers.get('session.next.tool.called')?.({
         properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
       });
+      flushSolid();
 
       vi.advanceTimersByTime(600);
+      flushSolid();
 
       expect(finishMessageStreaming).not.toHaveBeenCalled();
       expect(recheckSessionStatus).not.toHaveBeenCalled();
@@ -4195,6 +4510,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('settles a terminal v2 step end when no idle event arrives', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const updateUsageLimitState = vi.fn();
     const clearPendingAbort = vi.fn();
@@ -4241,6 +4557,7 @@ describe('registerSessionEventHandlers', () => {
         timestamp: 3,
       },
     });
+    flushSolid();
 
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4266,6 +4583,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('settles a terminal step-finish part when no idle event arrives', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const updateUsageLimitState = vi.fn();
     const clearPendingAbort = vi.fn();
@@ -4310,6 +4628,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4343,6 +4662,7 @@ describe('registerSessionEventHandlers', () => {
     'does not let terminal %s end known busy or retrying execution',
     (event) => {
       const handlers = installHandlers();
+      flushSolid();
       let assistantEntry: MessageEntry = createAssistantEntry();
       const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
       const setSessionStatusEntry = vi.fn();
@@ -4414,6 +4734,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps tool-call step-finish parts in progress', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     let assistantEntry: MessageEntry = createAssistantEntry();
 
@@ -4446,6 +4767,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4464,6 +4786,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores replayed v2 parts after a terminal step completes the assistant message', () => {
     const handlers = installHandlers();
+    flushSolid();
     let assistantEntry: MessageEntry = createAssistantEntry();
 
     upsertMessageInfo.mockClear();
@@ -4490,6 +4813,7 @@ describe('registerSessionEventHandlers', () => {
         timestamp: 3,
       },
     });
+    flushSolid();
     upsertPart.mockClear();
     markLoadingActivity.mockClear();
     startLoading.mockClear();
@@ -4503,6 +4827,7 @@ describe('registerSessionEventHandlers', () => {
         text: 'stale replay',
       },
     });
+    flushSolid();
 
     expect(upsertPart).not.toHaveBeenCalled();
     expect(markLoadingActivity).not.toHaveBeenCalled();
@@ -4514,6 +4839,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps tool-call v2 step ends in progress', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -4536,6 +4862,7 @@ describe('registerSessionEventHandlers', () => {
         finish: 'tool_calls',
       },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
     expect(startLoading).toHaveBeenCalledTimes(1);
@@ -4547,6 +4874,7 @@ describe('registerSessionEventHandlers', () => {
     'does not settle a newer assistant from a delayed terminal step (older loaded: %s)',
     (olderLoaded) => {
       const handlers = installHandlers();
+      flushSolid();
       const setSessionStatusEntry = vi.fn();
       const assistantEntry = createAssistantEntry();
       assistantEntry.info.time.created = 10;
@@ -4571,6 +4899,7 @@ describe('registerSessionEventHandlers', () => {
           timestamp: 3,
         },
       });
+      flushSolid();
 
       expect(upsertMessageInfo).not.toHaveBeenCalled();
       expect(finishMessageStreaming).not.toHaveBeenCalled();
@@ -4581,6 +4910,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('settles terminal v2 step ends against the latest legacy assistant when ids differ', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const updateUsageLimitState = vi.fn();
     const clearPendingAbort = vi.fn();
@@ -4616,6 +4946,7 @@ describe('registerSessionEventHandlers', () => {
         timestamp: 3,
       },
     });
+    flushSolid();
 
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4636,6 +4967,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('completes a pending terminal step after sync without ending newer execution', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const updateUsageLimitState = vi.fn();
     const clearPendingAbort = vi.fn();
@@ -4676,6 +5008,7 @@ describe('registerSessionEventHandlers', () => {
         timestamp: 3,
       },
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(upsertMessageInfo).toHaveBeenCalledWith(
@@ -4685,6 +5018,7 @@ describe('registerSessionEventHandlers', () => {
         })
       );
     });
+    flushSolid();
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
     expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'idle' });
@@ -4699,6 +5033,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not settle an older assistant when a newer user prompt is latest', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -4721,6 +5056,7 @@ describe('registerSessionEventHandlers', () => {
         finish: 'stop',
       },
     });
+    flushSolid();
 
     expect(upsertMessageInfo).not.toHaveBeenCalled();
     expect(finishMessageStreaming).not.toHaveBeenCalled();
@@ -4730,6 +5066,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('marks inactive sessions busy from progress events without active message work', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const setSessionStatusEntry = vi.fn();
     const clearUsageLimitOnResumedProgress = vi.fn();
@@ -4752,6 +5089,7 @@ describe('registerSessionEventHandlers', () => {
         text: 'streaming response',
       },
     });
+    flushSolid();
     handlers.get('session.next.reasoning.delta')?.({
       properties: {
         sessionID: 'reasoning-session',
@@ -4759,6 +5097,7 @@ describe('registerSessionEventHandlers', () => {
         delta: 'thinking',
       },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenNthCalledWith(1, 'background-session', {
       type: 'busy',
@@ -4844,6 +5183,7 @@ describe('registerSessionEventHandlers', () => {
         todos: [{ id: 'todo-1', content: 'sync me', status: 'pending', priority: 'medium' }],
       },
     });
+    flushSolid();
 
     expect(syncTodosFromMessages).toHaveBeenCalledTimes(1);
   });
@@ -4914,6 +5254,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(markSessionSeen).toHaveBeenCalledWith('session-1');
@@ -4923,6 +5264,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('refreshes todos when the active session becomes idle', () => {
     const handlers = installHandlers();
+    flushSolid();
     const messages = [createCompletedAssistantEntry(1, 2)];
     const syncTodosForSession = vi.fn().mockResolvedValue(undefined);
 
@@ -4935,12 +5277,14 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(syncTodosForSession).toHaveBeenCalledWith('session-1', messages);
   });
 
   it('settles the status idle and legacy idle completion wave once', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const repairSessionTitle = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
@@ -4961,7 +5305,9 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     });
+    flushSolid();
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(syncSession).toHaveBeenCalledOnce();
     expect(repairSessionTitle).toHaveBeenCalledOnce();
@@ -4971,6 +5317,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('settles the latest active assistant message when the session becomes idle', () => {
     const handlers = installHandlers();
+    flushSolid();
 
     upsertMessageInfo.mockClear();
     finishMessageStreaming.mockClear();
@@ -4983,6 +5330,7 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(upsertMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4995,6 +5343,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not settle an older assistant when the latest session message is a user prompt', () => {
     const handlers = installHandlers();
+    flushSolid();
 
     upsertMessageInfo.mockClear();
     finishMessageStreaming.mockClear();
@@ -5007,6 +5356,7 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(upsertMessageInfo).not.toHaveBeenCalled();
     expect(finishMessageStreaming).not.toHaveBeenCalled();
@@ -5014,6 +5364,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not mark the active session seen on idle while the session list is open', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
 
@@ -5028,8 +5379,11 @@ describe('registerSessionEventHandlers', () => {
     );
 
     setShowSessionPicker(true);
+    flushSolid();
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
     setShowSessionPicker(false);
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
     expect(markSessionSeen).not.toHaveBeenCalled();
@@ -5038,6 +5392,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('marks the active editor session seen on idle while the session list is open', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     // SAFETY: The fixture provides the initial host state read by the event handler.
@@ -5057,8 +5412,11 @@ describe('registerSessionEventHandlers', () => {
     );
 
     setShowSessionPicker(true);
+    flushSolid();
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
     setShowSessionPicker(false);
+    flushSolid();
     // SAFETY: The test removes the optional host-provided initial state from the window fixture.
     delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
 
@@ -5128,12 +5486,14 @@ describe('registerSessionEventHandlers', () => {
     });
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
   it('resyncs messages on idle when the active chat is empty', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers(
@@ -5146,6 +5506,7 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
@@ -5202,12 +5563,14 @@ describe('registerSessionEventHandlers', () => {
     });
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('keeps loading for a busy follow-up sent after the previous assistant completed', () => {
     const handlers = installHandlers();
+    flushSolid();
 
     loadingStartedAt.mockReturnValueOnce(3);
     startLoading.mockClear();
@@ -5223,6 +5586,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
@@ -5230,6 +5594,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('keeps active parent loading when a child session is still working', () => {
     const handlers = installHandlers();
+    flushSolid();
 
     startLoading.mockClear();
     stopLoading.mockClear();
@@ -5245,6 +5610,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-child', status: { type: 'busy' } },
     });
+    flushSolid();
     handlers.get('message.updated')?.({
       properties: {
         info: {
@@ -5256,6 +5622,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
@@ -5263,6 +5630,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not treat the completed parent transcript tail as a completed child turn', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     loadingStartedAt.mockReturnValue(1);
@@ -5283,6 +5651,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-child', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'busy' });
     expect(startLoading).toHaveBeenCalledTimes(1);
@@ -5293,6 +5662,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('does not drop child progress because the parent transcript tail is completed', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     loadingStartedAt.mockReturnValue(1);
@@ -5311,6 +5681,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.next.text.delta')?.({
       properties: { sessionID: 'session-child', text: 'child progress' },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'busy' });
     expect(startLoading).toHaveBeenCalledTimes(1);
@@ -5320,6 +5691,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('accepts busy for a child session whose latest assistant already completed', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     loadingStartedAt.mockReturnValue(1);
@@ -5346,6 +5718,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-child', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'busy' });
     expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-child', { type: 'idle' });
@@ -5357,6 +5730,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('stops active parent loading when the last working child session becomes idle', () => {
     const handlers = installHandlers();
+    flushSolid();
 
     startLoading.mockClear();
     stopLoading.mockClear();
@@ -5372,6 +5746,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-child', status: { type: 'busy' } },
     });
+    flushSolid();
     handlers.get('message.updated')?.({
       properties: {
         info: {
@@ -5383,17 +5758,20 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-child' } });
+    flushSolid();
 
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
   it('uses snapshot status changes when checking whether the active tree is working', () => {
     const handlers = installHandlers();
+    flushSolid();
     const statuses = new Map<string, SessionStatus>([['session-child', { type: 'busy' }]]);
     const activeTreeIds = new Set(['session-parent', 'session-child']);
 
@@ -5414,18 +5792,22 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-parent' } });
+    flushSolid();
 
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
 
     statuses.set('session-child', { type: 'idle' });
+    flushSolid();
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-parent' } });
+    flushSolid();
 
     expect(stopLoading).toHaveBeenCalledTimes(1);
   });
 
   it('keeps loading for busy status when synced assistant already completed', () => {
     const handlers = installHandlers();
+    flushSolid();
 
     loadingStartedAt.mockReturnValue(1);
     startLoading.mockClear();
@@ -5441,6 +5823,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(stopLoading).not.toHaveBeenCalled();
     expect(startLoading).toHaveBeenCalledTimes(1);
@@ -5449,6 +5832,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('applies late part updates after completion without restarting loading', () => {
     const handlers = installHandlers();
+    flushSolid();
     const completedAssistant = createCompletedAssistantEntry(1, 2);
     const latePart: Part = {
       id: 'text-1',
@@ -5471,6 +5855,7 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('message.part.updated')?.({ properties: { part: latePart } });
+    flushSolid();
 
     expect(upsertPart).toHaveBeenCalledWith(latePart);
     expect(startLoading).not.toHaveBeenCalled();
@@ -5479,6 +5864,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('applies late part deltas after completion without marking the session busy', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const completedAssistant = createCompletedAssistantEntry(1, 2);
     completedAssistant.parts = [
@@ -5513,6 +5899,7 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(markLoadingActivity).not.toHaveBeenCalled();
@@ -5528,6 +5915,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores late reasoning deltas after the assistant message already completed', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
 
     loadingStartedAt.mockReturnValueOnce(1);
@@ -5551,6 +5939,7 @@ describe('registerSessionEventHandlers', () => {
         delta: 'late',
       },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(markLoadingActivity).not.toHaveBeenCalled();
@@ -5560,6 +5949,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('tracks session lifecycle events and active status transitions', () => {
     const handlers = installHandlers();
+    flushSolid();
     const upsertSession = vi.fn();
     const removeDeletedSessionTree = vi.fn();
     const setSessionCompacting = vi.fn();
@@ -5588,16 +5978,21 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.created')?.({
       properties: { info: { id: 'session-1', time: { compacting: true } } },
     });
+    flushSolid();
     handlers.get('session.updated')?.({
       properties: { info: { id: 'session-1', time: { compacting: false } } },
     });
+    flushSolid();
     handlers.get('session.deleted')?.({ properties: { info: { id: 'session-1' } } });
+    flushSolid();
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     });
+    flushSolid();
 
     expect(upsertSession).toHaveBeenCalledTimes(2);
     expect(setSessionCompacting).toHaveBeenCalledWith('session-1', false);
@@ -5613,6 +6008,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('syncs session state when OpenCode reports compaction completion', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -5627,6 +6023,7 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.compacted')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
 
     expect(setSessionCompactingStore).toHaveBeenCalledWith('session-1', false);
     expect(syncSession).toHaveBeenCalledWith('session-1');
@@ -5635,6 +6032,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('warns when post-event syncSession calls fail', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const failure = new Error('offline');
     const syncSession = vi.fn().mockRejectedValue(failure);
     logWarn.mockClear();
@@ -5648,13 +6046,16 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
     handlers.get('session.error')?.({
       properties: {
         sessionID: 'session-1',
         error: { name: 'UnknownError', data: { message: 'Command failed' } },
       },
     });
+    flushSolid();
     handlers.get('session.compacted')?.({ properties: { sessionID: 'session-1' } });
+    flushSolid();
     handlers.get('message.updated')?.({
       properties: {
         sessionID: 'background-session',
@@ -5666,6 +6067,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
     handlers.get('message.updated')?.({
       properties: {
         sessionID: 'active-session',
@@ -5677,6 +6079,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(logWarn).toHaveBeenCalledWith('session-event syncSession after session.idle', failure);
@@ -5697,10 +6100,12 @@ describe('registerSessionEventHandlers', () => {
         failure
       );
     });
+    flushSolid();
   });
 
   it('merges sync session updates by sessionID without overwriting existing fields with nulls', () => {
     const handlers = installHandlers();
+    flushSolid();
     const upsertSession = vi.fn();
     const setSessionCompacting = vi.fn();
 
@@ -5734,6 +6139,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5753,6 +6159,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('routes message and agent-switch events through guarded agent synchronization', () => {
     const handlers = installHandlers();
+    flushSolid();
     registerSessionEventHandlers(createDefaultDeps());
     setSelectedAgent.mockClear();
 
@@ -5780,6 +6187,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores pending-abort status events before mutating state', () => {
     const handlers = installHandlers();
+    flushSolid();
     const setSessionStatusEntry = vi.fn();
     const updateUsageLimitState = vi.fn();
 
@@ -5797,6 +6205,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('session.status')?.({
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+    flushSolid();
 
     expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(updateUsageLimitState).not.toHaveBeenCalled();
@@ -5805,6 +6214,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('aborts late-created child sessions when their parent is already stopping', async () => {
     const handlers = installHandlers();
+    flushSolid();
     const upsertSession = vi.fn();
     const markPendingAbort = vi.fn();
     const setSessionStatusEntry = vi.fn();
@@ -5833,17 +6243,19 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(upsertSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'child-1', parentID: 'session-1' })
     );
     expect(markPendingAbort).toHaveBeenCalledWith('child-1');
     expect(setSessionStatusEntry).toHaveBeenCalledWith('child-1', { type: 'idle' });
-    expect(abortRemoteSession).toHaveBeenCalledWith('child-1');
+    expect(abortRemoteSession).toHaveBeenCalledWith('child-1', '/repo');
   });
 
   it('clears session usage-limit state for non-limit errors and resumed assistant progress', () => {
     const handlers = installHandlers();
+    flushSolid();
     const clearUsageLimitOnResumedProgress = vi.fn();
     const applyUsageLimitNotice = vi.fn();
 
@@ -5867,6 +6279,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
     handlers.get('message.updated')?.({
       properties: {
         info: {
@@ -5875,6 +6288,7 @@ describe('registerSessionEventHandlers', () => {
         },
       },
     });
+    flushSolid();
 
     expect(setSessionFailed).toHaveBeenNthCalledWith(1, 'session-1', true);
     expect(setSessionFailed).toHaveBeenNthCalledWith(2, 'session-1', false);
@@ -5885,6 +6299,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('removes active-tree parts and messages and re-syncs todos from remaining messages', () => {
     const handlers = installHandlers();
+    flushSolid();
     const remainingMessage = createUserEntry({ id: 'keep-message' });
     const removedMessage = createAssistantEntry({ id: 'remove-message' });
     const syncTodosFromMessages = vi.fn();
@@ -5903,9 +6318,11 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('message.part.removed')?.({
       properties: { sessionID: 'session-1', messageID: 'remove-message', partID: 'part-1' },
     });
+    flushSolid();
     handlers.get('message.removed')?.({
       properties: { sessionID: 'session-1', messageID: 'remove-message' },
     });
+    flushSolid();
 
     expect(removeMessagePart).toHaveBeenCalledWith('session-1', 'remove-message', 'part-1');
     expect(removeMessage).toHaveBeenCalledWith('session-1', 'remove-message');
@@ -5915,6 +6332,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('defers local message removal while an edited replacement is pending', () => {
     const handlers = installHandlers();
+    flushSolid();
     const remainingMessage = createUserEntry({ id: 'keep-message' });
     const removedMessage = createAssistantEntry({ id: 'remove-message' });
     const syncSessionMessages = vi.fn(async () => {});
@@ -5934,6 +6352,7 @@ describe('registerSessionEventHandlers', () => {
     handlers.get('message.removed')?.({
       properties: { sessionID: 'session-1', messageID: 'remove-message' },
     });
+    flushSolid();
 
     expect(clearStreamingState).not.toHaveBeenCalled();
     expect(replaceMessages).not.toHaveBeenCalled();
@@ -5942,10 +6361,13 @@ describe('registerSessionEventHandlers', () => {
 
   it('removes a deleted message from cached pages and prompt history', () => {
     const handlers = installHandlers();
+    flushSolid();
     const removedMessage = createUserEntry({ id: 'remove-message' });
     resetMessageWindowState();
+    flushSolid();
     cacheSessionHistoryPage('session-1', 'page-cursor', [removedMessage]);
     setSessionHistoryPrompts('session-1', [removedMessage]);
+    flushSolid();
 
     try {
       registerSessionEventHandlers(
@@ -5958,16 +6380,19 @@ describe('registerSessionEventHandlers', () => {
       handlers.get('message.removed')?.({
         properties: { sessionID: 'session-1', messageID: 'remove-message' },
       });
+      flushSolid();
 
       expect(takeCachedSessionHistoryPage('session-1', 'page-cursor')).toBeUndefined();
       expect(getSessionHistoryPrompts('session-1')).toEqual([]);
     } finally {
       resetMessageWindowState();
+      flushSolid();
     }
   });
 
   it('normalizes fallback permission ids and tracks question lifecycle updates', () => {
     const handlers = installHandlers();
+    flushSolid();
     const question = {
       id: 'question-1',
       sessionID: 'session-1',
@@ -6001,10 +6426,15 @@ describe('registerSessionEventHandlers', () => {
         tool: { messageID: 'msg-1', callID: 'call-1' },
       },
     });
+    flushSolid();
     handlers.get('permission.replied')?.({ properties: { requestID: 'perm-fallback' } });
+    flushSolid();
     handlers.get('question.asked')?.({ properties: question });
+    flushSolid();
     handlers.get('question.replied')?.({ properties: { requestID: 'question-1' } });
+    flushSolid();
     handlers.get('question.rejected')?.({ properties: { requestID: 'question-2' } });
+    flushSolid();
 
     expect(addPermission).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -6022,6 +6452,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores settled todo updates and filters session diffs to the active tree', () => {
     const handlers = installHandlers();
+    flushSolid();
     const syncTodosFromMessages = vi.fn();
     const setDiffs = vi.fn();
     const diff = {
@@ -6049,12 +6480,15 @@ describe('registerSessionEventHandlers', () => {
     );
 
     handlers.get('todo.updated')?.({ properties: { sessionID: 'session-child', todos: [] } });
+    flushSolid();
     handlers.get('session.diff')?.({
       properties: { sessionID: 'session-child', diff: [diff] },
     });
+    flushSolid();
     handlers.get('session.diff')?.({
       properties: { sessionID: 'session-other', diff: [{ ...diff, file: 'src/other.ts' }] },
     });
+    flushSolid();
 
     expect(syncTodosFromMessages).toHaveBeenCalledTimes(1);
     expect(syncTodosFromMessages).toHaveBeenCalledWith(undefined, {

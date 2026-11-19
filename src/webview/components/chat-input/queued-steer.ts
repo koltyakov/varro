@@ -1,7 +1,6 @@
-import { batch, createSignal } from 'solid-js';
+import { createSignal } from 'solid-js';
 import {
   claimQueuedMessageDispatch,
-  error as sendError,
   getSelectedModelForSession,
   getSelectedAgentForSession,
   isActiveSessionWorking,
@@ -11,15 +10,13 @@ import {
   removeQueuedMessage,
   replaceQueuedMessage,
   setError,
-  setState,
   state,
 } from '../../lib/state';
 import { sendMessage } from '../../hooks/useOpenCode';
 import { isString, isObject } from '../../lib/runtime-values';
 import { createOpenCodeMessageID } from '../../../shared/opencode-id';
 import { queuedMessageWasAdmitted } from './queued-message-history';
-import type { ChatModelSelection, QueuedContextSnapshot } from '../../../shared/protocol';
-import type { Provider } from '../../types';
+import type { ChatModelSelection } from '../../../shared/protocol';
 import { matchesActiveTurnSelection } from './active-turn-selection';
 
 export function canSteerQueuedMessage(
@@ -60,8 +57,6 @@ export function getQueuedMessageWorkspaceDirectory(
   );
 }
 
-type QueuedModelSnapshot = NonNullable<QueuedContextSnapshot['editorContext']['queuedModel']>;
-
 export function sendWithQueuedModelSnapshot<T>(
   item: (typeof state.queuedMessages)[number],
   send: (selectedModel: ChatModelSelection | undefined) => Promise<T>
@@ -69,65 +64,7 @@ export function sendWithQueuedModelSnapshot<T>(
   const snapshot = item.queuedContext?.editorContext.queuedModel;
   const selectedModel =
     snapshot?.selection ?? getSelectedModelForSession(item.sessionId) ?? undefined;
-  if (!snapshot) return send(selectedModel);
-
-  const previousProviders = [...state.providers];
-  setState('providers', applyQueuedModelCapabilities(previousProviders, snapshot));
-  try {
-    return send(selectedModel);
-  } finally {
-    setState('providers', previousProviders);
-  }
-}
-
-function applyQueuedModelCapabilities(
-  providers: Provider[],
-  snapshot: QueuedModelSnapshot
-): Provider[] {
-  const { providerID, modelID } = snapshot.selection;
-  const provider = providers.find((item) => item.id === providerID);
-  const existingModel = provider?.models[modelID];
-  const existingInput = existingModel?.capabilities.input;
-  const input = Array.isArray(existingInput)
-    ? snapshot.capabilities.pdf
-      ? [...new Set([...existingInput, 'pdf'])]
-      : existingInput.filter((modality) => modality !== 'pdf')
-    : existingInput
-      ? { ...existingInput, pdf: snapshot.capabilities.pdf }
-      : snapshot.capabilities.pdf
-        ? ['pdf']
-        : undefined;
-  const variant = snapshot.selection.variant;
-  const model = {
-    ...(existingModel ?? {
-      id: modelID,
-      name: modelID,
-      cost: { input: 0, output: 0 },
-    }),
-    capabilities: {
-      ...existingModel?.capabilities,
-      vision: snapshot.capabilities.vision,
-      toolcall: snapshot.capabilities.tools,
-      input,
-    },
-    variants: variant
-      ? { ...existingModel?.variants, [variant]: existingModel?.variants?.[variant] ?? {} }
-      : existingModel?.variants,
-  };
-  if (provider) {
-    return providers.map((item) =>
-      item === provider ? { ...item, models: { ...item.models, [modelID]: model } } : item
-    );
-  }
-  return [
-    ...providers,
-    {
-      id: providerID,
-      name: providerID,
-      source: 'custom',
-      models: { [modelID]: model },
-    },
-  ];
+  return send(selectedModel);
 }
 
 function updateQueuedSteerId(
@@ -170,11 +107,11 @@ export function acceptQueuedSteer(sessionId: string, promptText: string | null) 
       matchesQueuedPromptText(queued.text, promptText)
   );
   if (!item) return;
-  batch(() => {
+  (() => {
     updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, false);
     updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, false);
     removeQueuedMessage(item.id);
-  });
+  })();
 }
 
 export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[number]) {
@@ -251,15 +188,15 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
     }
   } finally {
     if (!sent && dispatchLease !== null) releaseQueuedMessageDispatch(item, dispatchLease);
-    batch(() => {
+    (() => {
       if (sent) removeQueuedMessage(item.id);
       updateQueuedSteerId(setSteeringQueuedMessageIds, item.id, false);
-    });
+    })();
   }
   if (sent) return;
   if (!state.queuedMessages.some((queued) => queued.id === item.id)) return;
   if (state.activeSessionId === item.sessionId) {
-    setError(sendError() ?? 'Could not send steering message. Try again.');
+    setError((current) => current ?? 'Could not send steering message. Try again.');
   }
   updateQueuedSteerId(setFailedSteerQueuedMessageIds, item.id, true);
 }

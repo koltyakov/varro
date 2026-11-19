@@ -1,9 +1,10 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show } from 'solid-js';
+import { Portal } from '@solidjs/web';
+import { ariaBoolean } from '../lib/aria';
 import type { McpStatus } from '../../shared/protocol';
 import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
-import { trapModalFocus } from '../lib/modal-focus';
+import { modalFocus } from '../lib/modal-focus';
 import {
   getAvailableMcpNames,
   getSelectedMcpsForSession,
@@ -75,9 +76,12 @@ export function McpPicker(props: {
   const selectedNames = createMemo(() => new Set(getSelectedMcpsForSession(props.sessionId) || []));
   const showSearch = () => allItems().length > 8 || !!props.initialQuery;
 
-  createEffect(() => {
-    setFocusIndex((current) => Math.max(0, Math.min(current, filteredItems().length - 1)));
-  });
+  createEffect(
+    () => filteredItems().length,
+    (count) => {
+      setFocusIndex((current) => Math.max(0, Math.min(current, count - 1)));
+    }
+  );
 
   function toggle(name: string) {
     const next = new Set(selectedNames());
@@ -189,7 +193,9 @@ export function McpPicker(props: {
     }
   }
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     // Best effort: the settings screen falls back to its own load if this fails.
     void import('./McpSettingsPanel').catch(() => undefined);
 
@@ -205,8 +211,15 @@ export function McpPicker(props: {
     if (showSearch()) searchInputRef?.focus();
     else menuRef?.focus();
 
-    if (!menuRef) return;
-    onCleanup(observePopupViewport(menuRef, reposition));
+    if (!menuRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    cleanups.push(observePopupViewport(menuRef, reposition));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
@@ -224,7 +237,7 @@ export function McpPicker(props: {
           props.popoverRef?.(el);
         }}
         class="dropdown-menu w-full"
-        tabIndex={-1}
+        tabindex={-1}
         onKeyDown={handleKeyDown}
         onClick={(e) => e.stopPropagation()}
         style={{ outline: 'none' }}
@@ -275,7 +288,7 @@ export function McpPicker(props: {
                     >
                       <button
                         class={`dropdown-item mcp-picker-item ${selectedNames().has(item.name) ? 'selected' : ''} ${focusIndex() === index() ? 'keyboard-focus' : ''}`}
-                        aria-pressed={selectedNames().has(item.name)}
+                        aria-pressed={ariaBoolean(selectedNames().has(item.name))}
                         aria-label={
                           item.status === 'needs_auth'
                             ? item.name
@@ -428,7 +441,12 @@ function McpAuthDialog(props: {
   const [canPasteRedirect, setCanPasteRedirect] = createSignal(false);
   const [authorizationCode, setAuthorizationCode] = createSignal('');
   const [currentStatus, setCurrentStatus] = createSignal<McpStatus>(props.server.status);
-  const [isSubmitting, setIsSubmitting] = createSignal(false);
+  const [isSubmitting, publishSubmitting] = createSignal(false);
+  let submitting = false;
+  const setIsSubmitting = (value: boolean) => {
+    submitting = value;
+    publishSubmitting(value);
+  };
   const [errorMessage, setErrorMessage] = createSignal('');
   const [statusError, setStatusError] = createSignal('');
   const isConnected = () => currentStatus().status === 'connected';
@@ -437,13 +455,23 @@ function McpAuthDialog(props: {
   );
   let disposed = false;
 
-  createEffect(() => {
-    const status = state.mcpStatus[props.server.name];
-    if (status) setCurrentStatus({ status: status.status, error: status.error });
-  });
+  createEffect(
+    () => {
+      const status = state.mcpStatus[props.server.name];
+      return status ? { status: status.status, error: status.error } : null;
+    },
+    (status) => {
+      if (status) setCurrentStatus({ status: status.status, error: status.error });
+    }
+  );
 
-  createEffect(() => {
-    if (!waitingForAuthorization()) return;
+  createEffect(waitingForAuthorization, (waiting) => {
+    const cleanups: Array<() => void> = [];
+
+    if (!waiting)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
     const deadline = Date.now() + 5 * 60_000;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -466,10 +494,14 @@ function McpAuthDialog(props: {
       timer = setTimeout(() => void checkStatus(), 1_000);
     };
     timer = setTimeout(() => void checkStatus(), 1_000);
-    onCleanup(() => {
+    cleanups.push(() => {
       cancelled = true;
       clearTimeout(timer);
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   onCleanup(() => {
@@ -477,15 +509,21 @@ function McpAuthDialog(props: {
     props.dialogRef?.(undefined);
   });
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       props.onClose();
     };
     document.addEventListener('keydown', onKeyDown);
-    onCleanup(() => document.removeEventListener('keydown', onKeyDown));
+    cleanups.push(() => document.removeEventListener('keydown', onKeyDown));
     if (!needsConfiguration() && !isConnected()) void startAuth();
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   async function refreshStatus(isCurrent: () => boolean = () => !disposed) {
@@ -523,7 +561,7 @@ function McpAuthDialog(props: {
 
   async function submitCode() {
     const code = authorizationCode().trim();
-    if (isSubmitting() || !code) return;
+    if (submitting || !code) return;
     setIsSubmitting(true);
     setErrorMessage('');
     try {
@@ -594,7 +632,7 @@ function McpAuthDialog(props: {
         onClick={(event) => event.stopPropagation()}
       >
         <div
-          ref={(element) => onCleanup(trapModalFocus(element))}
+          ref={modalFocus()}
           class="provider-connect-dialog"
           role="dialog"
           aria-modal="true"

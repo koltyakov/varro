@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { createEffect, For, Show, createMemo, createSignal, onCleanup, untrack } from 'solid-js';
 import type { MessageEntry } from '../../types';
 import type { VirtualMetrics, VisibleRange } from './virtualization';
 import type { MessageBlockBoundary } from './row-layout';
@@ -162,28 +162,34 @@ export function VirtualizedContent(
       setRetainedPlaceholderVersion((version) => version + 1);
     });
   };
-  createEffect(() => {
-    const currentMessageIds = new Set(props.messages.map((message) => message.info.id));
-    for (const messageId of messageRenderItems.keys()) {
-      if (!currentMessageIds.has(messageId)) messageRenderItems.delete(messageId);
-    }
-    for (const messageId of retainedPinnedPlaceholderMessageIds) {
-      if (!currentMessageIds.has(messageId)) retainedPinnedPlaceholderMessageIds.delete(messageId);
-    }
-    const segments = pinnedSegments();
-    if (segments.length > 0) {
-      for (const segment of segments) {
-        if (segment.type !== 'gap') continue;
-        for (let index = segment.start; index < segment.end; index += 1) {
-          const messageId = props.messages[index]?.info.id;
-          if (messageId) retainedPinnedPlaceholderMessageIds.add(messageId);
-        }
+  createEffect(
+    () => ({
+      messageIds: props.messages.map((message) => message.info.id),
+      segments: pinnedSegments(),
+    }),
+    ({ messageIds, segments }) => {
+      const currentMessageIds = new Set(messageIds);
+      for (const messageId of messageRenderItems.keys()) {
+        if (!currentMessageIds.has(messageId)) messageRenderItems.delete(messageId);
       }
-      cancelRetainedPlaceholderRelease();
-      return;
+      for (const messageId of retainedPinnedPlaceholderMessageIds) {
+        if (!currentMessageIds.has(messageId))
+          retainedPinnedPlaceholderMessageIds.delete(messageId);
+      }
+      if (segments.length > 0) {
+        for (const segment of segments) {
+          if (segment.type !== 'gap') continue;
+          for (let index = segment.start; index < segment.end; index += 1) {
+            const messageId = messageIds[index];
+            if (messageId) retainedPinnedPlaceholderMessageIds.add(messageId);
+          }
+        }
+        cancelRetainedPlaceholderRelease();
+        return;
+      }
+      scheduleRetainedPlaceholderRelease();
     }
-    scheduleRetainedPlaceholderRelease();
-  });
+  );
   onCleanup(cancelRetainedPlaceholderRelease);
 
   const renderMessage = (
@@ -196,14 +202,16 @@ export function VirtualizedContent(
     // invalidated by the same batch still re-run; serve the last seen entry in
     // that window so nothing dereferences undefined mid-flush.
     let lastMessage = initialMessage;
-    const message = () => {
+    // Memoized: dozens of row computations read the entry, and each uncached store read
+    // through props.messages adds tracking work on every streamed update.
+    const message = createMemo(() => {
       const index = absoluteIndex();
       const current = index >= 0 ? props.messages[index] : undefined;
       if (current?.info.id === messageId) {
         lastMessage = current;
       }
       return lastMessage;
-    };
+    });
     const nearViewport = createMemo(() => {
       const index = absoluteIndex();
       return (index >= coreStart() && index < coreEnd()) || index === pinnedIndex();
@@ -359,10 +367,14 @@ export function VirtualizedContent(
             );
           }
 
-          const initialIndex = messageIndexes().get(item.messageId);
-          const initialMessage =
-            initialIndex === undefined ? undefined : props.messages[initialIndex];
-          if (!initialMessage || initialMessage.info.id !== item.messageId) return null;
+          // The captured entry is only the fallback while a pruned row is being disposed.
+          // All live reads in renderMessage use the current ID-to-index map.
+          const initialMessage = untrack(() => {
+            const index = messageIndexes().get(item.messageId);
+            const entry = index === undefined ? undefined : props.messages[index];
+            return entry?.info.id === item.messageId ? entry : undefined;
+          });
+          if (!initialMessage) return null;
           return renderMessage(
             item.messageId,
             initialMessage,

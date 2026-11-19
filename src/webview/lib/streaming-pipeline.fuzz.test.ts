@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { flush } from 'solid-js';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import { defaultAppState } from './app-state';
 import { flushPendingStreamingDeltasFor } from './streaming-deltas';
@@ -141,6 +142,7 @@ function flushFrame() {
   // Synchronous equivalent of the requestAnimationFrame flush the queue
   // schedules in production; keeps the fuzz deterministic and fast.
   flushPendingStreamingDeltasFor(defaultAppState);
+  flush();
 }
 
 function cloneEntriesWithStaleTexts(rng: Rng, delivered: Map<string, string>): MessageEntry[] {
@@ -167,6 +169,7 @@ function runScenario(seed: number) {
   clearStreamingState();
 
   upsertMessage({ info: assistantMessage(MESSAGE_ID, SESSION_ID), parts: [] });
+  flush();
 
   const partCount = randomInt(rng, 2, 4);
   const plans: PartPlan[] = [];
@@ -185,6 +188,7 @@ function runScenario(seed: number) {
   const announced: PartPlan[] = [];
 
   const checkInvariants = (label: string) => {
+    flush();
     for (const plan of announced) {
       const rendered = renderedText(plan.partId);
       const deliveredText = delivered.get(plan.partId) ?? '';
@@ -292,6 +296,7 @@ function runScenario(seed: number) {
 
   flushFrame();
   finishMessageStreaming(MESSAGE_ID);
+  flush();
 
   const entry = state.messages.find((m) => m.info.id === MESSAGE_ID);
   expect(entry, `seed ${seed}: message disappeared`).toBeTruthy();

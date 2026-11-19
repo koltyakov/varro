@@ -1,11 +1,4 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  untrack,
-  type Accessor,
-} from 'solid-js';
+import { createEffect, createMemo, createSignal, untrack, type Accessor } from 'solid-js';
 import { apiCall } from './bridge';
 import type { FilePart, Part } from '../types';
 import { isString } from '../../shared/type-utils';
@@ -60,19 +53,28 @@ export function createDeferredPart<T extends Part & { deferred?: string }>(
   const [loading, setLoading] = createSignal(false);
   const [attempt, setAttempt] = createSignal(0);
   const requestPath = createMemo(() => (enabled() ? source().deferred : undefined));
-  createEffect(() => {
-    const path = requestPath();
-    attempt();
+  const requestKey = createMemo(() => ({ path: requestPath(), attempt: attempt() }));
+  type RequestKey = ReturnType<typeof requestKey>;
+  let invalidate: ((key: RequestKey) => void) | undefined;
+  createEffect(requestKey, (key) => {
+    const { path } = key;
     setError('');
     setLoading(false);
-    if (!path) return;
+    if (!path) return undefined;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inFlight = false;
     let dirty = false;
     let nextRequestAt = 0;
+    let started = false;
     const refresh = () => {
-      if (inFlight || timer !== undefined || controller.signal.aborted) return;
+      if (
+        inFlight ||
+        timer !== undefined ||
+        controller.signal.aborted ||
+        untrack(requestKey) !== key
+      )
+        return;
       const delay = nextRequestAt - Date.now();
       if (delay > 0) {
         timer = setTimeout(() => {
@@ -81,6 +83,7 @@ export function createDeferredPart<T extends Part & { deferred?: string }>(
         }, delay);
         return;
       }
+      started = true;
       const part = untrack(source);
       dirty = false;
       inFlight = true;
@@ -113,7 +116,25 @@ export function createDeferredPart<T extends Part & { deferred?: string }>(
     };
     // One request at a time, at most ten per second, only while the disclosure
     // owns its details. Stream updates coalesce without starving a pending read.
-    createEffect(() => {
+    invalidate = (current) => {
+      if (current !== key) return;
+      dirty = true;
+      refresh();
+    };
+    // A part update may invalidate before this path's owner has installed its callback.
+    queueMicrotask(() => {
+      if (!started && !controller.signal.aborted && untrack(requestKey) === key) refresh();
+    });
+    return () => {
+      invalidate = undefined;
+      controller.abort();
+      clearTimeout(timer);
+      setLoaded(undefined);
+    };
+  });
+  createEffect(
+    () => {
+      const key = requestKey();
       const part = source();
       if (part.type === 'tool') {
         const state = part.state;
@@ -125,15 +146,10 @@ export function createDeferredPart<T extends Part & { deferred?: string }>(
           if (state.status === 'error') void state.error;
         }
       }
-      dirty = true;
-      untrack(refresh);
-    });
-    onCleanup(() => {
-      controller.abort();
-      clearTimeout(timer);
-      setLoaded(undefined);
-    });
-  });
+      return key;
+    },
+    (key) => invalidate?.(key)
+  );
   const detail = () => {
     const value = loaded();
     const current = source();
@@ -169,31 +185,31 @@ export function createDeferredImage(
   const [resolved, setResolved] = createSignal<{ source: string; url: string }>();
   const [error, setError] = createSignal('');
   const [attempt, setAttempt] = createSignal(0);
-  createEffect(() => {
-    const url = source();
-    const active = enabled();
-    attempt();
-    setError('');
-    const path = deferredFilePath(url);
-    if (!active || !path) return;
-    const controller = new AbortController();
-    const request = thumbnail
-      ? loadThumbnail(path, controller.signal)
-      : loadFileContent(url, controller.signal);
-    void request
-      .then((value) => {
-        if (!controller.signal.aborted) setResolved({ source: url, url: value });
-      })
-      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection values have no typed contract.
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted)
-          setError(reason instanceof Error ? reason.message : String(reason));
-      });
-    onCleanup(() => {
-      controller.abort();
-      setResolved(undefined);
-    });
-  });
+  createEffect(
+    () => ({ url: source(), active: enabled(), attempt: attempt() }),
+    ({ url, active }) => {
+      setError('');
+      const path = deferredFilePath(url);
+      if (!active || !path) return undefined;
+      const controller = new AbortController();
+      const request = thumbnail
+        ? loadThumbnail(path, controller.signal)
+        : loadFileContent(url, controller.signal);
+      void request
+        .then((value) => {
+          if (!controller.signal.aborted) setResolved({ source: url, url: value });
+        })
+        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection values have no typed contract.
+        .catch((reason: unknown) => {
+          if (!controller.signal.aborted)
+            setError(reason instanceof Error ? reason.message : String(reason));
+        });
+      return () => {
+        controller.abort();
+        setResolved(undefined);
+      };
+    }
+  );
   return {
     url: () =>
       !deferredFilePath(source())

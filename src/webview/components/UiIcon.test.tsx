@@ -1,4 +1,4 @@
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createUiIconElement, toCssUrl, UiIcon } from './UiIcon';
 

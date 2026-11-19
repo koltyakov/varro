@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebviewMessage } from '../../shared/protocol';
 import { parseExtensionMessage } from '../../shared/extension-message';
@@ -82,11 +84,13 @@ function nextFrame() {
 
 beforeEach(() => {
   vi.resetModules();
+  flushSolid();
 });
 
 describe('state helpers', () => {
   it('restores full text attachments from a saved draft', async () => {
     const { readStoredDroppedFiles } = await import('./state-stored-values');
+    flushSolid();
     const file = {
       path: 'varro-paste:one',
       relativePath: 'paste.txt',
@@ -94,14 +98,17 @@ describe('state helpers', () => {
       pastedText: '雪\r\n  text  ',
     };
     window.localStorage.setItem('test.paste-files', JSON.stringify([file]));
+    flushSolid();
     try {
       expect(readStoredDroppedFiles('test.paste-files')[0]).toMatchObject(file);
     } finally {
       window.localStorage.removeItem('test.paste-files');
+      flushSolid();
     }
   });
   it('restores database attachment labels from saved draft files', async () => {
     const { readStoredDroppedFiles } = await import('./state-stored-values');
+    flushSolid();
     const database = {
       name: 'users',
       dataSource: 'Demo SQLite',
@@ -123,36 +130,48 @@ describe('state helpers', () => {
         },
       ])
     );
+    flushSolid();
     try {
       expect(readStoredDroppedFiles('test.table-files')[0]?.database).toEqual(database);
     } finally {
       window.localStorage.removeItem('test.table-files');
+      flushSolid();
     }
   });
   it('manages queued messages and loading timestamps', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.enqueueMessage({ id: 'q1', sessionId: 'session-1', text: 'first' });
+    flushSolid();
     stateModule.enqueueMessage({ id: 'q2', sessionId: 'session-2', text: 'second' });
+    flushSolid();
     stateModule.removeQueuedMessage('missing');
+    flushSolid();
 
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
 
     stateModule.removeQueuedMessage('q1');
+    flushSolid();
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
 
     stateModule.clearQueuedMessagesForSession('session-2');
+    flushSolid();
     expect(stateModule.state.queuedMessages).toEqual([]);
 
     stateModule.startLoading(100);
+    flushSolid();
     stateModule.markLoadingActivity(150);
+    flushSolid();
     stateModule.startLoading(200);
+    flushSolid();
 
     expect(stateModule.isLoading()).toBe(true);
     expect(stateModule.loadingStartedAt()).toBe(100);
     expect(stateModule.loadingLastActivityAt()).toBe(200);
 
     stateModule.stopLoading();
+    flushSolid();
 
     expect(stateModule.isLoading()).toBe(false);
     expect(stateModule.loadingStartedAt()).toBeNull();
@@ -161,23 +180,32 @@ describe('state helpers', () => {
 
   it('invalidates loading ownership on a new start or stop, even at the same timestamp', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const ownsFirst = stateModule.startLoading(100);
+    flushSolid();
     stateModule.markLoadingActivity(100);
+    flushSolid();
     expect(ownsFirst()).toBe(true);
 
     const ownsSecond = stateModule.startLoading(100);
+    flushSolid();
     expect(ownsFirst()).toBe(false);
     expect(ownsSecond()).toBe(true);
     stateModule.stopLoading();
+    flushSolid();
     expect(ownsSecond()).toBe(false);
   });
 
   it('replaces queued messages without changing their position', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.enqueueMessage({ id: 'q1', sessionId: 'session-1', text: 'first' });
+    flushSolid();
     stateModule.enqueueMessage({ id: 'other', sessionId: 'session-2', text: 'other' });
+    flushSolid();
     stateModule.enqueueMessage({ id: 'q2', sessionId: 'session-1', text: 'second' });
+    flushSolid();
 
     expect(
       stateModule.replaceQueuedMessage('q2', {
@@ -186,6 +214,7 @@ describe('state helpers', () => {
         text: 'second edited',
       })
     ).toBe(true);
+    flushSolid();
 
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual([
       'q1',
@@ -195,16 +224,22 @@ describe('state helpers', () => {
     expect(stateModule.replaceQueuedMessage('missing', stateModule.state.queuedMessages[0]!)).toBe(
       false
     );
+    flushSolid();
   });
 
   it('pauses queued messages individually or across one session', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.enqueueMessage({ id: 'q1', sessionId: 'session-1', text: 'first' });
+    flushSolid();
     stateModule.enqueueMessage({ id: 'other', sessionId: 'session-2', text: 'other' });
+    flushSolid();
     stateModule.enqueueMessage({ id: 'q2', sessionId: 'session-1', text: 'second' });
+    flushSolid();
 
     stateModule.setQueuedMessagePaused('q1', true);
+    flushSolid();
     expect(stateModule.state.queuedMessages.map((item) => item.paused)).toEqual([
       true,
       undefined,
@@ -212,6 +247,7 @@ describe('state helpers', () => {
     ]);
 
     stateModule.setQueuedMessagePaused('q2', true, true);
+    flushSolid();
     expect(stateModule.state.queuedMessages.map((item) => item.paused)).toEqual([
       true,
       undefined,
@@ -224,6 +260,7 @@ describe('state helpers', () => {
     ]);
 
     stateModule.setQueuedMessagePaused('q1', false, true);
+    flushSolid();
     expect(stateModule.state.queuedMessages.map((item) => item.paused)).toEqual([
       undefined,
       undefined,
@@ -233,6 +270,7 @@ describe('state helpers', () => {
 
   it('persists queued messages and restores their session-aware order', async () => {
     let stateModule = await loadState();
+    flushSolid();
 
     stateModule.enqueueMessage({
       id: 'q1',
@@ -260,7 +298,9 @@ describe('state helpers', () => {
       ],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
     });
+    flushSolid();
     stateModule.enqueueMessage({ id: 'other', sessionId: 'session-2', text: 'other' });
+    flushSolid();
     stateModule.enqueueMessage({
       id: 'q2',
       sessionId: 'session-1',
@@ -269,9 +309,12 @@ describe('state helpers', () => {
       followupTitle: 'Inspect parser failures',
       paused: true,
     });
+    flushSolid();
 
     stateModule.reorderQueuedMessage('q2', 'q1');
+    flushSolid();
     stateModule.reorderQueuedMessage('q2', 'other');
+    flushSolid();
 
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other', 'q1']);
     expect(
@@ -281,7 +324,9 @@ describe('state helpers', () => {
     ).toEqual(['q2', 'other']);
 
     vi.resetModules();
+    flushSolid();
     stateModule = await loadState();
+    flushSolid();
 
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other']);
     expect(stateModule.state.queuedMessages[0]?.agent).toBe('build');
@@ -289,7 +334,9 @@ describe('state helpers', () => {
     expect(stateModule.state.queuedMessages[0]?.paused).toBe(true);
 
     stateModule.removeQueuedMessage('q2');
+    flushSolid();
     stateModule.clearQueuedMessagesForSession('session-1');
+    flushSolid();
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['other']);
     expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([
       {
@@ -308,6 +355,7 @@ describe('state helpers', () => {
       'varro.queuedMessages',
       JSON.stringify([{ id: 'legacy', sessionId: 'session-1', text: 'legacy' }])
     );
+    flushSolid();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       queuedMessages: [
@@ -368,6 +416,7 @@ describe('state helpers', () => {
 
     try {
       const stateModule = await loadState();
+      flushSolid();
 
       expect(stateModule.state.queuedMessages.map((message) => message.id)).toEqual(['host']);
       expect(stateModule.state.queuedMessages[0]?.messageId).toBe('msg_host');
@@ -455,7 +504,9 @@ describe('state helpers', () => {
         },
       ])
     );
+    flushSolid();
     const stateModule = await loadState();
+    flushSolid();
     expect(stateModule.state.queuedMessages[0]?.inlineProblems).toEqual([reference]);
     expect(stateModule.state.queuedMessages[0]?.attachedDiagnostics).toEqual(attachedDiagnostics);
   });
@@ -478,13 +529,16 @@ describe('state helpers', () => {
         },
       ])
     );
+    flushSolid();
     const stateModule = await loadState();
+    flushSolid();
     expect(stateModule.state.queuedMessages[0]?.attachedDiagnostics?.diagnostics).toHaveLength(30);
     expect(stateModule.state.queuedMessages[0]?.attachedDiagnostics?.inline).toBe(true);
   });
 
   it('keeps queued images live without serializing them', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const imageMessage = {
       id: 'image-message',
       sessionId: 'session-1',
@@ -502,6 +556,7 @@ describe('state helpers', () => {
     };
 
     stateModule.enqueueMessage(imageMessage);
+    flushSolid();
 
     expect(stateModule.state.queuedMessages).toEqual([imageMessage]);
     expect(window.localStorage.getItem('varro.queuedMessages')).not.toContain('base64');
@@ -513,11 +568,13 @@ describe('state helpers', () => {
         text: 'inspect image later',
       })
     ).toBe(true);
+    flushSolid();
     expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([
       { id: 'image-message', sessionId: 'session-1', text: 'inspect image later' },
     ]);
 
     expect(stateModule.replaceQueuedMessage('image-message', imageMessage)).toBe(true);
+    flushSolid();
     expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([]);
   });
 
@@ -554,8 +611,10 @@ describe('state helpers', () => {
         { id: 'empty', sessionId: 'session-1', text: '' },
       ])
     );
+    flushSolid();
 
     const stateModule = await loadState();
+    flushSolid();
 
     expect(stateModule.state.queuedMessages).toEqual([
       {
@@ -588,6 +647,7 @@ describe('state helpers', () => {
 
   it('persists active session state and unread markers', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
@@ -604,8 +664,11 @@ describe('state helpers', () => {
     });
 
     stateModule.markSessionSeen('session-1');
+    flushSolid();
     stateModule.markSessionSeen('session-2');
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-1': 1_000, 'session-2': 1_000 });
     expect(sent).toEqual([
@@ -620,6 +683,7 @@ describe('state helpers', () => {
     sent.length = 0;
     for (let index = 0; index < 100; index += 1) {
       stateModule.markSessionSeen('session-1', 1_500);
+      flushSolid();
     }
     expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_500);
     expect(sent).toEqual([
@@ -634,17 +698,20 @@ describe('state helpers', () => {
     delete bridgeWindow.__sendToExtension;
 
     stateModule.setSessionCompacting('session-4', true);
+    flushSolid();
     expect(stateModule.state.compactingSessionIds).toEqual(['session-4']);
     expect(stateModule.isSessionCompacting('session-4')).toBe(true);
     expect(stateModule.isSessionCompacting()).toBe(false);
 
     stateModule.setSessionCompacting('session-4', false);
+    flushSolid();
     expect(stateModule.state.compactingSessionIds).toEqual([]);
     expect(stateModule.isSessionCompacting('session-4')).toBe(false);
   });
 
   it('persists skipped plan sessions by session update time', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
@@ -659,8 +726,10 @@ describe('state helpers', () => {
         time: { created: 100, updated: 200 },
       },
     ]);
+    flushSolid();
 
     stateModule.skipPlanSession('session-1');
+    flushSolid();
 
     expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-1': 200 });
     expect(stateModule.isSkippedPlanSession('session-1', 200)).toBe(true);
@@ -674,6 +743,7 @@ describe('state helpers', () => {
     });
 
     stateModule.clearSkippedPlanSession('session-1');
+    flushSolid();
 
     expect(stateModule.state.skippedPlanSessions).toEqual({});
     expect(window.localStorage.getItem('varro.skippedPlanSessions')).toBe(JSON.stringify({}));
@@ -683,16 +753,20 @@ describe('state helpers', () => {
     });
     delete bridgeWindow.__sendToExtension;
 
-    stateModule.setState('lastSeenSessions', { 'session-1': 100, 'session-2': 200 });
+    stateModule.setState(storePath('lastSeenSessions', { 'session-1': 100, 'session-2': 200 }));
+    flushSolid();
     stateModule.clearSessionSeen('session-1');
+    flushSolid();
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-2': 200 });
     expect(window.localStorage.getItem('varro.lastSeenSessions')).toBe(JSON.stringify({}));
   });
 
   it('prunes stale skipped session markers on a complete refresh', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
-    stateModule.setState('skippedPlanSessions', { stale: 3, 'session-1': 4 });
+    stateModule.setState(storePath('skippedPlanSessions', { stale: 3, 'session-1': 4 }));
+    flushSolid();
 
     stateModule.setSessions(
       [
@@ -707,15 +781,18 @@ describe('state helpers', () => {
       ],
       true
     );
+    flushSolid();
 
     expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-1': 4 });
   });
 
   it('keeps session markers scoped per workspace', async () => {
     const stateModule = await loadState();
+    flushSolid();
     vi.spyOn(Date, 'now').mockReturnValue(1_000);
 
     stateModule.syncSessionMarkersForWorkspace('/repo-a');
+    flushSolid();
     stateModule.setSessions([
       {
         id: 'session-a',
@@ -726,13 +803,17 @@ describe('state helpers', () => {
         time: { created: 100, updated: 200 },
       },
     ]);
+    flushSolid();
     stateModule.markSessionSeen('session-a');
+    flushSolid();
     stateModule.skipPlanSession('session-a');
+    flushSolid();
 
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-a': 1_000 });
     expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-a': 200 });
 
     stateModule.syncSessionMarkersForWorkspace('/repo-b');
+    flushSolid();
     stateModule.setSessions([
       {
         id: 'session-b',
@@ -743,12 +824,15 @@ describe('state helpers', () => {
         time: { created: 300, updated: 400 },
       },
     ]);
+    flushSolid();
 
     expect(stateModule.state.lastSeenSessions).toEqual({});
     expect(stateModule.state.skippedPlanSessions).toEqual({});
 
     stateModule.markSessionSeen('session-b', 2_000);
+    flushSolid();
     stateModule.skipPlanSession('session-b');
+    flushSolid();
 
     expect(JSON.parse(window.localStorage.getItem('varro.lastSeenSessions') || '{}')).toEqual({
       '/repo-a': { 'session-a': 1_000 },
@@ -760,13 +844,16 @@ describe('state helpers', () => {
     });
 
     stateModule.syncSessionMarkersForWorkspace('/repo-a');
+    flushSolid();
     expect(stateModule.state.lastSeenSessions).toEqual({ 'session-a': 1_000 });
     expect(stateModule.state.skippedPlanSessions).toEqual({ 'session-a': 200 });
   });
 
   it('migrates legacy flat session marker storage into the current workspace scope', async () => {
     window.localStorage.setItem('varro.lastSeenSessions', JSON.stringify({ legacy: 123 }));
+    flushSolid();
     window.localStorage.setItem('varro.skippedPlanSessions', JSON.stringify({ legacy: 456 }));
+    flushSolid();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       editorContext: {
@@ -778,6 +865,7 @@ describe('state helpers', () => {
     };
 
     const stateModule = await loadState();
+    flushSolid();
 
     expect(stateModule.state.lastSeenSessions).toEqual({ legacy: 123 });
     expect(stateModule.state.skippedPlanSessions).toEqual({ legacy: 456 });
@@ -791,11 +879,14 @@ describe('state helpers', () => {
 
   it('tracks draft and per-session permission modes by workspace', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.syncDraftPermissionForWorkspace('/repo');
+    flushSolid();
     expect(stateModule.draftPermissionMode()).toBe('default');
 
     stateModule.setPermissionModeForSession(null, 'full');
+    flushSolid();
     expect(stateModule.getPermissionModeForSession(null)).toBe('full');
     expect(window.localStorage.getItem('varro.draftPermissionMode')).toBe(JSON.stringify('full'));
     expect(JSON.parse(window.localStorage.getItem('varro.projectPermissionModes') || '{}')).toEqual(
@@ -805,17 +896,22 @@ describe('state helpers', () => {
     );
 
     stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
 
     stateModule.removePermissionModeForSession('session-1');
+    flushSolid();
     expect(stateModule.state.sessionPermissionModes).toEqual({});
     expect(window.localStorage.getItem('varro.sessionPermissionModes')).toBe(JSON.stringify({}));
 
     stateModule.syncDraftPermissionForWorkspace('/other');
+    flushSolid();
     expect(stateModule.draftPermissionMode()).toBe('default');
 
     stateModule.syncDraftPermissionForWorkspace('/repo');
+    flushSolid();
     stateModule.resetDraftPermissionMode();
+    flushSolid();
     expect(stateModule.draftPermissionMode()).toBe('full');
     expect(window.localStorage.getItem('varro.draftPermissionMode')).toBeNull();
   });
@@ -827,56 +923,83 @@ describe('state helpers', () => {
     };
 
     const stateModule = await loadState();
+    flushSolid();
 
     expect(stateModule.draftPermissionMode()).toBe('full');
 
     stateModule.setPermissionModeForSession(null, 'default');
+    flushSolid();
     expect(stateModule.draftPermissionMode()).toBe('default');
     expect(window.localStorage.getItem('varro.draftPermissionMode')).toBe(
       JSON.stringify('default')
     );
 
     stateModule.setDefaultPermissionModePreference('full');
+    flushSolid();
 
     expect(stateModule.draftPermissionMode()).toBe('default');
   });
 
   it('preserves a pending permission mode over an older host snapshot', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
     stateModule.setPendingSessionPermissionMode('session-1', 'full');
+    flushSolid();
     stateModule.applySessionPermissionModesSnapshot({ 'session-1': 'auto' });
+    flushSolid();
 
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
 
     stateModule.setPendingSessionPermissionMode('session-1', null);
+    flushSolid();
 
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('auto');
   });
 
   it('does not let an old permission-mode acknowledgement clear a newer selection', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     const firstGeneration = stateModule.setPendingSessionPermissionMode('session-1', 'auto');
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
+    flushSolid();
     const secondGeneration = stateModule.setPendingSessionPermissionMode('session-1', 'full');
+    flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
 
     expect(
-      stateModule.setPendingSessionPermissionMode('session-1', null, firstGeneration ?? undefined)
+      stateModule.setPendingSessionPermissionMode(
+        'session-1',
+        null,
+        firstGeneration ?? undefined,
+        'confirmed'
+      )
     ).toBeNull();
+    flushSolid();
     expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
     expect(stateModule.isSessionPermissionModePending('session-1')).toBe(true);
 
     expect(
-      stateModule.setPendingSessionPermissionMode('session-1', null, secondGeneration ?? undefined)
+      stateModule.setPendingSessionPermissionMode(
+        'session-1',
+        null,
+        secondGeneration ?? undefined,
+        'confirmed'
+      )
     ).toBe(secondGeneration);
+    flushSolid();
     expect(stateModule.isSessionPermissionModePending('session-1')).toBe(false);
+    expect(stateModule.getPermissionModeForSession('session-1')).toBe('full');
   });
 
   it('treats a pending ancestor permission mode as pending for descendants', async () => {
     const stateModule = await loadState();
+    flushSolid();
     stateModule.setSessions([
       {
         id: 'session-1',
@@ -896,8 +1019,10 @@ describe('state helpers', () => {
         time: { created: 0, updated: 0 },
       },
     ]);
+    flushSolid();
 
     stateModule.setPendingSessionPermissionMode('session-1', 'full');
+    flushSolid();
 
     expect(stateModule.isSessionPermissionModePending('session-1')).toBe(true);
     expect(stateModule.isSessionPermissionModePending('child-1')).toBe(true);
@@ -906,6 +1031,7 @@ describe('state helpers', () => {
 
   it('inherits a parent session permission mode for child sessions', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSessions([
       {
@@ -926,14 +1052,17 @@ describe('state helpers', () => {
         time: { created: 1, updated: 1 },
       },
     ]);
+    flushSolid();
 
     stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
 
     expect(stateModule.getPermissionModeForSession('child-1')).toBe('full');
   });
 
   it('prefers an explicit child permission mode over the parent mode', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSessions([
       {
@@ -954,15 +1083,19 @@ describe('state helpers', () => {
         time: { created: 1, updated: 1 },
       },
     ]);
+    flushSolid();
 
     stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
     stateModule.setPermissionModeForSession('child-1', 'default');
+    flushSolid();
 
     expect(stateModule.getPermissionModeForSession('child-1')).toBe('default');
   });
 
   it('falls back to default when session ancestry is cyclic', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSessions([
       {
@@ -984,6 +1117,7 @@ describe('state helpers', () => {
         time: { created: 1, updated: 1 },
       },
     ]);
+    flushSolid();
 
     expect(stateModule.getPermissionModeForSession('session-a')).toBe('default');
     expect(stateModule.getPermissionModeForSession('session-b')).toBe('default');
@@ -991,19 +1125,28 @@ describe('state helpers', () => {
 
   it('persists problem context independently by project and restores it after reload', async () => {
     let stateModule = await loadState();
-    stateModule.setState('editorContext', 'workspacePath', '/repo/');
+    flushSolid();
+    stateModule.setState(storePath('editorContext', 'workspacePath', '/repo/'));
+    flushSolid();
     stateModule.syncCurrentDocumentForWorkspace('/repo/');
+    flushSolid();
     expect(stateModule.state.issuesEnabled).toBe(true);
     stateModule.toggleIssuesEnabled();
+    flushSolid();
     expect(stateModule.state.issuesEnabled).toBe(false);
     expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
     stateModule.syncCurrentDocumentForWorkspace('/other');
+    flushSolid();
     expect(stateModule.state.issuesEnabled).toBe(true);
     stateModule.syncCurrentDocumentForWorkspace('/repo');
+    flushSolid();
     expect(stateModule.state.issuesEnabled).toBe(false);
     vi.resetModules();
+    flushSolid();
     stateModule = await loadState();
+    flushSolid();
     stateModule.syncCurrentDocumentForWorkspace('/repo');
+    flushSolid();
     expect(stateModule.state.issuesEnabled).toBe(false);
   });
 
@@ -1018,18 +1161,23 @@ describe('state helpers', () => {
       },
     };
     let stateModule = await loadState();
+    flushSolid();
 
-    stateModule.setState('activeSessionId', null);
+    stateModule.setState(storePath('activeSessionId', null));
+    flushSolid();
     stateModule.rememberCurrentDocumentNavigation(null, '/repo/a.ts');
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
 
     stateModule.toggleCurrentDocumentEnabled();
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
     expect(
       JSON.parse(window.localStorage.getItem('varro.projectCurrentDocumentEnabled') || '{}')
     ).toEqual({ '/repo': false });
 
     stateModule.rememberCurrentDocumentNavigation('/repo/a.ts', '/repo/b.ts');
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
 
     stateModule.adoptDraftCurrentDocumentState('session-1');
@@ -1037,52 +1185,71 @@ describe('state helpers', () => {
     expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
 
     stateModule.setCurrentDocumentEnabled(true, 'session-1');
+    flushSolid();
     stateModule.rememberCurrentDocumentNavigation('/repo/a.ts', '/repo/b.ts', 'session-1');
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
     expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
 
     stateModule.setCurrentDocumentEnabled(false, 'session-1');
+    flushSolid();
     stateModule.rememberCurrentDocumentNavigation('/repo/b.ts', '/repo/c.ts', 'session-1');
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
 
     stateModule.clearCurrentDocumentStateForSession('session-1');
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
 
     stateModule.syncCurrentDocumentForWorkspace('/other');
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
 
     stateModule.syncCurrentDocumentForWorkspace('/repo');
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
 
     vi.resetModules();
+    flushSolid();
     stateModule = await loadState();
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
 
     stateModule.toggleCurrentDocumentEnabled();
+    flushSolid();
     vi.resetModules();
+    flushSolid();
     stateModule = await loadState();
+    flushSolid();
     expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
   });
 
   it('deduplicates context files and manages clipboard image placeholders', async () => {
     window.localStorage.clear();
+    flushSolid();
     let stateModule = await loadState();
+    flushSolid();
 
     stateModule.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
+    flushSolid();
     stateModule.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/a.ts',
       relativePath: 'a.ts',
       type: 'file',
       lineRanges: [{ startLine: 2, endLine: 4 }],
     });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/a.ts',
       relativePath: 'a.ts',
       type: 'file',
       lineRanges: [{ startLine: 8, endLine: 9 }],
     });
+    flushSolid();
     stateModule.addContextFile({ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' });
+    flushSolid();
     expect(stateModule.state.droppedFiles.map((file) => file.relativePath)).toEqual([
       'a.ts',
       'b.ts',
@@ -1090,18 +1257,21 @@ describe('state helpers', () => {
     expect(stateModule.state.droppedFiles[0]?.lineRanges).toBeUndefined();
 
     stateModule.clearContextFiles();
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/a.ts',
       relativePath: 'a.ts',
       type: 'file',
       lineRanges: [{ startLine: 2, endLine: 4 }],
     });
+    flushSolid();
     stateModule.addContextFile({
       path: '/repo/a.ts',
       relativePath: 'a.ts',
       type: 'file',
       lineRanges: [{ startLine: 8, endLine: 9 }],
     });
+    flushSolid();
     expect(stateModule.state.droppedFiles).toEqual([
       expect.objectContaining({
         path: '/repo/a.ts',
@@ -1116,12 +1286,15 @@ describe('state helpers', () => {
     ]);
 
     stateModule.removeContextFile('/repo/a.ts');
+    flushSolid();
     expect(stateModule.state.droppedFiles).toEqual([]);
 
     stateModule.addContextFile({ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' });
+    flushSolid();
     expect(stateModule.state.droppedFiles.map((file) => file.relativePath)).toEqual(['b.ts']);
 
     stateModule.clearContextFiles();
+    flushSolid();
     stateModule.addContextFiles([
       { path: 'C:\\Repo\\File.ts', relativePath: 'File.ts', type: 'file' },
       {
@@ -1131,6 +1304,7 @@ describe('state helpers', () => {
         lineRanges: [{ startLine: 2, endLine: 4 }],
       },
     ]);
+    flushSolid();
     expect(stateModule.state.droppedFiles).toEqual([
       expect.objectContaining({
         path: 'c:/repo/file.ts',
@@ -1138,9 +1312,11 @@ describe('state helpers', () => {
       }),
     ]);
     stateModule.removeContextFile('C:/REPO/FILE.ts');
+    flushSolid();
     expect(stateModule.state.droppedFiles).toEqual([]);
 
     stateModule.clearContextFiles();
+    flushSolid();
     stateModule.addContextFiles([
       { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
       {
@@ -1150,6 +1326,7 @@ describe('state helpers', () => {
         lineRanges: [{ startLine: 2, endLine: 4 }],
       },
     ]);
+    flushSolid();
     expect(stateModule.state.droppedFiles).toEqual([
       expect.objectContaining({
         path: '/repo/a.ts',
@@ -1160,7 +1337,9 @@ describe('state helpers', () => {
     ]);
 
     vi.resetModules();
+    flushSolid();
     stateModule = await loadState();
+    flushSolid();
     expect(stateModule.state.droppedFiles).toEqual([
       expect.objectContaining({
         path: '/repo/a.ts',
@@ -1171,10 +1350,12 @@ describe('state helpers', () => {
     ]);
 
     stateModule.clearContextFiles();
+    flushSolid();
     expect(stateModule.state.droppedFiles).toEqual([]);
     expect(window.localStorage.getItem('varro.inputDraftFiles')).toBeNull();
 
     stateModule.setInputText('See [img-2.png] later');
+    flushSolid();
     for (let i = 1; i <= stateModule.MAX_CLIPBOARD_IMAGES + 1; i++) {
       stateModule.addClipboardImage({
         id: `img-${i}`,
@@ -1183,6 +1364,7 @@ describe('state helpers', () => {
         filename: `img-${i}.png`,
         size: 10,
       });
+      flushSolid();
     }
     stateModule.addClipboardImage({
       id: 'too-big',
@@ -1191,17 +1373,22 @@ describe('state helpers', () => {
       filename: 'too-big.png',
       size: 6 * 1024 * 1024,
     });
+    flushSolid();
 
     expect(stateModule.state.clipboardImages.map((image) => image.id)).toEqual(
       Array.from({ length: stateModule.MAX_CLIPBOARD_IMAGES }, (_, index) => `img-${index + 2}`)
     );
 
     stateModule.removeClipboardImage('img-2');
+    flushSolid();
     expect(stateModule.inputText()).toBe('See _____ later');
 
     stateModule.setInputText('   ');
+    flushSolid();
     stateModule.setNextPastedImageIndex(4);
+    flushSolid();
     stateModule.clearClipboardImages();
+    flushSolid();
 
     expect(stateModule.state.clipboardImages).toEqual([]);
     expect(stateModule.nextPastedImageIndex()).toBe(1);
@@ -1209,6 +1396,7 @@ describe('state helpers', () => {
 
   it('caps clipboard images when a draft is restored over the limit', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     const restored = Array.from({ length: stateModule.MAX_CLIPBOARD_IMAGES + 3 }, (_, index) => ({
       id: `restored-${index + 1}`,
@@ -1219,6 +1407,7 @@ describe('state helpers', () => {
     }));
 
     const dropped = stateModule.replaceClipboardImages(restored);
+    flushSolid();
 
     expect(dropped.map((image) => image.id)).toEqual(['restored-1', 'restored-2', 'restored-3']);
     expect(stateModule.state.clipboardImages).toHaveLength(stateModule.MAX_CLIPBOARD_IMAGES);
@@ -1245,22 +1434,27 @@ describe('state helpers', () => {
       filename: 'fresh.png',
       size: 10,
     });
+    flushSolid();
 
     expect(added).toBe(true);
     expect(stateModule.state.clipboardImages).toHaveLength(stateModule.MAX_CLIPBOARD_IMAGES);
     expect(stateModule.state.clipboardImages.at(-1)?.id).toBe('fresh');
 
     stateModule.clearClipboardImages();
+    flushSolid();
   });
 
   it('tracks global and per-session selected models independently', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5' });
+    flushSolid();
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-4o' },
       { sessionId: 'session-1', persistGlobal: false }
     );
+    flushSolid();
 
     expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
@@ -1277,23 +1471,31 @@ describe('state helpers', () => {
     });
 
     stateModule.clearSelectedModelForSession('session-1');
+    flushSolid();
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
   });
 
   it('persists selected models independently per project', async () => {
     window.localStorage.clear();
+    flushSolid();
     const stateModule = await loadState();
+    flushSolid();
     const repoAModel = { providerID: 'openai', modelID: 'repo-a-model' };
     const repoBModel = { providerID: 'anthropic', modelID: 'repo-b-model' };
 
-    stateModule.setState('editorContext', 'workspacePath', '/repo-a');
+    stateModule.setState(storePath('editorContext', 'workspacePath', '/repo-a'));
+    flushSolid();
     stateModule.setSelectedModel({ ...repoAModel });
-    stateModule.setState('editorContext', 'workspacePath', '/repo-b');
+    flushSolid();
+    stateModule.setState(storePath('editorContext', 'workspacePath', '/repo-b'));
+    flushSolid();
 
     expect(stateModule.getPersistedSelectedModel()).toBeNull();
 
     stateModule.setSelectedModel({ ...repoBModel });
-    stateModule.setState('editorContext', 'workspacePath', '/repo-a');
+    flushSolid();
+    stateModule.setState(storePath('editorContext', 'workspacePath', '/repo-a'));
+    flushSolid();
 
     expect(stateModule.getPersistedSelectedModel()).toEqual(repoAModel);
     expect(JSON.parse(window.localStorage.getItem('varro.selectedModel:/repo-a')!)).toEqual(
@@ -1308,19 +1510,23 @@ describe('state helpers', () => {
 
   it('syncs the last choice from another view without changing the active composer', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const selected = { providerID: 'openai', modelID: 'current' };
     const lastSelectedModel = { providerID: 'openai', modelID: 'other-view', variant: 'high' };
     stateModule.setSelectedModel(selected);
+    flushSolid();
     stateModule.applyModelPreferencesSnapshot({
       ...stateModule.getModelPreferencesSnapshot(),
       lastSelectedModel,
     });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(selected);
     expect(stateModule.state.lastSelectedModel).toEqual(lastSelectedModel);
   });
 
   it('does not promote a temporary session model or reasoning to global defaults', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const defaultModel = {
       providerID: 'openai',
       modelID: 'gpt-5',
@@ -1333,6 +1539,7 @@ describe('state helpers', () => {
     };
 
     stateModule.setSelectedModel({ ...defaultModel });
+    flushSolid();
     stateModule.setSelectedModel(
       { ...sessionModel },
       {
@@ -1340,6 +1547,7 @@ describe('state helpers', () => {
         persistGlobal: false,
       }
     );
+    flushSolid();
 
     expect(stateModule.state.selectedModel).toEqual(sessionModel);
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual(sessionModel);
@@ -1350,6 +1558,7 @@ describe('state helpers', () => {
 
   it('switches between global defaults and active-session routing with the session picker', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const defaultModel = {
       providerID: 'openai',
       modelID: 'gpt-5',
@@ -1362,7 +1571,9 @@ describe('state helpers', () => {
     };
 
     stateModule.setSelectedModel({ ...defaultModel });
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     stateModule.setSelectedModel(
       { ...sessionModel },
       {
@@ -1370,12 +1581,15 @@ describe('state helpers', () => {
         persistGlobal: false,
       }
     );
+    flushSolid();
 
     stateModule.setPersistentShowSessionPicker(true);
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(defaultModel);
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual(sessionModel);
 
     stateModule.setPersistentShowSessionPicker(false);
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(sessionModel);
     expect(stateModule.getPersistedSelectedModel()).toEqual(defaultModel);
     expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeUndefined();
@@ -1383,17 +1597,23 @@ describe('state helpers', () => {
 
   it('normalizes persisted routing state while preserving valid entries', async () => {
     window.localStorage.setItem('varro.hiddenProviders', JSON.stringify(['openai', 42, '', null]));
+    flushSolid();
     window.localStorage.setItem('varro.hiddenModels', JSON.stringify(['openai:gpt-4o', false, '']));
+    flushSolid();
     window.localStorage.setItem('varro.pinnedModels', JSON.stringify(['openai:gpt-5', false, '']));
+    flushSolid();
     window.localStorage.setItem('varro.selectedAgent', JSON.stringify({ name: 'build' }));
+    flushSolid();
     window.localStorage.setItem(
       'varro.selectedModel',
       JSON.stringify({ providerID: 'openai', modelID: 'gpt-5', variant: 42 })
     );
+    flushSolid();
     window.localStorage.setItem(
       'varro.sessionSelectedAgents',
       JSON.stringify({ 'session-1': 'build', 'session-2': 42, '': 'plan' })
     );
+    flushSolid();
     window.localStorage.setItem(
       'varro.sessionSelectedModels',
       JSON.stringify({
@@ -1401,21 +1621,27 @@ describe('state helpers', () => {
         'session-2': { providerID: 'openai' },
       })
     );
+    flushSolid();
     window.localStorage.setItem(
       'varro.modelVariantSelections',
       JSON.stringify({ 'openai:gpt-5': 'medium', 'openai:gpt-5.5': null, invalid: false })
     );
+    flushSolid();
     window.localStorage.setItem(
       'varro.sessionSelectedMcps',
       JSON.stringify({ 'session-1': ['docs', 42, '', 'browser-bridge'], 'session-2': 'docs' })
     );
+    flushSolid();
     window.localStorage.setItem(
       'varro.sessionPermissionModes',
       JSON.stringify({ 'session-1': 'full', 'session-2': 'invalid' })
     );
+    flushSolid();
     window.localStorage.setItem('varro.lastActiveSessionId', JSON.stringify(42));
+    flushSolid();
 
     const stateModule = await loadState();
+    flushSolid();
 
     expect(stateModule.state.hiddenProviders).toEqual(['openai']);
     expect(stateModule.state.hiddenModels).toEqual(['openai:gpt-4o']);
@@ -1463,6 +1689,7 @@ describe('state helpers', () => {
 
     try {
       const stateModule = await loadState();
+      flushSolid();
 
       expect(stateModule.state.hiddenProviders).toEqual([]);
       expect(stateModule.state.hiddenModels).toEqual(['openai:gpt-4o']);
@@ -1482,9 +1709,12 @@ describe('state helpers', () => {
 
   it('remembers reasoning variants independently per model', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5.4', variant: 'medium' });
+    flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
+    flushSolid();
 
     expect(stateModule.getStoredVariantForModel('openai', 'gpt-5.4')).toBe('medium');
     expect(stateModule.getStoredVariantForModel('openai', 'gpt-5.5')).toBe('low');
@@ -1492,15 +1722,19 @@ describe('state helpers', () => {
 
   it('applies a host model snapshot to the active session composer', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'medium' },
       { sessionId: 'session-1', persistGlobal: false }
     );
+    flushSolid();
 
     stateModule.applySessionSelectedModelsSnapshot({
       'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
     });
+    flushSolid();
 
     expect(stateModule.state.selectedModel).toEqual({
       providerID: 'openai',
@@ -1516,61 +1750,85 @@ describe('state helpers', () => {
 
   it('keeps local model choices until the latest selection is acknowledged', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const model = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
     const older = { ...model, variant: 'medium' };
     stateModule.setSelectedModel(model, { sessionId: 'session-1', selectionId: 'first' });
+    flushSolid();
     stateModule.setSelectedModel(older, { sessionId: 'session-1', selectionId: 'second' });
+    flushSolid();
     stateModule.setSelectedModel(model, { sessionId: 'session-1', selectionId: 'latest' });
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': older, 'session-2': older });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(model);
     expect(stateModule.getSelectedModelForSession('session-2')).toEqual(older);
     stateModule.applySessionSelectedModelsSnapshot(
       { 'session-1': older },
       { sessionId: 'session-1', selectionId: 'first' }
     );
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(model);
     stateModule.applySessionSelectedModelsSnapshot(
       { 'session-1': model },
       { sessionId: 'session-1', selectionId: 'latest' }
     );
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': older });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(older);
   });
 
   it('preserves acknowledged composer selections through active-turn snapshots and hydration', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
     const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'xhigh' };
     const running = { ...selected, variant: 'high' };
     stateModule.setSelectedModel({ ...selected }, { sessionId: 'session-1', selectionId: 'local' });
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot(
       { 'session-1': selected },
       { sessionId: 'session-1', selectionId: 'local' }
     );
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': running });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(selected);
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual(selected);
     stateModule.setSelectedModel(running, { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(selected);
     stateModule.setSelectedModel(running, { persistGlobal: false });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(selected);
-    stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+    stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': running });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(running);
   });
 
   it('does not apply a session model snapshot to the new-chat composer', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const draftModel = { providerID: 'openai', modelID: 'gpt-5.6-sol' };
     stateModule.setSelectedModel(draftModel);
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     stateModule.setShowSessionPicker(true);
+    flushSolid();
 
     stateModule.applySessionSelectedModelsSnapshot({
       'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
     });
+    flushSolid();
 
     expect(stateModule.state.selectedModel).toEqual(draftModel);
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
@@ -1582,10 +1840,13 @@ describe('state helpers', () => {
 
   it('protects the sent model across routing and releases it after the turn settles', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const selected = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
     const previous = { providerID: 'openai', modelID: 'gpt-6-luna-fast' };
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
     stateModule.setSelectedModel(
       { ...selected },
       {
@@ -1594,32 +1855,45 @@ describe('state helpers', () => {
         protectDuringTurn: true,
       }
     );
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
+    flushSolid();
     stateModule.setSelectedModel({ ...previous }, { persistGlobal: false });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(selected);
 
-    stateModule.setState('activeSessionId', 'session-2');
+    stateModule.setState(storePath('activeSessionId', 'session-2'));
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
+    flushSolid();
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual(selected);
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
+    flushSolid();
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual(previous);
     expect(stateModule.state.selectedModel).toEqual(previous);
   });
 
   it('does not replace a newer busy composer choice when protecting a queued send model', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const queued = { providerID: 'openai', modelID: 'gpt-6-luna-fast' };
     const next = { providerID: 'openai', modelID: 'gpt-6.1-sol', variant: 'high' };
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
     stateModule.setSelectedModel({ ...next }, { sessionId: 'session-1', selectionId: 'next' });
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot(
       { 'session-1': { ...next } },
       { sessionId: 'session-1', selectionId: 'next' }
     );
+    flushSolid();
     stateModule.setSelectedModel(
       { ...queued },
       {
@@ -1628,22 +1902,27 @@ describe('state helpers', () => {
         protectDuringTurn: true,
       }
     );
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...queued } });
+    flushSolid();
     expect(stateModule.state.selectedModel).toEqual(next);
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual(next);
   });
 
   it('remembers an explicit default reasoning selection', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-5', variant: 'max' },
       { sessionId: 'session-1' }
     );
+    flushSolid();
     stateModule.setSelectedModel(
       { providerID: 'openai', modelID: 'gpt-5' },
       { sessionId: 'session-1', rememberVariant: null }
     );
+    flushSolid();
 
     expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
@@ -1661,12 +1940,15 @@ describe('state helpers', () => {
 
   it('tracks global and per-session selected agents independently', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
 
     stateModule.setSelectedAgent('build');
+    flushSolid();
     stateModule.setSelectedAgent('plan', { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
 
     expect(stateModule.state.selectedAgent).toBe('plan');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
@@ -1678,8 +1960,10 @@ describe('state helpers', () => {
 
     sent.length = 0;
     stateModule.setSelectedAgent('plan', { sessionId: 'session-1', publishHost: false });
+    flushSolid();
     expect(sent).toEqual([]);
     stateModule.setSelectedAgent('plan', { sessionId: 'session-1' });
+    flushSolid();
     expect(sent).toEqual([
       {
         type: 'session-plan-state/update',
@@ -1688,19 +1972,23 @@ describe('state helpers', () => {
     ]);
 
     stateModule.clearSelectedAgentForSession('session-1');
+    flushSolid();
     expect(stateModule.getSelectedAgentForSession('session-1')).toBeNull();
     delete bridgeWindow.__sendToExtension;
   });
 
   it('updates session agent metadata without changing the visible selection', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSelectedAgent('build');
+    flushSolid();
     stateModule.setSelectedAgent('explore', {
       sessionId: 'child-session',
       persistGlobal: false,
       updateSelection: false,
     });
+    flushSolid();
 
     expect(stateModule.state.selectedAgent).toBe('build');
     expect(stateModule.getSelectedAgentForSession('child-session')).toBe('explore');
@@ -1709,6 +1997,7 @@ describe('state helpers', () => {
 
   it('skips no-op local writes while publishing an explicit agent selection', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
@@ -1716,15 +2005,22 @@ describe('state helpers', () => {
     const model = { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' };
 
     stateModule.setSelectedAgent('build', { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
     stateModule.setSelectedModel(model, { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
     stateModule.setSelectedMcpsForSession('session-1', ['browser-bridge', 'docs']);
+    flushSolid();
     setItem.mockClear();
     sent.length = 0;
 
     stateModule.setSelectedAgent('build', { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
     stateModule.setSelectedModel({ ...model }, { sessionId: 'session-1', persistGlobal: false });
+    flushSolid();
     stateModule.setSelectedMcpsForSession('session-1', ['docs', 'browser-bridge', 'docs']);
+    flushSolid();
     stateModule.applySessionSelectedModelsSnapshot({ 'session-1': { ...model } });
+    flushSolid();
 
     expect(setItem).not.toHaveBeenCalled();
     expect(sent).toEqual([
@@ -1738,7 +2034,9 @@ describe('state helpers', () => {
 
   it('hydrates a session agent catalog with one persisted full-map write', async () => {
     window.localStorage.removeItem('varro.sessionSelectedAgents');
+    flushSolid();
     const stateModule = await loadState();
+    flushSolid();
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
 
     stateModule.hydrateSessionSelectedAgents({
@@ -1746,6 +2044,7 @@ describe('state helpers', () => {
       'session-2': 'plan',
       'session-3': 'build',
     });
+    flushSolid();
 
     expect(
       setItem.mock.calls.filter(([key]) => key === 'varro.sessionSelectedAgents')
@@ -1762,15 +2061,20 @@ describe('state helpers', () => {
       'session-2': 'plan',
       'session-3': 'build',
     });
+    flushSolid();
     expect(setItem).not.toHaveBeenCalled();
   });
 
   it('applies host agent updates to the active session selection', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     stateModule.setSelectedAgent('plan');
+    flushSolid();
 
     stateModule.applySessionSelectedAgentUpdate('session-1', 'build');
+    flushSolid();
 
     expect(stateModule.state.selectedAgent).toBe('build');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
@@ -1781,13 +2085,16 @@ describe('state helpers', () => {
 
   it('ignores stale agent echoes and snapshots until the latest selection is acknowledged', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
     try {
       for (const agent of ['ask', 'build', 'ask', 'build']) {
         stateModule.setSelectedAgent(agent, { sessionId: 'session-1' });
+        flushSolid();
       }
       const selections = sent.flatMap((message) => {
         const parsed = parseExtensionMessage(message);
@@ -1801,16 +2108,21 @@ describe('state helpers', () => {
           index % 2 === 0 ? 'ask' : 'build',
           selectionId
         );
+        flushSolid();
         expect(stateModule.state.selectedAgent).toBe('build');
       }
       stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask' });
+      flushSolid();
       stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      flushSolid();
       expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
       const latest = selections.at(-1)!;
       stateModule.applySessionSelectedAgentUpdate('session-1', 'build', latest);
+      flushSolid();
 
       // Once settled, changes from another webview must still synchronize.
       stateModule.applySessionSelectedAgentUpdate('session-1', 'ask', 'another-webview');
+      flushSolid();
       expect(stateModule.state.selectedAgent).toBe('ask');
     } finally {
       delete bridgeWindow.__sendToExtension;
@@ -1819,14 +2131,18 @@ describe('state helpers', () => {
 
   it('keeps a pending agent choice when session loading applies older metadata', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+    flushSolid();
 
     stateModule.setSelectedAgent('ask', {
       sessionId: 'session-1',
       persistGlobal: false,
       publishHost: false,
     });
+    flushSolid();
 
     expect(stateModule.state.selectedAgent).toBe('build');
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
@@ -1834,40 +2150,54 @@ describe('state helpers', () => {
 
   it('preserves an acknowledged composer agent through active-turn metadata updates', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const { syncSessionAgent } = await import('../hooks/session/session-event-utils');
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+    flushSolid();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
     try {
       stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+      flushSolid();
       const selection = sent
         .map(parseExtensionMessage)
         .find((message) => message?.type === 'session-plan-state/update');
       const selectionId = selection?.payload.selectionId;
       if (!selectionId) throw new Error('Missing selection acknowledgement id');
       stateModule.applySessionSelectedAgentUpdate('session-1', 'build', selectionId);
+      flushSolid();
 
       syncSessionAgent({ id: 'session-1', agent: 'ask' });
+      flushSolid();
       stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask', 'session-2': 'plan' });
+      flushSolid();
       stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      flushSolid();
       stateModule.setSelectedAgent('ask', {
         sessionId: 'session-1',
         persistGlobal: false,
         publishHost: false,
       });
+      flushSolid();
       expect(stateModule.state.selectedAgent).toBe('build');
       expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
       expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
 
       stateModule.applySessionSelectedAgentUpdate('session-1', 'plan', 'another-webview');
+      flushSolid();
       expect(stateModule.state.selectedAgent).toBe('plan');
       stateModule.hydrateSessionSelectedAgents({ 'session-1': 'ask' });
+      flushSolid();
       expect(stateModule.getSelectedAgentForSession('session-1')).toBe('plan');
 
-      stateModule.setState('sessionStatus', 'session-1', { type: 'idle' });
+      stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
       stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      flushSolid();
       expect(stateModule.state.selectedAgent).toBe('ask');
     } finally {
       delete bridgeWindow.__sendToExtension;
@@ -1876,20 +2206,25 @@ describe('state helpers', () => {
 
   it('releases agent synchronization after a failed selection write', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const sent: unknown[] = [];
     const bridgeWindow = getTestBridgeWindow();
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
     try {
       stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+      flushSolid();
       const selection = sent
         .map(parseExtensionMessage)
         .find((message) => message?.type === 'session-plan-state/update');
       const selectionId = selection?.payload.selectionId;
       if (!selectionId) throw new Error('Missing selection acknowledgement id');
       stateModule.applySessionSelectedAgentUpdate('session-1', undefined, selectionId);
+      flushSolid();
       expect(stateModule.state.selectedAgent).toBe('build');
       stateModule.applySessionSelectedAgentUpdate('session-1', 'ask');
+      flushSolid();
       expect(stateModule.state.selectedAgent).toBe('ask');
     } finally {
       delete bridgeWindow.__sendToExtension;
@@ -1898,10 +2233,14 @@ describe('state helpers', () => {
 
   it('keeps the visible agent when a host update targets another session', async () => {
     const stateModule = await loadState();
-    stateModule.setState('activeSessionId', 'session-1');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     stateModule.setSelectedAgent('plan');
+    flushSolid();
 
     stateModule.applySessionSelectedAgentUpdate('session-2', 'build');
+    flushSolid();
 
     expect(stateModule.state.selectedAgent).toBe('plan');
     expect(stateModule.getSelectedAgentForSession('session-2')).toBe('build');
@@ -1909,25 +2248,31 @@ describe('state helpers', () => {
 
   it('tracks per-session selected mcps independently', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setSelectedMcpsForSession('session-1', ['browser-bridge', 'docs']);
+    flushSolid();
     expect(stateModule.getSelectedMcpsForSession('session-1')).toEqual(['browser-bridge', 'docs']);
 
     stateModule.clearSelectedMcpsForSession('session-1');
+    flushSolid();
     expect(stateModule.getSelectedMcpsForSession('session-1')).toBeNull();
   });
 
   it('updates questions and model visibility state', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const providers = [
       provider('openai', ['gpt-4.1', 'gpt-4o']),
       provider('anthropic', ['claude']),
     ];
 
     stateModule.setQuestions([{ id: 'q1', sessionID: 'session-1', questions: [] }]);
+    flushSolid();
     const question = stateModule.state.questions[0];
 
     stateModule.setQuestions([{ id: 'q1', sessionID: 'session-1', questions: [] }]);
+    flushSolid();
 
     expect(stateModule.state.questions[0]).toBe(question);
 
@@ -1936,32 +2281,44 @@ describe('state helpers', () => {
       sessionID: 'session-1',
       questions: [{ question: 'Q', header: 'H', options: [] }],
     });
+    flushSolid();
     stateModule.upsertQuestion({ id: 'q2', sessionID: 'session-2', questions: [] });
+    flushSolid();
     stateModule.removeQuestion('q2');
+    flushSolid();
 
     expect(stateModule.state.questions).toHaveLength(1);
     expect(stateModule.state.questions[0]?.questions).toHaveLength(1);
 
-    stateModule.setState('providers', providers);
+    stateModule.setState(storePath('providers', providers));
+    flushSolid();
     stateModule.setModelPinned('openai', 'gpt-4.1', true);
+    flushSolid();
     expect(stateModule.isModelPinned('openai', 'gpt-4.1')).toBe(true);
     expect(JSON.parse(window.localStorage.getItem('varro.pinnedModels')!)).toEqual([
       'openai:gpt-4.1',
     ]);
     stateModule.setModelPinned('openai', 'gpt-4.1', false);
+    flushSolid();
     expect(stateModule.isModelPinned('openai', 'gpt-4.1')).toBe(false);
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4.1' });
+    flushSolid();
     stateModule.setProviderVisible('openai', false);
+    flushSolid();
     expect(stateModule.state.hiddenProviders).toEqual(['openai']);
     expect(stateModule.state.selectedModel).toBeNull();
 
     stateModule.setModelVisible('openai', 'gpt-4.1', true);
+    flushSolid();
     expect(stateModule.state.hiddenProviders).toEqual(['openai']);
     expect(stateModule.state.hiddenModels).toEqual([]);
     stateModule.setProviderVisible('openai', true);
+    flushSolid();
 
     stateModule.setSelectedModel({ providerID: 'anthropic', modelID: 'claude' });
+    flushSolid();
     stateModule.setModelVisible('anthropic', 'claude', false);
+    flushSolid();
     expect(stateModule.state.hiddenModels).toContain('anthropic:claude');
     expect(stateModule.state.selectedModel).toBeNull();
     expect(
@@ -1972,6 +2329,7 @@ describe('state helpers', () => {
         { allowHidden: true }
       )
     ).toEqual({ providerID: 'anthropic', modelID: 'claude' });
+    flushSolid();
 
     expect(stateModule.getVisibleProviders(providers).map((item) => item.id)).toEqual(['openai']);
     expect(
@@ -1981,152 +2339,212 @@ describe('state helpers', () => {
         {}
       )
     ).toEqual({ providerID: 'openai', modelID: 'gpt-4.1' });
+    flushSolid();
 
     stateModule.resetModelVisibility();
+    flushSolid();
     expect(stateModule.isModelVisible('anthropic', 'claude')).toBe(true);
   });
 
   it('keeps an answered question resolved until a new ask event arrives', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const question = { id: 'answered', sessionID: 'session-1', questions: [] };
     stateModule.resetQuestionResolutionState();
+    flushSolid();
     stateModule.upsertQuestion(question);
+    flushSolid();
 
     stateModule.removeResolvedQuestion(question.id);
+    flushSolid();
 
     expect(stateModule.state.questions).toEqual([]);
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
 
     stateModule.setQuestions([question]);
+    flushSolid();
     stateModule.setQuestions([]);
+    flushSolid();
     stateModule.setQuestions([question]);
+    flushSolid();
 
     expect(stateModule.state.questions).toEqual([]);
 
     stateModule.upsertQuestion(question);
+    flushSolid();
 
     expect(stateModule.state.questions).toEqual([question]);
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
 
     stateModule.removeQuestion(question.id);
+    flushSolid();
     stateModule.removeResolvedQuestion(question.id);
+    flushSolid();
 
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
     stateModule.resetQuestionResolutionState();
+    flushSolid();
   });
 
   it('treats a question omitted by an authoritative snapshot as resolved', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const question = { id: 'snapshot-resolved', sessionID: 'session-1', questions: [] };
     stateModule.resetQuestionResolutionState();
+    flushSolid();
     stateModule.upsertQuestion(question);
+    flushSolid();
 
     stateModule.setQuestions([]);
+    flushSolid();
 
     expect(stateModule.state.questions).toEqual([]);
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
 
     stateModule.setQuestions([question]);
+    flushSolid();
     expect(stateModule.state.questions).toEqual([]);
     stateModule.resetQuestionResolutionState();
+    flushSolid();
   });
 
   it('does not reopen a cleared transition for duplicate resolution evidence', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const question = { id: 'duplicate', sessionID: 'session-1', questions: [] };
     stateModule.resetQuestionResolutionState();
+    flushSolid();
     stateModule.upsertQuestion(question);
+    flushSolid();
     stateModule.removeResolvedQuestion(question.id);
+    flushSolid();
     stateModule.clearQuestionResponsePending(question.sessionID);
+    flushSolid();
 
     stateModule.removeResolvedQuestion(question.id);
+    flushSolid();
 
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
     stateModule.resetQuestionResolutionState();
+    flushSolid();
   });
 
   it('keeps status evidence that arrives while a question response is in flight', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const question = { id: 'in-flight', sessionID: 'session-1', questions: [] };
     stateModule.resetQuestionResolutionState();
+    flushSolid();
     stateModule.upsertQuestion(question);
+    flushSolid();
 
     stateModule.beginQuestionResponse(question.id);
+    flushSolid();
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
 
     stateModule.clearQuestionResponsePending(question.sessionID);
+    flushSolid();
     stateModule.removeResolvedQuestion(question.id);
+    flushSolid();
 
     expect(stateModule.state.questions).toEqual([]);
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
     stateModule.resetQuestionResolutionState();
+    flushSolid();
   });
 
   it('rolls back the transition when a question response fails', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const question = { id: 'failed-response', sessionID: 'session-1', questions: [] };
     stateModule.resetQuestionResolutionState();
+    flushSolid();
     stateModule.upsertQuestion(question);
+    flushSolid();
 
     stateModule.beginQuestionResponse(question.id);
+    // A synchronous transport rejection can roll back before publication.
     stateModule.cancelQuestionResponse(question.id);
+    flushSolid();
 
     expect(stateModule.state.questions).toEqual([question]);
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual([]);
     stateModule.resetQuestionResolutionState();
+    flushSolid();
   });
 
   it('ignores late response callbacks after an explicit ask reuses the request ID', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const first = { id: 'reused', sessionID: 'session-1', questions: [] };
     const second = {
       ...first,
       questions: [{ question: 'Again?', header: 'Retry', options: [] }],
     };
     stateModule.resetQuestionResolutionState();
+    flushSolid();
     stateModule.upsertQuestion(first);
+    flushSolid();
     const firstGeneration = stateModule.beginQuestionResponse(first.id);
+    flushSolid();
     stateModule.removeResolvedQuestion(first.id);
+    flushSolid();
     stateModule.clearQuestionResponsePending(first.sessionID);
+    flushSolid();
 
     stateModule.upsertQuestion(second);
+    flushSolid();
     const secondGeneration = stateModule.beginQuestionResponse(second.id);
+    flushSolid();
 
     expect(stateModule.removeResolvedQuestion(first.id, firstGeneration)).toBe(false);
+    flushSolid();
     expect(stateModule.cancelQuestionResponse(first.id, firstGeneration)).toBe(false);
     expect(secondGeneration).not.toBe(firstGeneration);
     expect(stateModule.state.questions).toEqual([second]);
     expect(stateModule.state.questionResponsePendingSessionIds).toEqual(['session-1']);
     stateModule.resetQuestionResolutionState();
+    flushSolid();
   });
 
   it('keeps the response generation stable for a duplicate ask delivery', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const question = { id: 'duplicate-ask', sessionID: 'session-1', questions: [] };
     stateModule.resetQuestionResolutionState();
+    flushSolid();
     stateModule.upsertQuestion(question);
+    flushSolid();
     const generation = stateModule.beginQuestionResponse(question.id);
+    flushSolid();
 
     stateModule.upsertQuestion(question);
+    flushSolid();
 
     expect(stateModule.beginQuestionResponse(question.id)).toBe(generation);
+    flushSolid();
     expect(stateModule.removeResolvedQuestion(question.id, generation)).toBe(true);
+    flushSolid();
     expect(stateModule.state.questions).toEqual([]);
     stateModule.resetQuestionResolutionState();
+    flushSolid();
   });
 
   it('lists only explicitly added models from large provider catalogs', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const openRouter = provider(
       'openrouter',
       Array.from({ length: 101 }, (_, index) => `model-${index}`)
     );
-    stateModule.setState('providers', [openRouter]);
+    stateModule.setState(storePath('providers', [openRouter]));
+    flushSolid();
 
     expect(stateModule.isLargeModelCatalog(openRouter)).toBe(true);
     expect(stateModule.getVisibleProviders([openRouter])).toEqual([]);
 
     stateModule.setModelAdded('openrouter', 'model-42', true);
+    flushSolid();
 
     expect(Object.keys(stateModule.getVisibleProviders([openRouter])[0]?.models ?? {})).toEqual([
       'model-42',
@@ -2139,17 +2557,20 @@ describe('state helpers', () => {
       'openrouter',
       Array.from({ length: 102 }, (_, index) => `model-${index}`)
     );
-    stateModule.setState('providers', [refreshed]);
+    stateModule.setState(storePath('providers', [refreshed]));
+    flushSolid();
     expect(Object.keys(stateModule.getVisibleProviders([refreshed])[0]?.models ?? {})).toEqual([
       'model-42',
     ]);
 
     stateModule.setModelAdded('openrouter', 'model-42', false);
+    flushSolid();
     expect(stateModule.getVisibleProviders([refreshed])).toEqual([]);
   });
 
   it('tracks provider limits independently per provider and model', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     const gpt4oLimit = {
       providerID: 'openai',
@@ -2187,95 +2608,121 @@ describe('state helpers', () => {
     };
 
     stateModule.setProviderLimit('openai', 'gpt-4o', gpt4oLimit);
+    flushSolid();
     stateModule.setProviderLimit('openai', 'gpt-4.1', gpt41Limit);
+    flushSolid();
 
     expect(stateModule.getProviderLimit('openai', 'gpt-4o')).toEqual(gpt4oLimit);
     expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
     expect(stateModule.getProviderLimit('openai', 'missing')).toBeNull();
 
     stateModule.setProviderLimit('openai', 'gpt-4.1', { ...gpt41Limit, checkedAt: 1 });
+    flushSolid();
     expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
     const stale = { ...gpt41Limit, note: 'Refresh failed; showing last known limits.' };
     stateModule.setProviderLimit('openai', 'gpt-4.1', stale);
+    flushSolid();
     expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(stale);
     stateModule.setProviderLimit('openai', 'gpt-4.1', gpt41Limit);
+    flushSolid();
 
     stateModule.setProviderLimit('openai', 'gpt-4o', null);
+    flushSolid();
     expect(stateModule.getProviderLimit('openai', 'gpt-4o')).toBeNull();
     expect(stateModule.getProviderLimit('openai', 'gpt-4.1')).toEqual(gpt41Limit);
   });
 
   it('treats permission and question state as awaiting input', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
-    stateModule.setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'write',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        title: 'Write file',
-        metadata: {},
-        time: { created: 0 },
-      },
-    ]);
+    stateModule.setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'write',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          title: 'Write file',
+          metadata: {},
+          time: { created: 0 },
+        },
+      ])
+    );
+    flushSolid();
     expect(stateModule.isSessionAwaitingInput('session-1')).toBe(true);
 
-    stateModule.setState('permissions', []);
-    stateModule.setState('questions', [{ id: 'q1', sessionID: 'session-2', questions: [] }]);
+    stateModule.setState(storePath('permissions', []));
+    flushSolid();
+    stateModule.setState(
+      storePath('questions', [{ id: 'q1', sessionID: 'session-2', questions: [] }])
+    );
+    flushSolid();
     expect(stateModule.isSessionAwaitingInput('session-2')).toBe(true);
 
-    stateModule.setState('questions', []);
+    stateModule.setState(storePath('questions', []));
+    flushSolid();
     expect(stateModule.isSessionAwaitingInput('session-3')).toBe(false);
   });
 
   it('treats root-session prompts as awaiting input on child sessions', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
-    stateModule.setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
-    stateModule.setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'write',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        title: 'Write file',
-        metadata: {},
-        time: { created: 0 },
-      },
-    ]);
+    stateModule.setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 10 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/',
+          title: 'Child 1',
+          version: '1',
+          parentID: 'session-1',
+          time: { created: 0, updated: 20 },
+        },
+      ])
+    );
+    flushSolid();
+    stateModule.setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'write',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          title: 'Write file',
+          metadata: {},
+          time: { created: 0 },
+        },
+      ])
+    );
+    flushSolid();
 
     expect(stateModule.isSessionAwaitingInput('child-1')).toBe(true);
   });
 
   it('handles incremental message updates and subagent grouping', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.clearMessages();
+    flushSolid();
     const initialVersion = stateModule.messageStructureVersion();
     stateModule.upsertMessageInfo(userMessage('message-1'));
+    flushSolid();
     expect(stateModule.messageStructureVersion()).toBe(initialVersion + 1);
 
     const afterMessageInsert = stateModule.messageStructureVersion();
     stateModule.upsertMessageInfo(userMessage('message-1', 'session-1', 1));
+    flushSolid();
     expect(stateModule.messageStructureVersion()).toBe(afterMessageInsert + 1);
 
     const afterMessageInfoUpdate = stateModule.messageStructureVersion();
@@ -2283,10 +2730,13 @@ describe('state helpers', () => {
       info: userMessage('message-1', 'session-1', 1),
       parts: [],
     });
+    flushSolid();
     expect(stateModule.messageStructureVersion()).toBe(afterMessageInfoUpdate);
 
     stateModule.applyMessagePartDelta('message-1', 'part-1', 'Hello', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
 
     expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
       id: 'part-1',
@@ -2303,6 +2753,7 @@ describe('state helpers', () => {
       type: 'text',
       text: 'Hello world',
     });
+    flushSolid();
 
     expect(stateModule.messageStructureVersion()).toBe(afterPartInsert);
     expect(stateModule.state.streamingPartId).toBeNull();
@@ -2315,18 +2766,23 @@ describe('state helpers', () => {
       type: 'text',
       text: 'Updated text',
     });
+    flushSolid();
     expect(stateModule.getMessageById('message-1')?.parts[0]).toMatchObject({
       id: 'part-1',
       text: 'Updated text',
     });
 
     stateModule.applyMessagePartDelta('message-1', 'part-2', 'Bye', 'session-1');
+    flushSolid();
     await nextFrame();
+    flushSolid();
     const afterSecondPartInsert = stateModule.messageStructureVersion();
     stateModule.removeMessagePart('session-1', 'message-1', 'missing-part');
+    flushSolid();
     expect(stateModule.messageStructureVersion()).toBe(afterSecondPartInsert);
 
     stateModule.removeMessagePart('session-1', 'message-1', 'part-2');
+    flushSolid();
     expect(stateModule.messageStructureVersion()).toBe(afterSecondPartInsert + 1);
     expect(stateModule.state.messages[0]?.parts).toHaveLength(1);
 
@@ -2334,10 +2790,12 @@ describe('state helpers', () => {
       { info: assistantMessage('message-1', 'session-1', 10), parts: [] },
       { info: assistantMessage('message-2', 'session-1', 20), parts: [] },
     ]);
+    flushSolid();
     stateModule.setMessagesIncremental([
       { info: assistantMessage('message-2', 'session-1', 20), parts: [] },
       { info: assistantMessage('message-3', 'session-1', 30), parts: [] },
     ]);
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'message-2',
@@ -2347,6 +2805,7 @@ describe('state helpers', () => {
     const afterNoOpSync = stateModule.messageStructureVersion();
     const sameEntries = stateModule.state.messages;
     stateModule.setMessagesIncremental(sameEntries);
+    flushSolid();
     expect(stateModule.messageStructureVersion()).toBe(afterNoOpSync);
 
     const children = stateModule.getChildRunsByParentId([
@@ -2361,6 +2820,7 @@ describe('state helpers', () => {
       { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },
       { info: assistantMessage('child-1', 'session-1', 10, 'subagent', 'parent-1'), parts: [] },
     ]);
+    flushSolid();
 
     const cachedChildren = stateModule.getChildRunsByParentId(stateModule.state.messages);
     expect(stateModule.getChildRunsByParentId(stateModule.state.messages)).toBe(cachedChildren);
@@ -2374,6 +2834,7 @@ describe('state helpers', () => {
       { info: assistantMessage('child-2', 'session-1', 20, 'subagent', 'parent-1'), parts: [] },
       { info: assistantMessage('child-1', 'session-1', 10, 'subagent', 'parent-1'), parts: [] },
     ]);
+    flushSolid();
 
     const updatedChildren = stateModule.getChildRunsByParentId(stateModule.state.messages);
     expect(updatedChildren).not.toBe(cachedChildren);
@@ -2386,6 +2847,7 @@ describe('state helpers', () => {
 
   it('reconciles optimistic user messages when the server user message arrives', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const optimisticParts: Part[] = [
       {
         id: 'message-1-part-0',
@@ -2409,14 +2871,17 @@ describe('state helpers', () => {
       info: userMessage('message-1'),
       parts: optimisticParts,
     });
+    flushSolid();
 
     stateModule.upsertMessageInfo(userMessage('message-1'));
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-1']);
   });
 
   it('preserves optimistic user image parts when server metadata arrives first', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const optimisticParts: Part[] = [
       {
         id: 'message-1-part-0',
@@ -2441,8 +2906,10 @@ describe('state helpers', () => {
       info: userMessage('message-1'),
       parts: optimisticParts,
     });
+    flushSolid();
 
     stateModule.upsertMessageInfo(userMessage('message-1'));
+    flushSolid();
 
     expect(stateModule.state.messages).toHaveLength(1);
     expect(stateModule.state.messages[0]?.info.id).toBe('message-1');
@@ -2469,6 +2936,7 @@ describe('state helpers', () => {
 
   it('replaces an optimistic user image part when the server file part arrives', async () => {
     const stateModule = await loadState();
+    flushSolid();
     stateModule.upsertMessage({
       info: userMessage('message-1'),
       parts: [
@@ -2483,7 +2951,9 @@ describe('state helpers', () => {
         },
       ],
     });
+    flushSolid();
     stateModule.upsertMessageInfo(userMessage('message-1'));
+    flushSolid();
 
     stateModule.upsertPart({
       id: 'server-file-1',
@@ -2494,6 +2964,7 @@ describe('state helpers', () => {
       filename: 'image.png',
       url: 'blob:image-1',
     });
+    flushSolid();
 
     expect(stateModule.state.messages[0]?.parts).toEqual([
       {
@@ -2510,6 +2981,7 @@ describe('state helpers', () => {
 
   it('does not preserve optimistic user text when an incremental sync replaces it', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const optimisticParts: Part[] = [
       {
         id: 'optimistic-user-1-part-0',
@@ -2526,6 +2998,7 @@ describe('state helpers', () => {
       { info: assistantMessage('assistant-1', 'session-1', 2), parts: [] },
       { info: userMessage('optimistic-user-1', 'session-1', 3), parts: optimisticParts },
     ]);
+    flushSolid();
 
     stateModule.setMessagesIncremental(
       [
@@ -2546,6 +3019,7 @@ describe('state helpers', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'user-1',
@@ -2565,6 +3039,7 @@ describe('state helpers', () => {
 
   it('prunes and restores only one session subsequence across interleaved child rows', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const childBefore = { info: userMessage('child-before', 'child-1', 2), parts: [] };
     const childAfter = { info: userMessage('child-after', 'child-1', 4), parts: [] };
     const messages = [
@@ -2576,11 +3051,13 @@ describe('state helpers', () => {
       { info: assistantMessage('assistant-2', 'session-1', 5, 'default', 'user-2'), parts: [] },
     ];
     stateModule.setMessagesIncremental(messages);
+    flushSolid();
     const retainedEntries = new Map(
       stateModule.state.messages.map((entry) => [entry.info.id, entry] as const)
     );
 
     const restore = stateModule.pruneMessagesFrom('session-1', 'user-2');
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'user-1',
@@ -2604,10 +3081,13 @@ describe('state helpers', () => {
       ],
     };
     stateModule.upsertMessage(updatedChildAfter);
+    flushSolid();
     const liveChildAfter = stateModule.state.messages[3];
     stateModule.removeMessage('session-1', 'user-1');
+    flushSolid();
 
     restore?.();
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'child-before',
@@ -2621,6 +3101,7 @@ describe('state helpers', () => {
 
   it('removes one recycled child tree without disturbing unrelated rows or streaming', async () => {
     const stateModule = await loadState();
+    flushSolid();
     const unrelatedPart: Part = {
       id: 'unrelated-stream',
       sessionID: 'child-keep',
@@ -2633,13 +3114,17 @@ describe('state helpers', () => {
       { info: userMessage('child-remove-message', 'child-remove', 2), parts: [] },
       { info: userMessage('child-keep-message', 'child-keep', 3), parts: [unrelatedPart] },
     ]);
+    flushSolid();
     const retained = new Map(
       stateModule.state.messages.map((entry) => [entry.info.id, entry] as const)
     );
-    stateModule.setState('streamingPartId', unrelatedPart.id);
-    stateModule.setState('streamingText', 'Unrelated child is still streaming');
+    stateModule.setState(storePath('streamingPartId', unrelatedPart.id));
+    flushSolid();
+    stateModule.setState(storePath('streamingText', 'Unrelated child is still streaming'));
+    flushSolid();
 
     stateModule.removeMessagesForSessions(['child-remove', 'grandchild-remove']);
+    flushSolid();
 
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
       'parent-message',
@@ -2653,10 +3138,13 @@ describe('state helpers', () => {
 
   it('toggles local ui helpers and persists ui display preferences', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     expect(stateModule.composerFocusKey()).toBe(0);
     expect(stateModule.openAttentionSessionsKey()).toBe(0);
+    flushSolid();
     expect(stateModule.openCompletedSessionsKey()).toBe(0);
+    flushSolid();
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
     expect(stateModule.showChangedFiles()).toBe(false);
@@ -2667,14 +3155,19 @@ describe('state helpers', () => {
     stateModule.requestOpenCompletedSessions();
     stateModule.requestMessageListScrollToBottom('message-new-turn');
     stateModule.toggleThinking();
+    flushSolid();
     stateModule.resetPastedImageIndex();
+    flushSolid();
 
     expect(stateModule.composerFocusKey()).toBe(1);
     expect(stateModule.openAttentionSessionsKey()).toBe(1);
+    flushSolid();
     expect(stateModule.openCompletedSessionsKey()).toBe(1);
+    flushSolid();
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
     expect(stateModule.messageListScrollTargetMessageId()).toBe('message-new-turn');
     stateModule.requestMessageListScrollToBottom();
+    flushSolid();
     expect(stateModule.messageListScrollRequestKey()).toBe(2);
     expect(stateModule.messageListScrollTargetMessageId()).toBeNull();
     expect(stateModule.showThinking()).toBe(false);
@@ -2684,6 +3177,7 @@ describe('state helpers', () => {
 
   it('updates incremental message entries when only metadata changes', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setMessagesIncremental([
       {
@@ -2706,6 +3200,7 @@ describe('state helpers', () => {
         ],
       },
     ]);
+    flushSolid();
 
     const beforeVersion = stateModule.messageStructureVersion();
 
@@ -2740,6 +3235,7 @@ describe('state helpers', () => {
         ],
       },
     ]);
+    flushSolid();
 
     expect(stateModule.messageStructureVersion()).toBe(beforeVersion + 1);
     expect(stateModule.state.messages[0]?.info).toMatchObject({
@@ -2761,6 +3257,7 @@ describe('state helpers', () => {
 
   it('preserves newer local parts during incremental snapshot refreshes', async () => {
     const stateModule = await loadState();
+    flushSolid();
 
     stateModule.setMessagesIncremental([
       {
@@ -2768,6 +3265,7 @@ describe('state helpers', () => {
         parts: [],
       },
     ]);
+    flushSolid();
 
     stateModule.upsertPart({
       id: 'tool-1',
@@ -2782,6 +3280,7 @@ describe('state helpers', () => {
         time: { start: 1 },
       },
     });
+    flushSolid();
 
     stateModule.setMessagesIncremental(
       [
@@ -2792,6 +3291,7 @@ describe('state helpers', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(stateModule.state.messages[0]?.parts).toHaveLength(1);
     expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({ id: 'tool-1' });
@@ -2815,6 +3315,7 @@ describe('state helpers', () => {
     };
 
     const stateModule = await loadState();
+    flushSolid();
 
     expect(stateModule.desktopSessionPaneSide()).toBe('right');
   });

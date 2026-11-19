@@ -29,8 +29,8 @@ export function CopyIconButton(props: { text: string; label: string }) {
     <Tooltip content={copied() ? 'Copied' : `Copy ${props.label}`} delay={500}>
       <button
         type="button"
-        class="tool-copy-button"
-        classList={{ 'is-copied': copied() }}
+
+        class={['tool-copy-button', { 'is-copied': copied() }]}
         aria-label={copied() ? 'Copied' : `Copy ${props.label}: ${props.text}`}
         onClick={() => void handleCopy()}
       >

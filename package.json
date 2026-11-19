@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.34.16",
+  "version": "0.35.0",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -92,6 +92,8 @@
     "@imagemagick/magick-wasm": "0.0.46",
     "@opencode-ai/sdk": "^1.19.6",
     "@opencode/client": "^2.3.2",
+    "@solidjs/signals": "2.0.3",
+    "@solidjs/web": "2.0.3",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.18",
     "highlight.js": "11.12.0",
@@ -99,15 +101,16 @@
     "katex": "0.19.1",
     "marked": "18.2.1",
     "mermaid": "^12.3.0",
-    "solid-js": "^1.9.19"
+    "solid-js": "2.0.3"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",
+    "@solidjs/vite-plugin": "3.0.1",
     "@tailwindcss/vite": "4.3.5",
     "@types/css.escape": "1.5.2",
     "@types/node": "26.6.6",
     "@types/vscode": "1.107.0",
-    "@vitest/coverage-v8": "5.1.0",
+    "@vitest/coverage-v8": "5.1.1",
     "@vscode/vsce": "4.1.1",
     "css.escape": "1.5.1",
     "esbuild": "0.28.2",
@@ -121,13 +124,12 @@
     "tailwindcss": "4.3.5",
     "typescript": "7.0.2",
     "vite": "8.3.8",
-    "vite-plugin-solid": "2.11.16",
-    "vitest": "5.1.0",
+    "vitest": "5.1.1",
     "ws": "8.23.0"
   },
   "overrides": {
     "@azure/identity": {
-      "@azure/msal-node": "7.2.2"
+      "@azure/msal-node": "7.2.3"
     },
     "@vscode/vsce": {
       "minimatch": "11.0.9"
@@ -780,7 +782,7 @@
   },
   "volta": {
     "node": "24.22.3",
-    "npm": "12.2.2"
+    "npm": "12.2.3"
   },
   "allowScripts": {
     "@vscode/vsce-sign@2.1.1": true,

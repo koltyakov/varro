@@ -1,6 +1,7 @@
+import { flush as flushSolid, Show } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
-import { Show } from 'solid-js';
+import { render } from '@solidjs/web';
 import { TodoList } from './TodoList';
 import { DEFAULT_TOOLTIP_DELAY } from './Tooltip';
 import { resetDefaultAppState, setState, state } from '../lib/state';
@@ -22,6 +23,7 @@ describe('TodoList', () => {
       'scrollIntoView'
     );
     resetDefaultAppState();
+    flushSolid();
     writeStored(STORAGE_KEYS.todoListCollapsed, null);
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -30,9 +32,12 @@ describe('TodoList', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    flushSolid();
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container?.remove();
+    flushSolid();
     container = null;
     if (originalResizeObserver) {
       globalThis.ResizeObserver = originalResizeObserver;
@@ -49,11 +54,13 @@ describe('TodoList', () => {
       ).scrollIntoView;
     }
     resetDefaultAppState();
+    flushSolid();
     writeStored(STORAGE_KEYS.todoListCollapsed, null);
   });
 
   it('renders an empty todo list with accessible list semantics', () => {
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
 
     const toggle = container?.querySelector('button.todo-block-header');
     const list = container?.querySelector('ul.todo-block-list');
@@ -108,8 +115,10 @@ describe('TodoList', () => {
         ],
       }),
     ];
-    setState('activeSessionId', 'session-1');
-    setState('todos', todos);
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('todos', todos));
+    flushSolid();
     cleanup = render(
       () => (
         <Show when={state.todos.length > 0}>
@@ -118,12 +127,15 @@ describe('TodoList', () => {
       ),
       container!
     );
+    flushSolid();
     const panel = container!.querySelector('.todo-block');
     const list = container!.querySelector('.todo-block-list');
     expect(list).not.toBeNull();
     const operations = createTodoSyncOperations({ loadSessionTodos: async () => [] });
     await operations.syncTodosForSession('session-1', messages);
+    flushSolid();
     await operations.syncTodosForSession('session-1', messages);
+    flushSolid();
     expect(container!.querySelector('.todo-block')).toBe(panel);
     expect(container!.querySelector('.todo-block-list')).toBe(list);
     expect(container!.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
@@ -134,30 +146,39 @@ describe('TodoList', () => {
   it('makes an overflowing todo list keyboard-scrollable', async () => {
     vi.spyOn(HTMLUListElement.prototype, 'scrollHeight', 'get').mockReturnValue(200);
     vi.spyOn(HTMLUListElement.prototype, 'clientHeight', 'get').mockReturnValue(100);
-    setState('todos', [
-      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('ul.todo-block-list')?.getAttribute('tabindex')).toBe('0');
   });
 
   it('renders pending, in-progress, completed, and cancelled todos and toggles collapse', () => {
-    setState('todos', [
-      { id: 'todo-1', content: 'Pending task', status: 'pending', priority: 'low' },
-      {
-        id: 'todo-2',
-        content: 'Working task',
-        status: 'in_progress',
-        priority: 'medium',
-      },
-      { id: 'todo-3', content: 'Done task', status: 'completed', priority: 'high' },
-      { id: 'todo-4', content: 'Cancelled task', status: 'cancelled', priority: 'low' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Pending task', status: 'pending', priority: 'low' },
+        {
+          id: 'todo-2',
+          content: 'Working task',
+          status: 'in_progress',
+          priority: 'medium',
+        },
+        { id: 'todo-3', content: 'Done task', status: 'completed', priority: 'high' },
+        { id: 'todo-4', content: 'Cancelled task', status: 'cancelled', priority: 'low' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
@@ -180,12 +201,14 @@ describe('TodoList', () => {
     );
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('ul.todo-block-list')).toBeNull();
     expect(container?.querySelector('.todo-block-active')?.textContent).toBe('Working task');
     expect(container?.querySelectorAll('.todo-block-active-dot')).toHaveLength(1);
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelector('.todo-block-active')).toBeNull();
     items = container?.querySelectorAll('li.todo-block-item');
@@ -193,41 +216,57 @@ describe('TodoList', () => {
   });
 
   it('remembers a manual collapse for active todos until the list is expanded', async () => {
-    setState('todos', [
-      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     let toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(readStored(STORAGE_KEYS.todoListCollapsed)).toBe(true);
 
     cleanup();
+    flushSolid();
     cleanup = undefined;
     container?.replaceChildren();
+    flushSolid();
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
 
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
 
-    setState('todos', (todos) => [
-      ...todos,
-      { id: 'todo-2', content: 'Next task', status: 'pending', priority: 'medium' },
-    ]);
+    setState(
+      storePath('todos', (todos) => [
+        ...todos,
+        { id: 'todo-2', content: 'Next task', status: 'pending', priority: 'medium' },
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
 
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(readStored(STORAGE_KEYS.todoListCollapsed)).toBeNull();
 
     cleanup();
+    flushSolid();
     cleanup = undefined;
     container?.replaceChildren();
+    flushSolid();
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
       'true'
@@ -235,47 +274,64 @@ describe('TodoList', () => {
   });
 
   it('keeps resolved todos visible on the next prompt and expands for new work', async () => {
-    setState('messages', [
-      {
-        info: userMessage('user-current'),
-        parts: [],
-      },
-    ]);
-    setState('todos', [
-      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
-      { id: 'todo-2', content: 'Cancelled task', status: 'cancelled', priority: 'low' },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: userMessage('user-current'),
+          parts: [],
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+        { id: 'todo-2', content: 'Cancelled task', status: 'cancelled', priority: 'low' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
 
     expect(container?.querySelector('.todo-block')).not.toBeNull();
 
-    setState('messages', (messages) => [
-      ...messages,
-      {
-        info: userMessage('user-while-unfinished'),
-        parts: [],
-      },
-    ]);
+    setState(
+      storePath('messages', (messages) => [
+        ...messages,
+        {
+          info: userMessage('user-while-unfinished'),
+          parts: [],
+        },
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.todo-block')).not.toBeNull();
     expect(container?.textContent).toContain('Working task');
 
-    setState('todos', 0, 'status', 'completed');
+    setState(storePath('todos', 0, 'status', 'completed'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.todo-block')).not.toBeNull();
     expect(container?.textContent).toContain('2/2');
 
-    setState('messages', (messages) => [
-      ...messages,
-      {
-        info: userMessage('user-next'),
-        parts: [],
-      },
-    ]);
+    setState(
+      storePath('messages', (messages) => [
+        ...messages,
+        {
+          info: userMessage('user-next'),
+          parts: [],
+        },
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.todo-block')).not.toBeNull();
     expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
@@ -283,11 +339,15 @@ describe('TodoList', () => {
     );
     expect(container?.textContent).toContain('2/2');
 
-    setState('todos', (todos) => [
-      ...todos,
-      { id: 'todo-3', content: 'New task', status: 'pending', priority: 'medium' },
-    ]);
+    setState(
+      storePath('todos', (todos) => [
+        ...todos,
+        { id: 'todo-3', content: 'New task', status: 'pending', priority: 'medium' },
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.todo-block')).not.toBeNull();
     expect(container?.textContent).toContain('New task');
@@ -295,16 +355,21 @@ describe('TodoList', () => {
 
   it('shows a dot per running todo and rotates their collapsed labels every five seconds', async () => {
     vi.useFakeTimers();
-    setState('todos', [
-      { id: 'todo-1', content: 'First running task', status: 'in_progress', priority: 'high' },
-      { id: 'todo-2', content: 'Second running task', status: 'in_progress', priority: 'medium' },
-      { id: 'todo-3', content: 'Later task', status: 'pending', priority: 'low' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'First running task', status: 'in_progress', priority: 'high' },
+        { id: 'todo-2', content: 'Second running task', status: 'in_progress', priority: 'medium' },
+        { id: 'todo-3', content: 'Later task', status: 'pending', priority: 'low' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     const dots = container?.querySelectorAll('.todo-block-active-dot');
     expect(dots).toHaveLength(2);
@@ -315,6 +380,7 @@ describe('TodoList', () => {
     );
 
     await vi.advanceTimersByTimeAsync(5_000);
+    flushSolid();
     expect(dots?.item(0).classList).not.toContain('is-current');
     expect(dots?.item(1).classList).toContain('is-current');
     expect(container?.querySelector('.todo-block-active-text')?.textContent).toBe(
@@ -322,6 +388,7 @@ describe('TodoList', () => {
     );
 
     await vi.advanceTimersByTimeAsync(5_000);
+    flushSolid();
     expect(dots?.item(0).classList).toContain('is-current');
     expect(dots?.item(1).classList).not.toContain('is-current');
     expect(container?.querySelector('.todo-block-active-text')?.textContent).toBe(
@@ -333,11 +400,15 @@ describe('TodoList', () => {
     'shows a styled tooltip only for truncated %s todo rows',
     async (status) => {
       vi.useFakeTimers();
-      setState('todos', [
-        { id: 'todo-1', content: 'Task details', status, priority: 'high' },
-        { id: 'todo-2', content: 'Next task', status: 'pending', priority: 'low' },
-      ]);
+      setState(
+        storePath('todos', [
+          { id: 'todo-1', content: 'Task details', status, priority: 'high' },
+          { id: 'todo-2', content: 'Next task', status: 'pending', priority: 'low' },
+        ])
+      );
+      flushSolid();
       cleanup = render(() => TodoList(), container!);
+      flushSolid();
 
       const row = container!.querySelector('[data-todo-id="todo-1"]')!;
       const text = row.querySelector('.todo-block-item-text')!;
@@ -345,15 +416,21 @@ describe('TodoList', () => {
       Object.defineProperty(text, 'clientWidth', { configurable: true, value: 100 });
 
       row.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
       row.dispatchEvent(new MouseEvent('mouseleave'));
+      flushSolid();
 
       Object.defineProperty(text, 'clientWidth', { configurable: true, value: 50 });
       row.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY - 1);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
       await vi.advanceTimersByTimeAsync(1);
+      flushSolid();
 
       const tooltip = document.querySelector('[role="tooltip"]');
       expect(tooltip?.textContent).toBe('Task details');
@@ -363,24 +440,32 @@ describe('TodoList', () => {
       expect(row.getAttribute('aria-describedby')).toBe(tooltip?.id);
 
       row.dispatchEvent(new MouseEvent('mouseleave'));
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
       Object.defineProperty(text, 'clientWidth', { configurable: true, value: 150 });
       row.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
     }
   );
 
   it('shows a styled tooltip only when the collapsed todo text is truncated', async () => {
     vi.useFakeTimers();
-    setState('todos', [
-      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
     container
       ?.querySelector('button.todo-block-header')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     const active = container?.querySelector('.todo-block-active');
     const text = container?.querySelector('.todo-block-active-text');
@@ -388,19 +473,25 @@ describe('TodoList', () => {
     Object.defineProperty(text, 'clientWidth', { configurable: true, value: 100 });
 
     active?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     expect(active?.getAttribute('title')).toBeNull();
     active?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
 
     Object.defineProperty(text, 'clientWidth', { configurable: true, value: 50 });
     active?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    flushSolid();
 
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Working task');
     expect(active?.getAttribute('title')).toBeNull();
 
     container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 
@@ -410,22 +501,29 @@ describe('TodoList', () => {
       configurable: true,
       value: scrollIntoView,
     });
-    setState('todos', [
-      { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'low' },
-      { id: 'todo-2', content: 'Working task', status: 'in_progress', priority: 'high' },
-      { id: 'todo-3', content: 'Later task', status: 'pending', priority: 'medium' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'low' },
+        { id: 'todo-2', content: 'Working task', status: 'in_progress', priority: 'high' },
+        { id: 'todo-3', content: 'Later task', status: 'pending', priority: 'medium' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const activeItem = container!.querySelector('[data-todo-id="todo-2"]');
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     expect(scrollIntoView.mock.contexts).toContain(activeItem);
 
     scrollIntoView.mockClear();
-    setState('todos', 1, 'status', 'completed');
+    setState(storePath('todos', 1, 'status', 'completed'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const nextActiveItem = container!.querySelector('[data-todo-id="todo-3"]');
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
@@ -433,12 +531,16 @@ describe('TodoList', () => {
   });
 
   it('starts collapsed when all todos are completed and expands when a new todo arrives', async () => {
-    setState('todos', [
-      { id: 'todo-1', content: 'Done task 1', status: 'completed', priority: 'low' },
-      { id: 'todo-2', content: 'Done task 2', status: 'completed', priority: 'medium' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Done task 1', status: 'completed', priority: 'low' },
+        { id: 'todo-2', content: 'Done task 2', status: 'completed', priority: 'medium' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
 
     const toggle = container?.querySelector('button.todo-block-header');
     const progressFill = container?.querySelector('.todo-block-progress-fill');
@@ -449,12 +551,16 @@ describe('TodoList', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((progressFill as HTMLDivElement | null)?.style.width).toBe('100%');
 
-    setState('todos', (todos) => [
-      ...todos,
-      { id: 'todo-3', content: 'New task', status: 'pending', priority: 'high' },
-    ]);
+    setState(
+      storePath('todos', (todos) => [
+        ...todos,
+        { id: 'todo-3', content: 'New task', status: 'pending', priority: 'high' },
+      ])
+    );
+    flushSolid();
 
     await Promise.resolve();
+    flushSolid();
 
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('li.todo-block-item')).toHaveLength(3);
@@ -462,57 +568,77 @@ describe('TodoList', () => {
   });
 
   it('collapses automatically when all todos become completed', async () => {
-    setState('todos', [
-      { id: 'todo-1', content: 'First task', status: 'in_progress', priority: 'high' },
-      { id: 'todo-2', content: 'Second task', status: 'pending', priority: 'medium' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'First task', status: 'in_progress', priority: 'high' },
+        { id: 'todo-2', content: 'Second task', status: 'pending', priority: 'medium' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
 
-    setState('todos', 0, 'status', 'completed');
+    setState(storePath('todos', 0, 'status', 'completed'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
 
-    setState('todos', 1, 'status', 'completed');
+    setState(storePath('todos', 1, 'status', 'completed'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('ul.todo-block-list')).toBeNull();
     expect(readStored(STORAGE_KEYS.todoListCollapsed)).toBeNull();
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('collapses completed todos for a new prompt and expands when a new todo arrives', async () => {
-    setState('todos', [
-      { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'medium' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'medium' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => TodoList(), container!);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
 
-    setState('messages', [{ info: userMessage('user-1'), parts: [] }]);
+    setState(storePath('messages', [{ info: userMessage('user-1'), parts: [] }]));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.todo-block')).not.toBeNull();
     expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
       'false'
     );
 
-    setState('todos', (todos) => [
-      ...todos,
-      { id: 'todo-2', content: 'New task', status: 'pending', priority: 'high' },
-    ]);
+    setState(
+      storePath('todos', (todos) => [
+        ...todos,
+        { id: 'todo-2', content: 'New task', status: 'pending', priority: 'high' },
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
       'true'
@@ -532,10 +658,13 @@ describe('TodoList', () => {
     }
     // SAFETY: The fixture provides the unknown fields read by this statement.
     globalThis.ResizeObserver = fixture<typeof ResizeObserver>(TestResizeObserver);
-    setState('todos', [
-      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
-      { id: 'todo-2', content: 'Later task', status: 'pending', priority: 'medium' },
-    ]);
+    setState(
+      storePath('todos', [
+        { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+        { id: 'todo-2', content: 'Later task', status: 'pending', priority: 'medium' },
+      ])
+    );
+    flushSolid();
     container!.innerHTML = `
       <div class="chat-main-column-shell">
         <div class="interactive-list"></div>
@@ -552,6 +681,7 @@ describe('TodoList', () => {
     Object.defineProperty(chatView, 'clientHeight', { configurable: true, value: 500 });
 
     cleanup = render(() => TodoList(), mount);
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = mount.querySelector('button.todo-block-header') as HTMLButtonElement;
@@ -566,10 +696,12 @@ describe('TodoList', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resizeCallback?.([], {} as ResizeObserver);
     await Promise.resolve();
+    flushSolid();
 
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
 
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resizeCallback?.([], {} as ResizeObserver);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');

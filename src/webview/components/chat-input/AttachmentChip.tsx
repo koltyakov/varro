@@ -1,5 +1,6 @@
-import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { ariaBoolean } from '../../lib/aria';
+import { createEffect, Show, createSignal, onCleanup } from 'solid-js';
+import { Portal } from '@solidjs/web';
 import { gymIcon, messageTextIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
 import { AttachmentLabel } from '../AttachmentLabel';
 import { FileTypeIcon } from '../FileTypeIcon';
@@ -36,8 +37,8 @@ export function AttachmentChip(props: {
   let labelElement: HTMLSpanElement | undefined;
   let unregisterComposerDismiss: (() => void) | undefined;
 
-  const updateTitleVisibility = () => {
-    if (props.title !== props.label) return;
+  const updateTitleVisibility = (distinctTitle = props.title !== props.label) => {
+    if (distinctTitle) return;
     const stem = labelElement?.querySelector<HTMLElement>('.chip-label-stem');
     const isTruncated = stem
       ? stem.scrollWidth > stem.clientWidth
@@ -51,14 +52,20 @@ export function AttachmentChip(props: {
     setPreviewStyle(null);
   };
 
-  createEffect(() => {
-    if (props.title !== props.label) setShowTitle(true);
-    else updateTitleVisibility();
-  });
+  createEffect(
+    () => props.title !== props.label,
+    (distinctTitle) => {
+      if (distinctTitle) setShowTitle(true);
+      else updateTitleVisibility(distinctTitle);
+    }
+  );
 
-  createEffect(() => {
-    if (!props.previewImage) hidePreview();
-  });
+  createEffect(
+    () => props.previewImage,
+    (image) => {
+      if (!image) hidePreview();
+    }
+  );
   onCleanup(hidePreview);
 
   const showPreview = (element: HTMLElement) => {
@@ -101,12 +108,14 @@ export function AttachmentChip(props: {
     <span
       class={`chat-attachment-chip${props.disabled ? ' disabled' : ''}${props.onClick ? ' clickable' : ''}${props.compressionHint ? ' image-size-warning' : ''}`}
       title={props.compressionHint ?? (showTitle() ? props.title : undefined)}
-      aria-disabled={props.disabled && !(props.toggle && props.onClick) ? 'true' : undefined}
-      aria-pressed={
+      aria-disabled={ariaBoolean(
+        props.disabled && !(props.toggle && props.onClick) ? 'true' : undefined
+      )}
+      aria-pressed={ariaBoolean(
         props.onClick && props.toggle ? (!props.disabled ? 'true' : 'false') : undefined
-      }
+      )}
       role={props.onClick ? 'button' : undefined}
-      tabIndex={props.onClick ? 0 : undefined}
+      tabindex={props.onClick ? 0 : undefined}
       onClick={() => props.onClick?.()}
       onKeyDown={handleKeyDown}
       onMouseEnter={(event) => showPreview(event.currentTarget)}

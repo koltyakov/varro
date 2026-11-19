@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
 });
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise the webview entry module's integration boundaries. */
-vi.mock('solid-js/web', () => ({ render: mocks.render }));
+vi.mock('@solidjs/web', () => ({ render: mocks.render }));
 vi.mock('./App', () => ({ AppRoot: () => null }));
 vi.mock('./lib/bridge', () => ({
   cleanupBridge: mocks.cleanupBridge,

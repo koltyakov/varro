@@ -1,6 +1,9 @@
+import { storePath } from '@solidjs/signals';
+import { snapshot } from 'solid-js';
+import { isFunction } from './runtime-values';
 import type { QueuedMessage } from './app-state-types';
 import { prepareForQueuedMessageRemoval } from './message-list-layout';
-import { setState, state } from './app-state';
+import { setState } from './app-state';
 import { postMessage } from './bridge';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 import { readWebviewInstanceContext } from './state-stored-values';
@@ -90,8 +93,14 @@ export function releaseQueuedMessageDispatch(message: QueuedMessage, lease: numb
   });
 }
 
-function commitQueuedMessages(messages: QueuedMessage[]) {
-  setState('queuedMessages', messages);
+function commitQueuedMessages(
+  update: QueuedMessage[] | ((current: QueuedMessage[]) => QueuedMessage[])
+) {
+  let messages: QueuedMessage[] = [];
+  setState((draft) => {
+    draft.queuedMessages = isFunction(update) ? update(draft.queuedMessages) : update;
+    messages = snapshot(draft.queuedMessages);
+  });
   reconcileQueuedMessageState(messages);
   const ownedMessages = messages.filter(ownsQueuedMessage);
   // Data URLs can make queued media messages tens of megabytes. Persist them through the
@@ -149,35 +158,39 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
 
 function reconcileQueuedMessageState(messages: QueuedMessage[], preserveMissingEdit = false) {
   const ids = new Set(messages.map((message) => message.id));
-  if (state.queuedMessageDispatchingId && !ids.has(state.queuedMessageDispatchingId)) {
-    setState('queuedMessageDispatchingId', null);
-  }
-  if (!preserveMissingEdit && state.queuedMessageEdit && !ids.has(state.queuedMessageEdit.id)) {
-    setState('queuedMessageEdit', null);
-  }
-  const failedIds = state.failedQueuedMessageIds.filter((id) => ids.has(id));
-  if (failedIds.length !== state.failedQueuedMessageIds.length) {
-    setState('failedQueuedMessageIds', failedIds);
-  }
+  setState((draft) => {
+    if (draft.queuedMessageDispatchingId && !ids.has(draft.queuedMessageDispatchingId)) {
+      draft.queuedMessageDispatchingId = null;
+    }
+    if (!preserveMissingEdit && draft.queuedMessageEdit && !ids.has(draft.queuedMessageEdit.id)) {
+      draft.queuedMessageEdit = null;
+    }
+    const failedIds = draft.failedQueuedMessageIds.filter((id) => ids.has(id));
+    if (failedIds.length !== draft.failedQueuedMessageIds.length) {
+      draft.failedQueuedMessageIds = failedIds;
+    }
+  });
 }
 
 export function syncQueuedMessages() {
-  commitQueuedMessages([...state.queuedMessages]);
+  commitQueuedMessages((messages) => messages);
 }
 
 export function setQueuedMessageDispatchingId(id: string | null) {
-  setState('queuedMessageDispatchingId', id);
+  setState(storePath('queuedMessageDispatchingId', id));
 }
 
 export function setQueuedMessageFailed(id: string, failed: boolean) {
-  const ids = new Set(state.failedQueuedMessageIds);
-  if (failed) ids.add(id);
-  else ids.delete(id);
-  setState('failedQueuedMessageIds', [...ids]);
+  setState((draft) => {
+    const ids = new Set(draft.failedQueuedMessageIds);
+    if (failed) ids.add(id);
+    else ids.delete(id);
+    draft.failedQueuedMessageIds = [...ids];
+  });
 }
 
 export function setQueuedMessageEdit(edit: { id: string; sessionId: string } | null) {
-  setState('queuedMessageEdit', edit);
+  setState(storePath('queuedMessageEdit', edit));
   writeStored(STORAGE_KEYS.queuedMessageEdit, edit);
 }
 
@@ -185,14 +198,14 @@ export function enqueueMessage(message: QueuedMessage) {
   const context = readWebviewInstanceContext();
   const ownedMessage =
     context?.surface === 'editor' ? { ...message, ownerViewId: context.viewId } : message;
-  commitQueuedMessages([...state.queuedMessages, ownedMessage]);
+  commitQueuedMessages((current) => [...current, ownedMessage]);
 }
 
 export function applyQueuedMessagesSnapshot(messages: QueuedMessage[], mutationId?: string) {
   // An older persistence echo must not erase a newer local enqueue, edit, or removal.
   if (pendingQueueMutationId && mutationId && mutationId !== pendingQueueMutationId) return;
   pendingQueueMutationId = undefined;
-  setState('queuedMessages', messages);
+  setState(storePath('queuedMessages', messages));
   reconcileQueuedMessageState(messages, true);
   const browserPersisted = messages
     .filter(ownsQueuedMessage)
@@ -204,75 +217,87 @@ export function applyQueuedMessagesSnapshot(messages: QueuedMessage[], mutationI
 }
 
 export function replaceQueuedMessage(id: string, message: QueuedMessage) {
-  const next = [...state.queuedMessages];
-  const index = next.findIndex((item) => item.id === id);
-  if (index === -1) return false;
-  const existing = next[index]!;
-  if (!ownsQueuedMessage(existing)) return false;
-  next[index] = { ...message, ownerViewId: existing.ownerViewId };
-  commitQueuedMessages(next);
-  return true;
+  let replaced = false;
+  setState((draft) => {
+    const next = [...draft.queuedMessages];
+    const index = next.findIndex((item) => item.id === id);
+    if (index === -1) return;
+    const existing = next[index]!;
+    if (!ownsQueuedMessage(existing)) return;
+    next[index] = { ...message, ownerViewId: existing.ownerViewId };
+    commitQueuedMessages(next);
+    replaced = true;
+  });
+  return replaced;
 }
 
 export function removeQueuedMessage(id: string) {
-  const message = state.queuedMessages.find((item) => item.id === id);
-  if (!message || !ownsQueuedMessage(message)) return;
-  const next = state.queuedMessages.filter((item) => item.id !== id);
-  if (next.length === state.queuedMessages.length) return;
-  prepareForQueuedMessageRemoval(id);
-  commitQueuedMessages(next);
+  setState((draft) => {
+    const message = draft.queuedMessages.find((item) => item.id === id);
+    if (!message || !ownsQueuedMessage(message)) return;
+    const next = draft.queuedMessages.filter((item) => item.id !== id);
+    if (next.length === draft.queuedMessages.length) return;
+    prepareForQueuedMessageRemoval(id);
+    commitQueuedMessages(next);
+  });
 }
 
 export function setQueuedMessagePaused(id: string, paused: boolean, allForSession = false) {
-  const message = state.queuedMessages.find((item) => item.id === id);
-  if (!message || !ownsQueuedMessage(message)) return;
-  let changed = false;
-  state.queuedMessages.forEach((item, index) => {
-    if (item.id !== id && (!allForSession || item.sessionId !== message.sessionId)) return;
-    if (!ownsQueuedMessage(item)) return;
-    if ((item.paused === true) === paused) return;
-    setState('queuedMessages', index, 'paused', paused ? true : undefined);
-    changed = true;
+  setState((draft) => {
+    const message = draft.queuedMessages.find((item) => item.id === id);
+    if (!message || !ownsQueuedMessage(message)) return;
+    let changed = false;
+    draft.queuedMessages.forEach((item) => {
+      if (item.id !== id && (!allForSession || item.sessionId !== message.sessionId)) return;
+      if (!ownsQueuedMessage(item)) return;
+      if ((item.paused === true) === paused) return;
+      item.paused = paused ? true : undefined;
+      changed = true;
+    });
+    if (changed) syncQueuedMessages();
   });
-  if (changed) syncQueuedMessages();
 }
 
 export function reorderQueuedMessage(id: string, targetId: string) {
   if (id === targetId) return;
-  const message = state.queuedMessages.find((item) => item.id === id);
-  const target = state.queuedMessages.find((item) => item.id === targetId);
-  if (
-    !message ||
-    !target ||
-    !ownsQueuedMessage(message) ||
-    !ownsQueuedMessage(target) ||
-    message.sessionId !== target.sessionId
-  ) {
-    return;
-  }
+  setState((draft) => {
+    const message = draft.queuedMessages.find((item) => item.id === id);
+    const target = draft.queuedMessages.find((item) => item.id === targetId);
+    if (
+      !message ||
+      !target ||
+      !ownsQueuedMessage(message) ||
+      !ownsQueuedMessage(target) ||
+      message.sessionId !== target.sessionId
+    ) {
+      return;
+    }
 
-  const sessionMessages = state.queuedMessages.filter(
-    (item) => item.sessionId === message.sessionId
-  );
-  const sourceIndex = sessionMessages.findIndex((item) => item.id === id);
-  const targetIndex = sessionMessages.findIndex((item) => item.id === targetId);
-  const moved = sessionMessages[sourceIndex];
-  if (!moved || targetIndex === -1) return;
+    const sessionMessages = draft.queuedMessages.filter(
+      (item) => item.sessionId === message.sessionId
+    );
+    const sourceIndex = sessionMessages.findIndex((item) => item.id === id);
+    const targetIndex = sessionMessages.findIndex((item) => item.id === targetId);
+    const moved = sessionMessages[sourceIndex];
+    if (!moved || targetIndex === -1) return;
 
-  sessionMessages.splice(sourceIndex, 1);
-  sessionMessages.splice(targetIndex, 0, moved);
-  let sessionIndex = 0;
-  const next = state.queuedMessages.map((item) => {
-    if (item.sessionId !== message.sessionId) return item;
-    return sessionMessages[sessionIndex++] ?? item;
+    sessionMessages.splice(sourceIndex, 1);
+    sessionMessages.splice(targetIndex, 0, moved);
+    let sessionIndex = 0;
+    const next = draft.queuedMessages.map((item) => {
+      if (item.sessionId !== message.sessionId) return item;
+      return sessionMessages[sessionIndex++] ?? item;
+    });
+    commitQueuedMessages(next);
   });
-  commitQueuedMessages(next);
 }
 
 export function clearQueuedMessagesForSession(sessionId: string) {
-  const next = state.queuedMessages.filter(
-    (item) => item.sessionId !== sessionId || !ownsQueuedMessage(item)
-  );
-  if (next.length === state.queuedMessages.length) return;
-  commitQueuedMessages(next);
+  setState((draft) => {
+    const next = draft.queuedMessages.filter(
+      (item) => item.sessionId !== sessionId || !ownsQueuedMessage(item)
+    );
+    if (next.length === draft.queuedMessages.length) return;
+    commitQueuedMessages(next);
+  });
 }

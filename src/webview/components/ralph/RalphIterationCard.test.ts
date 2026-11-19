@@ -1,5 +1,6 @@
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { RalphIteration } from '../../../shared/ralph';
 import type { Session } from '../../types';
 import { setSessionUsageLimit, setState } from '../../lib/state';
@@ -40,9 +41,9 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   selectSessionMock.mockReset();
-  setState('sessionStatus', {});
-  setState('sessionUsageLimits', {});
-  setState('failedSessionIds', []);
+  setState(storePath('sessionStatus', {}));
+  setState(storePath('sessionUsageLimits', {}));
+  setState(storePath('failedSessionIds', []));
 });
 
 afterEach(() => {
@@ -52,9 +53,9 @@ afterEach(() => {
   container = null;
   vi.useRealTimers();
   vi.restoreAllMocks();
-  setState('sessionStatus', {});
-  setState('sessionUsageLimits', {});
-  setState('failedSessionIds', []);
+  setState(storePath('sessionStatus', {}));
+  setState(storePath('sessionUsageLimits', {}));
+  setState(storePath('failedSessionIds', []));
 });
 
 describe('RalphIterationCard', () => {
@@ -395,7 +396,7 @@ describe('RalphIterationCard', () => {
       version: '1',
       time: { created: 0, updated: 0 },
     };
-    setState('sessions', [childSession]);
+    setState(storePath('sessions', [childSession]));
     setSessionUsageLimit('child-session-1', {
       source: 'status',
       statusCode: 429,
@@ -453,7 +454,7 @@ describe('RalphIterationCard', () => {
       parentID: 'manager-session',
       time: { created: 0, updated: 0 },
     };
-    setState('sessions', [managerSession, childSession, siblingSession]);
+    setState(storePath('sessions', [managerSession, childSession, siblingSession]));
     setSessionUsageLimit('child-session-error', {
       source: 'status',
       statusCode: 429,
@@ -492,7 +493,7 @@ describe('RalphIterationCard', () => {
       version: '1',
       time: { created: 0, updated: 0 },
     };
-    setState('sessions', [childSession]);
+    setState(storePath('sessions', [childSession]));
     setSessionUsageLimit('child-session-2', {
       source: 'status',
       statusCode: 429,
@@ -536,7 +537,7 @@ describe('RalphIterationCard', () => {
       version: '1',
       time: { created: 0, updated: 0 },
     };
-    setState('sessions', [childSession]);
+    setState(storePath('sessions', [childSession]));
     setSessionUsageLimit('child-session-3', {
       source: 'status',
       statusCode: 429,

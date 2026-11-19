@@ -1,5 +1,7 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import * as bridge from '../lib/bridge';
 import { citationPathChecks } from '../lib/citation-path-checks';
 import * as clipboard from '../lib/write-clipboard';
@@ -69,6 +71,7 @@ function edit(text: string) {
   selection?.removeAllRanges();
   selection?.addRange(range);
   input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  flushSolid();
   return input;
 }
 
@@ -96,18 +99,28 @@ beforeEach(() => {
     }
   );
   resetDefaultAppState();
+  flushSolid();
   setIsLoading(false);
-  setState('sessions', [
-    fixture<Session>({
-      id: 'ses_side',
-      directory: '/repo',
-      title: 'Fix migration',
-      time: { created: 1, updated: 2 },
-    }),
-  ]);
-  setState('activeSessionId', 'ses_side');
-  setState('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' });
+  flushSolid();
+  setState(
+    storePath('sessions', [
+      fixture<Session>({
+        id: 'ses_side',
+        directory: '/repo',
+        title: 'Fix migration',
+        time: { created: 1, updated: 2 },
+      }),
+    ])
+  );
+  flushSolid();
+  setState(storePath('activeSessionId', 'ses_side'));
+  flushSolid();
+  setState(
+    storePath('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' })
+  );
+  flushSolid();
   setInputText('Unsent task draft');
+  flushSolid();
   container = document.createElement('div');
   document.body.append(container);
   vi.spyOn(bridge, 'apiCall').mockResolvedValue({ text: '**Because** the default was missing.' });
@@ -117,11 +130,16 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
+  flushSolid();
   closeSideQuestion();
+  flushSolid();
   flushInputDraft();
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
   vi.unstubAllGlobals();
 });
 
@@ -131,12 +149,19 @@ describe('SideQuestionDialog', () => {
     const checks = vi.spyOn(citationPathChecks, 'peek').mockReturnValue('/repo/models/file.py');
     const open = vi.spyOn(bridge, 'openPathWithResult').mockResolvedValue('opened');
     mount('Where is the implementation?');
+    flushSolid();
     await settle();
+    flushSolid();
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
-    setState('activeSessionId', 'another-session');
-    setState('editorContext', 'workspacePath', '/other');
+    flushSolid();
+    setState(storePath('activeSessionId', 'another-session'));
+    flushSolid();
+    setState(storePath('editorContext', 'workspacePath', '/other'));
+    flushSolid();
     dialog().querySelector<HTMLAnchorElement>('a.file-path-link')!.click();
+    flushSolid();
     expect(open).toHaveBeenCalledWith({
       path: '/repo/models/file.py',
       line: 710,
@@ -155,17 +180,22 @@ describe('SideQuestionDialog', () => {
   it('sends successive questions without creating unowned computations', async () => {
     const warn = vi.spyOn(console, 'warn');
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     for (const question of ['First question', 'Second question', 'Third question']) {
       expect(button('Send (Enter)').disabled).toBe(true);
       edit(question);
       expect(button('Send (Enter)').disabled).toBe(false);
       button('Send (Enter)').click();
+      flushSolid();
       await settle();
+      flushSolid();
     }
     expect(bridge.apiCall).toHaveBeenCalledTimes(3);
     expect(dialog().querySelectorAll('.side-question-answer')).toHaveLength(3);
     button('Close side question').click();
+    flushSolid();
     expect(document.querySelector('.side-question-dialog')).toBeNull();
     expect(warn).not.toHaveBeenCalledWith(
       'computations created outside a `createRoot` or `render` will never be disposed'
@@ -175,7 +205,9 @@ describe('SideQuestionDialog', () => {
   it('sends captured context once and renders the usual attachment chips in the bubble', async () => {
     const context = '[Attached file: src/file.ts]\n\n[Selection from src/other.ts lines 2-4]';
     mount('Explain these', context);
+    flushSolid();
     await settle();
+    flushSolid();
     expect(vi.mocked(bridge.apiCall).mock.calls[0]![2]).toEqual({
       question: `Explain these\n\n${context}`,
     });
@@ -183,7 +215,9 @@ describe('SideQuestionDialog', () => {
     expect(dialog().querySelector('.side-question-question')?.textContent).toContain('file.ts');
     edit('And why?');
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(vi.mocked(bridge.apiCall).mock.calls[1]![2]).toEqual({
       question: 'And why?',
       history: [
@@ -195,10 +229,14 @@ describe('SideQuestionDialog', () => {
   it('keeps context on retry without inserting serialized attachment blocks into the editor', async () => {
     vi.mocked(bridge.apiCall).mockRejectedValueOnce(new Error('Provider unavailable'));
     mount('Explain', '[Attached file: src/file.ts]');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().querySelector('.rich-composer')?.textContent).toBe('Explain');
     button('Retry').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(vi.mocked(bridge.apiCall).mock.calls[1]![2]).toEqual({
       question: 'Explain\n\n[Attached file: src/file.ts]',
     });
@@ -206,7 +244,9 @@ describe('SideQuestionDialog', () => {
 
   it('blocks unsupported inline skills in follow-ups instead of sending them as plain text', async () => {
     mount('First');
+    flushSolid();
     await settle();
+    flushSolid();
     edit('$[docs] Explain');
     expect(button('Send (Enter)').disabled).toBe(true);
     dialog()
@@ -214,7 +254,9 @@ describe('SideQuestionDialog', () => {
       .dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
       );
+    flushSolid();
     await settle();
+    flushSolid();
     expect(bridge.apiCall).toHaveBeenCalledTimes(1);
     expect(feedback.showSessionActionFeedback).toHaveBeenCalledWith(
       'Side questions cannot use skills',
@@ -226,14 +268,19 @@ describe('SideQuestionDialog', () => {
     'warns on %s paste without reading images, losing drafts, or changing main attachments',
     async (source) => {
       mount();
+      flushSolid();
       await settle();
+      flushSolid();
       const input = edit('Keep this side draft');
       const attachments = state.clipboardImages;
       const documentPaste = vi.fn();
       document.addEventListener('paste', documentPaste);
+      flushSolid();
       try {
         const { event, getAsFile } = paste(input, '', source);
+        flushSolid();
         await settle();
+        flushSolid();
         expect(event.defaultPrevented).toBe(true);
         expect(getAsFile).not.toHaveBeenCalled();
         expect(documentPaste).not.toHaveBeenCalled();
@@ -242,6 +289,7 @@ describe('SideQuestionDialog', () => {
           'warning',
           input.closest('.chat-input-container')
         );
+        flushSolid();
         expect(input.textContent).toBe('Keep this side draft');
         expect(input.querySelector('img')).toBeNull();
         expect(state.clipboardImages).toBe(attachments);
@@ -250,23 +298,30 @@ describe('SideQuestionDialog', () => {
         expect(dialog().querySelector('[role="alert"]')).toBeNull();
       } finally {
         document.removeEventListener('paste', documentPaste);
+        flushSolid();
       }
     }
   );
 
   it('warns for a mixed image/text paste but preserves and sends only the text', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const input = edit('Question: ');
     const { getAsFile } = paste(input, 'keep this text', 'image-items');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(input.textContent).toBe('Question: keep this text');
     expect(getAsFile).not.toHaveBeenCalled();
     expect(feedback.showSessionActionFeedback).toHaveBeenCalledOnce();
     expect(state.clipboardImages).toEqual([]);
     expect(bridge.apiCall).not.toHaveBeenCalled();
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(vi.mocked(bridge.apiCall).mock.calls[0]![2]).toEqual({
       question: 'Question: keep this text',
     });
@@ -275,10 +330,14 @@ describe('SideQuestionDialog', () => {
 
   it('pastes ordinary text without a warning', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const input = edit('Question: ');
     paste(input, 'plain text', 'text');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(input.textContent).toBe('Question: plain text');
     expect(feedback.showSessionActionFeedback).not.toHaveBeenCalled();
   });
@@ -294,11 +353,14 @@ describe('SideQuestionDialog', () => {
         })
     );
     mount('First question');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().querySelector('.side-question-response-time')).toBeNull();
     now = 3_400;
     complete({ text: 'First answer' });
     await settle();
+    flushSolid();
     expect(dialog().querySelector('.side-question-response-time')?.textContent).toBe('2s');
     expect(dialog().querySelector('.side-question-response-time')?.getAttribute('aria-label')).toBe(
       'Response time: 2s'
@@ -307,7 +369,9 @@ describe('SideQuestionDialog', () => {
     now = 10_000;
     edit('Second question');
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(vi.mocked(bridge.apiCall).mock.calls[1]![2]).toEqual({
       question: 'Second question',
       history: [{ question: 'First question', answer: 'First answer' }],
@@ -315,6 +379,7 @@ describe('SideQuestionDialog', () => {
     now = 10_250;
     complete({ text: 'Second answer' });
     await settle();
+    flushSolid();
     expect(
       [...dialog().querySelectorAll('.side-question-response-time')].map(
         (element) => element.textContent
@@ -325,7 +390,9 @@ describe('SideQuestionDialog', () => {
   it('puts Copy below the answer in a divider row without an extra composer toolbar and preserves the main task', async () => {
     const messages = state.messages;
     mount('Why did the migration fail?');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(bridge.apiCall).toHaveBeenCalledExactlyOnceWith(
       'POST',
       '/session/ses_side/side-question?directory=%2Frepo',
@@ -349,7 +416,9 @@ describe('SideQuestionDialog', () => {
       '.assistant-dialog-summary-turn-actions [aria-label="Copy answer"]'
     )!;
     copy.click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(clipboard.writeClipboard).toHaveBeenCalledWith('**Because** the default was missing.');
     expect(copy.getAttribute('aria-label')).toBe('Answer copied');
     expect(copy.classList.contains('assistant-dialog-summary-copy')).toBe(true);
@@ -373,8 +442,11 @@ describe('SideQuestionDialog', () => {
     const opener = document.createElement('button');
     document.body.append(opener);
     opener.focus();
+    flushSolid();
     const onClose = mount();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(document.activeElement).toBe(dialog().querySelector('.rich-composer'));
     expect(bridge.apiCall).not.toHaveBeenCalled();
     expect(button('Send (Enter)').disabled).toBe(true);
@@ -387,9 +459,11 @@ describe('SideQuestionDialog', () => {
     dialog().dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     );
+    flushSolid();
     expect(onClose).toHaveBeenCalledOnce();
     expect(document.activeElement).toBe(opener);
     opener.remove();
+    flushSolid();
     expect(inputText()).toBe('Unsent task draft');
   });
 
@@ -402,15 +476,20 @@ describe('SideQuestionDialog', () => {
         })
     );
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     edit('Why did that fail?');
     expect(dialog().querySelector('.side-question-empty-state')).not.toBeNull();
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().querySelector('.side-question-empty-state')).toBeNull();
     expect(dialog().querySelector('[role="status"]')).not.toBeNull();
     complete({ text: 'Because of the missing default.' });
     await settle();
+    flushSolid();
     expect(dialog().querySelector('.side-question-empty-state')).toBeNull();
     expect(dialog().querySelector('[aria-label="Follow-up question"]')).not.toBeNull();
   });
@@ -431,40 +510,53 @@ describe('SideQuestionDialog', () => {
         })
     );
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     edit('Why?');
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().style.getPropertyValue('--side-question-min-height')).toBe('372px');
     expect(dialog().querySelector('.chat-empty-logo-waves')).toBeNull();
     complete({ text: 'Because.' });
     await settle();
+    flushSolid();
     expect(dialog().style.getPropertyValue('--side-question-min-height')).toBe('372px');
   });
 
   it('retains the question and offers Retry after a request error without a chat-wide error', async () => {
     vi.mocked(bridge.apiCall).mockRejectedValueOnce(new Error('Provider unavailable'));
     mount('Why?');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(dialog().querySelector('.rich-composer')?.textContent).toBe('Why?');
     expect(document.activeElement).toBe(dialog().querySelector('.rich-composer'));
     expect(dialog().querySelector('[role="alert"]')?.textContent).toContain('Provider unavailable');
     expect(dialog().querySelector('.side-question-empty-state')).toBeNull();
     expect(error()).toBeNull();
     button('Retry').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(bridge.apiCall).toHaveBeenCalledTimes(2);
     expect(dialog().querySelector('strong')?.textContent).toBe('Because');
   });
 
   it('asks while the main task is busy without changing its state', async () => {
-    setState('sessionStatus', 'ses_side', { type: 'busy' });
+    setState(storePath('sessionStatus', 'ses_side', { type: 'busy' }));
+    flushSolid();
     mount();
+    flushSolid();
     const input = edit('Why?');
     input.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     );
+    flushSolid();
     await settle();
+    flushSolid();
     expect(bridge.apiCall).toHaveBeenCalledTimes(1);
     expect(dialog().querySelector('.side-question-answer')?.textContent).toContain('Because');
     expect(state.sessionStatus.ses_side).toEqual({ type: 'busy' });
@@ -480,12 +572,16 @@ describe('SideQuestionDialog', () => {
         })
     );
     mount('Why?');
+    flushSolid();
     await settle();
+    flushSolid();
     const signal = vi.mocked(bridge.apiCall).mock.calls[0]![3]!.signal!;
     dialog().querySelector<HTMLButtonElement>('[aria-label="Close side question"]')!.click();
+    flushSolid();
     expect(signal.aborted).toBe(true);
     complete({ text: 'Late answer' });
     await settle();
+    flushSolid();
     expect(document.querySelector('.side-question-dialog')).toBeNull();
     expect(bridge.apiCall).toHaveBeenCalledTimes(1);
     expect(inputText()).toBe('Unsent task draft');
@@ -494,10 +590,14 @@ describe('SideQuestionDialog', () => {
   it('keeps a side request running when the main task becomes busy', async () => {
     vi.mocked(bridge.apiCall).mockImplementation(() => new Promise(() => {}));
     mount('Why?');
+    flushSolid();
     await settle();
+    flushSolid();
     const signal = vi.mocked(bridge.apiCall).mock.calls[0]![3]!.signal!;
-    setState('sessionStatus', 'ses_side', { type: 'busy' });
+    setState(storePath('sessionStatus', 'ses_side', { type: 'busy' }));
+    flushSolid();
     await settle();
+    flushSolid();
     expect(signal.aborted).toBe(false);
     expect(dialog().querySelector('[role="status"]')).not.toBeNull();
     expect(state.sessionStatus.ses_side).toEqual({ type: 'busy' });
@@ -507,10 +607,14 @@ describe('SideQuestionDialog', () => {
   it('keeps an admitted context snapshot independent of later main-draft changes', async () => {
     vi.mocked(bridge.apiCall).mockImplementation(() => new Promise(() => {}));
     mount('Explain', '[Attached file: src/file.ts]');
+    flushSolid();
     await settle();
+    flushSolid();
     const signal = vi.mocked(bridge.apiCall).mock.calls[0]![3]!.signal!;
     setInputText('$[docs] A different main draft');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(signal.aborted).toBe(false);
     expect(dialog().querySelector('[role="status"]')).not.toBeNull();
     expect(vi.mocked(bridge.apiCall).mock.calls[0]![2]).toEqual({
@@ -521,14 +625,18 @@ describe('SideQuestionDialog', () => {
   it('keeps a local question/answer thread and includes it in follow-ups without changing main history', async () => {
     const messages = state.messages;
     mount('What is the retry budget?');
+    flushSolid();
     await settle();
+    flushSolid();
     const input = dialog().querySelector<HTMLDivElement>('[aria-label="Follow-up question"]')!;
     expect(document.activeElement).toBe(input);
     edit('Why that number?');
     input.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     );
+    flushSolid();
     await settle();
+    flushSolid();
     expect(bridge.apiCall).toHaveBeenNthCalledWith(
       2,
       'POST',
@@ -560,13 +668,18 @@ describe('SideQuestionDialog', () => {
           })
       );
     mount('First question');
+    flushSolid();
     await settle();
+    flushSolid();
     edit('Second question');
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
+    flushSolid();
     const input = edit('Keep this next question');
     complete({ text: 'Second answer' });
     await settle();
+    flushSolid();
     expect(input.textContent).toBe('Keep this next question');
     expect(dialog().querySelectorAll('.side-question-turn')).toHaveLength(2);
   });
@@ -574,7 +687,9 @@ describe('SideQuestionDialog', () => {
   it('shows only the first question and Thinking while pending, with Close focused and no composer or Stop', async () => {
     vi.mocked(bridge.apiCall).mockImplementation(() => new Promise(() => {}));
     mount('Why?');
+    flushSolid();
     await settle();
+    flushSolid();
     expect(
       dialog().querySelector('[role="status"] .shimmer-progress.loading-verb')?.textContent
     ).toBe('Thinking');
@@ -598,19 +713,26 @@ describe('SideQuestionDialog', () => {
           })
       );
     mount('First question');
+    flushSolid();
     await settle();
+    flushSolid();
     edit('Second question');
     button('Send (Enter)').click();
+    flushSolid();
     await settle();
+    flushSolid();
     const signal = vi.mocked(bridge.apiCall).mock.calls[1]![3]!.signal!;
     edit('Next draft');
     button('Stop').click();
+    flushSolid();
     await settle();
+    flushSolid();
     expect(signal.aborted).toBe(true);
     expect(dialog().querySelector('[role="status"]')).toBeNull();
     expect(dialog().querySelector('.rich-composer')?.textContent).toBe('Next draft');
     complete({ text: 'Late answer' });
     await settle();
+    flushSolid();
     expect(dialog().querySelectorAll('.side-question-answer')).toHaveLength(1);
     expect(inputText()).toBe('Unsent task draft');
     expect(bridge.apiCall).toHaveBeenCalledTimes(2);
@@ -619,13 +741,17 @@ describe('SideQuestionDialog', () => {
 
   it('reuses composer undo and redo without touching the main draft', async () => {
     mount();
+    flushSolid();
     await settle();
+    flushSolid();
     const input = edit('First edit');
     edit('Second replacement');
     input.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
     );
+    flushSolid();
     await settle();
+    flushSolid();
     expect(input.textContent).toBe('First edit');
     input.dispatchEvent(
       new KeyboardEvent('keydown', {
@@ -636,7 +762,9 @@ describe('SideQuestionDialog', () => {
         cancelable: true,
       })
     );
+    flushSolid();
     await settle();
+    flushSolid();
     expect(input.textContent).toBe('Second replacement');
     expect(inputText()).toBe('Unsent task draft');
   });

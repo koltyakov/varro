@@ -1,3 +1,4 @@
+import { storePath } from '@solidjs/signals';
 import type { Agent, Command, Provider } from '../../types';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { postMessage } from '../bridge';
@@ -46,9 +47,10 @@ import {
 } from '../state';
 
 function releaseWorkspaceCatalogReloadLock() {
-  if (state.providersLoaded && state.agentsLoaded && state.commandsLoaded) {
-    setState('workspaceCatalogReloadPending', false);
-  }
+  setState((draft) => {
+    if (draft.providersLoaded && draft.agentsLoaded && draft.commandsLoaded)
+      draft.workspaceCatalogReloadPending = false;
+  });
 }
 
 export const routingStore = {
@@ -72,12 +74,12 @@ export const routingStore = {
   setProviderAuthMethods,
   setWorkspaceStatuses,
   finishWorkspaceCatalogReload() {
-    setState('workspaceCatalogReloadPending', false);
+    setState(storePath('workspaceCatalogReloadPending', false));
   },
   getAvailableMcpNames,
   setCommands(commands: Command[]) {
     setCommandsState(commands);
-    setState('commandsLoaded', true);
+    setState(storePath('commandsLoaded', true));
     releaseWorkspaceCatalogReloadLock();
   },
   getProviderLimit,
@@ -96,15 +98,15 @@ export const routingStore = {
   setModelsVisible,
   resetModelVisibility,
   setAllAgents(agents: Agent[]) {
-    setState('allAgents', agents);
+    setState(storePath('allAgents', agents));
   },
   setPrimaryAgents(agents: Agent[]) {
-    setState('agents', agents);
-    setState('agentsLoaded', true);
+    setState(storePath('agents', agents));
+    setState(storePath('agentsLoaded', true));
     releaseWorkspaceCatalogReloadLock();
   },
   setProvidersLoaded(value: boolean) {
-    setState('providersLoaded', value);
+    setState(storePath('providersLoaded', value));
     if (value) releaseWorkspaceCatalogReloadLock();
   },
   setProviders(
@@ -135,17 +137,19 @@ export const routingStore = {
     if (hiddenModelsChanged) {
       const base = getModelPreferencesSnapshot();
       const hiddenModels = [...nextHiddenModels];
-      setState('hiddenModels', hiddenModels);
-      writeStored(STORAGE_KEYS.hiddenModels, hiddenModels);
-      postMessage({
-        type: 'model-preferences/update',
-        payload: { base, preferences: getModelPreferencesSnapshot() },
+      setState((draft) => {
+        draft.hiddenModels = hiddenModels;
+        postMessage({
+          type: 'model-preferences/update',
+          payload: { base, preferences: getModelPreferencesSnapshot(draft) },
+        });
       });
+      writeStored(STORAGE_KEYS.hiddenModels, hiddenModels);
     }
-    setState('providers', providers);
+    setState(storePath('providers', providers));
   },
   setProviderDefaults(defaults: Record<string, string>) {
-    setState('providerDefaults', defaults);
+    setState(storePath('providerDefaults', defaults));
   },
   setProviderLimitStatus(
     providerID: string,

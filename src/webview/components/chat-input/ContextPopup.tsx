@@ -1,4 +1,5 @@
-import { For, createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { ariaBoolean } from '../../lib/aria';
+import { For, createSignal, onSettled, Show } from 'solid-js';
 import {
   checkSquareIcon,
   databaseBackupIcon,
@@ -139,8 +140,13 @@ export function ContextPopup(props: {
     if (isFunction(forwarded)) forwarded(el);
   };
 
-  onMount(() => {
-    if (!popupEl || !props.boundaryRef) return;
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (!popupEl || !props.boundaryRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
 
     const reposition = () => {
       if (!popupEl || !props.boundaryRef) return;
@@ -149,7 +155,11 @@ export function ContextPopup(props: {
       clampPopupToViewport(popupEl);
     };
 
-    onCleanup(observePopupViewport(popupEl, reposition));
+    cleanups.push(observePopupViewport(popupEl, reposition));
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   return (
@@ -182,11 +192,13 @@ export function ContextPopup(props: {
         <For each={getTokenRows(props.tokens)}>
           {(row) => (
             <div
-              class="context-popup-row"
-              classList={{
-                'context-popup-row-cache-read': row.key === 'cacheRead',
-                'context-popup-row-cache-write': row.key === 'cacheWrite',
-              }}
+              class={[
+                'context-popup-row',
+                {
+                  'context-popup-row-cache-read': row.key === 'cacheRead',
+                  'context-popup-row-cache-write': row.key === 'cacheWrite',
+                },
+              ]}
             >
               <span class="context-popup-row-label">{row.label}</span>
               <span
@@ -283,7 +295,7 @@ export function ContextPopup(props: {
         <button
           type="button"
           class="context-popup-section context-popup-section-toggle"
-          aria-expanded={subagentsExpanded()}
+          aria-expanded={ariaBoolean(subagentsExpanded())}
           onClick={() => setSubagentsExpanded((expanded) => !expanded)}
         >
           <span>Agents{props.subagentCount > 0 ? ` (${props.subagentCount})` : ''}</span>
@@ -302,11 +314,13 @@ export function ContextPopup(props: {
             <For each={getTokenRows(props.subagentTokens)}>
               {(row) => (
                 <div
-                  class="context-popup-row"
-                  classList={{
-                    'context-popup-row-cache-read': row.key === 'cacheRead',
-                    'context-popup-row-cache-write': row.key === 'cacheWrite',
-                  }}
+                  class={[
+                    'context-popup-row',
+                    {
+                      'context-popup-row-cache-read': row.key === 'cacheRead',
+                      'context-popup-row-cache-write': row.key === 'cacheWrite',
+                    },
+                  ]}
                 >
                   <span class="context-popup-row-label">{row.label}</span>
                   <span class="context-popup-row-value">

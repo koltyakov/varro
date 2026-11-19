@@ -519,42 +519,6 @@
   padding-top: var(--assistant-bordered-block-gap);
 }
 
-.assistant-active-activity-item.is-entering {
-  animation: assistant-active-activity-in var(--assistant-activity-entry-duration, 0.28s)
-    cubic-bezier(0.16, 0.72, 0.24, 1) both;
-}
-
-/* Incremental entry growth changes the native thumb's drag mapping on every frame. */
-.interactive-list[data-pointer-scroll-owned] {
-  --assistant-activity-entry-duration: 0s;
-}
-
-.interactive-item-container.interactive-response:not(.interactive-item-entering):has(
-    .assistant-message-flow
-      > .assistant-active-activity-tray:only-child:not(.has-active-summary)
-      > .assistant-active-activity-items
-      > .assistant-active-activity-item.is-entering:only-child
-  ) {
-  animation: assistant-active-activity-row-in var(--assistant-activity-entry-duration, 0.28s)
-    cubic-bezier(0.16, 0.72, 0.24, 1) both;
-}
-
-.interactive-item-container.interactive-response:not(.interactive-item-entering):has(
-    .assistant-message-flow
-      > .assistant-active-activity-tray:only-child:not(.has-active-summary)
-      > .assistant-active-activity-items
-      > .assistant-active-activity-item.is-entering:only-child
-  )
-  .assistant-turn-content:not(
-    .assistant-turn-content-bare,
-    .assistant-turn-content-plain,
-    .assistant-turn-content-highlighted,
-    .assistant-turn-content-planning
-  ) {
-  animation: assistant-active-activity-shell-in var(--assistant-activity-entry-duration, 0.28s)
-    cubic-bezier(0.16, 0.72, 0.24, 1) both;
-}
-
 .assistant-active-activity-item.is-completed {
   opacity: 0.82;
 }
@@ -570,60 +534,9 @@
   );
 }
 
+/* Active tools appear and leave immediately; they never fold in or out. */
 .assistant-active-activity-item.is-exiting {
-  animation: assistant-active-activity-out 0.42s cubic-bezier(0.3, 0, 0.2, 1) both;
-}
-
-@keyframes assistant-active-activity-in {
-  from {
-    grid-template-rows: 0fr;
-    opacity: 0;
-  }
-
-  to {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-}
-
-@keyframes assistant-active-activity-row-in {
-  from {
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-
-  to {
-    padding-top: 6px;
-    padding-bottom: 6px;
-  }
-}
-
-@keyframes assistant-active-activity-shell-in {
-  from {
-    padding-top: 0;
-    padding-bottom: 0;
-    border-top-width: 0;
-    border-bottom-width: 0;
-  }
-
-  to {
-    padding-top: 12px;
-    padding-bottom: 12px;
-    border-top-width: 1px;
-    border-bottom-width: 1px;
-  }
-}
-
-@keyframes assistant-active-activity-out {
-  from {
-    grid-template-rows: 1fr;
-    opacity: 0.82;
-  }
-
-  to {
-    grid-template-rows: 0fr;
-    opacity: 0;
-  }
+  display: none;
 }
 
 @keyframes assistant-active-activity-summary-gap-out {
@@ -2402,7 +2315,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
 }
 
 .file-path-icon.low-ink-icon {
-  /* Low-drawn ink lands between whole pixels at 1x, so either integer offset reads a pixel off.
+  /* Ink outside the usual frame lands between whole pixels, so an integer offset reads a pixel off.
      The box stays on the baseline to snap with the text; the transform moves only the paint. */
   vertical-align: baseline;
   transform: translateY(calc((1 - var(--file-icon-ink-bottom)) * 0.875em));
@@ -2416,6 +2329,44 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
 .rendered-markdown :is(.file-path-icon, .session-reference-icon, .external-link-icon) {
   /* The icon artwork and the first glyph already leave some space. */
   margin-right: 0.5px;
+}
+
+/* Link artwork fills its box width, so the margin is the visible gap before the title. */
+.external-link-icon,
+.rendered-markdown .external-link-icon {
+  margin-right: 0.18em;
+}
+
+/* The artwork ends 2/24 short of its box width, so subtract that from the visible gap. */
+.session-reference-icon,
+.rendered-markdown .session-reference-icon {
+  margin-right: calc(0.18em - (2 / 24) * 0.875em);
+}
+
+/* Link artwork leaves empty space below its ink. Seat the ink itself on the text baseline, because
+   a rounded box offset lands on different pixels at each text size. */
+.external-link-icon,
+.session-reference-icon {
+  --link-icon-ink-gap: calc(6 / 32);
+
+  vertical-align: baseline;
+  transform: translateY(calc(var(--link-icon-ink-gap) * 0.875em));
+}
+
+.external-link-icon[data-chip-icon='git'] {
+  --link-icon-ink-gap: calc(1.66 / 32);
+}
+
+.session-reference-icon {
+  --link-icon-ink-gap: calc(3 / 24);
+}
+
+/* A round shape reads high when it only touches the baseline. High-density screens can overshoot
+   by a single device pixel, as round letters do; at 1x the same offset would be a whole pixel. */
+@media (min-resolution: 2dppx) {
+  .session-reference-icon {
+    transform: translateY(calc(var(--link-icon-ink-gap) * 0.875em + 0.5px));
+  }
 }
 
 .rendered-markdown .file-path-icon {
@@ -2499,7 +2450,8 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   object-fit: contain;
 }
 
-.rendered-markdown.remote-images-enabled [data-remote-image] {
+.rendered-markdown.remote-images-enabled [data-remote-image],
+.rendered-markdown [data-local-image] {
   display: inline-flex;
   vertical-align: top;
   width: min(100%, 384px);
@@ -2508,6 +2460,20 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   border-radius: 6px;
   background: var(--color-vscode-bg);
   overflow: hidden;
+}
+
+.local-markdown-image {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.local-markdown-image-placeholder {
+  align-self: center;
+  width: 100%;
+  padding: 12px;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .remote-markdown-image-placeholder {

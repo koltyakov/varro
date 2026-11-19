@@ -1,3 +1,4 @@
+import { storePath } from '@solidjs/signals';
 import type { SelectedModel } from '../lib/app-state-types';
 import { client, type SessionListPage } from '../lib/client';
 import { appStore } from '../lib/stores/app-store';
@@ -124,13 +125,15 @@ export function createStateBoundDataLoaderOperations(deps: {
     finishWorkspaceCatalogReload: routingStore.finishWorkspaceCatalogReload,
     listSessions: (limit) => client.session.list({ limit }),
     applySessions: deps.applySessions,
-    setSessionsLoadError: (message) => appStore.setState('sessionsLoadError', message),
-    setSessionsHasMore: (value) => appStore.setState('sessionsHasMore', value),
-    setSessionsLoadingMore: (value) => appStore.setState('sessionsLoadingMore', value),
-    setSessionsPaginationError: (message) => appStore.setState('sessionsPaginationError', message),
+    setSessionsLoadError: (message) => appStore.setState(storePath('sessionsLoadError', message)),
+    setSessionsHasMore: (value) => appStore.setState(storePath('sessionsHasMore', value)),
+    setSessionsLoadingMore: (value) => appStore.setState(storePath('sessionsLoadingMore', value)),
+    setSessionsPaginationError: (message) =>
+      appStore.setState(storePath('sessionsPaginationError', message)),
     listRecycleBin: () => client.varro.recycleBin.list(),
     setRecycleBinEntries: sessionStore.setRecycleBinEntries,
-    setRecycleBinLoadError: (message) => appStore.setState('recycleBinLoadError', message),
+    setRecycleBinLoadError: (message) =>
+      appStore.setState(storePath('recycleBinLoadError', message)),
     loadSessionStatuses: () => client.session.status(),
     setSessionStatuses: sessionStore.setSessionStatuses,
     getSessions: () => appStore.state.sessions,

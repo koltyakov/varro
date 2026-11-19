@@ -1,5 +1,5 @@
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { flush as flushSolid, createSignal } from 'solid-js';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 
@@ -89,8 +89,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   if (originalResizeObserver) {
     globalThis.ResizeObserver = originalResizeObserver;
@@ -99,10 +101,11 @@ afterEach(() => {
     delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
   }
   vi.restoreAllMocks();
+  flushSolid();
 });
 
 describe('CompletionMenu', () => {
-  it('shows native execution help only for the selected command', () => {
+  it('shows selected command help in a separate panel above the scrollable menu', () => {
     const [selectedIndex, setSelectedIndex] = createSignal(0);
     cleanup = render(
       () => (
@@ -114,10 +117,16 @@ describe('CompletionMenu', () => {
       ),
       container!
     );
-    expect(container?.querySelector('[role="note"]')?.textContent).toBe(
-      'OpenCode decides where this runs.'
-    );
+    flushSolid();
+    const help = container?.querySelector('[role="note"]');
+    const menu = container?.querySelector('.composer-completion-menu');
+    expect(help?.textContent).toBe('OpenCode decides where this runs.');
+    expect(help?.parentElement).toBe(menu?.parentElement);
+    expect(help?.nextElementSibling).toBe(menu);
+    expect(menu?.contains(help ?? null)).toBe(false);
+    expect(menu?.querySelectorAll('button')).toHaveLength(2);
     setSelectedIndex(1);
+    flushSolid();
     expect(container?.querySelector('[role="note"]')).toBeNull();
   });
 
@@ -134,6 +143,7 @@ describe('CompletionMenu', () => {
         }),
       container!
     );
+    flushSolid();
 
     const header = container?.querySelector('.composer-completion-header');
     const buttons = container?.querySelectorAll<HTMLButtonElement>('button') ?? [];
@@ -149,7 +159,9 @@ describe('CompletionMenu', () => {
 
     const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     buttons[0]?.dispatchEvent(mouseDown);
+    flushSolid();
     buttons[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(mouseDown.defaultPrevented).toBe(true);
     expect(onSelect).toHaveBeenCalledOnce();
@@ -164,11 +176,14 @@ describe('CompletionMenu', () => {
       () => <CompletionMenu items={items()} selectedIndex={0} onSelect={onSelect} />,
       container!
     );
+    flushSolid();
 
     expect(container?.querySelectorAll('button')).toHaveLength(2);
 
     setItems([]);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.composer-completion-header')).toBeNull();
     expect(container?.querySelectorAll('button')).toHaveLength(0);
@@ -214,8 +229,10 @@ describe('CompletionMenu', () => {
       ),
       container!
     );
+    flushSolid();
 
     await flushMicrotasks();
+    flushSolid();
 
     const menu = container?.querySelector<HTMLDivElement>('.composer-completion-menu');
     const fileTitle = Array.from(
@@ -233,11 +250,14 @@ describe('CompletionMenu', () => {
 
     menu.scrollTop = 24;
     setSelectedIndex(0);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(menu.scrollTop).toBe(0);
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     expect(disconnectObserverMock).toHaveBeenCalled();
   });
@@ -252,6 +272,7 @@ describe('CompletionMenu', () => {
         }),
       container!
     );
+    flushSolid();
 
     const icon = container?.querySelector<HTMLElement>('.composer-completion-icon .ui-icon');
     expect(icon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
@@ -268,6 +289,7 @@ describe('CompletionMenu', () => {
         }),
       container!
     );
+    flushSolid();
 
     const icon = container?.querySelector('.composer-completion-icon img');
     expect(icon).toBeInstanceOf(HTMLImageElement);
@@ -289,6 +311,7 @@ describe('CompletionMenu', () => {
       () => <CompletionMenu items={[recentSessionItem]} selectedIndex={0} onSelect={vi.fn()} />,
       container!
     );
+    flushSolid();
 
     const icon = container?.querySelector('.composer-completion-icon img');
     const age = container?.querySelector('.composer-completion-age');

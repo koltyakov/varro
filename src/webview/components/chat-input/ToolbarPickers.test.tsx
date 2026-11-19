@@ -1,8 +1,8 @@
-import { createSignal } from 'solid-js';
+import { flush as flushSolid, createSignal } from 'solid-js';
 import cubeIcon from 'iconoir/icons/cube.svg';
 import binocularSvg from 'iconoir/icons/binocular.svg?raw';
 import cubeScanSolidSvg from 'iconoir/icons/cube-scan-solid.svg?raw';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelPricing, WebviewMessage } from '../../../shared/protocol';
 import type { Agent, Provider } from '../../types';
@@ -65,11 +65,15 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   Reflect.deleteProperty(window, '__sendToExtension');
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
   vi.useRealTimers();
 });
 
@@ -93,6 +97,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst');
     expect(
@@ -101,6 +106,7 @@ describe('ToolbarPickers', () => {
       )
     ).toEqual(['j', 's', 't']);
     setSelectedPath('/MyDotNetProject');
+    flushSolid();
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('mdnp');
     expect(
       [...(container?.querySelectorAll('.workspace-name-initial') ?? [])].map(
@@ -108,9 +114,11 @@ describe('ToolbarPickers', () => {
       )
     ).toEqual(['M', 'D', 'N', 'P']);
     setSelectedPath('/gosip');
+    flushSolid();
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('gosip');
     expect(container?.querySelectorAll('.workspace-name-initial')).toHaveLength(0);
     setSelectedPath('/Drop Box');
+    flushSolid();
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe(
       'Drop Box'
     );
@@ -135,11 +143,14 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst1');
     setSelectedPath('/jobs-service-test');
+    flushSolid();
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst2');
     setSelectedPath('/java-script-tools');
+    flushSolid();
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst3');
   });
 
@@ -159,6 +170,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.workspace-picker-button')?.getAttribute('aria-label')).toBe(
       'Selected workspace: Repo B'
@@ -186,6 +198,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const allFolders = container?.querySelector('.workspace-popover-all');
     expect(allFolders?.querySelector('.workspace-popover-name')?.textContent).toBe('All folders');
@@ -214,16 +227,23 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const button = container?.querySelector('.workspace-picker-button');
     button?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('2 folders in workspace');
 
     button?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     setSelectedPath('/repo-b');
+    flushSolid();
     button?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('/repo-b');
   });
 
@@ -240,6 +260,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.workspace-picker-button')?.getAttribute('aria-label')).toBe(
       'Selected workspace: Varro'
@@ -265,6 +286,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     const path = container?.querySelector<HTMLElement>(
       '[data-workspace-path="/a/long/path/to/repo-b"] .workspace-popover-path'
     );
@@ -272,17 +294,23 @@ describe('ToolbarPickers', () => {
     vi.spyOn(path!, 'scrollWidth', 'get').mockReturnValue(160);
     vi.spyOn(path!, 'clientWidth', 'get').mockImplementation(() => clientWidth);
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(path?.getAttribute('title')).toBeNull();
 
     clientWidth = 100;
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(path?.getAttribute('title')).toBe('/a/long/path/to/repo-b');
 
     clientWidth = 200;
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(path?.getAttribute('title')).toBeNull();
   });
 
@@ -318,7 +346,9 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
       await flushMicrotasks();
+      flushSolid();
       expect(observerCount).toBe(1);
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
@@ -356,7 +386,9 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const popup = container?.querySelector<HTMLElement>('.toolbar-popover');
     expect(popup?.style.left).toBe('24px');
@@ -374,7 +406,9 @@ describe('ToolbarPickers', () => {
       toJSON: () => ({}),
     });
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(popup?.style.width).toBe('180px');
   });
@@ -405,6 +439,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
     const options = container?.querySelectorAll<HTMLButtonElement>('.toolbar-popover-item') ?? [];
@@ -419,8 +454,11 @@ describe('ToolbarPickers', () => {
     expect(options[1]?.className).not.toContain('selected');
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     options[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     popoverRef?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(onToggle).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledWith('full');
@@ -430,6 +468,7 @@ describe('ToolbarPickers', () => {
   it('opens the permission guide from the picker header', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     Reflect.set(window, '__sendToExtension', send);
+    flushSolid();
 
     cleanup = render(
       () => (
@@ -442,6 +481,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const learnMore = container?.querySelector<HTMLButtonElement>('.permission-mode-learn-more');
     const externalIcon = learnMore?.querySelector<HTMLElement>('.ui-icon');
@@ -451,6 +491,7 @@ describe('ToolbarPickers', () => {
     );
 
     learnMore?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-external',
@@ -471,6 +512,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.permission-mode-settings-button')).toBeNull();
   });
@@ -487,6 +529,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
 
@@ -556,6 +599,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
     const activity = container?.querySelector<HTMLElement>('.permission-activity');
@@ -578,6 +622,7 @@ describe('ToolbarPickers', () => {
     );
 
     activity?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(onToggle).not.toHaveBeenCalled();
   });
 
@@ -595,6 +640,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.permission-activity')).toBeNull();
   });
@@ -612,6 +658,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
 
@@ -619,7 +666,9 @@ describe('ToolbarPickers', () => {
     expect(container?.querySelector('.toolbar-popover')).toBeNull();
 
     toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1500);
+    flushSolid();
 
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
       'Full access: Allow commands and edits without prompts.'
@@ -639,6 +688,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
 
@@ -671,6 +721,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     const popup = container?.querySelector<HTMLElement>('.permission-mode-popover');
     const parent = popup?.parentElement;
     vi.spyOn(popup!, 'offsetParent', 'get').mockReturnValue(parent ?? null);
@@ -686,7 +737,9 @@ describe('ToolbarPickers', () => {
     });
     vi.spyOn(popup!, 'scrollWidth', 'get').mockReturnValue(320);
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(popup?.style.width).toBe('250px');
     expect(popup?.style.left).toBe('-200px');
@@ -715,6 +768,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     const popup = container?.querySelector<HTMLElement>('.permission-mode-popover');
     const parent = popup?.parentElement;
     vi.spyOn(popup!, 'offsetParent', 'get').mockReturnValue(parent ?? null);
@@ -730,7 +784,9 @@ describe('ToolbarPickers', () => {
     });
     vi.spyOn(popup!, 'scrollWidth', 'get').mockReturnValue(288);
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(popup?.style.width).toBe('288px');
     expect(popup?.style.left).toBe('-144px');
@@ -741,7 +797,9 @@ describe('ToolbarPickers', () => {
       right: 700,
     });
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(popup?.style.left).toBe('0px');
   });
@@ -772,6 +830,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     const options =
@@ -788,8 +847,11 @@ describe('ToolbarPickers', () => {
     expect(options[1]?.querySelector('.text-vscode-muted')?.className).toContain('font-normal');
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     options[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     options[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(onToggle).toHaveBeenCalledOnce();
     expect(onFocusIndex).toHaveBeenCalledWith(0);
@@ -814,6 +876,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
 
@@ -846,6 +909,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     const options = container?.querySelectorAll('.agent-popover .toolbar-popover-item') ?? [];
@@ -882,6 +946,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     expect(toggleButton?.querySelector('.agent-picker-value-icon')).toBeNull();
@@ -911,6 +976,7 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
 
       const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
       expect(
@@ -942,14 +1008,17 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     await vi.dynamicImportSettled();
+    flushSolid();
 
     for (const [name, svg] of [
       ['binocular', binocularSvg],
       ['cube-scan-solid', cubeScanSolidSvg],
     ] as const) {
       setIcon(name);
+      flushSolid();
       await vi.waitFor(() => {
         const sources = [
           container?.querySelector<HTMLElement>('.agent-picker-value-icon'),
@@ -958,6 +1027,7 @@ describe('ToolbarPickers', () => {
         expect(sources[0]).toBe(toCssUrl(`data:image/svg+xml,${encodeURIComponent(svg)}`));
         expect(sources[1]).toBe(sources[0]);
       });
+      flushSolid();
     }
   });
 
@@ -983,10 +1053,13 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
 
       const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
       toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(1500);
+      flushSolid();
 
       const tooltip = document.querySelector('[role="tooltip"]');
       expect(tooltip?.querySelector('.agent-picker-tooltip-title')?.textContent).toBe('Reviewer');
@@ -1030,6 +1103,7 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
 
       const option = container?.querySelector<HTMLButtonElement>(
         '.agent-popover .toolbar-popover-item'
@@ -1040,6 +1114,7 @@ describe('ToolbarPickers', () => {
         scrollWidth: { configurable: true, value: 300 },
       });
       option?.dispatchEvent(new Event(showEvent));
+      flushSolid();
 
       const details = document.querySelector('.agent-picker-details');
       expect(details?.querySelector('.agent-picker-details-description')?.textContent).toBe(
@@ -1048,6 +1123,7 @@ describe('ToolbarPickers', () => {
       expect(details?.querySelector('dl')).toBeNull();
 
       option?.dispatchEvent(new Event(hideEvent));
+      flushSolid();
       expect(document.querySelector('.agent-picker-details')).toBeNull();
     }
   );
@@ -1070,6 +1146,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const option = container?.querySelector<HTMLButtonElement>(
       '.agent-popover .toolbar-popover-item'
@@ -1080,6 +1157,7 @@ describe('ToolbarPickers', () => {
       scrollWidth: { configurable: true, value: 120 },
     });
     option?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
 
     expect(document.querySelector('.agent-picker-details')).toBeNull();
   });
@@ -1105,6 +1183,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     const boundary = container?.querySelector<HTMLElement>('.chat-input-container');
     const popup = container?.querySelector<HTMLElement>('.agent-popover');
     const trigger = container?.querySelector<HTMLElement>('.toolbar-picker');
@@ -1127,7 +1206,9 @@ describe('ToolbarPickers', () => {
     });
     vi.spyOn(popup!, 'scrollWidth', 'get').mockReturnValue(288);
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(popup?.style.width).toBe('250px');
     expect(popup?.style.left).toBe('-200px');
@@ -1152,6 +1233,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     expect(toggleButton?.getAttribute('aria-label')).toBe('Thinking level');
@@ -1159,10 +1241,13 @@ describe('ToolbarPickers', () => {
     expect(container?.querySelector('.toolbar-popover')).toBeNull();
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(onToggle).toHaveBeenCalledOnce();
 
     setShowPicker(true);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const options = container?.querySelectorAll<HTMLButtonElement>('.toolbar-popover-item') ?? [];
     expect(options).toHaveLength(3);
@@ -1170,6 +1255,7 @@ describe('ToolbarPickers', () => {
     expect(options[2]?.className).toContain('selected');
 
     options[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(onSelect).toHaveBeenCalledWith(null);
   });
@@ -1195,13 +1281,16 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
 
     expect(toggleButton?.classList.contains('maximum-reasoning-selected')).toBe(true);
 
     toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(1500);
+    flushSolid();
 
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
       `${level} reasoning may be more expensive and can sometimes produce worse results.`
@@ -1228,10 +1317,13 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
       const button = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
       expect(button?.disabled).toBe(false);
       button?.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(1500);
+      flushSolid();
       const text = document.querySelector('[role="tooltip"]')?.textContent;
       expect(text).toContain(QUEUE_ONLY_SELECTION_TOOLTIP);
       const separator = document.querySelector('[role="tooltip"] [role="separator"]');
@@ -1262,6 +1354,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const wrapper = container?.querySelector('.toolbar-picker')
@@ -1291,7 +1384,9 @@ describe('ToolbarPickers', () => {
     });
 
     setShowPicker(true);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const popover = container?.querySelector<HTMLElement>('.toolbar-popover');
 
@@ -1299,6 +1394,7 @@ describe('ToolbarPickers', () => {
     expect(popover?.style.right).toBe('0px');
 
     boundary.remove();
+    flushSolid();
   });
 
   it('renders the model picker fallback when no model is selected', () => {
@@ -1316,6 +1412,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
 
@@ -1326,6 +1423,7 @@ describe('ToolbarPickers', () => {
     expect(container?.querySelector('.provider-icon')).toBeNull();
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(onToggle).toHaveBeenCalledOnce();
   });
@@ -1344,6 +1442,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     const providerIcon = container?.querySelector<HTMLElement>('.provider-icon');
@@ -1378,6 +1477,7 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
 
       const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
       expect(button?.getAttribute('aria-label')).toBe(`${providerName} / ${modelName}`);
@@ -1393,7 +1493,9 @@ describe('ToolbarPickers', () => {
       expect(container?.querySelector('.model-speed-icons-ultrafast')).toBeNull();
 
       button?.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(1_500);
+      flushSolid();
 
       const tooltip = document.querySelector('[role="tooltip"]');
       expect(tooltip?.querySelector('.model-picker-tooltip > span')?.textContent).toBe(
@@ -1421,6 +1523,7 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
       const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
       expect(button?.classList.contains('ultrafast-model-selected')).toBe(true);
       expect(button?.classList.contains('fast-model-selected')).toBe(false);
@@ -1428,6 +1531,7 @@ describe('ToolbarPickers', () => {
       expect(container?.querySelector('.model-name-text')?.textContent).toBe(
         modelName.replace('Ultrafast', '')
       );
+      flushSolid();
       expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(2);
       expect(
         container
@@ -1441,7 +1545,9 @@ describe('ToolbarPickers', () => {
           ?.style.getPropertyValue('--ui-icon-mask')
       ).toBe(toCssUrl(flashSolidIcon));
       button?.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(1500);
+      flushSolid();
       expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
         'Fast mode may consume usage limits faster and cost more.'
       );
@@ -1451,6 +1557,7 @@ describe('ToolbarPickers', () => {
   it('groups two clustered ultrafast flash icons under one cost tooltip in model lists', async () => {
     vi.useFakeTimers();
     cleanup = render(() => <FormattedModelName name="GPT-6 Astra Ultrafast" />, container!);
+    flushSolid();
     const symbols = container?.querySelectorAll(
       '[aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
@@ -1464,7 +1571,9 @@ describe('ToolbarPickers', () => {
         ?.style.getPropertyValue('--ui-icon-mask')
     ).toBe(toCssUrl(flashSolidIcon));
     symbols?.[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(300);
+    flushSolid();
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
       'Fast mode may consume usage limits faster and cost more.'
     );
@@ -1516,6 +1625,7 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
       expect(
         container?.querySelector('.model-picker-btn')?.classList.contains('fast-model-selected')
       ).toBe(warning);
@@ -1563,8 +1673,10 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.fast-model-selected')).toBeNull();
     await flushMicrotasks();
+    flushSolid();
     expect(client.config.modelPricing).toHaveBeenCalledExactlyOnceWith('openai', 'gpt-6-astra');
     expect(
       container?.querySelector('.model-picker-btn')?.classList.contains('fast-model-selected')
@@ -1615,11 +1727,16 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     setModel('Sol');
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(resolveAstra).toBeDefined();
     resolveAstra?.({ input: 10, output: 50 });
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(container?.querySelector('.fast-model-selected')).toBeNull();
   });
 
@@ -1653,6 +1770,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     const button = () => container?.querySelector('.model-picker-btn');
     expect(button()?.classList.contains('fast-model-selected')).toBe(false);
     setProviders([
@@ -1669,8 +1787,10 @@ describe('ToolbarPickers', () => {
         },
       },
     ]);
+    flushSolid();
     expect(button()?.classList.contains('fast-model-selected')).toBe(true);
     setProviders([]);
+    flushSolid();
     expect(button()?.classList.contains('fast-model-selected')).toBe(false);
   });
 
@@ -1703,6 +1823,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.fast-model-selected')).toBeNull();
   });
 
@@ -1723,10 +1844,13 @@ describe('ToolbarPickers', () => {
         ),
         container!
       );
+      flushSolid();
       const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
       expect(button?.disabled).toBe(false);
       button?.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(1500);
+      flushSolid();
       const text = document.querySelector('[role="tooltip"]')?.textContent;
       expect(text).toContain(`OpenAI / ${modelName}`);
       expect(text).toContain(QUEUE_ONLY_SELECTION_TOOLTIP);
@@ -1743,6 +1867,7 @@ describe('ToolbarPickers', () => {
       () => <ProviderLimitChip badges={[]} title={null} onClick={vi.fn()} />,
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('button')).toBeNull();
   });
@@ -1771,6 +1896,7 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     const buttons = container?.querySelectorAll<HTMLButtonElement>('.toolbar-limit-chip') ?? [];
     expect(buttons).toHaveLength(2);
@@ -1789,6 +1915,7 @@ describe('ToolbarPickers', () => {
     );
 
     buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(onClick).toHaveBeenCalledOnce();
   });
@@ -1810,10 +1937,12 @@ describe('ToolbarPickers', () => {
       ),
       container!
     );
+    flushSolid();
 
     container
       ?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(onClick).toHaveBeenCalledOnce();
   });

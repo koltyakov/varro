@@ -1,7 +1,7 @@
-import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
-import type { Accessor } from 'solid-js';
-import { Portal } from 'solid-js/web';
-import { trapModalFocus } from '../lib/modal-focus';
+import { createEffect, Show, createSignal, onCleanup, onSettled, type Accessor } from 'solid-js';
+
+import { Portal } from '@solidjs/web';
+import { modalFocus } from '../lib/modal-focus';
 import { checkIcon, navArrowLeftIcon, navArrowRightIcon, xmarkIcon } from '../lib/ui-icons';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
@@ -27,8 +27,8 @@ export function createImagePreviewEffect(
   onClose: () => void,
   navigation?: PreviewNavigationOptions
 ) {
-  createEffect(() => {
-    if (!isOpen()) return;
+  createEffect(isOpen, (open) => {
+    if (!open) return;
 
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -53,10 +53,10 @@ export function createImagePreviewEffect(
     window.addEventListener('keydown', handleKeydown);
     document.body.classList.add('chat-image-preview-open');
 
-    onCleanup(() => {
+    return () => {
       window.removeEventListener('keydown', handleKeydown);
       document.body.classList.remove('chat-image-preview-open');
-    });
+    };
   });
 }
 
@@ -82,17 +82,18 @@ export function ImagePreviewOverlay(props: {
   const [isCopying, setIsCopying] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
   const [copyError, setCopyError] = createSignal('');
-  createEffect(() => {
-    void props.image?.url;
-    void content.url();
-    copyGeneration++;
-    clearTimeout(copyFeedbackTimeout);
-    setMenu(null);
-    setLoadedUrl('');
-    setIsCopying(false);
-    setCopied(false);
-    setCopyError('');
-  });
+  createEffect(
+    () => [props.image?.url, content.url()],
+    () => {
+      copyGeneration++;
+      clearTimeout(copyFeedbackTimeout);
+      setMenu(null);
+      setLoadedUrl('');
+      setIsCopying(false);
+      setCopied(false);
+      setCopyError('');
+    }
+  );
   onCleanup(() => {
     copyGeneration++;
     clearTimeout(copyFeedbackTimeout);
@@ -121,146 +122,149 @@ export function ImagePreviewOverlay(props: {
   return (
     <Portal>
       <Show when={props.image}>
-        {(image) => (
-          <div
-            ref={(element) => onCleanup(trapModalFocus(element))}
-            class="chat-image-preview-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Image preview: ${image().title}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              props.onClose();
-            }}
-          >
-            <Tooltip content="Close image preview">
-              <button
-                type="button"
-                class="chat-image-preview-close"
-                aria-label="Close image preview"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onClose();
-                }}
-              >
-                <CloseIcon />
-              </button>
-            </Tooltip>
-            <div class="chat-image-preview-overlay-scroll">
-              <div class="chat-image-preview-overlay-inner">
-                <figure
-                  class="chat-image-preview-figure"
-                  onClick={(event) => event.stopPropagation()}
+        {(image) => {
+          const focus = modalFocus();
+          return (
+            <div
+              ref={focus}
+              class="chat-image-preview-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Image preview: ${image().title}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onClose();
+              }}
+            >
+              <Tooltip content="Close image preview">
+                <button
+                  type="button"
+                  class="chat-image-preview-close"
+                  aria-label="Close image preview"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    props.onClose();
+                  }}
                 >
-                  <img
-                    ref={(element) => {
-                      previewElement = element;
-                    }}
-                    src={content.url()}
-                    alt={image().alt}
-                    class="chat-image-preview-img"
-                    decoding="async"
-                    onLoad={() => setLoadedUrl(content.url())}
-                    onError={() => setLoadedUrl('')}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setMenu({ x: event.clientX, y: event.clientY });
-                    }}
-                  />
-                  <Show when={content.error()}>
-                    <div role="alert">
-                      {content.error()}{' '}
-                      <button type="button" onClick={content.retry}>
-                        Retry
-                      </button>
-                    </div>
-                  </Show>
-                  <Show when={props.showNavigation}>
-                    <div class="chat-image-preview-nav-group">
-                      <Tooltip content="Previous image">
-                        <button
-                          type="button"
-                          class="chat-image-preview-nav chat-image-preview-nav-prev"
-                          aria-label="Previous image"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            props.onPrevious?.();
-                          }}
-                        >
-                          <ChevronLeftIcon />
+                  <CloseIcon />
+                </button>
+              </Tooltip>
+              <div class="chat-image-preview-overlay-scroll">
+                <div class="chat-image-preview-overlay-inner">
+                  <figure
+                    class="chat-image-preview-figure"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <img
+                      ref={(element) => {
+                        previewElement = element;
+                      }}
+                      src={content.url()}
+                      alt={image().alt}
+                      class="chat-image-preview-img"
+                      decoding="async"
+                      onLoad={() => setLoadedUrl(content.url())}
+                      onError={() => setLoadedUrl('')}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setMenu({ x: event.clientX, y: event.clientY });
+                      }}
+                    />
+                    <Show when={content.error()}>
+                      <div role="alert">
+                        {content.error()}{' '}
+                        <button type="button" onClick={content.retry}>
+                          Retry
                         </button>
-                      </Tooltip>
-                      <Tooltip content="Next image">
-                        <button
-                          type="button"
-                          class="chat-image-preview-nav chat-image-preview-nav-next"
-                          aria-label="Next image"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            props.onNext?.();
-                          }}
-                        >
-                          <ChevronRightIcon />
-                        </button>
-                      </Tooltip>
-                    </div>
-                  </Show>
-                  <figcaption class="chat-image-preview-caption">
-                    <Show when={props.total && props.total > 1}>
-                      <span class="chat-image-preview-count">
-                        {props.position} / {props.total}
-                      </span>
-                      <span class="chat-image-preview-caption-separator">&middot;</span>
+                      </div>
                     </Show>
-                    <span class="chat-image-preview-caption-label">{image().title}</span>
-                    <Show when={image().mime}>
-                      <span class="chat-image-preview-caption-mime">· {image().mime}</span>
+                    <Show when={props.showNavigation}>
+                      <div class="chat-image-preview-nav-group">
+                        <Tooltip content="Previous image">
+                          <button
+                            type="button"
+                            class="chat-image-preview-nav chat-image-preview-nav-prev"
+                            aria-label="Previous image"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              props.onPrevious?.();
+                            }}
+                          >
+                            <ChevronLeftIcon />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Next image">
+                          <button
+                            type="button"
+                            class="chat-image-preview-nav chat-image-preview-nav-next"
+                            aria-label="Next image"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              props.onNext?.();
+                            }}
+                          >
+                            <ChevronRightIcon />
+                          </button>
+                        </Tooltip>
+                      </div>
                     </Show>
-                  </figcaption>
-                  <Show when={copyError()}>
-                    <div class="chat-image-preview-copy-status" role="alert">
-                      {copyError()}
-                    </div>
-                  </Show>
-                </figure>
+                    <figcaption class="chat-image-preview-caption">
+                      <Show when={props.total && props.total > 1}>
+                        <span class="chat-image-preview-count">
+                          {props.position} / {props.total}
+                        </span>
+                        <span class="chat-image-preview-caption-separator">&middot;</span>
+                      </Show>
+                      <span class="chat-image-preview-caption-label">{image().title}</span>
+                      <Show when={image().mime}>
+                        <span class="chat-image-preview-caption-mime">· {image().mime}</span>
+                      </Show>
+                    </figcaption>
+                    <Show when={copyError()}>
+                      <div class="chat-image-preview-copy-status" role="alert">
+                        {copyError()}
+                      </div>
+                    </Show>
+                  </figure>
+                </div>
               </div>
+              <Show when={copied()}>
+                <div
+                  class="session-action-feedback chat-image-preview-feedback"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span class="session-action-feedback-icon" aria-hidden="true">
+                    <UiIcon
+                      source={checkIcon}
+                      class="session-action-feedback-glyph"
+                      width={11}
+                      height={11}
+                    />
+                  </span>
+                  <span class="session-action-feedback-message">Image copied</span>
+                </div>
+              </Show>
+              <Show when={menu()}>
+                {(position) => (
+                  <ImagePreviewContextMenu
+                    x={position().x}
+                    y={position().y}
+                    disabled={
+                      loadedUrl() !== content.url() ||
+                      content.url() === IMAGE_PLACEHOLDER ||
+                      !!content.error() ||
+                      isCopying()
+                    }
+                    onClose={() => setMenu(null)}
+                    onCopy={() => void copyImage()}
+                  />
+                )}
+              </Show>
             </div>
-            <Show when={copied()}>
-              <div
-                class="session-action-feedback chat-image-preview-feedback"
-                role="status"
-                aria-live="polite"
-              >
-                <span class="session-action-feedback-icon" aria-hidden="true">
-                  <UiIcon
-                    source={checkIcon}
-                    class="session-action-feedback-glyph"
-                    width={11}
-                    height={11}
-                  />
-                </span>
-                <span class="session-action-feedback-message">Image copied</span>
-              </div>
-            </Show>
-            <Show when={menu()}>
-              {(position) => (
-                <ImagePreviewContextMenu
-                  x={position().x}
-                  y={position().y}
-                  disabled={
-                    loadedUrl() !== content.url() ||
-                    content.url() === IMAGE_PLACEHOLDER ||
-                    !!content.error() ||
-                    isCopying()
-                  }
-                  onClose={() => setMenu(null)}
-                  onCopy={() => void copyImage()}
-                />
-              )}
-            </Show>
-          </div>
-        )}
+          );
+        }}
       </Show>
     </Portal>
   );
@@ -280,9 +284,11 @@ function ImagePreviewContextMenu(props: {
     menu.style.left = `${Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8))}px`;
   };
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     positionMenu();
-    onCleanup(observePopupViewport(menu, positionMenu));
+    cleanups.push(observePopupViewport(menu, positionMenu));
     (menu.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? menu).focus();
     const outside = (event: Event) => {
       if (event.target instanceof Node && menu.contains(event.target)) return;
@@ -291,13 +297,17 @@ function ImagePreviewContextMenu(props: {
     window.addEventListener('pointerdown', outside, true);
     window.addEventListener('contextmenu', outside, true);
     window.addEventListener('focusin', outside);
-    onCleanup(() => {
+    cleanups.push(() => {
       window.removeEventListener('pointerdown', outside, true);
       window.removeEventListener('contextmenu', outside, true);
       window.removeEventListener('focusin', outside);
       if (menu.contains(document.activeElement) && previousFocus instanceof HTMLElement)
         previousFocus.focus({ preventScroll: true });
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
   return (
     <div
@@ -307,7 +317,7 @@ function ImagePreviewContextMenu(props: {
       class="session-item-actions-menu chat-image-preview-context-menu"
       role="menu"
       aria-label="Image actions"
-      tabIndex={-1}
+      tabindex={-1}
       style={{ left: `${props.x}px`, top: `${props.y}px` }}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {

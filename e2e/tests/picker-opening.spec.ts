@@ -14,69 +14,79 @@ for (const delay of [0, 100]) {
         page,
       }) => {
         await page.setViewportSize({ width, height: 900 });
+        if (delay > 0) {
+          // Shadow the placement module's scheduler, not the page scheduler: Solid
+          // must be able to mount the real menu before we sample the hidden gap.
+          await page.route('**/src/webview/lib/popup-position.ts*', async (route) => {
+            const response = await route.fetch();
+            await route.fulfill({
+              response,
+              body: `let delayFirstPlacement = true;
+                const queueMicrotask = (place) => {
+                  const menu = document.querySelector(${JSON.stringify(picker.menu)});
+                  if (!menu || !delayFirstPlacement) return window.queueMicrotask(place);
+                  delayFirstPlacement = false;
+                  requestAnimationFrame(() => setTimeout(() => {
+                    menu.dispatchEvent(new Event('picker-test:placement', { bubbles: true }));
+                    window.queueMicrotask(place);
+                  }, ${delay}));
+                };\n${await response.text()}`,
+            });
+          });
+        }
         await page.goto('/e2e/harness/index.html?scenario=model-search');
         await expect(page.locator(picker.trigger)).toBeVisible();
 
-        const frames = await page.evaluate(
-          async ({ trigger, menu, delay: placementDelay }) => {
-            const button = document.querySelector<HTMLButtonElement>(trigger);
-            if (!button) throw new Error(`Missing picker trigger: ${trigger}`);
-            const enqueue = window.queueMicrotask;
-            let placementStarted = false;
-            // Make the initialization gap span painted frames for the delayed cases.
-            if (placementDelay > 0) {
-              window.queueMicrotask = (callback) => {
-                window.setTimeout(() => {
-                  placementStarted = true;
-                  enqueue(callback);
-                }, placementDelay);
-              };
+        const frames = await page.evaluate(async ({ trigger, menu }) => {
+          const button = document.querySelector<HTMLButtonElement>(trigger);
+          if (!button) throw new Error(`Missing picker trigger: ${trigger}`);
+          let placementStarted = false;
+          const markPlacement = () => {
+            placementStarted = true;
+          };
+          document.addEventListener('picker-test:placement', markPlacement);
+          const samples: Array<{
+            visible: boolean;
+            placementStarted: boolean;
+            left: number;
+            top: number;
+            bottom: number;
+            width: number;
+            unobscured: boolean;
+            aboveFade: boolean;
+            focused: boolean;
+          }> = [];
+          try {
+            button.click();
+            for (let index = 0; index < 24; index += 1) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              const element = document.querySelector<HTMLElement>(menu);
+              if (!element) continue;
+              const box = element.getBoundingClientRect();
+              const visible = getComputedStyle(element).visibility === 'visible';
+              const shell = element.closest('.chat-input-shell');
+              const fade = document.querySelector('.interactive-list-bottom-fade-wrap');
+              const hit = document.elementFromPoint(box.left + box.width / 2, box.bottom - 8);
+              samples.push({
+                visible,
+                placementStarted,
+                left: box.left,
+                top: box.top,
+                bottom: box.bottom,
+                width: box.width,
+                unobscured: !!hit && element.contains(hit),
+                aboveFade:
+                  !fade ||
+                  (!!shell &&
+                    Number(getComputedStyle(shell).zIndex) > Number(getComputedStyle(fade).zIndex)),
+                focused: element.contains(document.activeElement),
+              });
             }
-            const samples: Array<{
-              visible: boolean;
-              placementStarted: boolean;
-              left: number;
-              top: number;
-              bottom: number;
-              width: number;
-              unobscured: boolean;
-              aboveFade: boolean;
-              focused: boolean;
-            }> = [];
-            try {
-              button.click();
-              for (let index = 0; index < 24; index += 1) {
-                await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-                const element = document.querySelector<HTMLElement>(menu);
-                if (!element) continue;
-                const box = element.getBoundingClientRect();
-                const visible = getComputedStyle(element).visibility === 'visible';
-                const shell = element.closest('.chat-input-shell');
-                const fade = document.querySelector('.interactive-list-bottom-fade-wrap');
-                const hit = document.elementFromPoint(box.left + box.width / 2, box.bottom - 8);
-                samples.push({
-                  visible,
-                  placementStarted,
-                  left: box.left,
-                  top: box.top,
-                  bottom: box.bottom,
-                  width: box.width,
-                  unobscured: !!hit && element.contains(hit),
-                  aboveFade:
-                    !fade ||
-                    (!!shell &&
-                      Number(getComputedStyle(shell).zIndex) >
-                        Number(getComputedStyle(fade).zIndex)),
-                  focused: element.contains(document.activeElement),
-                });
-              }
-            } finally {
-              window.queueMicrotask = enqueue;
-            }
-            return samples;
-          },
-          { ...picker, delay }
-        );
+          } finally {
+            document.removeEventListener('picker-test:placement', markPlacement);
+          }
+          return samples;
+        }, picker);
 
         expect(frames.length).toBeGreaterThan(0);
         if (delay > 0) {

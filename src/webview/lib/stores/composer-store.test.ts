@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EditorContext } from '../../../shared/protocol';
 import type { NormalizedTodo } from '../../types';
@@ -30,7 +32,9 @@ function createEditorContext(): EditorContext {
 describe('composerStore', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    flushSolid();
     resetDefaultAppState();
+    flushSolid();
   });
 
   it('updates editor and terminal context', () => {
@@ -38,12 +42,15 @@ describe('composerStore', () => {
     const selection = { text: 'npm test', terminalName: 'zsh' };
 
     composerStore.setEditorContext(context);
+    flushSolid();
     composerStore.setTerminalSelection(selection);
+    flushSolid();
 
     expect(state.editorContext).toEqual(context);
     expect(state.terminalSelection).toEqual(selection);
 
     composerStore.clearTerminalSelection();
+    flushSolid();
 
     expect(state.terminalSelection).toBeNull();
   });
@@ -56,17 +63,23 @@ describe('composerStore', () => {
       priority: 'high',
     };
 
-    setState('droppedFiles', [
-      {
-        path: '/workspace/src/file.ts',
-        relativePath: 'src/file.ts',
-        type: 'file',
-      },
-    ]);
-    setState('todos', [todo]);
+    setState(
+      storePath('droppedFiles', [
+        {
+          path: '/workspace/src/file.ts',
+          relativePath: 'src/file.ts',
+          type: 'file',
+        },
+      ])
+    );
+    flushSolid();
+    setState(storePath('todos', [todo]));
+    flushSolid();
 
     composerStore.clearDroppedFiles();
+    flushSolid();
     composerStore.clearTodos();
+    flushSolid();
 
     expect(state.droppedFiles).toEqual([]);
     expect(state.todos).toEqual([]);

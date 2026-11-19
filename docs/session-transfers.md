@@ -12,11 +12,12 @@ explanation.
 - Session catalog authorization is refreshed for the destination. An active conversation follows
   automatically only when the destination is already authorized by an open folder or history scope.
   Background transfers refresh the catalog without taking over the selected conversation.
-- A known transferred conversation can also follow a saved Git worktree of the same project, without
-  opening another VS Code window or widening history scope. The host verifies the open root's project,
-  its Git VCS, the server's saved worktree inventory, and the canonical session's project and destination.
-  Missing, unrelated, or unverifiable destinations remain read-only and require the existing explicit
-  open-folder action. Verification never loads configuration in an unapproved destination.
+- A known transferred conversation can also follow a closed folder, including a non-Git folder or a
+  saved worktree, without opening another VS Code window or widening history scope. Its retained,
+  server-scoped link must belong to an open origin. Through that origin the host verifies the canonical
+  session ID, project and exact destination. The resulting grant applies only to that conversation,
+  not other sessions, the destination's catalog, or general filesystem access. A missing link or failed
+  canonical verification leaves the conversation read-only. Verification never loads destination config.
 - V2 project and worktree inventories are native bare arrays, not session-style `data` envelopes.
   When a fresh session snapshot confirms availability, the webview clears an older read-only marker
   for that same destination. A marker for a different, newer move remains blocked.
@@ -45,16 +46,17 @@ explanation.
 - Varro saves a bounded, server-scoped link in the originating workspace's local state. The session
   remains in that project's list after selection changes and editor reloads, with a destination label
   using the same layout as workspace labels. This does not move or copy the OpenCode session.
-- Unapproved retained links admit only session-scoped history, attachment, diff, and summary reads. They do not
-  authorize filesystem access, tools, sends, edits, permission replies, or other session mutations in
-  a closed destination. Unknown sessions and other servers do not inherit these read capabilities.
+- Retained links without a verified execution grant admit only session-scoped history, attachment,
+  diff, and summary reads. Successful canonical verification allows that known conversation to continue
+  in its destination without opening the folder. Unknown sessions, unrelated destinations and other
+  servers do not inherit the grant. Catalog invalidation and directory drift require fresh verification.
 - A transfer refresh preserves the active transcript, message IDs, pagination, expansion state, draft,
   and scroll ownership. It does not clear the chat or force a jump to the latest message.
 - Changing a conversation's directory clears its old presentation-only worktree flag before refreshing
   history, so the old Git icon does not linger when the chat returns to its original folder.
-- A destination outside the authorized workspace keeps the last transcript and composer draft on
-  screen, with a persistent "Conversation moved" notice. Sends are blocked rather than dispatched
-  through the previous directory. The server execution itself is not cancelled.
+- A destination that cannot be verified keeps the last transcript and composer draft on screen, with
+  a persistent "Conversation moved" notice. Sends are blocked rather than dispatched through the previous
+  directory. The server execution itself is not cancelled.
 - "Open folder" is an explicit user action. The host rechecks the canonical destination and opens
   that folder in a new VS Code window. The originating project can still open the conversation's history.
   This action does not change the server session, permissions, messages, or timestamps.

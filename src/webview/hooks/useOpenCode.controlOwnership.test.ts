@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it } from 'vitest';
 import { assistantMessage, getClientMocks, loadModules, session } from './useOpenCode.test-support';
 
@@ -10,30 +12,42 @@ describe('session control loading ownership', () => {
         `${control} ${outcome} preserves %s state`,
         async (transition) => {
           const { stateModule, hookModule } = await loadModules();
+          flushSolid();
           stateModule.setSessions([session('session-a'), session('session-b')]);
-          stateModule.setState('activeSessionId', 'session-a');
-          stateModule.setState('providers', [
-            {
-              id: 'openai',
-              name: 'OpenAI',
-              source: 'api',
-              models: {
-                model: {
-                  id: 'model',
-                  name: 'Model',
-                  capabilities: {},
-                  cost: { input: 0, output: 0 },
+          flushSolid();
+          stateModule.setState(storePath('activeSessionId', 'session-a'));
+          flushSolid();
+          stateModule.setState(
+            storePath('providers', [
+              {
+                id: 'openai',
+                name: 'OpenAI',
+                source: 'api',
+                models: {
+                  model: {
+                    id: 'model',
+                    name: 'Model',
+                    capabilities: {},
+                    cost: { input: 0, output: 0 },
+                  },
                 },
               },
-            },
-          ]);
-          stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'model' });
-          stateModule.setState('messages', [
-            {
-              info: { ...assistantMessage('assistant-a', 'user-a'), sessionID: 'session-a' },
-              parts: [],
-            },
-          ]);
+            ])
+          );
+          flushSolid();
+          stateModule.setState(
+            storePath('selectedModel', { providerID: 'openai', modelID: 'model' })
+          );
+          flushSolid();
+          stateModule.setState(
+            storePath('messages', [
+              {
+                info: { ...assistantMessage('assistant-a', 'user-a'), sessionID: 'session-a' },
+                parts: [],
+              },
+            ])
+          );
+          flushSolid();
           clientMocks.sessionGet.mockImplementation(async (id: string) => session(id));
           clientMocks.sessionMessages.mockResolvedValue([]);
           clientMocks.sessionStatus.mockResolvedValue({});
@@ -60,14 +74,21 @@ describe('session control loading ownership', () => {
           expect(remote).toHaveBeenCalledOnce();
           if (transition !== 'newer loading') {
             await hookModule.selectSession('session-b');
+            flushSolid();
             if (transition === 'round trip') await hookModule.selectSession('session-a');
+            flushSolid();
           }
+          flushSolid();
           stateModule.startLoading(200);
+          flushSolid();
           stateModule.setError('newer error');
+          flushSolid();
           const startedAt = stateModule.loadingStartedAt();
           if (outcome === 'success') resolve(session('session-a'));
           else reject(new Error('old control failed'));
+          flushSolid();
           await operation;
+          flushSolid();
           expect(stateModule.state.activeSessionId).toBe(
             transition === 'other session' ? 'session-b' : 'session-a'
           );

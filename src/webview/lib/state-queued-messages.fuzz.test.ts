@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flush } from 'solid-js';
 import type { QueuedMessage } from './app-state-types';
 
 /**
@@ -143,6 +144,7 @@ function runScenario(seed: number, stateModule: Awaited<ReturnType<typeof loadSt
       model = modelReorder(model, id, targetId);
     }
 
+    flush();
     verify(`after step ${step} (op ${op})`);
   }
 }
@@ -164,6 +166,7 @@ describe('queued messages fuzz', () => {
     stateModule.enqueueMessage({ id: 'b1', sessionId: 'session-b', text: '2' });
     stateModule.enqueueMessage({ id: 'a2', sessionId: 'session-a', text: '3' });
     stateModule.reorderQueuedMessage('a2', 'a1');
+    flush();
     const saved = stateModule.state.queuedMessages.map((item) => item.id);
     expect(saved).toEqual(['a2', 'b1', 'a1']);
 

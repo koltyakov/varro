@@ -1,4 +1,5 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { createEffect, Show, createMemo, createSignal, onCleanup } from 'solid-js';
+import { ariaBoolean } from '../lib/aria';
 import { getMessageById, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatModelName, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
@@ -181,18 +182,25 @@ function ReasoningBlock(props: {
     );
   const durationLabel = () => formatReasoningDuration(props.part.time);
 
-  createEffect(() => {
-    const nextExpansionKey = expansionKey();
-    if (nextExpansionKey === currentExpansionKey) return;
-    currentExpansionKey = nextExpansionKey;
-    wasExpanded = false;
-    autoFollow = true;
-    wasAutoExpansionRequested = isAutoExpansionRequested();
-    setExpanded(isAutoExpansionRequested() || (getMessageBlockExpanded(nextExpansionKey) ?? false));
-  });
+  createEffect(
+    () => {
+      const nextExpansionKey = expansionKey();
+      return nextExpansionKey === currentExpansionKey
+        ? null
+        : { nextExpansionKey, autoExpansion: isAutoExpansionRequested() };
+    },
+    (change) => {
+      if (!change) return;
+      const { nextExpansionKey, autoExpansion } = change;
+      currentExpansionKey = nextExpansionKey;
+      wasExpanded = false;
+      autoFollow = true;
+      wasAutoExpansionRequested = autoExpansion;
+      setExpanded(autoExpansion || (getMessageBlockExpanded(nextExpansionKey) ?? false));
+    }
+  );
 
-  createEffect(() => {
-    const autoExpansionRequested = isAutoExpansionRequested();
+  createEffect(isAutoExpansionRequested, (autoExpansionRequested) => {
     if (autoExpansionRequested && !wasAutoExpansionRequested) {
       setExpanded(true);
     } else if (!autoExpansionRequested && wasAutoExpansionRequested) {
@@ -251,38 +259,37 @@ function ReasoningBlock(props: {
     stopStreamingFollow();
   });
 
-  createEffect(() => {
-    const nextExpanded = expanded();
-    const nextStreaming = isStreaming();
-    reasoningBody();
+  createEffect(
+    () => ({ nextExpanded: expanded(), nextStreaming: isStreaming(), body: reasoningBody() }),
+    ({ nextExpanded, nextStreaming }) => {
+      if (!nextExpanded || !contentElement) {
+        stopStreamingFollow();
+        wasExpanded = nextExpanded;
+        wasStreaming = nextStreaming;
+        return;
+      }
 
-    if (!nextExpanded || !contentElement) {
-      stopStreamingFollow();
+      if (!wasExpanded) {
+        autoFollow = nextStreaming;
+        contentElement.scrollTop = 0;
+        updateOverflowFades();
+        if (nextStreaming) followStreamingBottom();
+      } else if (wasStreaming && !nextStreaming) {
+        stopStreamingFollow();
+        if (autoFollow) contentElement.scrollTop = 0;
+        autoFollow = false;
+        updateOverflowFades();
+      } else if (nextStreaming && autoFollow) {
+        followStreamingBottom();
+        requestAnimationFrame(updateOverflowFades);
+      } else {
+        requestAnimationFrame(updateOverflowFades);
+      }
+
       wasExpanded = nextExpanded;
       wasStreaming = nextStreaming;
-      return;
     }
-
-    if (!wasExpanded) {
-      autoFollow = nextStreaming;
-      contentElement.scrollTop = 0;
-      updateOverflowFades();
-      if (nextStreaming) followStreamingBottom();
-    } else if (wasStreaming && !nextStreaming) {
-      stopStreamingFollow();
-      if (autoFollow) contentElement.scrollTop = 0;
-      autoFollow = false;
-      updateOverflowFades();
-    } else if (nextStreaming && autoFollow) {
-      followStreamingBottom();
-      requestAnimationFrame(updateOverflowFades);
-    } else {
-      requestAnimationFrame(updateOverflowFades);
-    }
-
-    wasExpanded = nextExpanded;
-    wasStreaming = nextStreaming;
-  });
+  );
 
   const handleContentScroll = () => {
     if (!contentElement) return;
@@ -311,7 +318,7 @@ function ReasoningBlock(props: {
       <button
         class="thinking-header"
         disabled={!hasBody()}
-        aria-expanded={hasBody() ? expanded() : undefined}
+        aria-expanded={ariaBoolean(hasBody() ? expanded() : undefined)}
         onClick={() => hasBody() && toggleExpanded()}
       >
         <span class="thinking-label">
@@ -534,8 +541,10 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
         }
       >
         <figure
-          class="chat-image-figure"
-          classList={{ 'chat-image-figure-deferred': !!deferredFilePath(props.part.url) }}
+          class={[
+            'chat-image-figure',
+            { 'chat-image-figure-deferred': !!deferredFilePath(props.part.url) },
+          ]}
         >
           <button
             type="button"

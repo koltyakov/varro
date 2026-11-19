@@ -1,12 +1,15 @@
+import { ariaBoolean } from '../lib/aria';
 import {
+  createEffect,
   For,
   Match,
   Show,
   Switch,
-  createEffect,
   createMemo,
   createSignal,
   createUniqueId,
+  untrack,
+  onSettled,
 } from 'solid-js';
 import {
   activeNativeFormFields,
@@ -35,10 +38,10 @@ const [pendingReplies, setPendingReplies] = createSignal<ReadonlySet<string>>(ne
 export function NativeFormPrompt(props: { form: NativeForm }) {
   const draftKey = () => `${props.form.sessionID}/${props.form.id}`;
   const isQuestion = () => props.form.metadata?.kind === 'question';
-  const saved = nativeFormDrafts.get(props.form.id, props.form.sessionID);
-  const [draft, setDraft] = createSignal<NativeFormAnswer>(
-    saved?.values ?? nativeFormDefaults(props.form)
-  );
+  const initialForm = untrack(() => props.form);
+  const saved = nativeFormDrafts.get(initialForm.id, initialForm.sessionID);
+  const initialValues = saved?.values ?? nativeFormDefaults(initialForm);
+  const [draft, setDraft] = createSignal<NativeFormAnswer>(initialValues);
   const [customValues, setCustomValues] = createSignal<Record<string, string>>(saved?.custom ?? {});
   const customValue = (key: string) =>
     Object.hasOwn(customValues(), key) ? customValues()[key]! : '';
@@ -46,11 +49,16 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
     Record<string, NativeMultiSelectDraftRow[]>
   >(
     Object.fromEntries(
-      props.form.fields.flatMap((field) => {
+      initialForm.fields.flatMap((field) => {
         if (field.type !== 'multiselect') return [];
-        const initialValue = draft()[field.key];
+        const initialValue = initialValues[field.key];
         const selected = Array.isArray(initialValue) ? initialValue : [];
-        const restored = saved?.multiselectRows?.[field.key];
+        const restored =
+          saved?.multiselectRows && Object.hasOwn(saved.multiselectRows, field.key)
+            ? saved.multiselectRows[field.key]
+            : undefined;
+        const initialCustom =
+          saved && Object.hasOwn(saved.custom, field.key) ? saved.custom[field.key] : undefined;
         const rows = restored
           ? restored
               .filter((row, index) => row.value || index === restored.length - 1)
@@ -60,7 +68,7 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
                 ...selected.filter(
                   (item) => !field.options.some((option) => option.value === item)
                 ),
-                ...(field.custom && customValue(field.key) ? [customValue(field.key)] : []),
+                ...(field.custom && initialCustom ? [initialCustom] : []),
               ]),
             ].map((value) => ({ id: createUniqueId(), value, selected: true }));
         if (field.custom && (!rows.length || rows.at(-1)?.value))
@@ -87,11 +95,19 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
     ])
   );
   const submitting = () => pendingReplies().has(draftKey());
-  const setSubmitting = (pending: boolean) =>
+  function claimReply(key: string) {
+    let claimed = false;
+    setPendingReplies((previous) => {
+      if (previous.has(key)) return previous;
+      claimed = true;
+      return new Set(previous).add(key);
+    });
+    return claimed;
+  }
+  const releaseReply = (key: string) =>
     setPendingReplies((previous) => {
       const next = new Set(previous);
-      if (pending) next.add(draftKey());
-      else next.delete(draftKey());
+      next.delete(key);
       return next;
     });
   const [error, setError] = createSignal('');
@@ -103,17 +119,18 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
   const unsupported = () => props.form.fields.some((field) => field.type === 'unsupported');
   let element: HTMLFormElement | undefined;
 
-  createEffect(() => {
-    setCheckpointed(
-      nativeFormDrafts.save({
-        id: props.form.id,
-        sessionID: props.form.sessionID,
-        values: draft(),
-        custom: customValues(),
-        multiselectRows: multiselectRows(),
-      })
-    );
-  });
+  createEffect(
+    () => ({
+      id: props.form.id,
+      sessionID: props.form.sessionID,
+      values: draft(),
+      custom: customValues(),
+      multiselectRows: multiselectRows(),
+    }),
+    (snapshot) => {
+      setCheckpointed(nativeFormDrafts.save(snapshot));
+    }
+  );
 
   function update(key: string, value: NativeFormValue | undefined) {
     setDraft((previous) => {
@@ -137,10 +154,11 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
     setServerInvalidKey(undefined);
     setShowErrors(true);
     if (fields().some((field) => nativeFormFieldError(field, answerValue(field.key)))) {
-      element?.querySelector<HTMLElement>('[aria-invalid="true"]:not(:disabled)')?.focus();
+      focusInvalid();
       return;
     }
-    setSubmitting(true);
+    const key = draftKey();
+    if (!claimReply(key)) return;
     setError('');
     try {
       await respondQuestion(
@@ -160,26 +178,31 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
           ? fields().find((field) => err.message.endsWith(`: ${field.key}`))
           : undefined;
       setServerInvalidKey(rejected?.key);
+      if (rejected) focusInvalid();
       setError(
         'The server did not accept this response. Review your answers and retry, or answer in another OpenCode client.'
       );
     } finally {
-      setSubmitting(false);
-      if (serverInvalidKey())
-        element?.querySelector<HTMLElement>('[aria-invalid="true"]:not(:disabled)')?.focus();
+      releaseReply(key);
     }
   }
 
+  function focusInvalid() {
+    onSettled(() => {
+      element?.querySelector<HTMLElement>('[aria-invalid="true"]:not(:disabled)')?.focus();
+    });
+  }
+
   async function skip() {
-    if (submitting()) return;
-    setSubmitting(true);
+    const key = draftKey();
+    if (!claimReply(key)) return;
     try {
       await rejectQuestion(props.form.id, { rethrow: true });
       nativeFormDrafts.remove(props.form.id);
     } catch {
       setError('Could not skip this form. It is still pending. Try again.');
     } finally {
-      setSubmitting(false);
+      releaseReply(key);
     }
   }
 
@@ -190,9 +213,9 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
         ref={(el) => {
           element = el;
         }}
-        noValidate
+        novalidate
         aria-label={props.form.title}
-        aria-busy={submitting()}
+        aria-busy={ariaBoolean(submitting())}
         onSubmit={(event) => {
           event.preventDefault();
           void submit();
@@ -221,8 +244,7 @@ export function NativeFormPrompt(props: { form: NativeForm }) {
                   : undefined;
             return (
               <fieldset
-                class="native-form-field"
-                classList={{ 'native-question-field': isQuestion() }}
+                class={['native-form-field', { 'native-question-field': isQuestion() }]}
                 disabled={submitting()}
                 data-field-key={field.key}
                 aria-labelledby={`${fieldID}-label`}
@@ -354,19 +376,22 @@ function NativeFieldControl(props: {
   update(value: NativeFormValue | undefined): void;
 }) {
   const [numericText, setNumericText] = createSignal(
-    props.value === undefined ? '' : String(props.value)
+    untrack(() => (props.value === undefined ? '' : String(props.value)))
   );
-  createEffect(() => {
-    if (props.value === undefined) setNumericText('');
-  });
+  createEffect(
+    () => props.value,
+    (value) => {
+      if (value === undefined) setNumericText('');
+    }
+  );
   const label = () => props.field.title ?? props.field.key;
   const booleanSelectValue = () => (props.value === undefined ? '' : String(props.value));
+  const required = () =>
+    props.field.type === 'external' || ('required' in props.field && props.field.required === true);
   const attributes = () => ({
     'aria-label': label(),
-    'aria-invalid': props.invalid,
-    'aria-required':
-      props.field.type === 'external' ||
-      ('required' in props.field && props.field.required === true),
+    'aria-invalid': ariaBoolean(props.invalid),
+    'aria-required': ariaBoolean(required()),
     'aria-describedby':
       [
         props.field.description ? `${props.id}-description` : '',
@@ -422,7 +447,7 @@ function NativeFieldControl(props: {
             <NativeFormSelect
               label={label()}
               invalid={props.invalid}
-              required={attributes()['aria-required']}
+              required={required()}
               describedBy={attributes()['aria-describedby']}
               disabled={props.disabled}
               value={booleanSelectValue()}
@@ -444,7 +469,7 @@ function NativeFieldControl(props: {
               { value: false, label: 'No' },
             ]}
             invalid={props.invalid}
-            required={attributes()['aria-required']}
+            required={required()}
             describedBy={attributes()['aria-describedby']}
             disabled={props.disabled}
             onChange={props.update}
@@ -482,7 +507,7 @@ function NativeFieldControl(props: {
                       <NativeFormSelect
                         label={label()}
                         invalid={props.invalid}
-                        required={attributes()['aria-required']}
+                        required={required()}
                         describedBy={attributes()['aria-describedby']}
                         disabled={props.disabled}
                         value={isString(props.value) ? `value:${props.value}` : ''}
@@ -505,7 +530,7 @@ function NativeFieldControl(props: {
                       value={props.value}
                       options={field().options ?? []}
                       invalid={props.invalid}
-                      required={attributes()['aria-required']}
+                      required={required()}
                       describedBy={attributes()['aria-describedby']}
                       disabled={props.disabled}
                       custom={field().custom}

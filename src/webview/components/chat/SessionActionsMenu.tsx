@@ -1,7 +1,7 @@
-import { Show, createEffect, createSignal, untrack } from 'solid-js';
+import { createEffect, Show, createSignal, untrack } from 'solid-js';
 import { supportsDetachedEditors } from '../../host/extensions';
 import { HostActions } from '../HostActions';
-import { Portal } from 'solid-js/web';
+import { Portal } from '@solidjs/web';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { isSameWorkspacePath } from '../../../shared/workspace-path';
 import { renameSession } from '../../hooks/useOpenCode';
@@ -172,13 +172,14 @@ export function SessionActionsMenu(props: {
     });
   };
 
-  createEffect(() => {
-    props.state.position();
-    props.state.renaming();
-    queueMicrotask(() => {
-      if (menuRef) clampPopupToViewport(menuRef);
-    });
-  });
+  createEffect(
+    () => [props.state.position(), props.state.renaming()],
+    () => {
+      queueMicrotask(() => {
+        if (menuRef) clampPopupToViewport(menuRef);
+      });
+    }
+  );
 
   return (
     <Portal>
@@ -258,7 +259,7 @@ export function SessionActionsMenu(props: {
                     openSideQuestion();
                   }}
                 >
-                  Ask a side question…
+                  Ask side-question
                 </button>
               </Show>
               <button

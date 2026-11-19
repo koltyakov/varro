@@ -1,4 +1,8 @@
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRoot, flush } from 'solid-js';
+import { createAppState } from './app-state';
+import { isFunction } from './runtime-values';
 import type { MessageEntry } from '../types';
 import {
   applyMessagePartDelta,
@@ -9,7 +13,11 @@ import {
   streamingDeltaQueue,
   upsertMessage,
 } from './state';
-import { createStreamingDeltaQueue, shouldUseStreamingText } from './streaming-deltas';
+import {
+  createStreamingDeltaQueue,
+  flushPendingStreamingDeltasFor,
+  shouldUseStreamingText,
+} from './streaming-deltas';
 
 function captureSchedule() {
   const callbacks: Array<() => void> = [];
@@ -167,6 +175,81 @@ describe('createStreamingDeltaQueue', () => {
   });
 });
 
+describe('streaming delta store transactions', () => {
+  it.each([false, true])('indexes multiple new parts with staged writes %s', (staged) => {
+    const { appState, dispose } = createRoot((disposeRoot) => ({
+      appState: createAppState(),
+      dispose: disposeRoot,
+    }));
+    try {
+      // SAFETY: The fixture supplies the message fields used by streaming and its ID index.
+      const message = {
+        info: { id: 'm1', sessionID: 's1', role: 'assistant', time: { created: 0 } },
+        parts: [{ id: 'existing', messageID: 'm1', sessionID: 's1', type: 'text', text: 'before' }],
+      } as MessageEntry;
+      appState.setState(storePath('messages', [message]));
+      appState.setState(storePath('streamingPartId', 'existing'));
+      appState.setState(storePath('streamingText', 'before complete'));
+      flush();
+      const retainedPart = appState.state.messages[0]!.parts[0];
+      const pending: Array<() => void> = [];
+      const setState = appState.setState;
+      const setter = vi.spyOn(appState, 'setState');
+      if (staged) {
+        setter.mockImplementation((update) => {
+          if (!isFunction(update)) throw new Error('Expected a single draft transaction');
+          pending.push(() => {
+            (() => {
+              setState(update);
+            })();
+          });
+        });
+      }
+      appState.streamingDeltaQueue.set(textDelta({ messageId: 'm1', partId: 'p1', text: 'first' }));
+      appState.streamingDeltaQueue.set({
+        messageId: 'm1',
+        partId: 'p2',
+        partType: 'reasoning',
+        partStartedAt: 42,
+        text: 'second',
+      });
+      appState.streamingDeltaQueue.set(textDelta({ messageId: 'm1', partId: 'p3', text: 'third' }));
+
+      flushPendingStreamingDeltasFor(appState);
+      expect(setter).toHaveBeenCalledTimes(1);
+      if (staged) {
+        expect(appState.state.messages[0]!.parts).toHaveLength(1);
+        expect(appState.state.streamingPartId).toBe('existing');
+        expect(appState.messageIndex.getIndexedPartLocation('p1')).toBeNull();
+        pending.splice(0).forEach((apply) => apply());
+      }
+      flush();
+
+      const parts = appState.state.messages[0]!.parts;
+      expect(parts.map((part) => part.id)).toEqual(['existing', 'p1', 'p2', 'p3']);
+      expect(parts[0]).not.toBe(retainedPart);
+      expect(parts[0]).toMatchObject({ text: 'before complete' });
+      expect(parts[1]).toMatchObject({ text: 'first', sessionID: 's1' });
+      expect(parts[2]).toMatchObject({ type: 'reasoning', text: 'second', time: { start: 42 } });
+      expect(appState.state.streamingPartId).toBe('p3');
+      expect(appState.state.streamingText).toBe('third');
+      for (const [partIdx, part] of parts.entries()) {
+        expect(appState.messageIndex.getIndexedPartLocation(part.id)).toEqual({
+          msgIdx: 0,
+          partIdx,
+        });
+      }
+      const structureVersion = appState.messageStructureVersion();
+      flushPendingStreamingDeltasFor(appState);
+      expect(setter).toHaveBeenCalledTimes(1);
+      expect(appState.messageStructureVersion()).toBe(structureVersion);
+      setter.mockRestore();
+    } finally {
+      dispose();
+    }
+  });
+});
+
 // The AI-08 live capture handled eight deltas during a 1,008 ms frame gap. Withholding frames must
 // delay delivery without losing, reordering, or duplicating text, and must not poll for a frame.
 describe('streaming deltas while frames are withheld', () => {
@@ -185,6 +268,7 @@ describe('streaming deltas while frames are withheld', () => {
       info: { id: 'm1', sessionID: 's1', role: 'user', time: { created: 0 } },
       parts: [{ id: 'p1', messageID: 'm1', sessionID: 's1', type: 'text', text: '' }],
     } as MessageEntry);
+    flush();
   });
 
   afterEach(() => {
@@ -208,6 +292,7 @@ describe('streaming deltas while frames are withheld', () => {
     expect(state.streamingText).toBe('');
 
     frames.splice(0).forEach((frame) => frame(0));
+    flush();
 
     expect(state.streamingPartId).toBe('p1');
     expect(state.streamingText).toBe('one two three four');
@@ -219,6 +304,7 @@ describe('streaming deltas while frames are withheld', () => {
     applyMessagePartDelta('m1', 'p1', 'answer', 's1');
 
     finishMessageStreaming('m1');
+    flush();
 
     const part = state.messages[0]?.parts[0];
     expect(part?.type === 'text' ? part.text : null).toBe('partial answer');

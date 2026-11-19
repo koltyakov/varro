@@ -1,7 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { ImageMagick, initializeImageMagick } from '@imagemagick/magick-wasm';
-import { brightPixels, glyphContinuity, verdict } from './ai-native-paint-oracles.mjs';
+import {
+  brightPixels,
+  glyphContinuity,
+  markerPaintEligibility,
+  verdict,
+} from './ai-native-paint-oracles.mjs';
 
 let initialized;
 export async function decodeNativeImage(bytes) {
@@ -31,6 +36,7 @@ export async function analyzeNativePaint(
   const references = new Map();
   const nodeChanges = new Map();
   const inspected = [];
+  const excludedMarkers = [];
   let continuityChecks = 0;
   let prependChecks = 0;
   let coldChecks = 0;
@@ -74,6 +80,13 @@ export async function analyzeNativePaint(
     for (const marker of before.markers) {
       const next = after.markers.find((m) => m.node === marker.node);
       const r = marker.rect;
+      const exclusion =
+        markerPaintEligibility(marker, before) ??
+        (next ? markerPaintEligibility(next, after) : null);
+      if (exclusion) {
+        excludedMarkers.push({ file: frame.file, epoch, row: marker.row, reason: exclusion });
+        continue;
+      }
       if (
         !next ||
         Math.abs(next.rect.y - r.y) > 2 ||
@@ -81,10 +94,7 @@ export async function analyzeNativePaint(
         Math.abs(next.rect.width - r.width) > 1 ||
         marker.text !== next.text ||
         (marker.hits?.length && !marker.hits[0].containsParagraph) ||
-        (next.hits?.length && !next.hits[0].containsParagraph) ||
-        marker.styles.some(
-          (s) => s.opacity !== '1' || s.visibility !== 'visible' || s.display === 'none'
-        )
+        (next.hits?.length && !next.hits[0].containsParagraph)
       )
         continue;
       const crop = {
@@ -155,9 +165,10 @@ export async function analyzeNativePaint(
       checkedFrames: continuityChecks,
       prependChecks,
       failures: textFailures,
+      excludedMarkers,
     },
     inspected,
     limits:
-      'Dark theme, 1:1 native frames; stable bracketing text bounds; 2 CSS px search. Missing gates stay BLOCKED.',
+      'Dark theme, 1:1 native frames; stable bracketing text bounds and measured sticky coverage; 2 CSS px search. DOM/compositor disagreement requires visual review. Missing gates stay BLOCKED.',
   };
 }

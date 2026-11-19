@@ -51,7 +51,6 @@ export function sideQuestionUnavailableReason(
   if (state.serverStatus.apiVersion !== 2) return 'Requires OpenCode V2';
   const session = state.sessions.find((entry) => entry.id === state.activeSessionId);
   if (!session) return 'Open a conversation';
-  if (session.transfer && !session.transfer.available) return 'Open its folder';
   if (!checkComposerDraft) return null;
   if (state.nativePdfs.length) {
     return 'Remove PDFs to ask a side question';

@@ -1,6 +1,7 @@
+import { flush as flushSolid, createComponent, Loading } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
-import { createComponent, Suspense } from 'solid-js';
+import { render } from '@solidjs/web';
 import type { ModelPricing } from '../../shared/protocol';
 import type { Provider } from '../types';
 import { ModelPicker } from './ModelPicker';
@@ -66,11 +67,17 @@ beforeEach(() => {
   vi.spyOn(client.config, 'modelPricing').mockResolvedValue(null);
   refreshProviderLimit.mockClear();
   restoreRuntime = installOpenCodeRuntime({ ...createOpenCodeRuntime(), refreshProviderLimit });
+  flushSolid();
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  flushSolid();
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
+  flushSolid();
   resetDefaultAppState();
+  flushSolid();
   resetProviderConnectionState();
+  flushSolid();
   window.localStorage.removeItem(STORAGE_KEYS.modelPickerOpened);
+  flushSolid();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -79,77 +86,123 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreRuntime?.();
+  flushSolid();
   vi.useRealTimers();
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   if (originalScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  flushSolid();
   setShowModels(false);
+  flushSolid();
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  flushSolid();
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
+  flushSolid();
   resetDefaultAppState();
+  flushSolid();
   resetProviderConnectionState();
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
 });
 
 describe('ModelPicker', () => {
   it('focuses search after positioning without scrolling the initial anchor into view', async () => {
     const focus = vi.spyOn(HTMLInputElement.prototype, 'focus');
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     const menu = container!.querySelector<HTMLElement>('.model-picker-menu')!;
 
     expect(menu.hasAttribute('data-popup-position-pending')).toBe(true);
     expect(focus).not.toHaveBeenCalled();
     await flushMicrotasks();
+    flushSolid();
 
     expect(menu.hasAttribute('data-popup-position-pending')).toBe(false);
     expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
     expect(document.activeElement).toBe(container!.querySelector('.dropdown-search-input'));
+
+    const other = document.createElement('button');
+    container!.append(other);
+    other.focus();
+    window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
+    expect(document.activeElement).toBe(other);
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves focus moved by the user before the picker is revealed', async () => {
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
+    const menu = container!.querySelector<HTMLElement>('.model-picker-menu')!;
+    expect(menu.hasAttribute('data-popup-position-pending')).toBe(true);
+    const other = document.createElement('button');
+    container!.append(other);
+    other.focus();
+
+    await flushMicrotasks();
+    expect(menu.hasAttribute('data-popup-position-pending')).toBe(false);
+    expect(document.activeElement).toBe(other);
   });
 
   it('clears the model highlight when the pointer leaves and restores keyboard navigation', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        alpha: createModel('alpha', 'Alpha'),
-        beta: createModel('beta', 'Beta'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          alpha: createModel('alpha', 'Alpha'),
+          beta: createModel('beta', 'Beta'),
+        }),
+      ])
+    );
+    flushSolid();
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const row = container!.querySelector<HTMLElement>('.model-picker-row')!;
     row.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(row.querySelector('.keyboard-focus')).not.toBeNull();
 
     row.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     container!.querySelector('.dropdown-group-header')!.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(container!.querySelector('.keyboard-focus')).toBeNull();
     expect(container!.querySelector('.model-picker-details')).toBeNull();
 
     container!
       .querySelector('.dropdown-menu')!
       .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    flushSolid();
     expect(row.querySelector('.keyboard-focus')).not.toBeNull();
   });
 
-  it('keeps the dropdown visible inside Suspense while hover pricing loads', async () => {
+  it('keeps the dropdown visible inside Loading while hover pricing loads', async () => {
     vi.useFakeTimers();
     let resolvePricing!: (pricing: ModelPricing | null) => void;
     const pending = new Promise<ModelPricing | null>((resolve) => {
       resolvePricing = resolve;
     });
     vi.mocked(client.config.modelPricing).mockReturnValue(pending);
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        sol: createModel('sol', 'Sol', { cost: { input: 0, output: 0 } }),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          sol: createModel('sol', 'Sol', { cost: { input: 0, output: 0 } }),
+        }),
+      ])
+    );
+    flushSolid();
     const onSelect = vi.fn();
     cleanup = render(
       () =>
-        createComponent(Suspense, {
+        createComponent(Loading, {
           fallback: 'Loading picker',
           get children() {
             return ModelPicker({ onSelect, onClose: vi.fn() });
@@ -157,37 +210,51 @@ describe('ModelPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     container
       ?.querySelector<HTMLElement>('.model-picker-row')
       ?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     vi.advanceTimersByTime(2_000);
+    flushSolid();
     await flushMicrotasks(6);
+    flushSolid();
 
     expect(client.config.modelPricing).toHaveBeenCalledWith('openai', 'sol');
     expect(container?.querySelector('.model-picker-menu')).not.toBeNull();
     expect(container?.textContent).not.toContain('Loading picker');
     expect(container?.querySelector('.model-picker-cost-heading')).toBeNull();
     container?.querySelector<HTMLButtonElement>('.model-picker-item')?.click();
+    flushSolid();
     expect(onSelect).toHaveBeenCalledWith({ providerID: 'openai', modelID: 'sol' });
 
     resolvePricing({ input: 4, output: 20 });
+    flushSolid();
     await flushMicrotasks(6);
+    flushSolid();
     expect(container?.querySelector('.model-picker-menu')).not.toBeNull();
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain('$4.00');
   });
 
   it('loads provider quotas and updates remaining percentages without labeling pinned groups', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        alpha: createModel('alpha', 'Alpha'),
-        beta: createModel('beta', 'Beta'),
-      }),
-      createProvider('custom', 'Custom', { custom: createModel('custom', 'Custom') }),
-    ]);
-    setState('pinnedModels', ['openai:alpha']);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          alpha: createModel('alpha', 'Alpha'),
+          beta: createModel('beta', 'Beta'),
+        }),
+        createProvider('custom', 'Custom', { custom: createModel('custom', 'Custom') }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('pinnedModels', ['openai:alpha']));
+    flushSolid();
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(refreshProviderLimit).toHaveBeenCalledWith('openai', undefined);
     expect(refreshProviderLimit).toHaveBeenCalledWith('custom', undefined);
@@ -233,7 +300,9 @@ describe('ModelPicker', () => {
         },
       ],
     });
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const limits = container!.querySelectorAll('.model-picker-provider-limit');
     expect(limits).toHaveLength(1);
@@ -257,7 +326,9 @@ describe('ModelPicker', () => {
         },
       ],
     });
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(container?.querySelector('.model-picker-provider-limit')?.textContent).toBe(
       '5h 0% left'
     );
@@ -269,25 +340,34 @@ describe('ModelPicker', () => {
       checkedAt: 3,
       note: 'No quota available',
     });
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(container?.querySelector('.model-picker-provider-limit')).toBeNull();
   });
 
   it('uses manually ordered providers and models', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        alpha: createModel('alpha', 'Alpha model'),
-        zeta: createModel('zeta', 'Zeta model'),
-      }),
-      createProvider('custom', 'Custom', {
-        custom: createModel('custom', 'Custom model'),
-      }),
-    ]);
-    setState('providerOrder', ['custom', 'openai']);
-    setState('modelOrder', ['openai:zeta', 'openai:alpha']);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          alpha: createModel('alpha', 'Alpha model'),
+          zeta: createModel('zeta', 'Zeta model'),
+        }),
+        createProvider('custom', 'Custom', {
+          custom: createModel('custom', 'Custom model'),
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('providerOrder', ['custom', 'openai']));
+    flushSolid();
+    setState(storePath('modelOrder', ['openai:zeta', 'openai:alpha']));
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(
       Array.from(container?.querySelectorAll('.dropdown-group-header') ?? []).map(
@@ -302,15 +382,21 @@ describe('ModelPicker', () => {
   });
 
   it('does not label provider defaults in the dropdown', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
-    setState('providerDefaults', { openai: 'gpt-5' });
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('providerDefaults', { openai: 'gpt-5' }));
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.model-default-label')).toBeNull();
     expect(container?.querySelector('.model-picker-item')?.textContent).not.toContain('(default)');
@@ -318,37 +404,51 @@ describe('ModelPicker', () => {
 
   it('shows and searches a renamed model while selecting its original ID', async () => {
     const onSelect = vi.fn();
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
-    setState('modelDisplayNames', { 'openai:gpt-5': 'Primary coder' });
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('modelDisplayNames', { 'openai:gpt-5': 'Primary coder' }));
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect, onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.dropdown-name')?.textContent).toBe('Primary coder');
     const search = container?.querySelector<HTMLInputElement>('[aria-label="Search models"]');
     if (search) {
       search.value = 'primary';
       search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      flushSolid();
     }
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.model-picker-item')?.click();
+    flushSolid();
 
     expect(onSelect).toHaveBeenCalledWith({ providerID: 'openai', modelID: 'gpt-5' });
   });
 
   it.each(['Fast', 'Ultrafast'])('shows a dimmed %s label after the flash icons', async (speed) => {
-    setState('providers', [
-      createProvider('anthropic', 'Anthropic', {
-        fast: createModel('fast', `Claude Opus 5 ${speed}`),
-        standard: createModel('standard', 'Claude Opus 5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('anthropic', 'Anthropic', {
+          fast: createModel('fast', `Claude Opus 5 ${speed}`),
+          standard: createModel('standard', 'Claude Opus 5'),
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const fastLabel = Array.from(container?.querySelectorAll('.dropdown-name') ?? []).find(
       (item) => item.textContent === `Claude Opus 5 ${speed}`
@@ -370,19 +470,25 @@ describe('ModelPicker', () => {
 
   it('shows model details only while hovering when there is room on the right', async () => {
     vi.useFakeTimers();
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        detailed: createModel('detailed', 'GPT-5 Detailed', {
-          release_date: '2026-01-01',
-          limit: { context: 400_000, output: 32_000 },
-          capabilities: { toolcall: true, reasoning: true, input: ['text', 'image', 'pdf'] },
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          detailed: createModel('detailed', 'GPT-5 Detailed', {
+            release_date: '2026-01-01',
+            limit: { context: 400_000, output: 32_000 },
+            capabilities: { toolcall: true, reasoning: true, input: ['text', 'image', 'pdf'] },
+          }),
         }),
-      }),
-    ]);
-    setState('providerDefaults', { openai: 'detailed' });
+      ])
+    );
+    flushSolid();
+    setState(storePath('providerDefaults', { openai: 'detailed' }));
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.model-picker-item')?.textContent).toContain('GPT-5 Detailed');
     expect(container?.querySelector('.model-picker-item')?.textContent).not.toContain('400k');
@@ -395,13 +501,18 @@ describe('ModelPicker', () => {
       right: 300,
     });
     row?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.model-picker-details')).toBeNull();
     vi.advanceTimersByTime(499);
+    flushSolid();
     expect(container?.querySelector('.model-picker-details')).toBeNull();
     vi.advanceTimersByTime(1);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain('OpenAI');
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain(
@@ -416,34 +527,45 @@ describe('ModelPicker', () => {
     expect(container?.querySelector('.model-picker-details')?.textContent).toContain('400k');
 
     row?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(container?.querySelector('.model-picker-details')).toBeNull();
   });
 
   it('shows model details above the picker on narrow screens', async () => {
     vi.useFakeTimers();
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        detailed: createModel('detailed', 'GPT-5 Detailed', {
-          limit: { context: 400_000, output: 32_000 },
-          capabilities: { toolcall: true, reasoning: true, input: ['text', 'image'] },
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          detailed: createModel('detailed', 'GPT-5 Detailed', {
+            limit: { context: 400_000, output: 32_000 },
+            capabilities: { toolcall: true, reasoning: true, input: ['text', 'image'] },
+          }),
         }),
-      }),
-    ]);
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     container
       ?.querySelector<HTMLElement>('.model-picker-row')
       ?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.model-picker-details')).toBeNull();
     vi.advanceTimersByTime(1_999);
+    flushSolid();
     expect(container?.querySelector('.model-picker-details')).toBeNull();
     vi.advanceTimersByTime(1);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const anchor = container?.querySelector('.model-picker-anchor');
     const details = container?.querySelector('.model-picker-details');
@@ -484,19 +606,27 @@ describe('ModelPicker', () => {
     },
   ])('shows only available model pricing: $name', async ({ cost, expected }) => {
     vi.useFakeTimers();
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        detailed: createModel('detailed', 'Detailed', { cost }),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          detailed: createModel('detailed', 'Detailed', { cost }),
+        }),
+      ])
+    );
+    flushSolid();
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     container
       ?.querySelector<HTMLElement>('.model-picker-row')
       ?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     vi.advanceTimersByTime(2_000);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const heading = container?.querySelector('.model-picker-cost-heading');
     if (expected.length === 0) {
@@ -517,20 +647,28 @@ describe('ModelPicker', () => {
       cache_read: 0.4,
       cache_write: 5,
     });
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        sol: createModel('sol', 'Sol', {
-          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          sol: createModel('sol', 'Sol', {
+            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          }),
         }),
-      }),
-    ]);
+      ])
+    );
+    flushSolid();
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     container
       ?.querySelector<HTMLElement>('.model-picker-row')
       ?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     vi.advanceTimersByTime(2_000);
+    flushSolid();
     await flushMicrotasks(6);
+    flushSolid();
 
     expect(client.config.modelPricing).toHaveBeenCalledWith('openai', 'sol');
     const heading = container?.querySelector('.model-picker-cost-heading');
@@ -543,17 +681,23 @@ describe('ModelPicker', () => {
   });
 
   it('orders models by release date without prioritizing the provider default', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        older: createModel('older', 'Older', { release_date: '2025-01-01' }),
-        default: createModel('default', 'Default', { release_date: '2024-01-01' }),
-        newer: createModel('newer', 'Newer', { release_date: '2026-01-01' }),
-      }),
-    ]);
-    setState('providerDefaults', { openai: 'default' });
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          older: createModel('older', 'Older', { release_date: '2025-01-01' }),
+          default: createModel('default', 'Default', { release_date: '2024-01-01' }),
+          newer: createModel('newer', 'Newer', { release_date: '2026-01-01' }),
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('providerDefaults', { openai: 'default' }));
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(
       Array.from(container?.querySelectorAll('.dropdown-name') ?? []).map((item) =>
@@ -563,16 +707,21 @@ describe('ModelPicker', () => {
   });
 
   it('prioritizes mainstream providers, then orders providers alphabetically', async () => {
-    setState('providers', [
-      createProvider('zulu', 'Zulu', { zulu: createModel('zulu', 'Zulu model') }),
-      createProvider('google', 'Google', { google: createModel('google', 'Google model') }),
-      createProvider('alpha', 'Alpha', { alpha: createModel('alpha', 'Alpha model') }),
-      createProvider('openai', 'OpenAI', { openai: createModel('openai', 'OpenAI model') }),
-      createProvider('beta', 'Beta', { beta: createModel('beta', 'Beta model') }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('zulu', 'Zulu', { zulu: createModel('zulu', 'Zulu model') }),
+        createProvider('google', 'Google', { google: createModel('google', 'Google model') }),
+        createProvider('alpha', 'Alpha', { alpha: createModel('alpha', 'Alpha model') }),
+        createProvider('openai', 'OpenAI', { openai: createModel('openai', 'OpenAI model') }),
+        createProvider('beta', 'Beta', { beta: createModel('beta', 'Beta model') }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(
       Array.from(container?.querySelectorAll('.dropdown-group-header') ?? []).map(
@@ -582,24 +731,33 @@ describe('ModelPicker', () => {
   });
 
   it('only renders a checkmark for the selected model and updates it with the selection', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        alpha: createModel('alpha', 'Alpha'),
-        beta: createModel('beta', 'Beta'),
-      }),
-    ]);
-    setState('pinnedModels', ['openai:alpha']);
-    setState('selectedModel', { providerID: 'openai', modelID: 'alpha' });
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          alpha: createModel('alpha', 'Alpha'),
+          beta: createModel('beta', 'Beta'),
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('pinnedModels', ['openai:alpha']));
+    flushSolid();
+    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'alpha' }));
+    flushSolid();
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const alpha = container!.querySelector('[data-model-id="alpha"]')!;
     const beta = container!.querySelector('[data-model-id="beta"]')!;
     expect(alpha.querySelector('.dropdown-check .ui-icon')).not.toBeNull();
     expect(beta.querySelector('.dropdown-check')).toBeNull();
 
-    setState('selectedModel', { providerID: 'openai', modelID: 'beta' });
+    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'beta' }));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
     expect(alpha.querySelector('.dropdown-check')).toBeNull();
     expect(beta.querySelector('.dropdown-check .ui-icon')).not.toBeNull();
   });
@@ -607,23 +765,30 @@ describe('ModelPicker', () => {
   it('pins models in a top group without selecting or closing the picker', async () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        sol: createModel('sol', 'GPT-5.6 Sol'),
-      }),
-      createProvider('github-copilot', 'GitHub Copilot', {
-        luna: createModel('luna', 'GPT-5.6 Luna'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          sol: createModel('sol', 'GPT-5.6 Sol'),
+        }),
+        createProvider('github-copilot', 'GitHub Copilot', {
+          luna: createModel('luna', 'GPT-5.6 Luna'),
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect, onClose }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const pinButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Pin GPT-5.6 Luna"]'
     );
     pinButton?.click();
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(onSelect).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -644,7 +809,9 @@ describe('ModelPicker', () => {
     ]);
 
     pinnedRow?.querySelector<HTMLButtonElement>('[aria-label="Unpin GPT-5.6 Luna"]')?.click();
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.querySelector('.dropdown-group-header')?.textContent).toBe('OpenAI');
     expect(container?.textContent).toContain('GitHub Copilot');
@@ -652,18 +819,24 @@ describe('ModelPicker', () => {
   });
 
   it('hides providers that require re-authentication', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-      createProvider('github-copilot', 'GitHub Copilot', {
-        'gpt-5': createModel('gpt-5', 'GPT-5 Copilot'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+        createProvider('github-copilot', 'GitHub Copilot', {
+          'gpt-5': createModel('gpt-5', 'GPT-5 Copilot'),
+        }),
+      ])
+    );
+    flushSolid();
     markProviderAuthFailure('github-copilot', 'failed-message');
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.textContent).toContain('OpenAI');
     expect(container?.textContent).toContain('GPT-5');
@@ -679,12 +852,15 @@ describe('ModelPicker', () => {
       })
     );
 
-    setState('providers', [
-      createProvider('alpha', 'Alpha Cloud', alphaModels),
-      createProvider('beta', 'Beta Host', {
-        owl: createModel('owl', 'Night Owl'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('alpha', 'Alpha Cloud', alphaModels),
+        createProvider('beta', 'Beta Host', {
+          owl: createModel('owl', 'Night Owl'),
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -694,7 +870,9 @@ describe('ModelPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const searchInput = container?.querySelector('input[aria-label="Search models"]');
     expect(searchInput).toBeInstanceOf(HTMLInputElement);
@@ -702,7 +880,9 @@ describe('ModelPicker', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'Alpha Cloud';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const providerHeaders = Array.from(
       container?.querySelectorAll('.dropdown-group-header') ?? []
@@ -718,7 +898,9 @@ describe('ModelPicker', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'Night Owl';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(
       Array.from(container?.querySelectorAll('.dropdown-name') ?? []).map((item) =>
@@ -729,7 +911,9 @@ describe('ModelPicker', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'missing';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     expect(container?.textContent).toContain('No matching models');
   });
@@ -738,16 +922,22 @@ describe('ModelPicker', () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
 
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-        'gpt-5-mini': createModel('gpt-5-mini', 'GPT-5 mini'),
-      }),
-    ]);
-    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5-mini' });
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+          'gpt-5-mini': createModel('gpt-5-mini', 'GPT-5 mini'),
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-5-mini' }));
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect, onClose }), container!);
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const menu = container?.querySelector('.dropdown-menu');
     const search = container?.querySelector<HTMLInputElement>('[aria-label="Search models"]');
@@ -762,11 +952,14 @@ describe('ModelPicker', () => {
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     );
+    flushSolid();
 
     expect(onSelect).toHaveBeenCalledWith({ providerID: 'openai', modelID: 'gpt-5' });
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -776,11 +969,14 @@ describe('ModelPicker', () => {
   it('opens Models from the footer action and closes the picker', () => {
     const onClose = vi.fn();
 
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -790,6 +986,7 @@ describe('ModelPicker', () => {
         }),
       container!
     );
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const manageButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
@@ -798,19 +995,24 @@ describe('ModelPicker', () => {
     expect(manageButton).toBeInstanceOf(HTMLButtonElement);
 
     manageButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(showModels()).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('animates Manage models only on the first eligible open', () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
 
     const manageButton = container?.querySelector('.manage-models-attention');
     expect(manageButton).toBeInstanceOf(HTMLButtonElement);
@@ -823,7 +1025,9 @@ describe('ModelPicker', () => {
     expect(window.localStorage.getItem(STORAGE_KEYS.modelPickerOpened)).toBe('true');
 
     cleanup();
+    flushSolid();
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.manage-models-attention')).toBeNull();
   });
@@ -832,26 +1036,35 @@ describe('ModelPicker', () => {
     { hiddenProviders: ['openai'], hiddenModels: [] },
     { hiddenProviders: [], hiddenModels: ['openai:gpt-5'] },
   ])('does not animate Manage models when models or providers are hidden', (visibility) => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
-    setState('hiddenProviders', visibility.hiddenProviders);
-    setState('hiddenModels', visibility.hiddenModels);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
+    setState(storePath('hiddenProviders', visibility.hiddenProviders));
+    flushSolid();
+    setState(storePath('hiddenModels', visibility.hiddenModels));
+    flushSolid();
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.manage-models-attention')).toBeNull();
     expect(window.localStorage.getItem(STORAGE_KEYS.modelPickerOpened)).toBe('true');
   });
 
   it('can hide the manage models footer and customize the popup gap', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -863,7 +1076,9 @@ describe('ModelPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     const list = container?.querySelector('.model-picker-list');
     expect(list?.classList.contains('pb-1')).toBe(true);
@@ -872,11 +1087,14 @@ describe('ModelPicker', () => {
   });
 
   it('uses compact dimensions and a constrained height', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -886,7 +1104,9 @@ describe('ModelPicker', () => {
         }),
       container!
     );
+    flushSolid();
     await flushMicrotasks();
+    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.firstElementChild as HTMLDivElement | null;
@@ -897,14 +1117,18 @@ describe('ModelPicker', () => {
   });
 
   it('opens toward the left when the default width would cross the viewport edge', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(320);
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
     const button = document.createElement('button');
     button.className = 'model-picker-btn';
@@ -923,20 +1147,25 @@ describe('ModelPicker', () => {
       top: 450,
     });
     await flushMicrotasks();
+    flushSolid();
 
     expect(anchor?.style.width).toBe('256.5px');
     expect(anchor?.style.left).toBe('44px');
   });
 
   it('reduces its width before opening toward the left', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(320);
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
     const button = document.createElement('button');
     button.className = 'model-picker-btn';
@@ -955,20 +1184,25 @@ describe('ModelPicker', () => {
       top: 450,
     });
     await flushMicrotasks();
+    flushSolid();
 
     expect(anchor?.style.width).toBe('232px');
     expect(anchor?.style.left).toBe('80px');
   });
 
   it('shrinks to the viewport when the default width cannot fit', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(240);
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
     const button = document.createElement('button');
     button.className = 'model-picker-btn';
@@ -987,20 +1221,25 @@ describe('ModelPicker', () => {
       top: 450,
     });
     await flushMicrotasks();
+    flushSolid();
 
     expect(anchor?.style.width).toBe('224px');
     expect(anchor?.style.left).toBe('8px');
   });
 
   it('limits its width and position to the input host', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
 
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    flushSolid();
     const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
     const button = document.createElement('button');
     button.className = 'model-picker-btn';
@@ -1019,23 +1258,28 @@ describe('ModelPicker', () => {
       top: 450,
     });
     await flushMicrotasks();
+    flushSolid();
 
     expect(anchor?.style.width).toBe('250px');
     expect(anchor?.style.left).toBe('0px');
   });
 
   it('can match the model trigger width', async () => {
-    setState('providers', [
-      createProvider('openai', 'OpenAI', {
-        'gpt-5': createModel('gpt-5', 'GPT-5'),
-      }),
-    ]);
+    setState(
+      storePath('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ])
+    );
+    flushSolid();
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
 
     cleanup = render(
       () => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn(), matchTriggerWidth: true }),
       container!
     );
+    flushSolid();
     const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
     const button = document.createElement('button');
     button.className = 'model-picker-btn';
@@ -1055,6 +1299,7 @@ describe('ModelPicker', () => {
       top: 450,
     });
     await flushMicrotasks();
+    flushSolid();
 
     expect(anchor?.style.width).toBe('360px');
     expect(anchor?.style.left).toBe('20px');

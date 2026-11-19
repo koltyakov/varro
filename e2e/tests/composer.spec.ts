@@ -112,14 +112,16 @@ test('pastes an absolute path as immediately editable text without command sugge
   await page.evaluate(async () => {
     const path = '/src/webview/lib/state.ts';
     const { setState } = (await import(path)) as typeof WebviewState;
-    setState('commands', [
-      {
-        name: 'inspect-launch-services',
-        description: 'Inspect /usr/libexec/lsd',
-        template: 'Inspect launch services',
-        source: 'skill',
-      },
-    ]);
+    setState((draft) => {
+      draft.commands = [
+        {
+          name: 'inspect-launch-services',
+          description: 'Inspect /usr/libexec/lsd',
+          template: 'Inspect launch services',
+          source: 'skill',
+        },
+      ];
+    });
   });
   const pastedPath = '/usr/libexec/lsd';
   const immediateText = await composer.evaluate((editor, text) => {

@@ -1,3 +1,4 @@
+import { flush as flushSolid } from 'solid-js';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { FilePart, MessageEntry, Part, UserMessage } from '../types';
 import { clearMessages, setMessagesIncremental, state, upsertMessage, upsertPart } from './state';
@@ -46,6 +47,7 @@ function partIds() {
 
 beforeEach(() => {
   clearMessages();
+  flushSolid();
 });
 
 describe('optimistic user message reconciliation', () => {
@@ -59,9 +61,12 @@ describe('optimistic user message reconciliation', () => {
       parts: [textPart('msg-pending-part-0', 'msg-pending', 'new prompt')],
     };
     upsertMessage(previous);
+    flushSolid();
     upsertMessage(optimistic);
+    flushSolid();
 
     setMessagesIncremental([previous]);
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-previous', 'msg-pending']);
     expect(state.messages[1]!.parts).toEqual(optimistic.parts);
@@ -77,14 +82,18 @@ describe('optimistic user message reconciliation', () => {
       parts: [textPart('msg-pending-part-0', 'msg-pending', 'new prompt')],
     };
     upsertMessage(previous);
+    flushSolid();
     upsertMessage(optimistic);
+    flushSolid();
     setMessagesIncremental([previous]);
+    flushSolid();
 
     const acknowledged = {
       info: userMessage('msg-pending'),
       parts: [textPart('part-server', 'msg-pending', 'new prompt')],
     };
     setMessagesIncremental([previous, acknowledged]);
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-previous', 'msg-pending']);
     expect(state.messages[1]!.parts).toEqual(acknowledged.parts);
@@ -92,10 +101,12 @@ describe('optimistic user message reconciliation', () => {
 
   it('does not reconcile a different server ID based only on matching text', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'hello world')]));
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-1'),
       parts: [textPart('p-2', 'msg-1', 'hello world')],
     });
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
@@ -109,30 +120,36 @@ describe('optimistic user message reconciliation', () => {
         textPart('p-4', OPTIMISTIC_ID, 'explain this'),
       ])
     );
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-1'),
       parts: [textPart('p-5', 'msg-1', 'explain this')],
     });
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
 
   it('keeps the optimistic entry when the server text does not match', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'first question')]));
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-1'),
       parts: [textPart('p-2', 'msg-1', 'a different question')],
     });
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
 
   it('does not reconcile an optimistic entry from another session', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'hello')], 'session-2'));
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-1', 'session-1'),
       parts: [textPart('p-2', 'msg-1', 'hello')],
     });
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
@@ -141,7 +158,9 @@ describe('optimistic user message reconciliation', () => {
     upsertMessage(
       optimisticEntry([imagePart(`${OPTIMISTIC_ID}-optimistic-file-0`, OPTIMISTIC_ID)])
     );
+    flushSolid();
     upsertMessage({ info: userMessage('msg-1'), parts: [] });
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
@@ -151,14 +170,17 @@ describe('optimistic user message reconciliation', () => {
       info: userMessage('optimistic-user-1'),
       parts: [textPart('p-1', 'optimistic-user-1', 'same text')],
     });
+    flushSolid();
     upsertMessage({
       info: userMessage('optimistic-user-2'),
       parts: [textPart('p-2', 'optimistic-user-2', 'same text')],
     });
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-1'),
       parts: [textPart('p-3', 'msg-1', 'same text')],
     });
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual([
       'optimistic-user-1',
@@ -172,12 +194,15 @@ describe('optimistic user message reconciliation', () => {
       info: userMessage('msg-older'),
       parts: [textPart('msg-older-part-0', 'msg-older', 'older prompt')],
     });
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-newer'),
       parts: [textPart('msg-newer-part-0', 'msg-newer', 'newer prompt')],
     });
+    flushSolid();
 
     upsertMessageInfo(userMessage('msg-older'));
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-older', 'msg-newer']);
     expect(state.messages[0]!.parts).toHaveLength(1);
@@ -189,13 +214,16 @@ describe('optimistic user message reconciliation', () => {
       info: userMessage('msg-1'),
       parts: [textPart('msg-1-part-0', 'msg-1', 'optimistic text')],
     });
+    flushSolid();
 
     upsertMessageInfo(userMessage('msg-1'));
+    flushSolid();
     expect(state.messages[0]!.parts).toEqual([
       textPart('msg-1-part-0', 'msg-1', 'optimistic text'),
     ]);
 
     upsertPart(textPart('part-server', 'msg-1', 'server text'));
+    flushSolid();
     expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
   });
 
@@ -211,22 +239,28 @@ describe('optimistic user message reconciliation', () => {
         textPart('msg-1-part-3', 'msg-1', terminalSelection),
       ],
     });
+    flushSolid();
     upsertMessageInfo(userMessage('msg-1'));
+    flushSolid();
 
     upsertPart(textPart('part-server-0', 'msg-1', 'Test message'));
+    flushSolid();
 
     expect(state.messages[0]!.parts.map((part) => (part.type === 'text' ? part.text : ''))).toEqual(
       ['Test message', '[Working directory: /repo]', 'package.json', terminalSelection]
     );
 
     upsertPart(textPart('part-server-1', 'msg-1', '[Working directory: /repo]'));
+    flushSolid();
     upsertPart(textPart('part-server-2', 'msg-1', 'package.json'));
+    flushSolid();
 
     expect(state.messages[0]!.parts.at(-1)).toEqual(
       textPart('msg-1-part-3', 'msg-1', terminalSelection)
     );
 
     upsertPart(textPart('part-server-3', 'msg-1', terminalSelection));
+    flushSolid();
 
     expect(partIds()).toEqual([
       ['part-server-0', 'part-server-1', 'part-server-2', 'part-server-3'],
@@ -245,7 +279,9 @@ describe('optimistic user message reconciliation', () => {
         textPart('msg-1-part-1', 'msg-1', terminalSelection),
       ],
     });
+    flushSolid();
     upsertMessageInfo(info);
+    flushSolid();
 
     setMessagesIncremental(
       [
@@ -259,6 +295,7 @@ describe('optimistic user message reconciliation', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(partIds()).toEqual([['server-part-0', 'server-part-1']]);
   });
@@ -279,20 +316,26 @@ describe('optimistic user message reconciliation', () => {
           image,
         ],
       });
+      flushSolid();
 
       if (timing === 'metadata first') upsertMessageInfo(info);
+      flushSolid();
       if (timing !== 'snapshot first') upsertPart(canonical);
       else setMessagesIncremental([{ info, parts: [canonical] }], { preserveExtraParts: true });
+      flushSolid();
 
       expect(state.messages[0]!.parts.filter((part) => part.type === 'text')).toEqual([canonical]);
       expect(state.messages[0]!.parts.filter((part) => part.type === 'file')).toHaveLength(1);
 
       const canonicalImage = { ...image, id: 'msg-1:content:1' };
       upsertPart(canonicalImage);
+      flushSolid();
       upsertPart(canonical);
+      flushSolid();
       setMessagesIncremental([{ info, parts: [canonical, canonicalImage] }], {
         preserveExtraParts: true,
       });
+      flushSolid();
       expect(state.messages[0]!.parts).toEqual([canonical, canonicalImage]);
     }
   );
@@ -305,8 +348,10 @@ describe('optimistic user message reconciliation', () => {
       info,
       parts: [textPart('msg-1-part-0', 'msg-1', 'Review README.md'), context],
     });
+    flushSolid();
 
     setMessagesIncremental([{ info, parts: [canonical] }], { preserveExtraParts: true });
+    flushSolid();
 
     expect(state.messages[0]!.parts).toEqual([canonical, context]);
   });
@@ -320,6 +365,7 @@ describe('optimistic user message reconciliation', () => {
         textPart('msg-1-part-1', 'msg-1', '[Working directory: /repo]'),
       ],
     });
+    flushSolid();
 
     setMessagesIncremental(
       [
@@ -333,6 +379,7 @@ describe('optimistic user message reconciliation', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(state.messages[0]!.parts).toEqual([
       textPart('server-part-0', 'msg-1', 'Update changelog'),
@@ -350,11 +397,16 @@ describe('optimistic user message reconciliation', () => {
       parts: [textPart('msg-pending-part-0', 'msg-pending', 'new prompt')],
     };
     upsertMessage(previous);
+    flushSolid();
     upsertMessage(optimistic);
+    flushSolid();
     upsertMessageInfo(userMessage('msg-pending'));
+    flushSolid();
     upsertPart(textPart('part-server', 'msg-pending', 'new prompt'));
+    flushSolid();
 
     setMessagesIncremental([previous]);
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-previous', 'msg-pending']);
     expect(state.messages[1]!.parts).toEqual([
@@ -372,6 +424,7 @@ describe('optimistic user message reconciliation', () => {
         }),
       ],
     });
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-newer'),
       parts: [
@@ -381,9 +434,12 @@ describe('optimistic user message reconciliation', () => {
         }),
       ],
     });
+    flushSolid();
 
     upsertMessageInfo(userMessage('msg-newer'));
+    flushSolid();
     upsertMessageInfo(userMessage('msg-older'));
+    flushSolid();
 
     expect(
       state.messages.map((entry) => {
@@ -401,8 +457,10 @@ describe('optimistic user message reconciliation', () => {
       info: userMessage('msg-1'),
       parts: [textPart('msg-1-part-0', 'msg-1', 'optimistic text')],
     });
+    flushSolid();
 
     upsertPart(textPart('part-server', 'msg-1', 'server text'));
+    flushSolid();
 
     expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
   });
@@ -418,27 +476,36 @@ describe('optimistic user message reconciliation', () => {
         info: userMessage('msg-1'),
         parts: [textPart('msg-1-part-0', 'msg-1', prompt), context],
       });
+      flushSolid();
       if (timing === 'after metadata') upsertMessageInfo(userMessage('msg-1'));
+      flushSolid();
 
       upsertPart(serverPrompt);
+      flushSolid();
       if (timing === 'after refresh') {
         setMessagesIncremental([{ info: userMessage('msg-1'), parts: [serverPrompt] }], {
           preserveExtraParts: true,
         });
+        flushSolid();
       }
+      flushSolid();
       upsertPart(serverPrompt);
+      flushSolid();
 
       expect(state.messages[0]!.parts).toEqual([serverPrompt, context]);
 
       const serverContext = { ...context, id: 'server-context' };
       upsertPart(serverContext);
+      flushSolid();
       expect(state.messages[0]!.parts).toEqual([serverPrompt, serverContext]);
 
       setMessagesIncremental(
         [{ info: userMessage('msg-1'), parts: [serverPrompt, serverContext] }],
         { preserveExtraParts: true }
       );
+      flushSolid();
       upsertPart(serverPrompt);
+      flushSolid();
       expect(state.messages[0]!.parts).toEqual([serverPrompt, serverContext]);
     }
   );
@@ -458,22 +525,28 @@ describe('optimistic user message reconciliation', () => {
         }),
       ],
     });
+    flushSolid();
     upsertMessageInfo(userMessage('msg-1'));
+    flushSolid();
 
     upsertPart(textPart('server-text-1', 'msg-1', 'Review these screenshots'));
+    flushSolid();
     upsertPart(
       imagePart('server-image-1', 'msg-1', {
         filename: 'first.png',
         url: 'data:image/png;base64,FIRST',
       })
     );
+    flushSolid();
     upsertPart(
       imagePart('server-image-2', 'msg-1', {
         filename: 'second.png',
         url: 'data:image/png;base64,SECOND',
       })
     );
+    flushSolid();
     upsertPart(textPart('server-text-2', 'msg-1', 'Review these screenshots'));
+    flushSolid();
 
     expect(
       state.messages[0]!.parts.map((part) => (part.type === 'text' ? part.text : part.id))
@@ -488,6 +561,7 @@ describe('history prepend reconciliation', () => {
       parts: [imagePart('image-1', 'msg-current'), imagePart('image-2', 'msg-current')],
     };
     setMessagesIncremental([current]);
+    flushSolid();
     const mountedEntry = state.messages[0]!;
 
     setMessagesIncremental([
@@ -500,6 +574,7 @@ describe('history prepend reconciliation', () => {
         parts: current.parts.map((part) => ({ ...part })),
       },
     ]);
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-older', 'msg-current']);
     expect(state.messages[1]).toBe(mountedEntry);
@@ -519,6 +594,7 @@ describe('history prepend reconciliation', () => {
       parts: [textPart('child-after-text', 'child-after', 'after', 'child-1')],
     };
     setMessagesIncremental([childBefore, parentCurrent, childAfter]);
+    flushSolid();
     const retained = new Map(state.messages.map((entry) => [entry.info.id, entry]));
 
     setMessagesIncremental([
@@ -530,6 +606,7 @@ describe('history prepend reconciliation', () => {
       state.messages[1]!,
       state.messages[2]!,
     ]);
+    flushSolid();
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual([
       'child-before',
@@ -552,7 +629,9 @@ describe('optimistic image parts carried onto the server message', () => {
         imagePart('local-image', OPTIMISTIC_ID),
       ])
     );
+    flushSolid();
     upsertMessageInfo(userMessage(OPTIMISTIC_ID));
+    flushSolid();
 
     expect(state.messages).toHaveLength(1);
     const entry = state.messages[0]!;
@@ -569,7 +648,9 @@ describe('optimistic image parts carried onto the server message', () => {
 
   it('keeps non-image optimistic parts until a server part arrives', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'text only')]));
+    flushSolid();
     upsertMessageInfo(userMessage(OPTIMISTIC_ID));
+    flushSolid();
 
     expect(state.messages).toHaveLength(1);
     expect(state.messages[0]!.parts).toEqual([textPart('p-1', OPTIMISTIC_ID, 'text only')]);
@@ -591,6 +672,7 @@ describe('optimistic image part de-duplication', () => {
         }),
       ],
     });
+    flushSolid();
     const renamed = imagePart('server-second', 'msg-1', {
       filename: 'renamed.png',
       url: 'varro-content:/second',
@@ -602,6 +684,7 @@ describe('optimistic image part de-duplication', () => {
     setMessagesIncremental([{ info: userMessage('msg-1'), parts: [renamed, first] }], {
       preserveExtraParts: true,
     });
+    flushSolid();
     expect(partIds()).toEqual([['server-first', 'server-second']]);
   });
 
@@ -621,6 +704,7 @@ describe('optimistic image part de-duplication', () => {
       info: userMessage('msg-1'),
       parts: [textPart('msg-1-part-0', 'msg-1', 'Compare these'), ...local],
     });
+    flushSolid();
     setMessagesIncremental(
       [
         {
@@ -630,6 +714,7 @@ describe('optimistic image part de-duplication', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
     expect(partIds()).toEqual([['server-text', 'server-0', 'server-1', 'server-2']]);
   });
 
@@ -641,9 +726,13 @@ describe('optimistic image part de-duplication', () => {
         imagePart('msg-1-part-1', 'msg-1'),
       ],
     });
+    flushSolid();
     upsertMessageInfo(userMessage('msg-1'));
+    flushSolid();
     upsertPart(imagePart('server-image', 'msg-1', { url: 'varro-content:/image' }));
+    flushSolid();
     upsertMessageInfo(userMessage('msg-1'));
+    flushSolid();
     expect(partIds()).toEqual([['msg-1-part-0', 'server-image']]);
   });
 
@@ -659,12 +748,16 @@ describe('optimistic image part de-duplication', () => {
       url: 'varro-content:/image-0',
     });
     upsertMessage({ info: userMessage('msg-1'), parts: local });
+    flushSolid();
     upsertPart(first);
+    flushSolid();
     upsertPart(first);
+    flushSolid();
     expect(partIds()).toEqual([['server-0', 'msg-1-optimistic-file-1', 'msg-1-optimistic-file-2']]);
     setMessagesIncremental([{ info: userMessage('msg-1'), parts: [first] }], {
       preserveExtraParts: true,
     });
+    flushSolid();
     expect(partIds()).toEqual([['server-0', 'msg-1-optimistic-file-1', 'msg-1-optimistic-file-2']]);
   });
 
@@ -676,6 +769,7 @@ describe('optimistic image part de-duplication', () => {
       })
     );
     upsertMessage({ info: userMessage('msg-1'), parts: local });
+    flushSolid();
     const second = imagePart('server-1', 'msg-1', {
       filename: '1.png',
       url: 'varro-content:/image-1',
@@ -683,6 +777,7 @@ describe('optimistic image part de-duplication', () => {
     setMessagesIncremental([{ info: userMessage('msg-1'), parts: [second] }], {
       preserveExtraParts: true,
     });
+    flushSolid();
     expect(partIds()).toEqual([['msg-1-part-0', 'server-1', 'msg-1-part-2']]);
   });
 
@@ -696,7 +791,9 @@ describe('optimistic image part de-duplication', () => {
 
   it('removes the optimistic twin when the server image part arrives', () => {
     seedServerMessageWithOptimisticImage();
+    flushSolid();
     upsertPart(imagePart('server-image', 'msg-1'));
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image']]);
   });
@@ -715,6 +812,7 @@ describe('optimistic image part de-duplication', () => {
         }),
       ],
     });
+    flushSolid();
 
     upsertPart(
       imagePart('server-image-1', 'msg-1', {
@@ -722,6 +820,7 @@ describe('optimistic image part de-duplication', () => {
         url: 'data:image/png;base64,FIRST',
       })
     );
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image-1', 'msg-1-optimistic-file-1']]);
 
@@ -731,26 +830,32 @@ describe('optimistic image part de-duplication', () => {
         url: 'data:image/png;base64,SECOND',
       })
     );
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image-1', 'server-image-2']]);
   });
 
   it('replaces the optimistic image when the server rewrites its url', () => {
     seedServerMessageWithOptimisticImage();
+    flushSolid();
     upsertPart(imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }));
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image']]);
   });
 
   it('replaces the optimistic image when the server rewrites its filename', () => {
     seedServerMessageWithOptimisticImage();
+    flushSolid();
     upsertPart(imagePart('server-image', 'msg-1', { filename: 'renamed.png' }));
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image']]);
   });
 
   it('does not consume an unacknowledged image when an existing server part is updated', () => {
     seedServerMessageWithOptimisticImage();
+    flushSolid();
     upsertMessage({
       info: userMessage('msg-1'),
       parts: [
@@ -758,14 +863,17 @@ describe('optimistic image part de-duplication', () => {
         imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }),
       ],
     });
+    flushSolid();
 
     upsertPart(imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }));
+    flushSolid();
 
     expect(partIds()).toEqual([['msg-1-optimistic-file-0', 'server-image']]);
   });
 
   it('does not remove an optimistic image for a non-image file part', () => {
     seedServerMessageWithOptimisticImage();
+    flushSolid();
     upsertPart({
       id: 'server-file',
       sessionID: 'session-1',
@@ -775,6 +883,7 @@ describe('optimistic image part de-duplication', () => {
       filename: 'pasted-1.png',
       url: 'data:image/png;base64,AAAA',
     });
+    flushSolid();
 
     expect(partIds()).toEqual([['msg-1-optimistic-file-0', 'server-file']]);
   });
@@ -784,7 +893,9 @@ describe('optimistic image part de-duplication', () => {
       info: userMessage('msg-1'),
       parts: [imagePart('regular-image', 'msg-1')],
     });
+    flushSolid();
     upsertPart(imagePart('server-image', 'msg-1'));
+    flushSolid();
 
     expect(partIds()).toEqual([['regular-image', 'server-image']]);
   });
@@ -799,22 +910,27 @@ describe('optimistic image parts across an incremental refresh', () => {
 
   it('preserves an optimistic image the server payload has not caught up to', () => {
     upsertMessage(currentEntry([imagePart(optimisticImageId, 'msg-1')]));
+    flushSolid();
     setMessagesIncremental([currentEntry([textPart('p-1', 'msg-1', 'look')])]);
+    flushSolid();
 
     expect(partIds()).toEqual([['p-1', optimisticImageId]]);
   });
 
   it('does not duplicate the image once the server payload includes a match', () => {
     upsertMessage(currentEntry([imagePart(optimisticImageId, 'msg-1')]));
+    flushSolid();
     setMessagesIncremental([currentEntry([imagePart('server-image', 'msg-1')])], {
       preserveExtraParts: true,
     });
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image']]);
   });
 
   it('does not duplicate an image when the server rewrites its metadata', () => {
     upsertMessage(currentEntry([imagePart(optimisticImageId, 'msg-1')]));
+    flushSolid();
     setMessagesIncremental(
       [
         currentEntry([
@@ -826,6 +942,7 @@ describe('optimistic image parts across an incremental refresh', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image']]);
   });
@@ -840,6 +957,7 @@ describe('optimistic image parts across an incremental refresh', () => {
         }),
       ])
     );
+    flushSolid();
     setMessagesIncremental(
       [
         currentEntry([
@@ -851,6 +969,7 @@ describe('optimistic image parts across an incremental refresh', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image-1', 'msg-1-optimistic-file-1']]);
   });
@@ -865,6 +984,7 @@ describe('optimistic image parts across an incremental refresh', () => {
         }),
       ])
     );
+    flushSolid();
     setMessagesIncremental(
       [
         currentEntry([
@@ -877,15 +997,18 @@ describe('optimistic image parts across an incremental refresh', () => {
       ],
       { preserveExtraParts: true }
     );
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image-1', 'server-image-2']]);
   });
 
   it('treats a different server image as the canonical optimistic image', () => {
     upsertMessage(currentEntry([imagePart(optimisticImageId, 'msg-1')]));
+    flushSolid();
     setMessagesIncremental([
       currentEntry([imagePart('server-image', 'msg-1', { url: 'data:image/png;base64,BBBB' })]),
     ]);
+    flushSolid();
 
     expect(partIds()).toEqual([['server-image']]);
   });

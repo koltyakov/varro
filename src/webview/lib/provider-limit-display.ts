@@ -1,5 +1,5 @@
-import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import type { Accessor } from 'solid-js';
+import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js';
+
 import { PROVIDER_LIMIT_STALE_RETENTION_MS } from '../../shared/provider-limit-config';
 import type { ProviderLimitStatus } from '../../shared/protocol';
 
@@ -40,21 +40,26 @@ export function createProviderLimitDisplay(
   readLimit: Accessor<ProviderLimitStatus | null>
 ): Accessor<ProviderLimitStatus | null> {
   const [now, setNow] = createSignal(Date.now());
-  createEffect(() => {
-    const limit = readLimit();
-    setNow(Date.now());
-    if (limit?.status !== 'available') return;
-    const deadlines: number[] = [];
-    if (limit.stale) deadlines.push(limit.checkedAt + PROVIDER_LIMIT_STALE_RETENTION_MS);
-    if (limit.usageLimitResets?.stale && limit.usageLimitResets.checkedAt !== undefined) {
-      deadlines.push(limit.usageLimitResets.checkedAt + PROVIDER_LIMIT_STALE_RETENTION_MS);
+  createEffect(
+    () => {
+      const limit = readLimit();
+      const deadlines: number[] = [];
+      if (limit?.status !== 'available') return deadlines;
+      if (limit.stale) deadlines.push(limit.checkedAt + PROVIDER_LIMIT_STALE_RETENTION_MS);
+      if (limit.usageLimitResets?.stale && limit.usageLimitResets.checkedAt !== undefined) {
+        deadlines.push(limit.usageLimitResets.checkedAt + PROVIDER_LIMIT_STALE_RETENTION_MS);
+      }
+      return deadlines;
+    },
+    (deadlines) => {
+      setNow(Date.now());
+      const timers = [...new Set(deadlines)]
+        .filter((deadline) => deadline > Date.now())
+        .map((deadline) => setTimeout(() => setNow(Date.now()), deadline - Date.now()));
+      return () => {
+        for (const timer of timers) clearTimeout(timer);
+      };
     }
-    const timers = [...new Set(deadlines)]
-      .filter((deadline) => deadline > Date.now())
-      .map((deadline) => setTimeout(() => setNow(Date.now()), deadline - Date.now()));
-    onCleanup(() => {
-      for (const timer of timers) clearTimeout(timer);
-    });
-  });
+  );
   return createMemo(() => getProviderLimitDisplay(readLimit(), now()));
 }

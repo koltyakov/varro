@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { BusySendMenu } from './BusySendMenu';
 import { chatBubbleQuestionIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';

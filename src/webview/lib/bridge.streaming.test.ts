@@ -1,5 +1,5 @@
+import { createEffect, createRoot, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createComputed, createRoot, createSignal } from 'solid-js';
 import type { ExtensionMessage } from '../../shared/protocol';
 import { cleanupBridge, initializeBridge, onMessage } from './bridge';
 
@@ -44,8 +44,8 @@ describe('incoming stream batches', () => {
     const observed: number[] = [];
     const dispose = createRoot((disposeRoot) => {
       const [count, setCount] = createSignal(0);
-      createComputed(() => {
-        observed.push(count());
+      createEffect(count, (value) => {
+        observed.push(value);
       });
       onMessage((message) => {
         received.push(message);

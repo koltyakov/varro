@@ -1,4 +1,4 @@
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StarterHistogram } from './StarterHistogram';
 import * as tileWavesModule from './TileWaves';

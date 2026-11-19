@@ -1,7 +1,7 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
 /* oxlint-disable anti-slop/no-module-mocking -- The bridge is substituted to test explicit user opt-in and failure presentation. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { DecisionProviderStatus } from '../../shared/protocol';
 import { NativeDecisionProviderSection } from './NativeDecisionProviderSection';
 
@@ -10,8 +10,11 @@ vi.mock('../lib/client', () => ({ client: { varro: { decisionProviders: { update
 let cleanup: (() => void) | undefined;
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   document.body.replaceChildren();
+  flushSolid();
   vi.clearAllMocks();
+  flushSolid();
 });
 const initial: NonNullable<DecisionProviderStatus['native']> = {
   supported: true,
@@ -40,6 +43,7 @@ function mount(initialStatus = initial) {
 describe('native decision model selection', () => {
   it('stays off until explicitly selected and can be turned off again', async () => {
     const { select } = mount();
+    flushSolid();
     expect(select.value).toBe('');
     expect(update).not.toHaveBeenCalled();
     update.mockResolvedValueOnce({
@@ -47,13 +51,17 @@ describe('native decision model selection', () => {
     });
     select.value = 'typesafe-ai/jev';
     select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSolid();
     await vi.waitFor(() => expect(select.disabled).toBe(false));
+    flushSolid();
     expect(update).toHaveBeenCalledWith({ action: 'native', model: 'typesafe-ai/jev' });
     expect(select.value).toBe('typesafe-ai/jev');
     update.mockResolvedValueOnce({ native: initial });
     select.value = '';
     select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSolid();
     await vi.waitFor(() => expect(select.disabled).toBe(false));
+    flushSolid();
     expect(update).toHaveBeenLastCalledWith({ action: 'native', model: '' });
     expect(select.value).toBe('');
   });
@@ -66,25 +74,31 @@ describe('native decision model selection', () => {
         modelID: 'jev',
       },
     });
+    flushSolid();
     expect(select.value).toBe('typesafe-ai/jev');
     expect(container.textContent).toContain('(unavailable)');
     update.mockResolvedValueOnce({ native: { supported: false, models: [], model: null } });
     select.value = '';
     select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSolid();
     await vi.waitFor(() => expect(select.disabled).toBe(false));
+    flushSolid();
     expect(update).toHaveBeenCalledWith({ action: 'native', model: '' });
     expect(select.value).toBe('');
   });
   it('keeps the confirmed selection and shows a failed setting update', async () => {
     update.mockRejectedValueOnce(new Error('Selection not saved'));
     const { container, select } = mount();
+    flushSolid();
     select.value = 'typesafe-ai/jev';
     select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSolid();
     await vi.waitFor(() =>
       expect(container.querySelector('[role="alert"]')?.textContent).toContain(
         'Selection not saved'
       )
     );
+    flushSolid();
     expect(select.value).toBe('');
     expect(select.disabled).toBe(false);
   });

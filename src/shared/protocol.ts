@@ -488,6 +488,7 @@ export type WorkspaceStatusEventSummary = {
 export const VARRO_API_NAMESPACE = '/varro' as const;
 
 export const VARRO_API_ENDPOINTS = {
+  localImage: `${VARRO_API_NAMESPACE}/local-image`,
   remoteImage: `${VARRO_API_NAMESPACE}/remote-image`,
   promptCompletion: `${VARRO_API_NAMESPACE}/prompt-completion`,
   promptCompletionModels: `${VARRO_API_NAMESPACE}/prompt-completion/models`,
@@ -1086,6 +1087,7 @@ export type ExtensionMessage =
         deniedReason?: 'missing';
       };
     }
+  | { type: 'pinned-sessions/sync'; payload: { sessionIds: string[] } }
   | {
       type: 'permission-modes/sync';
       payload: { modes: Record<string, PermissionMode>; recoveringSessionIds?: string[] };

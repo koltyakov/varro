@@ -1,6 +1,6 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { resetDefaultAppState, setShowFileDiffs } from '../../lib/state';
 import type { AssistantMessage, Part, ToolPart } from '../../types';
 import { fixture } from '../../test-fixtures';
@@ -11,16 +11,21 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   resetDefaultAppState();
+  flushSolid();
   setShowFileDiffs(false);
+  flushSolid();
   container = document.createElement('div');
   document.body.append(container);
 });
 
 afterEach(() => {
   dispose?.();
+  flushSolid();
   dispose = undefined;
   container.remove();
+  flushSolid();
   resetDefaultAppState();
+  flushSolid();
 });
 
 function edit(id: string, completed: boolean): ToolPart {
@@ -49,6 +54,7 @@ it.each([false, true])(
   'keeps the transcript usable through file-edit replacement and removal (inline diffs: %s)',
   (inlineDiffs) => {
     setShowFileDiffs(inlineDiffs);
+    flushSolid();
     const [parts, setParts] = createSignal<Part[]>([edit('first', true)]);
     dispose = render(
       () => (
@@ -69,21 +75,27 @@ it.each([false, true])(
       ),
       container
     );
+    flushSolid();
     expect(container.textContent).toContain('app.ts');
+    function replaceParts(next: Part[]) {
+      setParts(next);
+      flushSolid();
+    }
     expect(
-      () => setParts([edit('first', true), edit('second', false)]),
+      () => replaceParts([edit('first', true), edit('second', false)]),
       'append running edit'
     ).not.toThrow();
     expect(
-      () => setParts([edit('first', true), edit('second', true)]),
+      () => replaceParts([edit('first', true), edit('second', true)]),
       'complete second edit'
     ).not.toThrow();
     expect(container.textContent).toContain('app.ts');
     expect(container.querySelectorAll('.assistant-file-edit-stack > *')).toHaveLength(1);
-    expect(() => setParts([edit('replacement', true)]), 'replace edit snapshot').not.toThrow();
-    expect(() => setParts([]), 'clear transcript').not.toThrow();
+    expect(() => replaceParts([edit('replacement', true)]), 'replace edit snapshot').not.toThrow();
+    expect(() => replaceParts([]), 'clear transcript').not.toThrow();
     expect(container.querySelector('.assistant-file-edit-stack')).toBeNull();
     setParts([edit('third', true)]);
+    flushSolid();
     expect(container.textContent).toContain('app.ts');
   }
 );

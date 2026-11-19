@@ -61,14 +61,14 @@ export function sameFrozenSegmentBoundary(
 export function createSettledHistoryRanges(entries: Accessor<readonly MessageEntry[]>) {
   const historyEnd = createMemo(() => getHistorySegmentEnd(entries()));
   const frozenBoundary = createMemo<FrozenSegmentBoundary>(
-    (previous) => getFrozenSegmentBoundary(entries(), historyEnd(), previous),
-    { entry: null, index: 0 },
+    (previous = { entry: null, index: 0 }) =>
+      getFrozenSegmentBoundary(entries(), historyEnd(), previous),
     { equals: sameFrozenSegmentBoundary }
   );
-  const frozen = createMemo(() => entries().slice(0, frozenBoundary().index), [], {
+  const frozen = createMemo(() => entries().slice(0, frozenBoundary().index), {
     equals: sameEntries,
   });
-  const recent = createMemo(() => entries().slice(frozenBoundary().index, historyEnd()), [], {
+  const recent = createMemo(() => entries().slice(frozenBoundary().index, historyEnd()), {
     equals: sameEntries,
   });
   return { frozen, recent, historyEnd };

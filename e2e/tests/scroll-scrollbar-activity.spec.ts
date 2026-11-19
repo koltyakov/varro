@@ -12,6 +12,148 @@ import { appendDeltaToRapidStreaming } from './scroll-helpers';
 
 type ScrollSample = { top: number; height: number };
 
+test('cold virtual measurements yield scroll writes to the held native thumb', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 486, height: 794 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewTurns=110&diffPreviewCompleted=1'
+  );
+  const list = page.locator('.interactive-list');
+  await expect(list).toBeVisible();
+  await expect
+    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+    .toBeLessThanOrEqual(1);
+  await waitForAnimationFrames(page, 12);
+  const initialIds = await list
+    .locator('[data-msg-id]')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-msg-id')));
+  const writes: Array<{ top: number; held: boolean }> = [];
+  await page.exposeFunction('recordThumbScrollWrite', (top: number, held: boolean) =>
+    writes.push({ top, held })
+  );
+  await list.evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+    Object.defineProperty(element, 'scrollTop', {
+      configurable: true,
+      get() {
+        return descriptor.get!.call(this);
+      },
+      set(value: number) {
+        // SAFETY: exposeFunction installed this test-owned binding before this setter.
+        const host = window as typeof window & {
+          recordThumbScrollWrite: (top: number, held: boolean) => Promise<void>;
+        };
+        void host.recordThumbScrollWrite(value, element.hasAttribute('data-pointer-scroll-owned'));
+        descriptor.set!.call(this, value);
+      },
+    });
+  });
+  const thumb = await getThumb(list);
+  await page.mouse.move(thumb.x, thumb.y);
+  await page.mouse.down();
+  await expect(list).toHaveAttribute('data-pointer-scroll-owned', '');
+  try {
+    await page.waitForTimeout(400);
+    await page.mouse.move(thumb.x, thumb.y - 160, { steps: 16 });
+    await page.waitForTimeout(1_050);
+    const destination = await getScrollMetrics(page, '.interactive-list');
+    expect(destination.scrollTop).toBeLessThan(thumb.top - 1_000);
+    const currentIds = await list
+      .locator('[data-msg-id]')
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-msg-id')));
+    expect(currentIds.some((id) => !initialIds.includes(id))).toBe(true);
+    const anchor = await getVisibleMessageAnchor(list);
+    const heldSamples = await sampleMessageTopAcrossFrames(list, anchor.id, 12);
+    expect(heldSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1)).toBe(true);
+    await testInfo.attach('native-thumb-writes', {
+      body: JSON.stringify({ initialIds, currentIds, writes, anchor, heldSamples }),
+      contentType: 'application/json',
+    });
+    expect(writes.filter((write) => write.held)).toEqual([]);
+  } finally {
+    await page.mouse.up();
+  }
+  const released = await getVisibleMessageAnchor(list);
+  const releasedSamples = await sampleMessageTopAcrossFrames(list, released.id, 12);
+  expect(releasedSamples.every((top) => top !== null && Math.abs(top - released.top) <= 1)).toBe(
+    true
+  );
+});
+
+test('reveals new streamed parts once without replaying entrances when reopening busy sessions', async ({
+  page,
+}) => {
+  const starts: string[] = [];
+  await page.exposeFunction('recordStreamedEntrance', (key: string) => starts.push(key));
+  await page.addInitScript(() => {
+    document.addEventListener(
+      'animationstart',
+      (event) => {
+        if (
+          event.animationName !== 'streamed-assistant-item-in' ||
+          !(event.target instanceof Element)
+        )
+          return;
+        const key = event.target.closest<HTMLElement>('[data-assistant-render-key]')?.dataset
+          .assistantRenderKey;
+        if (!key) return;
+        // SAFETY: Playwright installed this callback before navigation.
+        void (window as Window & { recordStreamedEntrance?(key: string): Promise<void> })
+          .recordStreamedEntrance!(key);
+      },
+      true
+    );
+  });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter&secondBusySession=1');
+  const list = page.locator('.interactive-list');
+  const first = [
+    'session-rapid-streaming-jitter',
+    'message-rapid-assistant-streaming',
+    'message-rapid-assistant-streaming-text-1',
+  ] as const;
+  const second = ['session-rapid-second', 'second-assistant', 'second-assistant-part-1'] as const;
+  for (const [index, session] of [first, second, first].entries()) {
+    const [sessionID, messageID, initialPartID] = session;
+    if (index) {
+      await page.getByLabel('Back to sessions').click();
+      await expect(list).toHaveCount(0);
+      await page.locator(`[data-session-id="${sessionID}"] .session-item-main`).click();
+    }
+    const row = list.locator(`[data-msg-id="${messageID}"]`);
+    await expect(row).toContainText('Starting...');
+    await waitForAnimationFrames(page, 4);
+    const partID = `new-part-${index}`;
+    await page.evaluate(
+      (part) => {
+        // SAFETY: The isolated E2E harness installs the production-event replay helper.
+        const harness = (
+          window as Window & {
+            __varroE2E?: { replayServerEvent(event: ServerEvent): void };
+          }
+        ).__varroE2E!;
+        harness.replayServerEvent({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: part.partID,
+              sessionID: part.sessionID,
+              messageID: part.messageID,
+              type: 'text',
+              text: `Fresh content: ${part.partID}`,
+            },
+          },
+        });
+      },
+      { sessionID, messageID, partID }
+    );
+    await expect(row).toContainText(partID);
+    await expect.poll(() => starts.filter((key) => key === `part:${partID}`).length).toBe(1);
+    expect(starts).not.toContain(`part:${initialPartID}`);
+  }
+  expect(starts.filter((key) => key === 'part:new-part-0')).toHaveLength(1);
+});
+
 // Headless Chromium hides native scrollbars by default, making thumb drags inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
@@ -39,6 +181,7 @@ for (const destination of ['top', 'bottom'] as const) {
     const thumb = await getThumb(list);
     const bounds = await list.boundingBox();
     if (!bounds) throw new Error('Missing transcript viewport');
+    const heldScrollHeight = thumb.scrollHeight;
     await page.mouse.move(thumb.x, thumb.y);
     await page.mouse.down();
     await expect(list).toHaveAttribute('data-pointer-scroll-owned', '');
@@ -50,7 +193,11 @@ for (const destination of ['top', 'bottom'] as const) {
       block.style.height = '20px';
       block.style.overflow = 'hidden';
     });
-    await expect(list.locator('.append-scroll-bottom-reserve')).toBeVisible();
+    // The held thumb keeps its range while the content shrinks underneath it.
+    await waitForAnimationFrames(page, 2);
+    expect(await list.evaluate((element) => element.scrollHeight)).toBeGreaterThanOrEqual(
+      heldScrollHeight - 1
+    );
     await page.mouse.move(
       thumb.x,
       destination === 'top' ? bounds.y - 40 : bounds.y + bounds.height + 40,
@@ -62,7 +209,9 @@ for (const destination of ['top', 'bottom'] as const) {
     // Releasing immediately can accidentally pass because a queued frame cleans up afterward.
     await waitForAnimationFrames(page, 60);
     if (destination === 'top')
-      await expect(list.locator('.append-scroll-bottom-reserve')).toBeVisible();
+      expect(await list.evaluate((element) => element.scrollHeight)).toBeGreaterThanOrEqual(
+        heldScrollHeight - 1
+      );
     else {
       const paintedFrames = await list.evaluate(async (element) => {
         const frames = [];
@@ -175,7 +324,7 @@ test('streaming yields to a held scrollbar, stays at the top, and follows a drag
     .toBeLessThanOrEqual(1);
 });
 
-for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointer'] as const) {
+for (const phase of ['bottom-event', 'retained', 'held-pointer'] as const) {
   test(`scrollbar dragging releases the ${phase} activity-collapse anchor`, async ({
     page,
   }, testInfo) => {
@@ -190,12 +339,6 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThanOrEqual(1);
-    const pauseExit = phase.startsWith('exiting')
-      ? await page.addStyleTag({
-          content:
-            '.assistant-active-activity-item.is-exiting { animation-play-state: paused !important; }',
-        })
-      : null;
     await page.evaluate(() => {
       // SAFETY: The isolated fixture installs this typed message store and event transport.
       const harness = (
@@ -219,13 +362,9 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
         });
       }
     });
-    if (phase.startsWith('exiting')) {
-      await expect(page.locator('.assistant-active-activity-item.is-exiting')).toHaveCount(1);
-    } else {
-      await expect(items).toHaveCount(0);
-      await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
-      await waitForAnimationFrames(page, 40);
-    }
+    await expect(items).toHaveCount(0);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
+    await waitForAnimationFrames(page, 40);
 
     const thumb = await list.evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -243,7 +382,7 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
     });
     await page.mouse.move(thumb.x, thumb.y);
     await page.mouse.down();
-    if (phase === 'exiting-bottom-event') {
+    if (phase === 'bottom-event') {
       // Reproduce a layout-driven bottom event after the pointer releases the exit
       // anchor, before native dragging moves away. It must not reclaim ownership.
       await list.evaluate((element) => {
@@ -257,7 +396,6 @@ for (const phase of ['exiting', 'exiting-bottom-event', 'retained', 'held-pointe
     // Custom Chromium scrollbars deliver the final drag movement on the next frame.
     await waitForAnimationFrames(page, 2);
     await page.mouse.up();
-    await pauseExit?.evaluate((element) => element.parentNode?.removeChild(element));
 
     const samples = await list.evaluate(async (element) => {
       const summary = element.querySelector('.assistant-activity-summary');

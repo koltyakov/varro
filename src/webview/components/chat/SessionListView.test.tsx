@@ -1,10 +1,12 @@
-import { render } from 'solid-js/web';
-import { reconcile } from 'solid-js/store';
+import { flush as flushSolid, reconcile } from 'solid-js';
+import { storePath } from '@solidjs/signals';
+import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import type { SessionDiffSummary } from '../../../shared/protocol';
 import { client } from '../../lib/client';
 import {
+  applyPinnedSessionsSync,
   error,
   markSessionResponseCompleted,
   markSessionResponseInterrupted,
@@ -27,6 +29,7 @@ import {
   SessionListView,
 } from './SessionListView';
 import { SessionActionFeedback } from './SessionActionFeedback';
+import { SessionLocationIndicator } from './SessionLocationIndicator';
 import {
   applySessionShareOverride,
   resetSessionShareOverridesForTests,
@@ -158,13 +161,20 @@ describe('deriveSessionIndicators', () => {
         }),
       ];
       setSessions(sessions);
-      if (source === 'local') setState('compactingSessionIds', ['child']);
-      setState('sessionStatus', {
-        root: { type: 'idle' },
-        child: { type: 'idle' },
-      });
-      setState('completedSessionResponses', { root: 10, child: 10 });
-      setState('lastSeenSessions', { root: 0, child: 0 });
+      flushSolid();
+      if (source === 'local') setState(storePath('compactingSessionIds', ['child']));
+      flushSolid();
+      setState(
+        storePath('sessionStatus', {
+          root: { type: 'idle' },
+          child: { type: 'idle' },
+        })
+      );
+      flushSolid();
+      setState(storePath('completedSessionResponses', { root: 10, child: 10 }));
+      flushSolid();
+      setState(storePath('lastSeenSessions', { root: 0, child: 0 }));
+      flushSolid();
 
       const indicators = deriveSessionIndicators(sessions, new Set(['child']));
       expect([...indicators.runningIds].toSorted()).toEqual(['child', 'root']);
@@ -193,16 +203,21 @@ describe('deriveSessionIndicators', () => {
   it('keeps pending waits unfinished and prefers active work in the same tree', () => {
     const sessions = [session('root', 1), session('child', 2, { parentID: 'root' })];
     setSessions(sessions);
-    setState('sessionStatus', {
-      root: { type: 'idle' },
-      child: { type: 'busy', background: true, backgroundStartedAt: 1 },
-    });
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        root: { type: 'idle' },
+        child: { type: 'busy', background: true, backgroundStartedAt: 1 },
+      })
+    );
+    flushSolid();
     const waiting = deriveSessionIndicators(sessions, new Set(['child']));
     expect([...waiting.pendingIds].toSorted()).toEqual(['child', 'root']);
     expect(waiting.runningIds.has('root')).toBe(true);
     expect(waiting.newlyCompletedIds.has('root')).toBe(false);
 
-    setState('sessionStatus', 'root', { type: 'busy' });
+    setState(storePath('sessionStatus', 'root', { type: 'busy' }));
+    flushSolid();
     const active = deriveSessionIndicators(sessions, new Set(['child']));
     expect([...active.pendingIds]).toEqual(['child']);
   });
@@ -212,6 +227,7 @@ describe('deriveSessionIndicators', () => {
       session('cycle-b', 2, { parentID: 'cycle-a' }),
     ];
     setSessions(cyclic);
+    flushSolid();
     expect(() => deriveSessionIndicators(cyclic)).not.toThrow();
 
     const depth = 15_000;
@@ -221,6 +237,7 @@ describe('deriveSessionIndicators', () => {
       })
     );
     setSessions(nested);
+    flushSolid();
 
     const indicators = deriveSessionIndicators(nested);
     expect(indicators.subagentCounts.get('nested-0')).toBe(depth - 1);
@@ -230,34 +247,83 @@ describe('deriveSessionIndicators', () => {
 
 beforeEach(() => {
   resetSessionShareOverridesForTests();
+  flushSolid();
   resetSessionDiffSummaryStateForTests();
-  setState('sessions', []);
-  setState('providers', []);
-  setState('sessionSelectedModels', reconcile({}));
-  setState('pinnedSessionIds', []);
-  setState('activeSessionId', null);
-  setState('editorTabsOpen', false);
-  setState('editorSessionIds', []);
-  setState('openEditorSessionIds', []);
-  setState('sessionStatus', {});
-  setState('compactingSessionIds', []);
-  setState('queuedMessages', []);
-  setState('editorContext', {
-    workspacePath: null,
-    workspaceFolders: [],
-    activeFile: null,
-    selection: null,
-    diagnostics: [],
+  flushSolid();
+  setState(storePath('failedSessionIds', []));
+  flushSolid();
+  setState((draft) => {
+    reconcile({})(draft.failedSessionUpdatedAt);
   });
-  setState('editorTabsOpen', false);
-  setState('completedSessionResponses', reconcile({}));
-  setState('interruptedSessionResponses', reconcile({}));
-  setState('sessionsLoadError', null);
-  setState('sessionsHasMore', false);
-  setState('sessionsLoadingMore', false);
-  setState('sessionsPaginationError', null);
-  setState('recycleBinLoadError', null);
+  flushSolid();
+  setState(storePath('sessions', []));
+  flushSolid();
+  setState(storePath('providers', []));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['sessionSelectedModels'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionSelectedModels'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('pinnedSessionIds', []));
+  flushSolid();
+  setState(storePath('activeSessionId', null));
+  flushSolid();
+  setState(storePath('editorTabsOpen', false));
+  flushSolid();
+  setState(storePath('editorSessionIds', []));
+  flushSolid();
+  setState(storePath('openEditorSessionIds', []));
+  flushSolid();
+  setState(storePath('sessionStatus', {}));
+  flushSolid();
+  setState(storePath('compactingSessionIds', []));
+  flushSolid();
+  setState(storePath('queuedMessages', []));
+  flushSolid();
+  setState(
+    storePath('editorContext', {
+      workspacePath: null,
+      workspaceFolders: [],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    })
+  );
+  flushSolid();
+  setState(storePath('editorTabsOpen', false));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['completedSessionResponses'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['completedSessionResponses'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['interruptedSessionResponses'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['interruptedSessionResponses'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('sessionsLoadError', null));
+  flushSolid();
+  setState(storePath('sessionsHasMore', false));
+  flushSolid();
+  setState(storePath('sessionsLoadingMore', false));
+  flushSolid();
+  setState(storePath('sessionsPaginationError', null));
+  flushSolid();
+  setState(storePath('recycleBinLoadError', null));
+  flushSolid();
   setError(null);
+  flushSolid();
   renameSessionMock.mockReset();
   renameSessionMock.mockResolvedValue(true);
   reloadSessionsMock.mockReset();
@@ -270,26 +336,62 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
-  setState('sessions', []);
-  setState('providers', []);
-  setState('sessionSelectedModels', reconcile({}));
-  setState('pinnedSessionIds', []);
-  setState('sessionStatus', {});
-  setState('compactingSessionIds', []);
-  setState('queuedMessages', []);
-  setState('completedSessionResponses', reconcile({}));
-  setState('interruptedSessionResponses', reconcile({}));
-  setState('sessionsLoadError', null);
-  setState('sessionsHasMore', false);
-  setState('sessionsLoadingMore', false);
-  setState('sessionsPaginationError', null);
-  setState('recycleBinLoadError', null);
+  flushSolid();
+  setState(storePath('sessions', []));
+  flushSolid();
+  setState(storePath('providers', []));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['sessionSelectedModels'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionSelectedModels'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('pinnedSessionIds', []));
+  flushSolid();
+  setState(storePath('sessionStatus', {}));
+  flushSolid();
+  setState(storePath('compactingSessionIds', []));
+  flushSolid();
+  setState(storePath('queuedMessages', []));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['completedSessionResponses'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['completedSessionResponses'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState((draft) => {
+    const current = draft['interruptedSessionResponses'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['interruptedSessionResponses'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('sessionsLoadError', null));
+  flushSolid();
+  setState(storePath('sessionsHasMore', false));
+  flushSolid();
+  setState(storePath('sessionsLoadingMore', false));
+  flushSolid();
+  setState(storePath('sessionsPaginationError', null));
+  flushSolid();
+  setState(storePath('recycleBinLoadError', null));
+  flushSolid();
   setError(null);
+  flushSolid();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension;
   vi.restoreAllMocks();
+  flushSolid();
   if (originalIntersectionObserver) {
     globalThis.IntersectionObserver = originalIntersectionObserver;
   } else {
@@ -297,7 +399,9 @@ afterEach(() => {
     delete (globalThis as Partial<typeof globalThis>).IntersectionObserver;
   }
   resetSessionDiffSummaryStateForTests();
+  flushSolid();
   resetSessionShareOverridesForTests();
+  flushSolid();
 });
 
 describe('SessionListSectionHeader icons', () => {
@@ -315,6 +419,7 @@ describe('SessionListSectionHeader icons', () => {
       ),
       container
     );
+    flushSolid();
 
     const archiveIcon = container.querySelector<HTMLElement>('.session-list-section-archive-icon');
     expect(archiveIcon?.classList).toContain('ui-icon');
@@ -326,6 +431,7 @@ describe('SessionListSectionHeader icons', () => {
     expect(chevron?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
 
     container.querySelector<HTMLButtonElement>('.session-list-section-chevron-button')!.click();
+    flushSolid();
     expect(onToggle).toHaveBeenCalledOnce();
   });
 });
@@ -336,13 +442,19 @@ describe('SessionListView keyboard recovery', () => {
     (source) => {
       vi.useFakeTimers();
       setSessions([session('compacting', 10), session('idle', 9)]);
-      setState('sessionStatus', { compacting: { type: 'idle' }, idle: { type: 'idle' } });
+      flushSolid();
+      setState(
+        storePath('sessionStatus', { compacting: { type: 'idle' }, idle: { type: 'idle' } })
+      );
+      flushSolid();
       try {
         cleanup = render(() => <SessionListView sessionFilter="running" />, container);
+        flushSolid();
         expect(container.querySelector('.session-item')).toBeNull();
 
-        if (source === 'local') setState('compactingSessionIds', ['compacting']);
-        else setState('sessions', 0, 'time', 'compacting', 11);
+        if (source === 'local') setState(storePath('compactingSessionIds', ['compacting']));
+        else setState(storePath('sessions', 0, 'time', 'compacting', 11));
+        flushSolid();
 
         expect(container.querySelectorAll('.session-item')).toHaveLength(1);
         const indicator = container.querySelector<HTMLElement>(
@@ -357,20 +469,26 @@ describe('SessionListView keyboard recovery', () => {
         ).toBe(toCssUrl(compressIcon));
         expect(container.querySelector('.session-status-indicator.is-running')).toBeNull();
 
-        setState('sessionStatus', 'compacting', { type: 'busy' });
+        setState(storePath('sessionStatus', 'compacting', { type: 'busy' }));
+        flushSolid();
         expect(container.querySelector('.session-status-indicator.is-compacting')).not.toBeNull();
-        if (source === 'local') setState('compactingSessionIds', []);
-        else setState('sessions', 0, 'time', 'compacting', undefined);
+        if (source === 'local') setState(storePath('compactingSessionIds', []));
+        else setState(storePath('sessions', 0, 'time', 'compacting', storePath.DELETE));
+        flushSolid();
         expect(container.querySelector('.session-status-indicator.is-compacting')).toBeNull();
         expect(container.querySelector('.session-status-indicator.is-running')).not.toBeNull();
 
-        setState('sessionStatus', 'compacting', { type: 'idle' });
+        setState(storePath('sessionStatus', 'compacting', { type: 'idle' }));
+        flushSolid();
         vi.advanceTimersByTime(1200);
+        flushSolid();
         expect(container.querySelector('.session-item')).toBeNull();
       } finally {
         cleanup?.();
+        flushSolid();
         cleanup = undefined;
         restoreRealTimers();
+        flushSolid();
       }
     }
   );
@@ -378,16 +496,24 @@ describe('SessionListView keyboard recovery', () => {
   it('replaces the spinner with a counter-free hourglass after one minute of background waiting', () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
+    flushSolid();
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     setSessions([session('waiting', Date.now())]);
-    setState('sessionStatus', {
-      waiting: { type: 'busy', background: true, backgroundStartedAt: Date.now() },
-    });
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        waiting: { type: 'busy', background: true, backgroundStartedAt: Date.now() },
+      })
+    );
+    flushSolid();
     try {
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       vi.advanceTimersByTime(59_999);
+      flushSolid();
       expect(container.querySelector('.session-status-indicator.is-running')).not.toBeNull();
       vi.advanceTimersByTime(1);
+      flushSolid();
       const pending = container.querySelector<HTMLElement>('.session-status-indicator.is-pending');
       expect(pending?.getAttribute('aria-label')).toBe('Pending background task');
       expect(pending?.textContent).toBe('');
@@ -395,21 +521,27 @@ describe('SessionListView keyboard recovery', () => {
         pending?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
       ).toBe(toCssUrl(hourglassIcon));
       expect(container.querySelector('.session-status-indicator.is-running')).toBeNull();
-      setState('sessionStatus', 'waiting', { type: 'busy', background: false });
+      setState(storePath('sessionStatus', 'waiting', { type: 'busy', background: false }));
+      flushSolid();
       expect(container.querySelector('.session-status-indicator.is-pending')).toBeNull();
       expect(container.querySelector('.session-status-indicator.is-running')).not.toBeNull();
     } finally {
       cleanup?.();
+      flushSolid();
       cleanup = undefined;
       restoreRealTimers();
+      flushSolid();
     }
   });
   it.each(['idle', 'busy'] as const)('mounts a visible %s session with its clocks', (type) => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
     setSessions([session('visible-session', Date.now())]);
-    setState('sessionStatus', { 'visible-session': { type } });
+    flushSolid();
+    setState(storePath('sessionStatus', { 'visible-session': { type } }));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(container.querySelector('.session-item')?.textContent).toContain('visible-session');
     expect(setIntervalSpy.mock.calls.some(([, delay]) => delay === 1_000)).toBe(type === 'busy');
@@ -417,18 +549,71 @@ describe('SessionListView keyboard recovery', () => {
 
   it.each([false, true])('handles Escape with no sessions, embedded=%s', (embedded) => {
     setSessions([]);
+    flushSolid();
     setShowSessionPicker(true);
+    flushSolid();
     cleanup = render(() => <SessionListView embedded={embedded} />, container);
+    flushSolid();
     container
       .querySelector('.session-list-view')!
       .dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
       );
+    flushSolid();
     expect(showSessionPicker()).toBe(embedded);
   });
 });
 
 describe('SessionListView model details', () => {
+  it('shares the header worktree verification with the sessions list', async () => {
+    const directory = '/worktrees/feature';
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
+    setSessions([
+      session('worktree', Date.now(), {
+        directory,
+        transfer: { originDirectory: '/repo', available: true },
+      }),
+    ]);
+    flushSolid();
+    const location = vi.spyOn(client.varro.session, 'location').mockResolvedValue({
+      directory,
+      isGitWorktree: true,
+    });
+    cleanup = render(
+      () => (
+        <>
+          <SessionListView />
+          <SessionLocationIndicator
+            sessionId="worktree"
+            directory={directory}
+            isGitWorktree={appState.sessions[0]?.isGitWorktree}
+            moved={true}
+          />
+        </>
+      ),
+      container
+    );
+    flushSolid();
+
+    await vi.waitFor(() => {
+      flushSolid();
+      expect(container.querySelector('.chat-header-location')?.getAttribute('aria-label')).toBe(
+        'Session Git worktree'
+      );
+    });
+    expect(location).toHaveBeenCalledExactlyOnceWith('worktree', { directory });
+    expect(appState.sessions[0]?.isGitWorktree).toBe(true);
+    const label = container.querySelector('.session-item-folder')!;
+    expect(label.textContent).toBe('feature');
+    expect(
+      label
+        .querySelector<HTMLElement>('.session-item-folder-meta-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(gitIcon));
+    expect(container.querySelector('[aria-label="Git worktree"]')).not.toBeNull();
+  });
+
   it.each([false, true])(
     'offers location actions from a moved row icon, worktree=%s',
     (worktree) => {
@@ -440,15 +625,19 @@ describe('SessionListView model details', () => {
           transfer: { originDirectory: '/repo', available: true },
         }),
       ]);
+      flushSolid();
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       container
         .querySelector('.session-item-folder-meta-icon')!
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      flushSolid();
       const items = Array.from(
         document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       );
       expect(items.some((item) => item.textContent?.trim() === 'Merge changes')).toBe(worktree);
       items.find((item) => item.textContent?.trim() === 'Copy folder path')!.click();
+      flushSolid();
       expect(copy).toHaveBeenCalledExactlyOnceWith('/outside');
     }
   );
@@ -456,7 +645,8 @@ describe('SessionListView model details', () => {
   it.each([false, true])(
     'uses the Git icon and path for a verified worktree, moved=%s',
     (moved) => {
-      setState('editorContext', 'workspacePath', '/repo');
+      setState(storePath('editorContext', 'workspacePath', '/repo'));
+      flushSolid();
       setSessions([
         session('worktree', Date.now(), {
           directory: '/worktrees/feature',
@@ -464,7 +654,9 @@ describe('SessionListView model details', () => {
           transfer: moved ? { originDirectory: '/repo', available: true } : undefined,
         }),
       ]);
+      flushSolid();
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       const label = container.querySelector('.session-item-folder')!;
       expect(label.textContent).toBe('feature');
       expect(label.textContent).not.toContain('Worktree:');
@@ -481,22 +673,30 @@ describe('SessionListView model details', () => {
       directory: '/outside',
       transfer: { originDirectory: '/repo', available: false },
     });
-    setState('editorContext', 'workspacePath', '/repo');
+    setState(storePath('editorContext', 'workspacePath', '/repo'));
+    flushSolid();
     setSessions([moved, session('local', Date.now() - 1)]);
-    setState('activeSessionId', 'moved');
-    setState('sessionsHasMore', true);
+    flushSolid();
+    setState(storePath('activeSessionId', 'moved'));
+    flushSolid();
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
     const hide = vi.spyOn(client.varro.session, 'hideTransfer').mockResolvedValue(true);
     const reload = deferred<void>();
     reloadSessionsMock.mockReturnValueOnce(reload.promise);
     const count = vi.fn();
     cleanup = render(() => <SessionListView onPrimarySessionsCountChange={count} />, container);
+    flushSolid();
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
     const action = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
     ).find((button) => button.textContent === 'Hide from this list');
     expect(action).toBeDefined();
     action!.click();
+    flushSolid();
     await vi.waitFor(() => expect(container.querySelectorAll('.session-item')).toHaveLength(1));
+    flushSolid();
     expect(container.querySelector('.session-item')?.textContent).toContain('local');
     expect(hide).toHaveBeenCalledExactlyOnceWith('moved', { directory: '/repo' });
     expect(appState.activeSessionId).toBe('moved');
@@ -508,6 +708,7 @@ describe('SessionListView model details', () => {
       '/repo',
     ]);
     reload.resolve();
+    flushSolid();
   });
 
   it('keeps the moved link visible and reports a failed hide', async () => {
@@ -517,41 +718,53 @@ describe('SessionListView model details', () => {
         transfer: { originDirectory: '/repo', available: false },
       }),
     ]);
+    flushSolid();
     vi.spyOn(client.varro.session, 'hideTransfer').mockRejectedValue(
       new Error('Storage unavailable')
     );
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent === 'Hide from this list')!
       .click();
+    flushSolid();
     await vi.waitFor(() => expect(error()).toBe('Storage unavailable'));
+    flushSolid();
     expect(container.querySelectorAll('.session-item')).toHaveLength(1);
     expect(reloadSessionsMock).not.toHaveBeenCalled();
   });
 
   it('hides only the dismissed origin when switching a multi-root list', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      workspaceFolders: [
-        { name: 'Repo', path: '/repo' },
-        { name: 'Outside', path: '/outside' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        workspaceFolders: [
+          { name: 'Repo', path: '/repo' },
+          { name: 'Outside', path: '/outside' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     setSessions([
       session('moved', Date.now(), {
         directory: '/outside',
         transfer: { originDirectory: '/repo', available: true, hiddenOrigins: ['/repo'] },
       }),
     ]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     expect(container.querySelectorAll('.session-item')).toHaveLength(1);
     const selector = container.querySelector('.session-list-workspace-selector')!;
     selector.querySelector<HTMLButtonElement>('.workspace-picker-button')!.click();
+    flushSolid();
     selector.querySelector<HTMLButtonElement>('[data-workspace-path="/repo"]')!.click();
+    flushSolid();
     expect(container.querySelectorAll('.session-item')).toHaveLength(0);
   });
 
@@ -561,26 +774,34 @@ describe('SessionListView model details', () => {
       transfer: { originDirectory: '/repo', available: false, hidden: true },
     });
     setSessions([moved]);
+    flushSolid();
     vi.spyOn(client.session, 'list').mockResolvedValue({ items: [moved], hasMore: false });
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
     search.value = 'moved';
     search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     await vi.waitFor(() => expect(client.session.list).toHaveBeenCalled());
+    flushSolid();
     expect(container.querySelectorAll('.session-item')).toHaveLength(0);
   });
 
   it.each([false, true])(
     'does not offer hiding for a destination-folder session, transfer=%s',
     (transfer) => {
-      setState('editorContext', 'workspacePath', '/repo');
+      setState(storePath('editorContext', 'workspacePath', '/repo'));
+      flushSolid();
       setSessions([
         session('local', Date.now(), {
           transfer: transfer ? { originDirectory: '/other', available: true } : undefined,
         }),
       ]);
+      flushSolid();
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+      flushSolid();
       expect(document.querySelector('.session-item-actions-menu')?.textContent).not.toContain(
         'Hide from this list'
       );
@@ -588,34 +809,45 @@ describe('SessionListView model details', () => {
   );
 
   it('keeps a transferred conversation in the origin folder with a workspace-style destination label', async () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      workspaceFolders: [
-        { name: 'Repo', path: '/repo' },
-        { name: 'Other', path: '/other' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    setState('sessions', [
-      session('Transferred conversation', Date.now(), {
-        directory: '/outside',
-        transfer: { originDirectory: '/repo', available: false },
-      }),
-      session('Other conversation', Date.now() - 1, { directory: '/other' }),
-    ]);
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        workspaceFolders: [
+          { name: 'Repo', path: '/repo' },
+          { name: 'Other', path: '/other' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('Transferred conversation', Date.now(), {
+          directory: '/outside',
+          transfer: { originDirectory: '/repo', available: false },
+        }),
+        session('Other conversation', Date.now() - 1, { directory: '/other' }),
+      ])
+    );
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     const selector = container.querySelector('.session-list-workspace-selector');
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    flushSolid();
     selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo"]')?.click();
+    flushSolid();
     await vi.waitFor(() => expect(container.querySelectorAll('.session-item')).toHaveLength(1));
+    flushSolid();
     const row = container.querySelector('.session-item');
     expect(row?.textContent).toContain('Transferred conversation');
     expect(row?.querySelector('.session-item-folder')?.textContent).toBe('Moved to outside');
     expect(row?.querySelector('.session-item-folder')?.getAttribute('title')).toBe('/outside');
     vi.mocked(selectSession).mockClear();
     row?.querySelector<HTMLButtonElement>('.session-item-main')?.click();
+    flushSolid();
     expect(selectSession).toHaveBeenCalledWith(
       'Transferred conversation',
       expect.objectContaining({ directory: '/outside' })
@@ -628,28 +860,37 @@ describe('SessionListView model details', () => {
     const setScope = vi
       .spyOn(client.varro.sessionHistoryScope, 'set')
       .mockResolvedValue({ scope: 'descendants', git: true });
-    setState('editorContext', {
-      workspacePath: '/repo',
-      workspaceFolders: [{ name: 'Repo', path: '/repo' }],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView onPrimarySessionsCountChange={vi.fn()} />, container);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const trigger = container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!;
     expect(getScope).toHaveBeenCalledWith('/repo');
     expect(trigger.textContent).toContain('Project');
     reloadSessionsMock.mockClear();
     trigger.click();
+    flushSolid();
     const below = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option')
     ).find((option) => option.textContent?.includes('Nested'))!;
     below.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(setScope).toHaveBeenCalledWith('/repo', 'descendants');
     expect(reloadSessionsMock).toHaveBeenCalledOnce();
@@ -657,9 +898,11 @@ describe('SessionListView model details', () => {
     const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
     search.value = 'active';
     search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     expect(container.querySelector('.session-history-scope-picker')).toBeNull();
 
     container.querySelector<HTMLButtonElement>('.session-list-search-clear')!.click();
+    flushSolid();
     expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
       'Nested'
     );
@@ -677,33 +920,42 @@ describe('SessionListView model details', () => {
       resolveSet = resolve;
     });
     vi.spyOn(client.varro.sessionHistoryScope, 'set').mockReturnValue(setRequest);
-    setState('editorContext', {
-      workspacePath: '/repo',
-      workspaceFolders: [{ name: 'Repo', path: '/repo' }],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     await vi.waitFor(() => {
       expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
         'Folder'
       );
     });
+    flushSolid();
     const trigger = container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!;
     trigger.click();
+    flushSolid();
     const nested = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option')
     ).find((option) => option.textContent?.includes('Nested'))!;
     nested.click();
+    flushSolid();
 
     expect(trigger.textContent).toContain('Nested');
     expect(container.querySelector('.session-history-scope-menu')).toBeNull();
     expect(reloadSessionsMock).not.toHaveBeenCalled();
 
     resolveSet({ scope: 'descendants', git: true });
+    flushSolid();
     await vi.waitFor(() => expect(reloadSessionsMock).toHaveBeenCalledOnce());
+    flushSolid();
   });
 
   it('ignores a scope save that completes after the directory changes', async () => {
@@ -715,34 +967,47 @@ describe('SessionListView model details', () => {
     const setScope = vi
       .spyOn(client.varro.sessionHistoryScope, 'set')
       .mockReturnValue(save.promise);
-    setState('editorContext', {
-      workspacePath: '/repo-a',
-      workspaceFolders: [{ name: 'Repo A', path: '/repo-a' }],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    setState('sessions', [session('nested-session', 1, { directory: '/repo-b/nested' })]);
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-a',
+        workspaceFolders: [{ name: 'Repo A', path: '/repo-a' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [session('nested-session', 1, { directory: '/repo-b/nested' })])
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     await vi.waitFor(() => {
       expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
         'Folder'
       );
     });
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!.click();
+    flushSolid();
     Array.from(container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option'))
       .find((option) => option.textContent?.includes('Nested'))!
       .click();
+    flushSolid();
     expect(setScope).toHaveBeenCalledWith('/repo-a', 'descendants');
 
-    setState('editorContext', {
-      workspacePath: '/repo-b',
-      workspaceFolders: [{ name: 'Repo B', path: '/repo-b' }],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-b',
+        workspaceFolders: [{ name: 'Repo B', path: '/repo-b' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     await vi.waitFor(() => {
       expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
         'Project'
@@ -751,11 +1016,15 @@ describe('SessionListView model details', () => {
         '/repo-b/nested'
       );
     });
+    flushSolid();
     expect(reloadSessionsMock).toHaveBeenCalledOnce();
 
     save.resolve({ scope: 'directory', git: true });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
       'Project'
@@ -773,30 +1042,41 @@ describe('SessionListView model details', () => {
       git: true,
     });
     vi.spyOn(client.varro.sessionHistoryScope, 'set').mockReturnValue(save.promise);
-    setState('editorContext', {
-      workspacePath: '/repo',
-      workspaceFolders: [{ name: 'Repo', path: '/repo' }],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     await vi.waitFor(() => {
       expect(container.querySelector('.session-history-scope-trigger')?.textContent).toContain(
         'Folder'
       );
     });
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.session-history-scope-trigger')!.click();
+    flushSolid();
     Array.from(container.querySelectorAll<HTMLButtonElement>('.session-history-scope-option'))
       .find((option) => option.textContent?.includes('Nested'))!
       .click();
+    flushSolid();
 
     cleanup();
+    flushSolid();
     cleanup = undefined;
     save.reject(new Error('stale save failure'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(error()).toBeNull();
     expect(reloadSessionsMock).not.toHaveBeenCalled();
@@ -806,22 +1086,30 @@ describe('SessionListView model details', () => {
     'shows compact folder names for sessions outside the current folder in %s scope',
     async (scope) => {
       vi.spyOn(client.varro.sessionHistoryScope, 'get').mockResolvedValue({ scope, git: true });
-      setState('editorContext', {
-        workspacePath: '/repo',
-        workspaceFolders: [{ name: 'Repo', path: '/repo' }],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      });
-      setState('sessions', [
-        session('root-session', 2, { directory: '/repo' }),
-        session('nested-session', 1, { directory: '/repo/src/qil-frontend-web' }),
-      ]);
+      setState(
+        storePath('editorContext', {
+          workspacePath: '/repo',
+          workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        })
+      );
+      flushSolid();
+      setState(
+        storePath('sessions', [
+          session('root-session', 2, { directory: '/repo' }),
+          session('nested-session', 1, { directory: '/repo/src/qil-frontend-web' }),
+        ])
+      );
+      flushSolid();
 
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       await vi.waitFor(() => {
         expect(container.querySelectorAll('.session-item-folder')).toHaveLength(1);
       });
+      flushSolid();
 
       const folder = container.querySelector<HTMLElement>('.session-item-folder');
       expect(folder?.textContent).toBe('qfw');
@@ -832,6 +1120,7 @@ describe('SessionListView model details', () => {
           ?.closest('.session-item')
           ?.querySelector('.session-item-title-text')?.textContent
       ).toBe('nested-session');
+      flushSolid();
     }
   );
 
@@ -847,26 +1136,34 @@ describe('SessionListView model details', () => {
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
-    setState('editorContext', {
-      workspacePath: '/repo-a',
-      workspaceFolders: [
-        { name: 'carpathia-lambda-label-management', path: '/repo-a' },
-        { name: 'Repo B', path: '/repo-b' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    setState('sessions', [
-      session('session-1', 2, { directory: '/repo-a', workspaceScope: 'workspace' }),
-      session('session-2', 1, { directory: '/repo-b' }),
-    ]);
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-a',
+        workspaceFolders: [
+          { name: 'carpathia-lambda-label-management', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('session-1', 2, { directory: '/repo-a', workspaceScope: 'workspace' }),
+        session('session-2', 1, { directory: '/repo-b' }),
+      ])
+    );
+    flushSolid();
     setShowSessionPicker(false);
+    flushSolid();
 
     cleanup = render(
       () => <SessionListView onPrimarySessionsCountChange={onPrimarySessionsCountChange} />,
       container
     );
+    flushSolid();
 
     const selector = container.querySelector('.session-list-workspace-selector');
     const search = container.querySelector('.session-list-search');
@@ -885,8 +1182,11 @@ describe('SessionListView model details', () => {
     ).toEqual(['Workspace', 'Repo B']);
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    flushSolid();
     selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
+    flushSolid();
     await vi.waitFor(() => expect(getScope).toHaveBeenCalledWith('/repo-b'));
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'workspace/select',
       payload: { path: '/repo-b', requestId: expect.any(Number) },
@@ -906,8 +1206,11 @@ describe('SessionListView model details', () => {
     expect(onPrimarySessionsCountChange).toHaveBeenLastCalledWith(1);
 
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    flushSolid();
     selector?.querySelector<HTMLButtonElement>('.workspace-popover-all')?.click();
-    setState('editorContext', 'workspacePath', '/repo-b');
+    flushSolid();
+    setState(storePath('editorContext', 'workspacePath', '/repo-b'));
+    flushSolid();
     expect(selector?.textContent).toContain('Workspace');
     expect(container.querySelector('.session-history-scope-picker')).toBeNull();
     expect(getScope).toHaveBeenCalledOnce();
@@ -916,27 +1219,36 @@ describe('SessionListView model details', () => {
 
     send.mockClear();
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    flushSolid();
     selector?.querySelector<HTMLButtonElement>('.workspace-popover-all')?.click();
+    flushSolid();
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'workspace/select' }));
   });
 
   it('shows the empty state when the selected folder has no sessions', () => {
-    setState('editorContext', {
-      workspacePath: '/repo-a',
-      workspaceFolders: [
-        { name: 'Repo A', path: '/repo-a' },
-        { name: 'Repo B', path: '/repo-b' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
-    setState('sessions', [session('session-a', 1, { directory: '/repo-a' })]);
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-a',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
+    setState(storePath('sessions', [session('session-a', 1, { directory: '/repo-a' })]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     const selector = container.querySelector('.session-list-workspace-selector');
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    flushSolid();
     selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
+    flushSolid();
 
     expect(container.querySelector('.session-item')).toBeNull();
     expect(container.textContent).toContain('No sessions yet');
@@ -949,13 +1261,16 @@ describe('SessionListView model details', () => {
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     vi.mocked(selectSession).mockClear();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     container
       .querySelector<HTMLButtonElement>('.session-item-main')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-editor',
@@ -977,17 +1292,26 @@ describe('SessionListView model details', () => {
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
-    setState('editorTabsOpen', true);
-    setState('editorSessionIds', ['session-1']);
-    setState('openEditorSessionIds', ['session-1']);
-    setState('sessions', [session('session-1', Date.now())]);
-    setState('sessionSelectedModels', {
-      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
-    });
+    setState(storePath('editorTabsOpen', true));
+    flushSolid();
+    setState(storePath('editorSessionIds', ['session-1']));
+    flushSolid();
+    setState(storePath('openEditorSessionIds', ['session-1']));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
+    setState(
+      storePath('sessionSelectedModels', {
+        'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+      })
+    );
+    flushSolid();
     vi.mocked(selectSession).mockClear();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-editor',
@@ -1003,56 +1327,107 @@ describe('SessionListView model details', () => {
   });
 
   it('does not show an unread completion dot for a session visible in an editor tab', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('lastSeenSessions', { 'session-1': 100 });
-    setState('completedSessionResponses', { 'session-1': 500 });
-    setState('editorTabsOpen', true);
-    setState('editorSessionIds', ['session-1']);
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'session-1': 500 }));
+    flushSolid();
+    setState(storePath('editorTabsOpen', true));
+    flushSolid();
+    setState(storePath('editorSessionIds', ['session-1']));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(container.querySelector('.session-item-indicator.is-completed')).toBeNull();
   });
 
   it('shows an unread completion dot when its open editor tab is not visible', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('lastSeenSessions', { 'session-1': 100 });
-    setState('completedSessionResponses', { 'session-1': 500 });
-    setState('editorTabsOpen', true);
-    setState('editorSessionIds', []);
-    setState('openEditorSessionIds', ['session-1']);
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'session-1': 500 }));
+    flushSolid();
+    setState(storePath('editorTabsOpen', true));
+    flushSolid();
+    setState(storePath('editorSessionIds', []));
+    flushSolid();
+    setState(storePath('openEditorSessionIds', ['session-1']));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(container.querySelector('.session-item-indicator.is-completed')).not.toBeNull();
   });
 
-  it.each(['build', 'plan'])('shows a red marker for an unread interrupted %s session', (agent) => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('lastSeenSessions', { 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'session-1': agent });
+  it.each(['build', 'plan'])(
+    'does not mark an unread interrupted %s session as failed',
+    (agent) => {
+      setState(storePath('sessions', [session('session-1', 500)]));
+      flushSolid();
+      setState(storePath('lastSeenSessions', { 'session-1': 100 }));
+      flushSolid();
+      setState(storePath('sessionSelectedAgents', { 'session-1': agent }));
+      flushSolid();
+      markSessionResponseInterrupted('session-1', 500);
+      flushSolid();
+
+      cleanup = render(() => <SessionListView />, container);
+      flushSolid();
+
+      expect(deriveSessionIndicators(appState.sessions).failedIds.size).toBe(0);
+      expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
+      expect(container.querySelector('.session-item-indicator.is-completed')).toBeNull();
+      expect(container.querySelector('.session-item-indicator.is-plan-completed')).toBeNull();
+
+      markSessionSeen('session-1', 500);
+      flushSolid();
+      expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
+    }
+  );
+
+  it.each([100, 450])(
+    'keeps genuine failure status separate from an interruption when last seen at %s',
+    (seenAt) => {
+      setState(storePath('sessions', [session('session-1', 500)]));
+      flushSolid();
+      setState(storePath('lastSeenSessions', { 'session-1': seenAt }));
+      flushSolid();
+      setState(storePath('failedSessionIds', ['session-1']));
+      flushSolid();
+      setState(storePath('failedSessionUpdatedAt', { 'session-1': 400 }));
+      flushSolid();
+      markSessionResponseInterrupted('session-1', 500);
+      flushSolid();
+      cleanup = render(() => <SessionListView />, container);
+      flushSolid();
+
+      expect(deriveSessionIndicators(appState.sessions).failedIds.has('session-1')).toBe(true);
+      const marker = container.querySelector('.session-item-indicator.is-failed');
+      if (seenAt < 400) expect(marker?.getAttribute('aria-label')).toBe('Failed');
+      else expect(marker).toBeNull();
+    }
+  );
+
+  it('shows a completion marker after a previously unread interruption', () => {
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { 'session-1': 100 }));
+    flushSolid();
+    setState(storePath('sessionSelectedAgents', { 'session-1': 'build' }));
+    flushSolid();
     markSessionResponseInterrupted('session-1', 500);
-
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
-
-    const marker = container.querySelector('.session-item-indicator.is-failed');
-    expect(marker?.getAttribute('aria-label')).toBe('Interrupted');
-    expect(container.querySelector('.session-item-indicator.is-completed')).toBeNull();
-    expect(container.querySelector('.session-item-indicator.is-plan-completed')).toBeNull();
-
-    markSessionSeen('session-1', 500);
-    expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
-  });
-
-  it('replaces an unread interrupted marker with a later completion', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('lastSeenSessions', { 'session-1': 100 });
-    setState('sessionSelectedAgents', { 'session-1': 'build' });
-    markSessionResponseInterrupted('session-1', 500);
-    cleanup = render(() => <SessionListView />, container);
-    expect(container.querySelector('.session-item-indicator.is-failed')).not.toBeNull();
+    flushSolid();
+    expect(container.querySelector('.session-item-indicator')).toBeNull();
 
     markSessionResponseCompleted('session-1', 600);
+    flushSolid();
 
     expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
     expect(container.querySelector('.session-item-indicator.is-completed')).not.toBeNull();
@@ -1061,35 +1436,47 @@ describe('SessionListView model details', () => {
   it.each(['busy', 'retry', 'visible-editor'] as const)(
     'does not show an interrupted marker while the session is %s',
     (visibility) => {
-      setState('sessions', [session('session-1', 500)]);
-      setState('lastSeenSessions', { 'session-1': 100 });
+      setState(storePath('sessions', [session('session-1', 500)]));
+      flushSolid();
+      setState(storePath('lastSeenSessions', { 'session-1': 100 }));
+      flushSolid();
       markSessionResponseInterrupted('session-1', 500);
-      if (visibility === 'visible-editor') setState('editorSessionIds', ['session-1']);
+      flushSolid();
+      if (visibility === 'visible-editor') setState(storePath('editorSessionIds', ['session-1']));
       else
-        setState('sessionStatus', {
-          'session-1':
-            visibility === 'retry'
-              ? { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() + 1_000 }
-              : { type: 'busy' },
-        });
+        setState(
+          storePath('sessionStatus', {
+            'session-1':
+              visibility === 'retry'
+                ? { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() + 1_000 }
+                : { type: 'busy' },
+          })
+        );
+      flushSolid();
 
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
 
       expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
     }
   );
 
-  it('shows an unread child interruption on its parent and acknowledges it on parent read', () => {
+  it('does not classify an unread child interruption or its parent as failed', () => {
     setSessions([session('root', 500), session('child', 500, { parentID: 'root' })]);
-    setState('sessionStatus', { root: { type: 'idle' }, child: { type: 'idle' } });
-    setState('lastSeenSessions', { root: 100, child: 100 });
+    flushSolid();
+    setState(storePath('sessionStatus', { root: { type: 'idle' }, child: { type: 'idle' } }));
+    flushSolid();
+    setState(storePath('lastSeenSessions', { root: 100, child: 100 }));
+    flushSolid();
     markSessionResponseInterrupted('child', 500);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
-    expect(
-      container.querySelector('.session-item-indicator.is-failed')?.getAttribute('aria-label')
-    ).toBe('Interrupted');
+    expect(deriveSessionIndicators(appState.sessions).failedIds.size).toBe(0);
+    expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
     markSessionSeen('root', 500);
+    flushSolid();
     expect(container.querySelector('.session-item-indicator.is-failed')).toBeNull();
   });
 
@@ -1100,14 +1487,20 @@ describe('SessionListView model details', () => {
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
-    setState('editorTabsOpen', true);
-    setState('editorSessionIds', []);
-    setState('openEditorSessionIds', ['session-1']);
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('editorTabsOpen', true));
+    flushSolid();
+    setState(storePath('editorSessionIds', []));
+    flushSolid();
+    setState(storePath('openEditorSessionIds', ['session-1']));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     vi.mocked(selectSession).mockClear();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-editor',
@@ -1129,14 +1522,20 @@ describe('SessionListView model details', () => {
     // SAFETY: The fixture provides the bridge callback used by postMessage.
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
-    setState('editorTabsOpen', true);
-    setState('editorSessionIds', ['other-session']);
-    setState('openEditorSessionIds', ['other-session']);
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('editorTabsOpen', true));
+    flushSolid();
+    setState(storePath('editorSessionIds', ['other-session']));
+    flushSolid();
+    setState(storePath('openEditorSessionIds', ['other-session']));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     vi.mocked(selectSession).mockClear();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    flushSolid();
 
     expect(send).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'session/open-in-editor' })
@@ -1154,24 +1553,29 @@ describe('SessionListView model details', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.6-sol': {
-            id: 'gpt-5.6-sol',
-            name: 'GPT-5.6 Sol',
-            capabilities: {},
-            cost: { input: 0, output: 0 },
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.6-sol': {
+              id: 'gpt-5.6-sol',
+              name: 'GPT-5.6 Sol',
+              capabilities: {},
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    setState('sessions', [session('session-1', Date.now())]);
+      ])
+    );
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       const row = container.querySelector('.session-item');
@@ -1185,9 +1589,11 @@ describe('SessionListView model details', () => {
       expect(icon?.style.getPropertyValue('--provider-icon-mask')).toContain('url(');
       expect(row?.querySelector('.session-item-provider-name')).toBeNull();
     });
+    flushSolid();
 
     vi.mocked(selectSession).mockClear();
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    flushSolid();
     expect(selectSession).toHaveBeenCalledWith('session-1', {
       directory: '/repo',
       selectedModel: {
@@ -1212,24 +1618,29 @@ describe('SessionListView model details', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-6.1-sol': {
-            id: 'gpt-6.1-sol',
-            name,
-            capabilities: {},
-            cost: { input: 0, output: 0 },
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-6.1-sol': {
+              id: 'gpt-6.1-sol',
+              name,
+              capabilities: {},
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    setState('sessions', [session('session-1', Date.now())]);
+      ])
+    );
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       const details = container.querySelector('.session-item-model-meta');
@@ -1242,6 +1653,7 @@ describe('SessionListView model details', () => {
         expect(icon.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(flashSolidIcon));
       });
     });
+    flushSolid();
   });
 
   it('shows the provider name when no provider icon is available', async () => {
@@ -1253,28 +1665,35 @@ describe('SessionListView model details', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('providers', [
-      {
-        id: 'local-gateway',
-        name: 'Local Gateway',
-        source: 'custom',
-        models: {
-          'claude-sonnet': {
-            id: 'claude-sonnet',
-            name: 'Claude Sonnet',
-            capabilities: {},
-            cost: { input: 0, output: 0 },
+    setState(
+      storePath('providers', [
+        {
+          id: 'local-gateway',
+          name: 'Local Gateway',
+          source: 'custom',
+          models: {
+            'claude-sonnet': {
+              id: 'claude-sonnet',
+              name: 'Claude Sonnet',
+              capabilities: {},
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    setState('sessions', [
-      session('session-1', Date.now(), {
-        model: { providerID: 'local-gateway', id: 'claude-sonnet' },
-      }),
-    ]);
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('session-1', Date.now(), {
+          model: { providerID: 'local-gateway', id: 'claude-sonnet' },
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-model-meta')?.textContent).toBe(
@@ -1285,6 +1704,7 @@ describe('SessionListView model details', () => {
         'Local Gateway'
       );
     });
+    flushSolid();
   });
 
   it('shows and opens with the message summary instead of a persisted selection', async () => {
@@ -1297,42 +1717,52 @@ describe('SessionListView model details', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-5.6-sol': {
-            id: 'gpt-5.6-sol',
-            name: 'GPT-5.6 Sol',
-            capabilities: {},
-            cost: { input: 0, output: 0 },
-          },
-          'gpt-5.6-luna': {
-            id: 'gpt-5.6-luna',
-            name: 'GPT-5.6 Luna',
-            capabilities: {},
-            cost: { input: 0, output: 0 },
+    setState(
+      storePath('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-5.6-sol': {
+              id: 'gpt-5.6-sol',
+              name: 'GPT-5.6 Sol',
+              capabilities: {},
+              cost: { input: 0, output: 0 },
+            },
+            'gpt-5.6-luna': {
+              id: 'gpt-5.6-luna',
+              name: 'GPT-5.6 Luna',
+              capabilities: {},
+              cost: { input: 0, output: 0 },
+            },
           },
         },
-      },
-    ]);
-    setState('sessionSelectedModels', {
-      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-luna', variant: 'max' },
-    });
-    setState('sessions', [session('session-1', Date.now())]);
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('sessionSelectedModels', {
+        'session-1': { providerID: 'openai', modelID: 'gpt-5.6-luna', variant: 'max' },
+      })
+    );
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-model-meta')?.textContent).toBe(
         ' · GPT-5.6 Sol · High'
       );
     });
+    flushSolid();
 
     vi.mocked(selectSession).mockClear();
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    flushSolid();
     expect(selectSession).toHaveBeenCalledWith('session-1', {
       directory: '/repo',
       selectedModel: {
@@ -1353,26 +1783,39 @@ describe('SessionListView model details', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('sessions', [session('session-1', Date.now()), session('session-2', Date.now() - 1)]);
+    setState(
+      storePath('sessions', [
+        session('session-1', Date.now()),
+        session('session-2', Date.now() - 1),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(container.querySelectorAll('.session-item.has-model-details')).toHaveLength(2);
     });
+    flushSolid();
     const list = container.querySelector('.session-list-view')!;
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control' }));
+    flushSolid();
     expect(list.classList.contains('show-all-model-details')).toBe(false);
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    flushSolid();
     expect(list.classList.contains('show-all-model-details')).toBe(true);
 
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    flushSolid();
     expect(list.classList.contains('show-all-model-details')).toBe(false);
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    flushSolid();
     window.dispatchEvent(new Event('blur'));
+    flushSolid();
     expect(list.classList.contains('show-all-model-details')).toBe(false);
   });
 });
@@ -1380,18 +1823,25 @@ describe('SessionListView model details', () => {
 describe('SessionListView queued messages', () => {
   it('shows reactive per-session queue counts with the outcome icon', async () => {
     const now = Date.now();
-    setState('sessions', [
-      session('session-1', now, { summary: { files: 1, additions: 0, deletions: 0 } }),
-      session('session-2', now - 1, { summary: { files: 1, additions: 0, deletions: 0 } }),
-      session('session-3', now - 2, { summary: { files: 1, additions: 0, deletions: 0 } }),
-    ]);
-    setState('queuedMessages', [
-      { id: 'queue-1', sessionId: 'session-1', text: 'First follow-up' },
-      { id: 'queue-2', sessionId: 'session-1', text: 'Second follow-up' },
-      { id: 'queue-3', sessionId: 'session-2', text: 'Other session follow-up' },
-    ]);
+    setState(
+      storePath('sessions', [
+        session('session-1', now, { summary: { files: 1, additions: 0, deletions: 0 } }),
+        session('session-2', now - 1, { summary: { files: 1, additions: 0, deletions: 0 } }),
+        session('session-3', now - 2, { summary: { files: 1, additions: 0, deletions: 0 } }),
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('queuedMessages', [
+        { id: 'queue-1', sessionId: 'session-1', text: 'First follow-up' },
+        { id: 'queue-2', sessionId: 'session-1', text: 'Second follow-up' },
+        { id: 'queue-3', sessionId: 'session-2', text: 'Other session follow-up' },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const rows = () => Array.from(container.querySelectorAll<HTMLElement>('.session-item'));
     const row = (title: string) =>
@@ -1408,6 +1858,7 @@ describe('SessionListView queued messages', () => {
     expect(firstCount?.id).toBeTruthy();
     expect(firstButton?.getAttribute('aria-describedby')).toBe(firstCount?.id);
     expect(firstCount?.closest('.session-item-trailing')).not.toBeNull();
+    flushSolid();
     expect(
       firstCount
         ?.querySelector<HTMLElement>('.session-item-queued-icon')
@@ -1426,14 +1877,18 @@ describe('SessionListView queued messages', () => {
     ).toBeNull();
 
     setState(
-      'queuedMessages',
-      appState.queuedMessages.filter((item) => item.sessionId !== 'session-1')
+      storePath(
+        'queuedMessages',
+        appState.queuedMessages.filter((item) => item.sessionId !== 'session-1')
+      )
     );
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(row('session-1').querySelector('.session-item-queued-counter')).toBeNull();
       expect(row('session-2').querySelector('[aria-label="1 queued message"]')).not.toBeNull();
     });
+    flushSolid();
   });
 });
 
@@ -1457,10 +1912,13 @@ describe('SessionListView diff summaries', () => {
     );
     const now = Date.now();
     setSessions([session('settled', now), session('pending', now - 1)]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     const settledRow = container.querySelector('[data-session-id="settled"]');
     const pendingRow = container.querySelector('[data-session-id="pending"]');
     await vi.waitFor(() => expect(settledRow?.textContent).toContain('900 tokens'));
+    flushSolid();
     expect(pendingRow?.querySelector('.session-item-meta-skeleton')).not.toBeNull();
     const previousText = settledRow?.textContent;
     settledTokenReads = 0;
@@ -1473,7 +1931,9 @@ describe('SessionListView diff summaries', () => {
       durationMs: 10_000,
       activeStartedAt: null,
     });
+    flushSolid();
     await vi.waitFor(() => expect(getSessionDiffSummaryStateForTests().active).toBe(0));
+    flushSolid();
 
     expect(settledTokenReads).toBe(0);
     expect(container.querySelector('[data-session-id="settled"]')).toBe(settledRow);
@@ -1493,13 +1953,16 @@ describe('SessionListView diff summaries', () => {
       activeStartedAt: number | null;
     }>();
     vi.spyOn(client.varro.session, 'diffSummary').mockReturnValue(pending.promise);
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-meta-skeleton')).not.toBeNull();
     });
+    flushSolid();
     expect(container.querySelector('.session-item-meta')?.textContent).not.toContain('0 files');
 
     pending.resolve({
@@ -1510,10 +1973,12 @@ describe('SessionListView diff summaries', () => {
       durationMs: 65_000,
       activeStartedAt: null,
     });
+    flushSolid();
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-meta-skeleton')).toBeNull();
       expect(container.querySelector('.session-item-meta')?.textContent).toContain('2 files');
     });
+    flushSolid();
     expect(container.querySelector('.session-item-cost')).toBeNull();
   });
 
@@ -1549,18 +2014,22 @@ describe('SessionListView diff summaries', () => {
     });
     const diffSpy = vi.spyOn(client.session, 'diff').mockResolvedValue([]);
     const messagesSpy = vi.spyOn(client.session, 'messages').mockResolvedValue([]);
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number), {
         directory: '/repo',
       })
     );
+    flushSolid();
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-meta')?.textContent).toContain('2 files');
     });
+    flushSolid();
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('+6');
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('-4');
     expect(container.querySelector('.session-item-meta')?.textContent).toContain('12k tokens');
@@ -1586,9 +2055,11 @@ describe('SessionListView diff summaries', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       const meta = container.querySelector('.session-item-meta')?.textContent;
@@ -1596,6 +2067,7 @@ describe('SessionListView diff summaries', () => {
       expect(meta).toContain('+8190');
       expect(meta).toContain('-33K');
     });
+    flushSolid();
   });
 
   it('labels trimmed file summaries without zero line counts', async () => {
@@ -1609,9 +2081,11 @@ describe('SessionListView diff summaries', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       const meta = container.querySelector('.session-item-meta')?.textContent;
@@ -1620,6 +2094,7 @@ describe('SessionListView diff summaries', () => {
       expect(meta).not.toContain('-0');
       expect(meta).not.toContain('tokens');
     });
+    flushSolid();
   });
 
   it('uses loaded diff counts when stale edit counts already exist on the session', async () => {
@@ -1631,19 +2106,24 @@ describe('SessionListView diff summaries', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('sessions', [
-      session('session-1', Date.now(), {
-        summary: { files: 1, additions: 3, deletions: 2 },
-      }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('session-1', Date.now(), {
+          summary: { files: 1, additions: 3, deletions: 2 },
+        }),
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number), {
         directory: '/repo',
       })
     );
+    flushSolid();
     await vi.waitFor(() => {
       const meta = container.querySelector('.session-item-meta')?.textContent;
       expect(meta).toContain('2 files');
@@ -1651,11 +2131,13 @@ describe('SessionListView diff summaries', () => {
       expect(meta).toContain('-4');
       expect(meta).toContain('900 tokens');
     });
+    flushSolid();
   });
 
   it('updates the duration of a running session every second', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
+    flushSolid();
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -1664,20 +2146,27 @@ describe('SessionListView diff summaries', () => {
       durationMs: 5_000,
       activeStartedAt: 90_000,
     });
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
-    setState('sessions', [session('session-1', 100_000)]);
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 100_000)]));
+    flushSolid();
 
     try {
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       await vi.advanceTimersByTimeAsync(0);
+      flushSolid();
       expect(container.querySelector('.session-item-meta')?.textContent).toContain('15s');
 
       await vi.advanceTimersByTimeAsync(2_000);
+      flushSolid();
       expect(container.querySelector('.session-item-meta')?.textContent).toContain('17s');
     } finally {
       cleanup?.();
+      flushSolid();
       cleanup = undefined;
       restoreRealTimers();
+      flushSolid();
     }
   });
 
@@ -1692,17 +2181,22 @@ describe('SessionListView diff summaries', () => {
     }>();
     vi.spyOn(client.varro.session, 'diffSummary').mockReturnValue(pending.promise);
     setState(
-      'sessions',
-      Array.from({ length: 160 }, (_, index) => session(`session-${index}`, Date.now() - index))
+      storePath(
+        'sessions',
+        Array.from({ length: 160 }, (_, index) => session(`session-${index}`, Date.now() - index))
+      )
     );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(getSessionDiffSummaryStateForTests().active).toBe(4);
     expect(getSessionDiffSummaryStateForTests().queued).toBeGreaterThan(0);
     expect(getSessionDiffSummaryStateForTests().queued).toBeLessThan(30);
 
-    setState('sessions', []);
+    setState(storePath('sessions', []));
+    flushSolid();
     expect(getSessionDiffSummaryStateForTests().queued).toBe(0);
 
     pending.resolve({
@@ -1713,7 +2207,9 @@ describe('SessionListView diff summaries', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
+    flushSolid();
     await vi.waitFor(() => expect(getSessionDiffSummaryStateForTests().active).toBe(0));
+    flushSolid();
   });
 
   it('loads summaries only when rows approach the scroll viewport', async () => {
@@ -1747,11 +2243,15 @@ describe('SessionListView diff summaries', () => {
     });
     const now = Date.now();
     setState(
-      'sessions',
-      Array.from({ length: 20 }, (_, index) => session(`viewport-session-${index}`, now - index))
+      storePath(
+        'sessions',
+        Array.from({ length: 20 }, (_, index) => session(`viewport-session-${index}`, now - index))
+      )
     );
+    flushSolid();
 
     cleanup = render(() => <SessionListView embedded />, container);
+    flushSolid();
     expect(diffSummarySpy).not.toHaveBeenCalled();
 
     const rows = Array.from(container.querySelectorAll('.session-item')).slice(0, 3);
@@ -1767,9 +2267,11 @@ describe('SessionListView diff summaries', () => {
     }
 
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(3));
+    flushSolid();
     await vi.waitFor(() =>
       expect(getSessionDiffSummaryStateForTests()).toMatchObject({ active: 0, queued: 0 })
     );
+    flushSolid();
   });
 
   it('bounds cached summaries across changing visible session sets', async () => {
@@ -1782,14 +2284,18 @@ describe('SessionListView diff summaries', () => {
       activeStartedAt: null,
     });
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     for (let batch = 0; batch < 3; batch += 1) {
       setState(
-        'sessions',
-        Array.from({ length: 90 }, (_, index) =>
-          session(`batch-${batch}-session-${index}`, Date.now() - index)
+        storePath(
+          'sessions',
+          Array.from({ length: 90 }, (_, index) =>
+            session(`batch-${batch}-session-${index}`, Date.now() - index)
+          )
         )
       );
+      flushSolid();
       await vi.waitFor(
         () => {
           const state = getSessionDiffSummaryStateForTests();
@@ -1798,6 +2304,7 @@ describe('SessionListView diff summaries', () => {
         },
         { timeout: 5_000 }
       );
+      flushSolid();
     }
 
     const state = getSessionDiffSummaryStateForTests();
@@ -1809,19 +2316,26 @@ describe('SessionListView diff summaries', () => {
       .spyOn(client.varro.session, 'diffSummary')
       .mockRejectedValue(new Error('server unavailable'));
     const updated = Date.now();
-    setState('sessions', [session('session-1', updated)]);
+    setState(storePath('sessions', [session('session-1', updated)]));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => expect(getSessionDiffSummaryStateForTests().active).toBe(0));
+    flushSolid();
     expect(diffSummarySpy).toHaveBeenCalledTimes(1);
 
-    setState('sessions', [session('session-1', updated)]);
+    setState(storePath('sessions', [session('session-1', updated)]));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(diffSummarySpy).toHaveBeenCalledTimes(1);
 
-    setState('sessions', [session('session-1', updated + 1)]);
+    setState(storePath('sessions', [session('session-1', updated + 1)]));
+    flushSolid();
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(2));
+    flushSolid();
   });
 
   it('refreshes a root summary when a descendant session updates', async () => {
@@ -1837,9 +2351,12 @@ describe('SessionListView diff summaries', () => {
       session('session-1', 100_000),
       session('child-1', 100_000, { parentID: 'session-1' }),
     ]);
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(1));
+    flushSolid();
 
     setSessions([
       session('session-1', 100_000),
@@ -1853,8 +2370,10 @@ describe('SessionListView diff summaries', () => {
         },
       }),
     ]);
+    flushSolid();
 
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(2));
+    flushSolid();
     expect(diffSummarySpy).toHaveBeenNthCalledWith(2, 'session-1', 100_001, {
       directory: '/repo',
     });
@@ -1864,14 +2383,20 @@ describe('SessionListView diff summaries', () => {
 describe('SessionListView pins', () => {
   it('does not show a reorder handle for the only pinned session', () => {
     const now = Date.now();
-    setState('sessions', [session('pinned', now), session('unpinned', now - 1_000)]);
-    setState('pinnedSessionIds', ['pinned']);
-    setState('sessionStatus', {
-      pinned: { type: 'busy', background: true },
-      unpinned: { type: 'busy', background: true },
-    });
+    setState(storePath('sessions', [session('pinned', now), session('unpinned', now - 1_000)]));
+    flushSolid();
+    setState(storePath('pinnedSessionIds', ['pinned']));
+    flushSolid();
+    setState(
+      storePath('sessionStatus', {
+        pinned: { type: 'busy', background: true },
+        unpinned: { type: 'busy', background: true },
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const pinnedRow = container.querySelector<HTMLElement>('[data-session-id="pinned"]');
     expect(pinnedRow?.querySelector('.session-item-drag-handle')).toBeNull();
@@ -1880,13 +2405,17 @@ describe('SessionListView pins', () => {
   });
 
   it('keeps a non-blocking service counter visible in the sessions list while the session is idle', () => {
-    setState('sessions', [session('server', Date.now())]);
-    setState('sessionStatus', { server: { type: 'idle', backgroundServices: 1 } });
+    setState(storePath('sessions', [session('server', Date.now())]));
+    flushSolid();
+    setState(storePath('sessionStatus', { server: { type: 'idle', backgroundServices: 1 } }));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     const badge = container.querySelector('.session-item-background-services');
     expect(badge?.getAttribute('aria-label')).toBe('1 running background service');
     expect(badge?.querySelector('.session-item-subagents-count')?.textContent).toBe('1');
-    setState('sessionStatus', { server: { type: 'idle' } });
+    setState(storePath('sessionStatus', { server: { type: 'idle' } }));
+    flushSolid();
     expect(container.querySelector('.session-item-background-services')).toBeNull();
   });
 
@@ -1903,8 +2432,10 @@ describe('SessionListView pins', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const row = () => container.querySelector<HTMLElement>('.session-item')!;
     expect(row().querySelector('.session-item-pin')).toBeNull();
@@ -1912,43 +2443,56 @@ describe('SessionListView pins', () => {
 
     expect(row().querySelector('[aria-label="Session actions"]')).toBeNull();
     openSessionActions(row());
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Pin session')!
       .click();
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(setPinned).toHaveBeenCalledWith('session-1', true, { directory: '/repo' })
     );
+    flushSolid();
     await vi.waitFor(() => {
       expect(row().classList.contains('is-pinned')).toBe(true);
       const pinnedIcon = row().querySelector<HTMLElement>('.session-item-pinned-icon');
       expect(pinnedIcon?.classList).toContain('ui-icon');
       expect(pinnedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
     });
+    flushSolid();
     openSessionActions(row());
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Unpin session')!
       .click();
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(setPinned).toHaveBeenLastCalledWith('session-1', false, { directory: '/repo' })
     );
+    flushSolid();
     await vi.waitFor(() => {
       expect(row().classList.contains('is-pinned')).toBe(false);
       expect(row().querySelector('[aria-label="Pinned session"]')).toBeNull();
     });
+    flushSolid();
   });
 
   it('separates the pinned group from the first unpinned session', () => {
     const now = Date.now();
-    setState('sessions', [
-      session('unpinned', now),
-      session('pinned-newer', now - 1_000),
-      session('pinned-older', now - 2_000),
-    ]);
-    setState('pinnedSessionIds', ['pinned-newer', 'pinned-older']);
+    setState(
+      storePath('sessions', [
+        session('unpinned', now),
+        session('pinned-newer', now - 1_000),
+        session('pinned-older', now - 2_000),
+      ])
+    );
+    flushSolid();
+    setState(storePath('pinnedSessionIds', ['pinned-newer', 'pinned-older']));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const rows = Array.from(container.querySelectorAll<HTMLElement>('.session-item'));
     expect(rows.map((row) => row.querySelector('.session-item-title-text')?.textContent)).toEqual([
@@ -1966,14 +2510,20 @@ describe('SessionListView pins', () => {
       .spyOn(client.varro.session, 'reorderPinned')
       .mockResolvedValue(['pinned-newer', 'pinned-older']);
     const now = Date.now();
-    setState('sessions', [
-      session('pinned-newer', now),
-      session('pinned-older', now - 1_000),
-      session('unpinned', now + 1_000),
-    ]);
-    setState('pinnedSessionIds', ['pinned-older', 'pinned-newer']);
-    setState('sessionStatus', { 'pinned-newer': { type: 'busy' } });
+    setState(
+      storePath('sessions', [
+        session('pinned-newer', now),
+        session('pinned-older', now - 1_000),
+        session('unpinned', now + 1_000),
+      ])
+    );
+    flushSolid();
+    setState(storePath('pinnedSessionIds', ['pinned-older', 'pinned-newer']));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'pinned-newer': { type: 'busy' } }));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const rows = () => Array.from(container.querySelectorAll<HTMLElement>('.session-item'));
     expect(rows().map((row) => row.dataset.sessionId)).toEqual([
@@ -2000,10 +2550,13 @@ describe('SessionListView pins', () => {
 
     const dataTransfer = createDragDataTransfer();
     dispatchDragEvent(handles[0]!, 'dragstart', dataTransfer);
+    flushSolid();
     dispatchDragEvent(rows()[1]!, 'dragover', dataTransfer);
+    flushSolid();
     expect(rows()[0]?.classList.contains('is-dragging-pinned')).toBe(true);
     expect(rows()[1]?.classList.contains('is-drag-over-pinned')).toBe(true);
     dispatchDragEvent(rows()[1]!, 'drop', dataTransfer);
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(reorderPinned).toHaveBeenCalledWith('pinned-older', 'pinned-newer', {
@@ -2011,6 +2564,7 @@ describe('SessionListView pins', () => {
         targetDirectory: '/repo',
       })
     );
+    flushSolid();
     await vi.waitFor(() =>
       expect(rows().map((row) => row.dataset.sessionId)).toEqual([
         'pinned-newer',
@@ -2018,6 +2572,7 @@ describe('SessionListView pins', () => {
         'unpinned',
       ])
     );
+    flushSolid();
   });
 
   it('supports keyboard pin reordering and restores order after a failed write', async () => {
@@ -2025,13 +2580,17 @@ describe('SessionListView pins', () => {
       .spyOn(client.varro.session, 'reorderPinned')
       .mockRejectedValue(new Error('write failed'));
     const now = Date.now();
-    setState('sessions', [session('first', now), session('second', now - 1_000)]);
-    setState('pinnedSessionIds', ['first', 'second']);
+    setState(storePath('sessions', [session('first', now), session('second', now - 1_000)]));
+    flushSolid();
+    setState(storePath('pinnedSessionIds', ['first', 'second']));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     container
       .querySelector<HTMLButtonElement>('[aria-label="Reorder pinned session: first"]')!
       .dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(reorderPinned).toHaveBeenCalledWith('first', 'second', {
@@ -2039,13 +2598,43 @@ describe('SessionListView pins', () => {
         targetDirectory: '/repo',
       })
     );
+    flushSolid();
     await vi.waitFor(() => expect(error()).toBe('write failed'));
+    flushSolid();
     expect(appState.pinnedSessionIds).toEqual(['first', 'second']);
     expect(
       Array.from(container.querySelectorAll<HTMLElement>('.session-item')).map(
         (row) => row.dataset.sessionId
       )
     ).toEqual(['first', 'second']);
+  });
+  it('keeps a pin snapshot that arrives while a failed reorder is in flight', async () => {
+    vi.spyOn(client.varro.session, 'reorderPinned').mockImplementation(async () => {
+      applyPinnedSessionsSync(['second', 'third', 'first']);
+      throw new Error('write failed');
+    });
+    const now = Date.now();
+    setState(
+      storePath('sessions', [
+        session('first', now),
+        session('second', now - 1_000),
+        session('third', now - 2_000),
+      ])
+    );
+    flushSolid();
+    setState(storePath('pinnedSessionIds', ['first', 'second']));
+    flushSolid();
+    cleanup = render(() => <SessionListView />, container);
+    flushSolid();
+
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="Reorder pinned session: first"]')!
+      .dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
+    flushSolid();
+    await vi.waitFor(() => expect(error()).toBe('write failed'));
+    flushSolid();
+
+    expect(appState.pinnedSessionIds).toEqual(['second', 'third', 'first']);
   });
 });
 
@@ -2059,17 +2648,23 @@ describe('SessionListView selection', () => {
         return 42;
       });
     const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {});
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const sessionButton = container.querySelector<HTMLButtonElement>('.session-item-main')!;
     sessionButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    flushSolid();
     sessionButton.focus();
+    flushSolid();
     focusCallback?.(performance.now());
+    flushSolid();
 
     expect(document.activeElement).toBe(sessionButton);
     expect(requestFrame).toHaveBeenCalledOnce();
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(cancelFrame).toHaveBeenCalledWith(42);
   });
@@ -2083,10 +2678,13 @@ describe('SessionListView selection', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('sessions', [session('session-1', Date.now())]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(container.querySelector('.session-item')?.classList.contains('active')).toBe(false);
     expect(container.querySelector('.session-item-main')?.getAttribute('aria-current')).toBeNull();
@@ -2101,10 +2699,18 @@ describe('SessionListView selection', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    setState('sessions', [session('session-1', Date.now()), session('session-2', Date.now() - 1)]);
-    setState('activeSessionId', 'session-1');
+    setState(
+      storePath('sessions', [
+        session('session-1', Date.now()),
+        session('session-2', Date.now() - 1),
+      ])
+    );
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
 
     cleanup = render(() => <SessionListView embedded />, container);
+    flushSolid();
 
     const items = container.querySelectorAll('.session-item');
     expect(items[0]?.classList.contains('active')).toBe(true);
@@ -2118,14 +2724,18 @@ describe('SessionListView selection', () => {
   it('reports an active session reselect without reloading it', () => {
     vi.mocked(selectSession).mockClear();
     const onActiveSessionReselect = vi.fn();
-    setState('sessions', [session('session-1', Date.now())]);
-    setState('activeSessionId', 'session-1');
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(
       () => <SessionListView embedded onActiveSessionReselect={onActiveSessionReselect} />,
       container
     );
+    flushSolid();
 
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    flushSolid();
 
     expect(selectSession).not.toHaveBeenCalled();
     expect(onActiveSessionReselect).toHaveBeenCalledOnce();
@@ -2135,23 +2745,35 @@ describe('SessionListView selection', () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
-    setState('sessions', [session('session-1', Date.now()), session('session-2', Date.now() - 1)]);
+    setState(
+      storePath('sessions', [
+        session('session-1', Date.now()),
+        session('session-2', Date.now() - 1),
+      ])
+    );
+    flushSolid();
 
     try {
       cleanup = render(() => <SessionListView embedded />, container);
+      flushSolid();
       const list = container.querySelector<HTMLElement>('.session-list-view')!;
       const items = Array.from(container.querySelectorAll<HTMLElement>('.session-item'));
 
       list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(items[1]?.classList.contains('keyboard-focus')).toBe(true);
       expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' });
 
       list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       expect(items[0]?.classList.contains('keyboard-focus')).toBe(true);
 
       list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      flushSolid();
       expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -2159,11 +2781,19 @@ describe('SessionListView selection', () => {
   });
 
   it('synchronizes keyboard selection when a session receives focus', () => {
-    setState('sessions', [session('session-1', Date.now()), session('session-2', Date.now() - 1)]);
+    setState(
+      storePath('sessions', [
+        session('session-1', Date.now()),
+        session('session-2', Date.now() - 1),
+      ])
+    );
+    flushSolid();
     cleanup = render(() => <SessionListView embedded />, container);
+    flushSolid();
 
     const buttons = container.querySelectorAll<HTMLButtonElement>('.session-item-main');
     buttons[1]!.focus();
+    flushSolid();
 
     expect(
       container.querySelectorAll('.session-item')[1]?.classList.contains('keyboard-focus')
@@ -2174,24 +2804,34 @@ describe('SessionListView selection', () => {
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
     const now = Date.now();
-    setState('sessions', [session('session-1', now), session('session-2', now - 1)]);
+    setState(storePath('sessions', [session('session-1', now), session('session-2', now - 1)]));
+    flushSolid();
 
     try {
       cleanup = render(() => <SessionListView embedded />, container);
+      flushSolid();
 
       const list = container.querySelector<HTMLElement>('.session-list-view')!;
       let items = container.querySelectorAll<HTMLElement>('.session-item');
       items[0]!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      flushSolid();
       list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      flushSolid();
       expect(items[1]?.classList.contains('keyboard-focus')).toBe(true);
 
-      setState('sessions', [session('session-1', now + 1), session('session-2', now - 1)]);
+      setState(
+        storePath('sessions', [session('session-1', now + 1), session('session-2', now - 1)])
+      );
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       items = container.querySelectorAll<HTMLElement>('.session-item');
       items[0]!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      flushSolid();
 
       expect(items[1]?.classList.contains('keyboard-focus')).toBe(true);
       items[0]!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      flushSolid();
       expect(items[0]?.classList.contains('keyboard-focus')).toBe(true);
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -2199,31 +2839,40 @@ describe('SessionListView selection', () => {
   });
 
   it('clears pointer focus when the pointer leaves a session', () => {
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     cleanup = render(() => <SessionListView embedded />, container);
+    flushSolid();
 
     const item = container.querySelector<HTMLElement>('.session-item')!;
     item.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    flushSolid();
     expect(item.classList.contains('keyboard-focus')).toBe(true);
 
     item.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(item.classList.contains('keyboard-focus')).toBe(false);
   });
 
   it('selects a session from the trailing row area', () => {
     vi.mocked(selectSession).mockClear();
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     cleanup = render(() => <SessionListView embedded />, container);
+    flushSolid();
 
     container.querySelector<HTMLElement>('.session-item-age')!.click();
+    flushSolid();
 
     expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
   });
 
   it('opens desktop sessions on pointer down without double-selecting on click', () => {
     vi.mocked(selectSession).mockClear();
-    setState('sessions', [session('session-1', Date.now())]);
+    setState(storePath('sessions', [session('session-1', Date.now())]));
+    flushSolid();
     cleanup = render(() => <SessionListView embedded />, container);
+    flushSolid();
     const row = container.querySelector<HTMLElement>('.session-item')!;
     const capturePointer = vi.fn();
     row.setPointerCapture = capturePointer;
@@ -2236,10 +2885,12 @@ describe('SessionListView selection', () => {
         pointerType: 'mouse',
       })
     );
+    flushSolid();
     expect(capturePointer).toHaveBeenCalledWith(7);
     expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
 
     row.querySelector<HTMLElement>('.session-item-main')!.click();
+    flushSolid();
     expect(selectSession).toHaveBeenCalledTimes(1);
 
     const trailingControl = document.createElement('button');
@@ -2247,6 +2898,7 @@ describe('SessionListView selection', () => {
     trailingControl.dispatchEvent(
       new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 8 })
     );
+    flushSolid();
     expect(capturePointer).toHaveBeenCalledTimes(1);
     expect(selectSession).toHaveBeenCalledTimes(1);
   });
@@ -2254,8 +2906,10 @@ describe('SessionListView selection', () => {
   it('opens picker sessions on pointer down without starting text selection', () => {
     vi.mocked(selectSession).mockClear();
     const now = Date.now();
-    setState('sessions', [session('session-1', now), session('session-2', now - 1)]);
+    setState(storePath('sessions', [session('session-1', now), session('session-2', now - 1)]));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     const row = container.querySelector<HTMLElement>('.session-item')!;
 
     const pointerDown = new PointerEvent('pointerdown', {
@@ -2266,11 +2920,14 @@ describe('SessionListView selection', () => {
       pointerType: 'mouse',
     });
     row.querySelector<HTMLElement>('.session-item-main')!.dispatchEvent(pointerDown);
+    flushSolid();
 
     expect(pointerDown.defaultPrevented).toBe(true);
     expect(selectSession).toHaveBeenCalledWith('session-1', { directory: '/repo' });
-    setState('sessions', [session('session-2', now + 1), session('session-1', now)]);
+    setState(storePath('sessions', [session('session-2', now + 1), session('session-1', now)]));
+    flushSolid();
     row.querySelector<HTMLElement>('.session-item-main')!.click();
+    flushSolid();
     expect(selectSession).toHaveBeenCalledTimes(1);
   });
 });
@@ -2279,42 +2936,56 @@ describe('SessionListView ordering', () => {
   it('keeps the spinner when a completion dot briefly returns to running', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
-    setState('sessions', [session('session-1', 500)]);
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
-    setState('completedSessionResponses', { 'session-1': 10_000 });
+    flushSolid();
+    setState(storePath('sessions', [session('session-1', 500)]));
+    flushSolid();
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('completedSessionResponses', { 'session-1': 10_000 }));
+    flushSolid();
 
     try {
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       expect(
         container.querySelector('.session-item-indicator')?.classList.contains('is-running')
       ).toBe(true);
 
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(600);
+      flushSolid();
       expect(
         container.querySelector('.session-item-indicator')?.classList.contains('is-running')
       ).toBe(true);
 
-      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(1200);
+      flushSolid();
       expect(
         container.querySelector('.session-item-indicator')?.classList.contains('is-running')
       ).toBe(true);
 
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
       await vi.advanceTimersByTimeAsync(1199);
+      flushSolid();
       expect(
         container.querySelector('.session-item-indicator')?.classList.contains('is-running')
       ).toBe(true);
 
       await vi.advanceTimersByTimeAsync(1);
+      flushSolid();
       expect(
         container.querySelector('.session-item-indicator')?.classList.contains('is-completed')
       ).toBe(true);
     } finally {
       cleanup?.();
+      flushSolid();
       cleanup = undefined;
       restoreRealTimers();
+      flushSolid();
     }
   });
 
@@ -2329,14 +3000,18 @@ describe('SessionListView ordering', () => {
     });
     const now = Date.now();
     setSessions([session('session-1', now)]);
-    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    flushSolid();
+    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const indicator = container.querySelector('.session-item-indicator.is-running');
     expect(indicator).not.toBeNull();
 
     setSessions([session('session-1', now + 1, { title: 'Updated title' })]);
+    flushSolid();
 
     expect(container.querySelector('.session-item-indicator.is-running')).toBe(indicator);
   });
@@ -2359,8 +3034,10 @@ describe('SessionListView ordering', () => {
         time: { created: now - 30_000, updated: now - 20_000 },
       }),
     ]);
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(
       Array.from(container.querySelectorAll('.session-item-title-text')).map(
@@ -2381,9 +3058,12 @@ describe('SessionListView actions', () => {
       activeStartedAt: null,
     });
     setSessions([session('parent', 2), session('child', 1, { parentID: 'parent' })]);
+    flushSolid();
 
     cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
+    flushSolid();
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
 
     const menu = document.querySelector<HTMLElement>('[aria-label="Session actions"]');
     expect(menu?.textContent).not.toContain('Rename');
@@ -2408,12 +3088,16 @@ describe('SessionListView actions', () => {
       activeStartedAt: null,
     });
     setSessions([session('session-1', Date.now())]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Open in Terminal')!
       .click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-opencode',
@@ -2428,12 +3112,16 @@ describe('SessionListView actions', () => {
     (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
     setSessions([session('session-1', Date.now())]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Open')!
       .click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'session/open-in-sidebar',
@@ -2460,15 +3148,22 @@ describe('SessionListView actions', () => {
         activeStartedAt: null,
       });
       setSessions([session('session-1', Date.now())]);
-      setState('sessionSelectedModels', {
-        'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
-      });
+      flushSolid();
+      setState(
+        storePath('sessionSelectedModels', {
+          'session-1': { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'xhigh' },
+        })
+      );
+      flushSolid();
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
 
       openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+      flushSolid();
       Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
         .find((button) => button.textContent?.trim() === label)!
         .click();
+      flushSolid();
 
       expect(send).toHaveBeenCalledWith({
         type: 'session/open-in-editor',
@@ -2506,9 +3201,12 @@ describe('SessionListView actions', () => {
       value: { writeText },
       configurable: true,
     });
-    setState('sessions', [
-      session('session-1', activityUpdatedAt, { share: { url: 'https://share.test/1' } }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('session-1', activityUpdatedAt, { share: { url: 'https://share.test/1' } }),
+      ])
+    );
+    flushSolid();
 
     try {
       cleanup = render(
@@ -2520,6 +3218,7 @@ describe('SessionListView actions', () => {
         ),
         container
       );
+      flushSolid();
       const row = container.querySelector<HTMLElement>('.session-item')!;
 
       expect(row.querySelector('.session-item-shared-marker')?.getAttribute('title')).toBe(
@@ -2530,22 +3229,27 @@ describe('SessionListView actions', () => {
       expect(sharedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
 
       openSessionActions(row);
+      flushSolid();
       const sharedActions = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       );
       sharedActions.find((button) => button.textContent?.trim() === 'Unshare session')!.click();
+      flushSolid();
 
       expect(document.querySelector('[role="menu"]')).toBeNull();
       await vi.waitFor(() =>
         expect(unshare).toHaveBeenCalledWith('session-1', { directory: '/repo' })
       );
+      flushSolid();
       const inFlightEvent = applySessionShareOverride({
         ...unshareResult,
         share: undefined,
       });
+      flushSolid();
       expect(inFlightEvent.time.updated).toBe(activityUpdatedAt);
 
       pendingUnshare.resolve(unshareResult);
+      flushSolid();
       await vi.waitFor(() => {
         const feedback = document.querySelector<HTMLElement>('.session-action-feedback');
         expect(feedback?.textContent?.trim()).toBe('Session unshared');
@@ -2554,9 +3258,11 @@ describe('SessionListView actions', () => {
           'ui-icon'
         );
       });
+      flushSolid();
       expect(appState.sessions[0]?.time.updated).toBe(activityUpdatedAt);
       expect(row.querySelector('.session-item-shared-marker')).toBeNull();
       openSessionActions(row);
+      flushSolid();
       const unsharedActions = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       );
@@ -2567,18 +3273,23 @@ describe('SessionListView actions', () => {
         unsharedActions.some((button) => button.textContent?.trim() === 'Unshare session')
       ).toBe(false);
       unsharedActions.find((button) => button.textContent?.trim() === 'Copy session ID')!.click();
+      flushSolid();
       await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('session-1'));
+      flushSolid();
       await vi.waitFor(() => {
         expect(document.querySelector('.session-action-feedback')?.textContent?.trim()).toBe(
           'Session ID copied'
         );
       });
+      flushSolid();
     } finally {
       if (clipboardDescriptor) {
         Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       } else {
         Reflect.deleteProperty(navigator, 'clipboard');
+        flushSolid();
       }
+      flushSolid();
     }
   });
 
@@ -2592,29 +3303,37 @@ describe('SessionListView actions', () => {
       activeStartedAt: null,
     });
     const updated = Date.now();
-    setState('sessions', [session('session-1', updated), session('session-2', updated - 1)]);
+    setState(
+      storePath('sessions', [session('session-1', updated), session('session-2', updated - 1)])
+    );
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const rows = container.querySelectorAll<HTMLElement>('.session-item');
     const owningRow = rows[0]!;
     const otherRow = rows[1]!;
     vi.mocked(selectSession).mockClear();
     openSessionActions(owningRow);
+    flushSolid();
 
     expect(owningRow.classList.contains('is-context-selected')).toBe(true);
     expect(otherRow.classList.contains('is-context-obscured')).toBe(true);
-    expect(owningRow.inert).toBe(true);
-    expect(otherRow.inert).toBe(true);
+    expect(owningRow.hasAttribute('inert')).toBe(true);
+    expect(otherRow.hasAttribute('inert')).toBe(true);
 
     otherRow.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    flushSolid();
     expect(otherRow.classList.contains('keyboard-focus')).toBe(false);
 
     otherRow.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    flushSolid();
     otherRow.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    flushSolid();
 
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(otherRow.classList.contains('is-context-obscured')).toBe(false);
-    expect(otherRow.inert).not.toBe(true);
+    expect(otherRow.hasAttribute('inert')).toBe(false);
     expect(selectSession).not.toHaveBeenCalled();
   });
 
@@ -2629,10 +3348,14 @@ describe('SessionListView actions', () => {
     });
     const updated = Date.now();
     setSessions([session('session-1', updated), session('session-2', updated - 1)]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
     setSessions([session('session-1', updated), session('session-2', updated + 1)]);
+    flushSolid();
 
     const rowTitles = () =>
       Array.from(container.querySelectorAll('.session-item-title-text')).map(
@@ -2643,6 +3366,7 @@ describe('SessionListView actions', () => {
     document.body.dispatchEvent(
       new PointerEvent('pointerdown', { bubbles: true, cancelable: true })
     );
+    flushSolid();
 
     expect(rowTitles()).toEqual(['session-2', 'session-1']);
   });
@@ -2658,8 +3382,11 @@ describe('SessionListView actions', () => {
     });
     const now = Date.now();
     setSessions([session('session-1', now, { title: 'First session' })]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
 
     expect(
       container.querySelector('.session-item')?.classList.contains('is-context-selected')
@@ -2670,6 +3397,7 @@ describe('SessionListView actions', () => {
       session('session-1', now + 1, { title: 'Updated session' }),
       session('archived-session', now - 2 * 24 * 60 * 60 * 1_000),
     ]);
+    flushSolid();
 
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
     expect(
@@ -2688,36 +3416,49 @@ describe('SessionListView actions', () => {
     });
     const now = Date.now();
     setSessions([session('session-1', now, { title: 'First session' })]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     await vi.waitFor(() =>
       expect(document.activeElement).toBe(
         container.querySelector<HTMLInputElement>('.session-list-search-input')
       )
     );
+    flushSolid();
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Rename')!
       .click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
     input.value = 'Draft rename';
     input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
     input.focus();
+    flushSolid();
     input.setSelectionRange(5, 5);
+    flushSolid();
     input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    flushSolid();
 
     const unrelatedMutation = document.createElement('div');
     document.body.append(unrelatedMutation);
     await Promise.resolve();
+    flushSolid();
     expect(input.selectionStart).toBe(5);
     expect(input.selectionEnd).toBe(5);
     unrelatedMutation.remove();
+    flushSolid();
 
     setSessions([
       session('session-1', now + 1, { title: 'Updated session' }),
       session('archived-session', now - 2 * 24 * 60 * 60 * 1_000),
     ]);
+    flushSolid();
 
     await vi.waitFor(() => {
       const updatedInput = document.querySelector<HTMLInputElement>('[id^="session-rename-"]');
@@ -2726,6 +3467,7 @@ describe('SessionListView actions', () => {
       expect(updatedInput?.selectionStart).toBe(5);
       expect(updatedInput?.selectionEnd).toBe(5);
     });
+    flushSolid();
     expect(
       container.querySelector('.session-item')?.classList.contains('is-context-selected')
     ).toBe(true);
@@ -2742,27 +3484,39 @@ describe('SessionListView actions', () => {
     });
     const now = Date.now();
     setSessions([session('session-1', now, { title: 'First session' })]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Rename')!
       .click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
     const setSelectionRange = vi.spyOn(input, 'setSelectionRange');
 
     input.setSelectionRange(3, 3);
+    flushSolid();
     setSelectionRange.mockClear();
     input.dispatchEvent(new Event('select', { bubbles: true }));
+    flushSolid();
     input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    flushSolid();
 
     input.setSelectionRange(8, 8);
+    flushSolid();
     setSelectionRange.mockClear();
     input.dispatchEvent(new Event('select', { bubbles: true }));
+    flushSolid();
     input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(setSelectionRange).not.toHaveBeenCalled();
     expect(input.selectionStart).toBe(8);
@@ -2780,16 +3534,21 @@ describe('SessionListView actions', () => {
     });
     const updated = Date.now();
     setSessions([session('session-1', updated), session('session-2', updated - 1)]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const rows = container.querySelectorAll<HTMLElement>('.session-item');
     openSessionActions(rows[0]!);
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === 'Rename')!
       .click();
+    flushSolid();
     Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent === 'Cancel')!
       .click();
+    flushSolid();
 
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(document.querySelector('.session-item-actions-backdrop')).toBeNull();
@@ -2804,8 +3563,11 @@ describe('SessionListView actions', () => {
         transfer: { originDirectory: '/repo', available: false },
       }),
     ]);
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    flushSolid();
 
     const rename = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
@@ -2813,6 +3575,7 @@ describe('SessionListView actions', () => {
     expect(rename.disabled).toBe(true);
     expect(rename.title).toBe('Open the destination folder to rename this moved conversation');
     rename.click();
+    flushSolid();
 
     expect(document.querySelector('.session-item-rename-form')).toBeNull();
     expect(renameSessionMock).not.toHaveBeenCalled();
@@ -2834,25 +3597,33 @@ describe('SessionListView actions', () => {
           transfer: moved ? { originDirectory: '/other', available: true } : undefined,
         }),
       ]);
+      flushSolid();
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
 
       openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+      flushSolid();
       const rename = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       ).find((button) => button.textContent?.trim() === 'Rename')!;
       expect(rename.disabled).toBe(false);
       expect(rename.hasAttribute('title')).toBe(false);
       rename.click();
+      flushSolid();
 
       const input = document.querySelector<HTMLInputElement>('[id^="session-rename-"]')!;
       input.value = '  Better title  ';
       input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      flushSolid();
       input.closest('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true }));
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(renameSessionMock).toHaveBeenCalledWith('session-1', 'Better title');
       });
+      flushSolid();
       await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull());
+      flushSolid();
     }
   );
 
@@ -2866,16 +3637,21 @@ describe('SessionListView actions', () => {
       activeStartedAt: null,
     });
     const updated = Date.now();
-    setState('sessions', [
-      session('parent', updated),
-      session('child', updated - 1, { parentID: 'parent' }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('parent', updated),
+        session('child', updated - 1, { parentID: 'parent' }),
+      ])
+    );
+    flushSolid();
     cleanup = render(() => <SessionListView onOpenSubagents={vi.fn()} />, container);
+    flushSolid();
 
     const row = container.querySelector<HTMLElement>('.session-item')!;
     expect(row.querySelector('.session-item-actions-trigger')).toBeNull();
 
     openSessionActions(row, 72, 84);
+    flushSolid();
 
     const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
     expect(menu.style.left).toBe('72px');
@@ -2886,8 +3662,10 @@ describe('SessionListView actions', () => {
 describe('SessionListView load errors', () => {
   it('shows the bottom separator only for secondary groups or overflowing sessions', async () => {
     const now = Date.now();
-    setState('sessions', [session('recent', now)]);
+    setState(storePath('sessions', [session('recent', now)]));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const list = container.querySelector<HTMLElement>('.session-list-view')!;
     const scroll = container.querySelector<HTMLElement>('.session-list-scroll')!;
@@ -2898,19 +3676,27 @@ describe('SessionListView load errors', () => {
       scrollHeight: { configurable: true, value: 101 },
     });
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(list.classList).toContain('has-bottom-separator');
 
     Object.defineProperty(scroll, 'scrollHeight', { configurable: true, value: 100 });
     window.dispatchEvent(new Event('resize'));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(list.classList).not.toContain('has-bottom-separator');
 
-    setState('sessions', [
-      ...Array.from({ length: 50 }, (_, index) => session(`recent-${index}`, now - index)),
-      session('archived', now - 2 * 86_400_000),
-    ]);
+    setState(
+      storePath('sessions', [
+        ...Array.from({ length: 50 }, (_, index) => session(`recent-${index}`, now - index)),
+        session('archived', now - 2 * 86_400_000),
+      ])
+    );
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(list.classList).toContain('has-bottom-separator');
   });
 
@@ -2921,26 +3707,33 @@ describe('SessionListView load errors', () => {
     );
     const archived = session('archived', now - 2 * 86_400_000);
     loadMoreSessionsMock.mockImplementationOnce(async () => {
-      setState('sessions', [...recent, archived]);
-      setState('sessionsHasMore', false);
+      setState(storePath('sessions', [...recent, archived]));
+      setState(storePath('sessionsHasMore', false));
     });
-    setState('sessions', recent);
-    setState('sessionsHasMore', true);
+    setState(storePath('sessions', recent));
+    flushSolid();
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(container.textContent).not.toContain('0+');
     await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+    flushSolid();
     await vi.waitFor(() => {
       const archive = Array.from(
         container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
       ).find((button) => button.textContent?.includes('Archive'));
       expect(archive?.textContent).toContain('1');
     });
+    flushSolid();
   });
 
   it('offers continuation when the loaded page has no visible sessions', () => {
-    setState('sessionsHasMore', true);
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(container.textContent).not.toContain('No sessions yet');
     expect(container.querySelector('.session-list-continuation')).not.toBeNull();
@@ -2967,11 +3760,15 @@ describe('SessionListView load errors', () => {
       fixture<typeof IntersectionObserver>(TestIntersectionObserver);
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
     expect(container.querySelector('.session-list-continuation')).toBeNull();
     await Promise.resolve();
+    flushSolid();
 
-    setState('sessionsHasMore', true);
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     const continuation = container.querySelector('.session-list-continuation')!;
     expect(observed.has(continuation)).toBe(true);
@@ -2982,27 +3779,37 @@ describe('SessionListView load errors', () => {
       {} as IntersectionObserver
     );
     await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+    flushSolid();
 
-    setState('sessionsHasMore', false);
+    setState(storePath('sessionsHasMore', false));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(disconnect).toHaveBeenCalledOnce();
     expect(observed.size).toBe(0);
 
-    setState('sessionsHasMore', true);
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(observed.has(container.querySelector('.session-list-continuation')!)).toBe(true);
 
     cleanup();
+    flushSolid();
     cleanup = undefined;
     expect(disconnect).toHaveBeenCalledTimes(2);
   });
 
   it('does not paginate beyond recent sessions for a status filter', () => {
-    setState('sessions', [session('running', Date.now())]);
-    setState('sessionStatus', { running: { type: 'busy' } });
-    setState('sessionsHasMore', true);
+    setState(storePath('sessions', [session('running', Date.now())]));
+    flushSolid();
+    setState(storePath('sessionStatus', { running: { type: 'busy' } }));
+    flushSolid();
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
 
     cleanup = render(() => <SessionListView sessionFilter="running" />, container);
+    flushSolid();
 
     expect(container.querySelector('.session-item-title-text')?.textContent).toBe('running');
     expect(container.querySelector('.session-list-continuation')).toBeNull();
@@ -3028,12 +3835,17 @@ describe('SessionListView load errors', () => {
     const archivedSessions = Array.from({ length: 50 }, (_, index) =>
       session(`archived-${index}`, now - (index + 2) * 86_400_000)
     );
-    setState('sessions', [
-      ...Array.from({ length: 50 }, (_, index) => session(`recent-${index}`, now - index)),
-      ...archivedSessions,
-    ]);
-    setState('sessionsHasMore', true);
+    setState(
+      storePath('sessions', [
+        ...Array.from({ length: 50 }, (_, index) => session(`recent-${index}`, now - index)),
+        ...archivedSessions,
+      ])
+    );
+    flushSolid();
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const archive = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
@@ -3042,6 +3854,7 @@ describe('SessionListView load errors', () => {
     expect(loadMoreSessionsMock).not.toHaveBeenCalled();
 
     archive!.click();
+    flushSolid();
     const continuation = container.querySelector('.session-list-continuation')!;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     callbacks.get(continuation)?.(
@@ -3050,16 +3863,23 @@ describe('SessionListView load errors', () => {
     );
 
     await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+    flushSolid();
   });
 
   it('loads another session window by default while Archive has fewer than 50 sessions', async () => {
     const now = Date.now();
-    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
-    setState('sessionsHasMore', true);
+    setState(
+      storePath('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)])
+    );
+    flushSolid();
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
 
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+    flushSolid();
   });
 
   it('searches all sessions without adding search-only sessions to the archive', async () => {
@@ -3075,11 +3895,15 @@ describe('SessionListView load errors', () => {
       items: [searchOnlySession],
       hasMore: false,
     });
-    setState('sessions', loadedSessions);
-    setState('sessionsHasMore', true);
+    setState(storePath('sessions', loadedSessions));
+    flushSolid();
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+    flushSolid();
 
     const getArchive = () =>
       Array.from(
@@ -3087,16 +3911,19 @@ describe('SessionListView load errors', () => {
       ).find((button) => button.textContent?.includes('Archive'))!;
     expect(getArchive().textContent).toContain('1+');
     getArchive().click();
+    flushSolid();
 
     const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
     search.value = '  flick  ';
     search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-title-text')?.textContent).toBe(
         'Flick through old notes'
       );
     });
+    flushSolid();
     expect(client.session.list).toHaveBeenCalledOnce();
     expect(client.session.list).toHaveBeenCalledWith({
       limit: 30,
@@ -3112,6 +3939,7 @@ describe('SessionListView load errors', () => {
     expect(clearIcon?.classList).toContain('ui-icon');
     expect(clearIcon?.style.getPropertyValue('--ui-icon-width')).toBe('10px');
     container.querySelector<HTMLButtonElement>('.session-list-search-clear')!.click();
+    flushSolid();
 
     expect(container.textContent).not.toContain('Flick through old notes');
     expect(getArchive().textContent).toContain('1+');
@@ -3129,29 +3957,38 @@ describe('SessionListView load errors', () => {
 
     try {
       cleanup = render(() => <SessionListView />, container);
+      flushSolid();
       const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
       search.value = 'first';
       search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      flushSolid();
 
       await vi.advanceTimersByTimeAsync(199);
+      flushSolid();
       expect(list).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
+      flushSolid();
       expect(list).toHaveBeenCalledOnce();
       const firstSignal = list.mock.calls[0]![0]!.signal!;
 
       search.value = 'second';
       search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      flushSolid();
       expect(firstSignal.aborted).toBe(true);
       await vi.advanceTimersByTimeAsync(199);
+      flushSolid();
       expect(list).toHaveBeenCalledOnce();
       await vi.advanceTimersByTimeAsync(1);
+      flushSolid();
       expect(list).toHaveBeenCalledTimes(2);
 
       second.resolve({
         items: [session('current-result', 2, { title: 'Current result' })],
         hasMore: false,
       });
+      flushSolid();
       await vi.advanceTimersByTimeAsync(0);
+      flushSolid();
       expect(container.querySelector('.session-item-title-text')?.textContent).toBe(
         'Current result'
       );
@@ -3160,20 +3997,27 @@ describe('SessionListView load errors', () => {
         items: [session('stale-result', 1, { title: 'Stale result' })],
         hasMore: false,
       });
+      flushSolid();
       await vi.advanceTimersByTimeAsync(0);
+      flushSolid();
       expect(container.querySelector('.session-item-title-text')?.textContent).toBe(
         'Current result'
       );
 
       search.value = 'cancelled';
       search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      flushSolid();
       container.querySelector<HTMLButtonElement>('.session-list-search-clear')!.click();
+      flushSolid();
       await vi.advanceTimersByTimeAsync(200);
+      flushSolid();
       expect(list).toHaveBeenCalledTimes(2);
     } finally {
       cleanup?.();
+      flushSolid();
       cleanup = undefined;
       restoreRealTimers();
+      flushSolid();
     }
   });
 
@@ -3205,20 +4049,26 @@ describe('SessionListView load errors', () => {
         items: [...loadedSessions, unrelatedArchiveSession, paginatedChild],
         hasMore: false,
       });
-    setState('sessions', loadedSessions);
-    setState('sessionsHasMore', true);
-    setState('editorContext', {
-      workspacePath: '/repo-a',
-      workspaceFolders: [
-        { name: 'Repo A', path: '/repo-a' },
-        { name: 'Repo B', path: '/repo-b' },
-      ],
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(storePath('sessions', loadedSessions));
+    flushSolid();
+    setState(storePath('sessionsHasMore', true));
+    flushSolid();
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo-a',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(
@@ -3227,9 +4077,12 @@ describe('SessionListView load errors', () => {
         )
       ).toEqual(['loaded-child', 'paginated-child']);
     });
+    flushSolid();
     const selector = container.querySelector('.session-list-workspace-selector');
     selector?.querySelector<HTMLButtonElement>('.workspace-picker-button')?.click();
+    flushSolid();
     selector?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]')?.click();
+    flushSolid();
     expect(
       Array.from(container.querySelectorAll('.session-item-title-text')).map(
         (element) => element.textContent
@@ -3258,8 +4111,10 @@ describe('SessionListView load errors', () => {
   });
 
   it('shows a retryable error instead of the empty state when sessions fail to load', async () => {
-    setState('sessionsLoadError', 'Failed to load sessions');
+    setState(storePath('sessionsLoadError', 'Failed to load sessions'));
+    flushSolid();
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     const errorRow = container.querySelector('.session-load-error');
     expect(errorRow?.textContent).toContain('Failed to load sessions');
@@ -3268,11 +4123,14 @@ describe('SessionListView load errors', () => {
     const retry = errorRow?.querySelector<HTMLButtonElement>('.session-load-error-retry');
     expect(retry).not.toBeNull();
     retry!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     await vi.waitFor(() => expect(reloadSessionsMock).toHaveBeenCalledTimes(1));
+    flushSolid();
   });
 
   it('keeps the empty state when sessions load fine', () => {
     cleanup = render(() => <SessionListView />, container);
+    flushSolid();
 
     expect(container.querySelector('.session-load-error')).toBeNull();
     expect(container.textContent).toContain('No sessions yet');

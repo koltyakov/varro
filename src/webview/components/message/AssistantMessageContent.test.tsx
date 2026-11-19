@@ -1,6 +1,6 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { getAssistantActivityPartKey } from '../../lib/assistant-activity';
 import { resetDefaultAppState, setIsLoading, setShowFileDiffs } from '../../lib/state';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
@@ -193,19 +193,26 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   resetDefaultAppState();
+  flushSolid();
   resetToolCallExpansionState();
+  flushSolid();
 });
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   document.body.classList.remove('chat-read-mode-open');
+  flushSolid();
   markdownRendererMock.mockClear();
   messagePartMock.mockClear();
   resetToolCallExpansionState();
+  flushSolid();
   resetDefaultAppState();
+  flushSolid();
   vi.unstubAllGlobals();
 });
 
@@ -229,6 +236,7 @@ function pressAlt() {
 
 function releaseAlt() {
   window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+  flushSolid();
 }
 
 describe('deduplicateFileEdits', () => {
@@ -269,6 +277,7 @@ describe('AssistantMessageContent', () => {
       ),
       container!
     );
+    flushSolid();
 
     const summary = () =>
       container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
@@ -278,6 +287,7 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-activity-details')).toBeNull();
 
     summary()?.click();
+    flushSolid();
 
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
@@ -290,7 +300,9 @@ describe('AssistantMessageContent', () => {
       time: { start: 1 },
     };
     setParts((current) => [...current, runningCommand]);
+    flushSolid();
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    flushSolid();
 
     expect(summary()).toBe(initialSummary);
     expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search');
@@ -304,6 +316,7 @@ describe('AssistantMessageContent', () => {
         ?.querySelector('[data-activity-part-id="bash-1"]')
         ?.closest('.assistant-activity-details')
     ).toBeNull();
+    flushSolid();
 
     setParts((current) => [
       ...current.slice(0, -1),
@@ -312,7 +325,9 @@ describe('AssistantMessageContent', () => {
         state: completedToolState({ command: 'npm test' }, 'passed'),
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search, 1 command');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
@@ -320,20 +335,25 @@ describe('AssistantMessageContent', () => {
 
   it('activates Explored on mousedown without toggling again on click', () => {
     renderAssistantMessageContent({ parts: [toolPart('read-1', 'read')] });
+    flushSolid();
     const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
 
     summary?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    flushSolid();
     expect(summary?.getAttribute('aria-expanded')).toBe('true');
 
     summary?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    flushSolid();
     expect(summary?.getAttribute('aria-expanded')).toBe('true');
 
     summary?.click();
+    flushSolid();
     expect(summary?.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('marks a visible Explored summary as an unbordered flow boundary', () => {
     renderAssistantMessageContent({ parts: [toolPart('read-1', 'read')] });
+    flushSolid();
 
     const item = container?.querySelector('.assistant-message-flow-item');
     expect(item?.classList).toContain('assistant-flow-block-starts-summary');
@@ -360,6 +380,7 @@ describe('AssistantMessageContent', () => {
         toolPart('bash-1', 'bash'),
       ],
     });
+    flushSolid();
 
     const host = container?.querySelector<HTMLElement>('.assistant-activity-group');
     const resizeTarget = container?.querySelector<HTMLElement>('.assistant-message-flow');
@@ -386,6 +407,7 @@ describe('AssistantMessageContent', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resize?.([fixture<ResizeObserverEntry>({ target: resizeTarget })], {} as ResizeObserver);
+    flushSolid();
 
     const summary = container?.querySelector('.assistant-activity-summary-text');
     expect(summary?.getAttribute('aria-label')).toBe(
@@ -405,6 +427,7 @@ describe('AssistantMessageContent', () => {
     Object.defineProperty(host, 'clientWidth', { configurable: true, value: 340 });
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resize?.([fixture<ResizeObserverEntry>({ target: resizeTarget })], {} as ResizeObserver);
+    flushSolid();
 
     expect(summary?.querySelector('.assistant-activity-kind-icon')).toBeNull();
     expect(summary?.textContent).toBe('Explored: 1 file, 1 thought, 1 search, 1 command');
@@ -412,6 +435,7 @@ describe('AssistantMessageContent', () => {
 
   it('keeps inline file edits outside the compact activity disclosure while streaming', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const edit = fileEditPart('edit-inline', 'src/app.ts');
     edit.state = completedToolState(
       {
@@ -426,6 +450,7 @@ describe('AssistantMessageContent', () => {
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [edit],
     });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.assistant-file-edit-stack')).not.toBeNull();
@@ -434,6 +459,7 @@ describe('AssistantMessageContent', () => {
 
   it('keeps file edit cards outside the compact activity disclosure while streaming', () => {
     setShowFileDiffs(false);
+    flushSolid();
     const edit = fileEditPart('edit-inline', 'src/app.ts');
     edit.state = completedToolState(
       {
@@ -448,6 +474,7 @@ describe('AssistantMessageContent', () => {
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [edit],
     });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.assistant-file-edit-stack')).not.toBeNull();
@@ -456,15 +483,18 @@ describe('AssistantMessageContent', () => {
 
   it('moves completed inline file edits into compact history', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const edit = previewFileEditPart('edit-history', 'src/history.ts');
 
     renderAssistantMessageContent({ parts: [edit] });
+    flushSolid();
 
     const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     expect(summary?.textContent).toContain('Explored: 1 edit');
     expect(container?.querySelector('[data-part-id="edit-history"]')).toBeNull();
 
     summary?.click();
+    flushSolid();
 
     expect(
       container
@@ -475,11 +505,13 @@ describe('AssistantMessageContent', () => {
 
   it('keeps unparsed edit tools out of the activity summary when inline previews are enabled', () => {
     setShowFileDiffs(true);
+    flushSolid();
 
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [toolPart('edit-pending', 'apply_patch'), toolPart('read-1', 'read')],
     });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file'
@@ -492,9 +524,11 @@ describe('AssistantMessageContent', () => {
 
   it('groups file edits when inline previews are disabled', () => {
     setShowFileDiffs(false);
+    flushSolid();
     const edit = fileEditPart('edit-compact', 'src/app.ts');
 
     renderAssistantMessageContent({ parts: [edit] });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 edit'
@@ -512,6 +546,7 @@ describe('AssistantMessageContent', () => {
     };
 
     renderAssistantMessageContent({ parts: [toolPart('read-1', 'read'), failed] });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary-main')?.textContent).toBe(
       'Explored: 2 files'
@@ -534,10 +569,12 @@ describe('AssistantMessageContent', () => {
     };
 
     renderAssistantMessageContent({ parts: [reasoningPart('reasoning-1'), aborted] });
+    flushSolid();
 
     const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     expect(summary?.textContent).toBe('Explored: 1 thought');
     summary?.click();
+    flushSolid();
 
     expect(container?.querySelector('[data-part-id="reasoning-1"]')).not.toBeNull();
     expect(container?.querySelector('[data-part-id="patch-aborted"]')).toBeNull();
@@ -565,6 +602,7 @@ describe('AssistantMessageContent', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('[data-part-id="grep-running"]')).not.toBeNull();
@@ -575,7 +613,9 @@ describe('AssistantMessageContent', () => {
         state: completedToolState({ pattern: 'activity' }, 'Found matches'),
       },
     ]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toBe(
       'Explored: 1 search'
@@ -611,14 +651,17 @@ describe('AssistantMessageContent', () => {
       visibleActiveActivityPartKeys: new Set(),
       groupedActiveActivityPartKeys: new Set([getAssistantActivityPartKey(patch)]),
     });
+    flushSolid();
 
     const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     expect(summary?.textContent).toContain('Explored: 1 thought, 1 search');
     summary?.click();
+    flushSolid();
 
     const renderedPatch = container?.querySelector('[data-part-id="patch-running"]');
     expect(renderedPatch).not.toBeNull();
     expect(renderedPatch?.closest('.assistant-activity-details')).toBeNull();
+    flushSolid();
   });
 
   it('does not replay the group settle after the tray already shows Explored', () => {
@@ -654,19 +697,23 @@ describe('AssistantMessageContent', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary-placeholder')?.textContent).toBe(
       'Exploring'
     );
 
     setExitingKeys(new Set([partKey]));
+    flushSolid();
     setRetainedKeys(new Set<string>());
+    flushSolid();
 
     expect(container?.querySelector('.assistant-active-activity-summary')?.textContent).toContain(
       'Explored: 1 command'
     );
 
     setExitingKeys(new Set<string>());
+    flushSolid();
 
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -696,6 +743,7 @@ describe('AssistantMessageContent', () => {
     );
 
     cleanup = render(renderContent, container!);
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file'
@@ -703,8 +751,11 @@ describe('AssistantMessageContent', () => {
     expect(claimedKeys).toContain('activity-group:read-existing');
 
     cleanup();
+    flushSolid();
     setParts([first, second]);
+    flushSolid();
     cleanup = render(renderContent, container!);
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 file, 1 search'
@@ -734,6 +785,7 @@ describe('AssistantMessageContent', () => {
       parts: [runningSearch, completedRead, runningCommand],
       retainedActivityPartKeys: new Set([getAssistantActivityPartKey(completedRead)]),
     });
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-active-activity-tray')).toHaveLength(1);
     expect(container?.querySelectorAll('.assistant-active-activity-items')).toHaveLength(1);
@@ -766,6 +818,7 @@ describe('AssistantMessageContent', () => {
           status === 'completed' ? new Set([getAssistantActivityPartKey(tool)]) : undefined,
         claimItemReveal,
       });
+      flushSolid();
 
       const item = container?.querySelector('[data-activity-part-id="tool-preview"]');
       expect(item).not.toBeNull();
@@ -775,7 +828,7 @@ describe('AssistantMessageContent', () => {
     }
   );
 
-  it('keeps the entrance animation for active reasoning', () => {
+  it('shows active reasoning without an entrance animation', () => {
     const reasoning: ReasoningPart = {
       id: 'reasoning-preview',
       sessionID: 'session-1',
@@ -788,10 +841,11 @@ describe('AssistantMessageContent', () => {
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [reasoning],
     });
+    flushSolid();
 
     const item = container?.querySelector('[data-activity-part-id="reasoning-preview"]');
     expect(item).not.toBeNull();
-    expect(item?.classList).toContain('is-entering');
+    expect(item?.classList).not.toContain('is-entering');
   });
 
   it('preserves a single active item viewport position through unrelated mutations', async () => {
@@ -805,13 +859,18 @@ describe('AssistantMessageContent', () => {
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [running],
     });
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const viewport = container?.querySelector<HTMLElement>('.assistant-active-activity-items');
     if (!viewport) throw new Error('Missing active activity viewport');
     viewport.scrollTop = 80;
     viewport.firstElementChild!.classList.add('nested-scroll-regression');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(viewport.scrollTop).toBe(80);
   });
 
@@ -826,6 +885,7 @@ describe('AssistantMessageContent', () => {
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [toolPart('before-running', 'grep'), running, toolPart('after-running', 'grep')],
     });
+    flushSolid();
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 2 searches'
@@ -852,6 +912,7 @@ describe('AssistantMessageContent', () => {
       visibleActiveActivityPartKeys: new Set([partKey]),
       claimItemReveal,
     });
+    flushSolid();
 
     const item = container?.querySelector('[data-activity-part-id="search-offscreen"]');
     expect(item).not.toBeNull();
@@ -868,6 +929,7 @@ describe('AssistantMessageContent', () => {
       nearViewport: false,
       exitingActivityPartKeys: new Set([getAssistantActivityPartKey(command)]),
     });
+    flushSolid();
 
     const item = container?.querySelector('[data-activity-part-id="command-offscreen-exit"]');
     expect(item).not.toBeNull();
@@ -881,6 +943,7 @@ describe('AssistantMessageContent', () => {
       parts: [command],
       exitingActivityPartKeys: new Set([getAssistantActivityPartKey(command)]),
     });
+    flushSolid();
 
     const tray = container?.querySelector('.assistant-active-activity-tray');
     expect(tray?.classList).toContain('has-active-summary');
@@ -908,6 +971,7 @@ describe('AssistantMessageContent', () => {
             }
           : null,
     });
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(2);
     expect(
@@ -915,6 +979,7 @@ describe('AssistantMessageContent', () => {
     ).not.toBeNull();
 
     setQuestionActive(true);
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(2);
     expect(
@@ -926,6 +991,7 @@ describe('AssistantMessageContent', () => {
     renderAssistantMessageContent({
       parts: [toolPart('read-1', 'read'), toolPart('task-1', 'task'), toolPart('grep-1', 'grep')],
     });
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(2);
     expect(container?.querySelector('[data-assistant-render-key="part:task-1"]')).not.toBeNull();
@@ -948,18 +1014,21 @@ describe('AssistantMessageContent', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
     ).not.toContain('assistant-message-flow-item-streamed');
 
     setParts([{ ...initialPart, text: 'Streaming update' }]);
+    flushSolid();
 
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
     ).not.toContain('assistant-message-flow-item-streamed');
 
     setParts((current) => [...current, textPart('text-2', 'Next block')]);
+    flushSolid();
 
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-2"]')?.classList
@@ -994,15 +1063,19 @@ describe('AssistantMessageContent', () => {
       ),
       container!
     );
+    flushSolid();
 
     setParts([initialPart, streamedPart]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     const element = container?.querySelector<HTMLElement>(
       '[data-assistant-render-key="part:text-2"]'
     );
     expect(element?.classList).toContain('measured-entrance-active');
 
     setParts([initialPart]);
+    flushSolid();
 
     expect(disconnect).toHaveBeenCalledOnce();
     expect(element?.classList).not.toContain('measured-entrance-active');
@@ -1011,6 +1084,7 @@ describe('AssistantMessageContent', () => {
 
   it('does not reveal parts when mounting completed history', () => {
     renderAssistantMessageContent({ parts: [textPart('text-1', 'Completed')] });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
   });
@@ -1022,6 +1096,7 @@ describe('AssistantMessageContent', () => {
         parts: [toolPart('command-history', 'bash', { command: 'npm test' })],
         visibleActiveActivityPartKeys,
       });
+      flushSolid();
 
       expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
         'Explored: 1 command'
@@ -1062,17 +1137,21 @@ describe('AssistantMessageContent', () => {
       );
 
     cleanup = renderStreamingPart();
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-streamed')).not.toBeNull();
 
     cleanup?.();
+    flushSolid();
     container!.innerHTML = '';
 
     cleanup = renderStreamingPart();
+    flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
   });
 
   it('does not re-animate a file-edit stack when another edit is appended', async () => {
     setShowFileDiffs(true);
+    flushSolid();
     const info = createAssistantMessage({ time: { created: 0 } });
     const [parts, setParts] = createSignal<Part[]>([fileEditPart('edit-1', 'src/a.ts')]);
     const stackSelector = '[data-assistant-render-key^="file-edit-stack:"]';
@@ -1090,21 +1169,26 @@ describe('AssistantMessageContent', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector(stackSelector)?.classList).toContain(
       'assistant-message-flow-item-streamed'
     );
 
     await Promise.resolve();
+    flushSolid();
     const stack = container!.querySelector(stackSelector)!;
     expect(stack.classList).toContain('measured-entrance-active');
     const animationEnd = new Event('animationend');
     Object.defineProperty(animationEnd, 'animationName', { value: 'streamed-assistant-item-in' });
     stack.dispatchEvent(animationEnd);
+    flushSolid();
     expect(stack.classList).not.toContain('measured-entrance-active');
 
     setParts((current) => [...current, fileEditPart('edit-2', 'src/b.ts')]);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector(stackSelector)).toBe(stack);
     expect(container?.querySelector(stackSelector)?.classList).not.toContain(
@@ -1135,10 +1219,13 @@ describe('AssistantMessageContent', () => {
         ),
         container!
       );
+      flushSolid();
       expect(container!.querySelector('[data-assistant-render-key="part:edit-1"]')).not.toBeNull();
 
       setParts([{ ...completed, tool: 'patch' }]);
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
       const stack = container!.querySelector(
         '[data-assistant-render-key="file-edit-stack:edit-1"]'
       );
@@ -1150,6 +1237,7 @@ describe('AssistantMessageContent', () => {
 
   it('retains file-edit children across completion, replacement, and stack splits', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const first = { ...previewFileEditPart('edit-1', 'src/a.ts'), tool: 'edit' };
     const second = { ...previewFileEditPart('edit-2', 'src/b.ts'), tool: 'edit' };
     const [parts, setParts] = createSignal<Part[]>([first]);
@@ -1163,6 +1251,7 @@ describe('AssistantMessageContent', () => {
       ),
       container!
     );
+    flushSolid();
     const stack = container!.querySelector('.assistant-file-edit-stack');
     const firstNode = container!.querySelector('[data-part-id="edit-1"]');
     const running: ToolPart = {
@@ -1170,20 +1259,24 @@ describe('AssistantMessageContent', () => {
       state: { status: 'running', input: { filePath: 'src/b.ts' }, time: { start: 2 } },
     };
     setParts([first, running]);
+    flushSolid();
     expect(container!.querySelector('.assistant-file-edit-stack')).toBe(stack);
     expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
     const secondNode = container!.querySelector('[data-part-id="edit-2"]');
     setParts([{ ...first }, second]);
+    flushSolid();
     expect(firstNode?.isConnected).toBe(true);
     expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
     expect(container!.querySelector('[data-part-id="edit-2"]')).toBe(secondNode);
     expect(secondNode?.textContent).toBe('completed');
 
     setParts([first, textPart('separator', 'Between edits'), second]);
+    flushSolid();
     expect(container!.querySelectorAll('.assistant-file-edit-stack')).toHaveLength(2);
     expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
     expect(container!.querySelectorAll('[data-part-id="edit-2"]')).toHaveLength(1);
     setParts([first, second]);
+    flushSolid();
     expect(container!.querySelectorAll('.assistant-file-edit-stack')).toHaveLength(1);
     expect(container!.querySelector('[data-part-id="edit-1"]')).toBe(firstNode);
     expect(container!.querySelectorAll('[data-part-id="edit-2"]')).toHaveLength(1);
@@ -1215,6 +1308,7 @@ describe('AssistantMessageContent', () => {
         return part.type === 'text' ? part.text : null;
       },
     });
+    flushSolid();
 
     expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(1);
     expect(container?.querySelector('[data-part-id="text-1"]')).toBeNull();
@@ -1222,20 +1316,24 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
 
     pressShift();
+    flushSolid();
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
     releaseShift();
 
     pressAlt();
+    flushSolid();
 
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (toggle as HTMLButtonElement).click();
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(document.querySelector('.assistant-read-overlay')).toBeInstanceOf(HTMLDivElement);
     });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-read-overlay')).toBeNull();
     expect(markdownRendererMock).toHaveBeenLastCalledWith(
@@ -1253,10 +1351,12 @@ describe('AssistantMessageContent', () => {
     );
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(document.querySelector('.assistant-read-overlay')).toBeNull();
     });
+    flushSolid();
 
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(false);
 
@@ -1266,10 +1366,12 @@ describe('AssistantMessageContent', () => {
 
   it('groups consecutive file edits into a single stack container', () => {
     setShowFileDiffs(true);
+    flushSolid();
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [fileEditPart('edit-1', 'src/one.ts'), fileEditPart('edit-2', 'src/two.ts')],
     });
+    flushSolid();
 
     const stack = container?.querySelector('.assistant-file-edit-stack');
 
@@ -1317,6 +1419,7 @@ describe('AssistantMessageContent', () => {
     },
   ])('renders inline=$inlineChanges details=$detailsShown', (expected) => {
     setShowFileDiffs(expected.inlineChanges);
+    flushSolid();
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [
@@ -1325,10 +1428,13 @@ describe('AssistantMessageContent', () => {
         previewFileEditPart('edit-2', 'src/two.ts'),
       ],
     });
+    flushSolid();
 
     if (expected.detailsShown) {
       container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+      flushSolid();
     }
+    flushSolid();
 
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(
       expected.summaryCount
@@ -1346,6 +1452,7 @@ describe('AssistantMessageContent', () => {
 
   it('keeps every inline edit rendered in compact output', () => {
     setShowFileDiffs(true);
+    flushSolid();
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
       parts: [
@@ -1353,6 +1460,7 @@ describe('AssistantMessageContent', () => {
         previewFileEditPart('edit-2', 'src/two.ts'),
       ],
     });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
     expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
@@ -1362,6 +1470,7 @@ describe('AssistantMessageContent', () => {
     'renders every inline edit for %s output',
     (variant) => {
       setShowFileDiffs(true);
+      flushSolid();
       const parts = [
         previewFileEditPart('edit-1', 'src/one.ts'),
         previewFileEditPart('edit-2', 'src/two.ts'),
@@ -1380,6 +1489,7 @@ describe('AssistantMessageContent', () => {
               })
             : undefined,
       });
+      flushSolid();
 
       expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
       expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
@@ -1388,6 +1498,7 @@ describe('AssistantMessageContent', () => {
 
   it('renders all compact inline edit tool calls without a pager', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const multiFilePart: ToolPart = {
       ...fileEditPart('edit-multi', 'src/one.ts'),
       tool: 'apply_patch',
@@ -1428,6 +1539,7 @@ describe('AssistantMessageContent', () => {
       info: createAssistantMessage({ time: { created: 0 } }),
       parts,
     });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
     expect(
@@ -1456,6 +1568,7 @@ describe('AssistantMessageContent', () => {
     };
 
     renderAssistantMessageContent({ parts: [readPart, grepPart] });
+    flushSolid();
 
     expect(container?.querySelector('.assistant-file-edit-stack')).toBeNull();
     expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(1);
@@ -1500,11 +1613,13 @@ describe('AssistantMessageContent', () => {
   it('renders retry actions for assistant errors and disables them while loading', () => {
     const onRetry = vi.fn();
     setIsLoading(true);
+    flushSolid();
 
     renderAssistantMessageContent({
       errorMessage: 'Request failed',
       onRetry,
     });
+    flushSolid();
 
     const button = container?.querySelector<HTMLButtonElement>(
       '.assistant-message-flow-item-error-action'
@@ -1515,6 +1630,7 @@ describe('AssistantMessageContent', () => {
     expect(button?.disabled).toBe(true);
 
     button?.click();
+    flushSolid();
 
     expect(onRetry).not.toHaveBeenCalled();
   });
@@ -1524,6 +1640,7 @@ describe('AssistantMessageContent', () => {
       parts: createManyTextParts(45),
       isLastAssistant: true,
     });
+    flushSolid();
 
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
   });
@@ -1533,6 +1650,7 @@ describe('AssistantMessageContent', () => {
       parts: createManyTextParts(45),
       isLastAssistant: false,
     });
+    flushSolid();
 
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
   });
@@ -1543,6 +1661,7 @@ describe('AssistantMessageContent', () => {
       isLastAssistant: false,
       outerListVirtualized: true,
     });
+    flushSolid();
 
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
   });

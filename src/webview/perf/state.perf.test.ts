@@ -1,4 +1,5 @@
-import { createEffect } from 'solid-js';
+import { createEffect, flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearMessages,
@@ -115,7 +116,8 @@ describe('state perf guards', () => {
           },
         };
       });
-      setState('messages', history);
+      setState(storePath('messages', history));
+      flushSolid();
       const retained = state.messages.map((entry) => ({ entry, parts: entry.parts.slice() }));
       messageIndex.ensureIndex(state.messages);
       historicalPartAccesses = 0;
@@ -128,11 +130,13 @@ describe('state perf guards', () => {
         if (operation === 'upsertMessage') {
           upsertMessage({ info, parts: [createTextPart(`${id}-initial`, id, 'Initial')] });
         } else upsertMessageInfo(info);
+        flushSolid();
         expect(messageStructureVersion()).toBe(structureVersion + index * 2 + 1);
         expect(messageInfoVersion()).toBe(infoVersion + index + 1);
         expect(getMessageById(id)).toBe(state.messages[1000 + index]);
 
         upsertPart(createTextPart(`${id}-received`, id, 'Received'));
+        flushSolid();
         const entry = state.messages[1000 + index]!;
         for (let partIdx = 0; partIdx < entry.parts.length; partIdx++) {
           const part = entry.parts[partIdx]!;
@@ -164,6 +168,7 @@ describe('state perf guards', () => {
         if (operation === 'upsertMessage') upsertMessage({ info, parts: [] });
         else upsertMessageInfo(info);
         upsertPart(createTextPart(`${id}-part`, id, 'Received'));
+        flushSolid();
         const entry = getMessageById(id)!;
         expect(getMessagePartById(id, `${id}-part`)).toBe(entry.parts[0]);
         expect(messageIndex.getIndexedPartLocation(`${id}-part`)).toEqual({
@@ -180,12 +185,14 @@ describe('state perf guards', () => {
         { info: createAssistantMessage('older'), parts: [] },
         ...state.messages,
       ]);
+      flushSolid();
       expect(getMessagePartById('first', 'first-part')).toBe(firstPart);
       expect(messageIndex.getIndexedPartLocation('first-part')).toEqual({ msgIdx: 1, partIdx: 0 });
       expect(state.messages[1]).toBe(first);
       append('after-prepend');
 
       removeMessage('session-1', 'first');
+      flushSolid();
       expect(getMessageById('first')).toBeNull();
       expect(getMessagePartById('first', 'first-part')).toBeNull();
       expect(getMessagePartById('second', 'second-part')).toBe(state.messages[1]!.parts[0]);
@@ -195,6 +202,7 @@ describe('state perf guards', () => {
         info: createAssistantMessage('second'),
         parts: [createTextPart('replacement-part', 'second', 'Replacement')],
       });
+      flushSolid();
       expect(getMessagePartById('second', 'second-part')).toBeNull();
       expect(getMessagePartById('second', 'replacement-part')).toBe(state.messages[1]!.parts[0]);
       append('after-replacement');
@@ -225,7 +233,10 @@ describe('state perf guards', () => {
           },
         };
       });
-      setState('messages', [...history, { info: createAssistantMessage('active'), parts: [] }]);
+      setState(
+        storePath('messages', [...history, { info: createAssistantMessage('active'), parts: [] }])
+      );
+      flushSolid();
       messageIndex.ensureIndex(state.messages);
       historicalPartAccesses = 0;
 
@@ -244,6 +255,7 @@ describe('state perf guards', () => {
           flushPendingStreamingDeltasFor(defaultAppState);
         }
       }
+      flushSolid();
 
       expect(historicalPartAccesses).toBe(0);
       expect(state.messages[1000]!.parts.map((part) => part.id)).toEqual(
@@ -265,6 +277,7 @@ describe('state perf guards', () => {
           parts: [createTextPart('existing', 'active', 'Before')],
         },
       ]);
+      flushSolid();
       messageIndex.ensureIndex(state.messages);
       setMessagesIncremental([
         {
@@ -288,6 +301,7 @@ describe('state perf guards', () => {
         }
       }
       flushPendingStreamingDeltasFor(defaultAppState);
+      flushSolid();
 
       expect(state.messages[0]!.parts).toEqual([createTextPart('historical', 'older', 'History')]);
       expect(state.messages[1]!.parts).toEqual([
@@ -299,27 +313,33 @@ describe('state perf guards', () => {
   );
 
   it('clears message state with a single reactive flush', async () => {
-    setState('messages', [
-      {
-        info: createAssistantMessage('message-1'),
-        parts: [createTextPart('part-1', 'message-1', 'Streaming response')],
-      },
-    ]);
-    setState('todos', [createTodo('todo-1')]);
-    setState('diffs', [createDiff('src/example.ts')]);
-    setState('streamingPartId', 'part-1');
-    setState('streamingText', 'Streaming response');
+    setState(
+      storePath('messages', [
+        {
+          info: createAssistantMessage('message-1'),
+          parts: [createTextPart('part-1', 'message-1', 'Streaming response')],
+        },
+      ])
+    );
+    setState(storePath('todos', [createTodo('todo-1')]));
+    setState(storePath('diffs', [createDiff('src/example.ts')]));
+    setState(storePath('streamingPartId', 'part-1'));
+    setState(storePath('streamingText', 'Streaming response'));
 
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
-      createEffect(() => {
-        void state.messages.length;
-        void state.todos.length;
-        void state.diffs.length;
-        void state.streamingPartId;
-        void state.streamingText;
-        flushCount += 1;
-      });
+      createEffect(
+        () => {
+          void state.messages.length;
+          void state.todos.length;
+          void state.diffs.length;
+          void state.streamingPartId;
+          void state.streamingText;
+        },
+        () => {
+          flushCount += 1;
+        }
+      );
     });
 
     try {
@@ -341,19 +361,25 @@ describe('state perf guards', () => {
   });
 
   it('removes a selected grouped permission with a single reactive flush', async () => {
-    setState('permissions', [
-      createPermission('perm-1', [
-        { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1' },
-        { id: 'perm-2', sessionID: 'session-2', messageID: 'message-2' },
-      ]),
-    ]);
+    setState(
+      storePath('permissions', [
+        createPermission('perm-1', [
+          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1' },
+          { id: 'perm-2', sessionID: 'session-2', messageID: 'message-2' },
+        ]),
+      ])
+    );
 
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
-      createEffect(() => {
-        void state.permissions.map((permission) => permission.id).join(',');
-        flushCount += 1;
-      });
+      createEffect(
+        () => {
+          void state.permissions.map((permission) => permission.id).join(',');
+        },
+        () => {
+          flushCount += 1;
+        }
+      );
     });
 
     try {
@@ -381,24 +407,30 @@ describe('state perf guards', () => {
   });
 
   it('finalizes an active streaming part with a single reactive flush', async () => {
-    setState('messages', [
-      {
-        info: createAssistantMessage('message-1'),
-        parts: [createTextPart('part-1', 'message-1', 'Partial response')],
-      },
-    ]);
-    setState('streamingPartId', 'part-1');
-    setState('streamingText', 'Partial response');
+    setState(
+      storePath('messages', [
+        {
+          info: createAssistantMessage('message-1'),
+          parts: [createTextPart('part-1', 'message-1', 'Partial response')],
+        },
+      ])
+    );
+    setState(storePath('streamingPartId', 'part-1'));
+    setState(storePath('streamingText', 'Partial response'));
 
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
-      createEffect(() => {
-        const part = state.messages[0]?.parts[0];
-        void (part?.type === 'text' ? part.text : undefined);
-        void state.streamingPartId;
-        void state.streamingText;
-        flushCount += 1;
-      });
+      createEffect(
+        () => {
+          const part = state.messages[0]?.parts[0];
+          void (part?.type === 'text' ? part.text : undefined);
+          void state.streamingPartId;
+          void state.streamingText;
+        },
+        () => {
+          flushCount += 1;
+        }
+      );
     });
 
     try {
@@ -419,23 +451,29 @@ describe('state perf guards', () => {
   });
 
   it('removes an active streaming part with a single reactive flush', async () => {
-    setState('messages', [
-      {
-        info: createAssistantMessage('message-1'),
-        parts: [createTextPart('part-1', 'message-1', 'Partial response')],
-      },
-    ]);
-    setState('streamingPartId', 'part-1');
-    setState('streamingText', 'Partial response');
+    setState(
+      storePath('messages', [
+        {
+          info: createAssistantMessage('message-1'),
+          parts: [createTextPart('part-1', 'message-1', 'Partial response')],
+        },
+      ])
+    );
+    setState(storePath('streamingPartId', 'part-1'));
+    setState(storePath('streamingText', 'Partial response'));
 
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
-      createEffect(() => {
-        void state.messages[0]?.parts.length;
-        void state.streamingPartId;
-        void state.streamingText;
-        flushCount += 1;
-      });
+      createEffect(
+        () => {
+          void state.messages[0]?.parts.length;
+          void state.streamingPartId;
+          void state.streamingText;
+        },
+        () => {
+          flushCount += 1;
+        }
+      );
     });
 
     try {
@@ -455,26 +493,32 @@ describe('state perf guards', () => {
   });
 
   it('applies incremental message refreshes with streaming reset in a single reactive flush', async () => {
-    setState('messages', [
-      {
-        info: createAssistantMessage('message-1'),
-        parts: [createTextPart('part-1', 'message-1', 'Partial response')],
-      },
-    ]);
-    setState('streamingPartId', 'part-1');
-    setState('streamingText', 'Partial response');
+    setState(
+      storePath('messages', [
+        {
+          info: createAssistantMessage('message-1'),
+          parts: [createTextPart('part-1', 'message-1', 'Partial response')],
+        },
+      ])
+    );
+    setState(storePath('streamingPartId', 'part-1'));
+    setState(storePath('streamingText', 'Partial response'));
 
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
-      createEffect(() => {
-        const info = state.messages[0]?.info;
-        const part = state.messages[0]?.parts[0];
-        void (info?.role === 'assistant' ? info.modelID : undefined);
-        void (part?.type === 'text' ? part.text : undefined);
-        void state.streamingPartId;
-        void state.streamingText;
-        flushCount += 1;
-      });
+      createEffect(
+        () => {
+          const info = state.messages[0]?.info;
+          const part = state.messages[0]?.parts[0];
+          void (info?.role === 'assistant' ? info.modelID : undefined);
+          void (part?.type === 'text' ? part.text : undefined);
+          void state.streamingPartId;
+          void state.streamingText;
+        },
+        () => {
+          flushCount += 1;
+        }
+      );
     });
 
     try {
@@ -509,7 +553,8 @@ describe('state perf guards', () => {
       info: createAssistantMessage(`message-${index}`),
       parts: [createTextPart(`part-${index}`, `message-${index}`, `Response ${index}`)],
     }));
-    setState('messages', existingMessages);
+    setState(storePath('messages', existingMessages));
+    flushSolid();
 
     const firstEntry = state.messages[0];
     const middleEntry = state.messages[500];
@@ -517,11 +562,15 @@ describe('state perf guards', () => {
 
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
-      createEffect(() => {
-        void state.messages.length;
-        void state.messages[1000]?.info.id;
-        flushCount += 1;
-      });
+      createEffect(
+        () => {
+          void state.messages.length;
+          void state.messages[1000]?.info.id;
+        },
+        () => {
+          flushCount += 1;
+        }
+      );
     });
 
     try {
@@ -557,6 +606,7 @@ describe('state perf guards', () => {
       parts: [createTextPart(`part-${index}`, `message-${index}`, `Response ${index}`)],
     }));
     setMessagesIncremental(existingMessages);
+    flushSolid();
     const retainedEntries = [...state.messages];
     const retainedParts = state.messages.map((entry) => entry.parts[0]);
 
@@ -568,6 +618,7 @@ describe('state perf guards', () => {
       },
       ...state.messages.slice(1),
     ]);
+    flushSolid();
 
     expect(state.messages).toHaveLength(1001);
     for (let index = 0; index < retainedEntries.length; index += 1) {
@@ -605,7 +656,8 @@ describe('state perf guards', () => {
           },
         ],
       }));
-      setState('messages', existingMessages);
+      setState(storePath('messages', existingMessages));
+      flushSolid();
       const retained = [...state.messages];
       outputReads = 0;
 
@@ -624,6 +676,7 @@ describe('state perf guards', () => {
             ]
           : []),
       ]);
+      flushSolid();
 
       expect(outputReads).toBe(0);
       expect(state.messages).toHaveLength(change === 'append' ? 1001 : 1000);

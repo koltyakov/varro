@@ -1,3 +1,5 @@
+import { flush as flushSolid } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SESSION_RESUME_PROMPT } from '../../shared/session-pauses';
 import {
@@ -13,7 +15,9 @@ import type { MessageEntry } from '../types';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  flushSolid();
   resetDefaultAppState();
+  flushSolid();
 });
 
 describe('session pause markers', () => {
@@ -60,13 +64,15 @@ describe('session pause markers', () => {
     const current = session('session-1', {
       metadata: { source: 'test', varro: { agent: 'build' } },
     });
-    setState('sessions', [current]);
+    setState(storePath('sessions', [current]));
+    flushSolid();
     vi.spyOn(client.session, 'get').mockResolvedValue(current);
     vi.spyOn(client.session, 'messages').mockResolvedValue([boundary]);
     const update = vi
       .spyOn(client.session, 'update')
       .mockImplementation(async (_id, body) => ({ ...current, metadata: body.metadata }));
     await recordSessionPause('session-1');
+    flushSolid();
     expect(update).toHaveBeenCalledWith(
       'session-1',
       {
@@ -90,6 +96,7 @@ describe('session pause markers', () => {
     vi.spyOn(client.session, 'messages').mockResolvedValue([boundary]);
     const update = vi.spyOn(client.session, 'update');
     await recordSessionPause('session-1');
+    flushSolid();
     expect(update).not.toHaveBeenCalled();
   });
 });

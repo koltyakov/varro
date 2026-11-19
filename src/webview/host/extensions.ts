@@ -60,7 +60,7 @@ export interface HostExtension {
 let extension: HostExtension | undefined;
 let started = false;
 
-/** Register before importing the app. Registration is fixed for one mounted webview. */
+/** Register before importing the app. Registration is fixed for e mounted webview. */
 export function registerHostExtension(value: HostExtension): () => void {
   if (started || extension)
     throw new Error('Register the host extension once, before loading Varro');

@@ -1,7 +1,7 @@
+import { flush as flushSolid, createComponent, createSignal, reconcile } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
-import { createComponent, createSignal } from 'solid-js';
-import { reconcile } from 'solid-js/store';
+import { render } from '@solidjs/web';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import { setShowFileDiffs, setState } from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
@@ -58,6 +58,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   setShowFileDiffs(false);
+  flushSolid();
   selectSessionMock.mockClear();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete fixture<UnknownRecord>(window).__sendToExtension;
@@ -65,19 +66,37 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   setShowFileDiffs(false);
-  setState('permissions', []);
-  setState('questions', []);
-  setState('sessionStatus', reconcile({}));
-  setState('messages', []);
-  setState('sessions', []);
-  setState('allAgents', []);
-  setState('activeSessionId', null);
+  flushSolid();
+  setState(storePath('permissions', []));
+  flushSolid();
+  setState(storePath('questions', []));
+  flushSolid();
+  setState((draft) => {
+    const current = draft['sessionStatus'];
+    const incoming = {} satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionStatus'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  flushSolid();
+  setState(storePath('messages', []));
+  flushSolid();
+  setState(storePath('sessions', []));
+  flushSolid();
+  setState(storePath('allAgents', []));
+  flushSolid();
+  setState(storePath('activeSessionId', null));
+  flushSolid();
   clearDirectSessionReturn();
+  flushSolid();
   resetToolCallExpansionState();
+  flushSolid();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete fixture<UnknownRecord>(window).__sendToExtension;
   vi.useRealTimers();
@@ -265,10 +284,12 @@ describe('ToolCall', () => {
     ])('styles completed execute failures from metadata %j', (metadata) => {
       const part = executePart(metadata);
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
 
       expect(container?.querySelector('.tool-call-icon')?.classList).toContain('tool-status-error');
       expect(container?.querySelector('.tool-invocation-error-label')?.textContent).toBe('failed');
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
       const result = container?.querySelector('.structured-tool-row-result');
       expect(result?.classList).toContain('structured-tool-row-error');
       expect(result?.querySelector('.tool-invocation-error')?.textContent).toBe('Result');
@@ -284,12 +305,14 @@ describe('ToolCall', () => {
     ])('keeps successful execute results neutral with metadata %j', (metadata) => {
       const part = executePart(metadata);
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
 
       expect(container?.querySelector('.tool-call-icon')?.classList).toContain(
         'tool-status-completed'
       );
       expect(container?.querySelector('.tool-invocation-error-label')).toBeNull();
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
       expect(container?.querySelector('.structured-tool-row-error')).toBeNull();
       expect(container?.querySelector('.structured-tool-row-result')?.textContent).toContain(
         'Result'
@@ -304,12 +327,14 @@ describe('ToolCall', () => {
           tool
         );
         cleanup = render(() => ToolCall({ part }), container!);
+        flushSolid();
 
         expect(container?.querySelector('.tool-call-icon')?.classList).toContain(
           'tool-status-completed'
         );
         expect(container?.querySelector('.tool-invocation-error-label')).toBeNull();
         container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+        flushSolid();
         expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
         expect(container?.querySelector('.structured-tool-row-error')).toBeNull();
       }
@@ -331,7 +356,9 @@ describe('ToolCall', () => {
         'functions.execute'
       );
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
 
       const list = container?.querySelector('.code-mode-tool-calls');
       expect(list?.getAttribute('aria-label')).toBe('Code Mode tool calls');
@@ -371,7 +398,9 @@ describe('ToolCall', () => {
     ])('retains the generic fallback for absent or invalid nested calls %j', (metadata) => {
       const part = executePart(metadata);
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
 
       expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
       expect(container?.querySelector('.tool-call-icon')?.classList).toContain(
@@ -408,8 +437,10 @@ describe('ToolCall', () => {
           }),
         container!
       );
+      flushSolid();
       const header = container!.querySelector<HTMLButtonElement>('.tool-invocation-header')!;
       header.click();
+      flushSolid();
       expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
 
       setPart({
@@ -421,6 +452,7 @@ describe('ToolCall', () => {
           },
         },
       });
+      flushSolid();
       const first = container!.querySelector('.code-mode-tool-call')!;
       expect(first.getAttribute('data-status')).toBe('running');
       expect(first.textContent).toContain('id1');
@@ -438,6 +470,7 @@ describe('ToolCall', () => {
           },
         },
       });
+      flushSolid();
       expect(container?.querySelector('.code-mode-tool-call')).toBe(first);
       expect(first.getAttribute('data-status')).toBe('completed');
       expect(first.querySelector('[role="status"]')?.textContent).toBe('Completed');
@@ -452,11 +485,13 @@ describe('ToolCall', () => {
         ],
       };
       setPart({ ...part(), state: { ...part().state, metadata } });
+      flushSolid();
       expect(container?.querySelectorAll('.code-mode-tool-call')[1]).toBe(second);
       expect(second.querySelector('[role="status"]')?.textContent).toBe('Error');
       expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-running');
 
       setPart(executePart(metadata));
+      flushSolid();
       expect(container?.querySelector('.tool-invocation-header')).toBe(header);
       expect(container?.querySelector('.code-mode-tool-call')).toBe(first);
       expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-completed');
@@ -466,6 +501,7 @@ describe('ToolCall', () => {
         'Result'
       );
       header.click();
+      flushSolid();
       expect(container?.querySelector('.code-mode-tool-calls')).toBeNull();
       expect(header.querySelector('.tool-invocation-error-label')).toBeNull();
     });
@@ -475,9 +511,11 @@ describe('ToolCall', () => {
       const part = executePart(metadata);
       part.state = { ...completedState(), metadata };
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       const header = container!.querySelector<HTMLButtonElement>('.tool-invocation-header')!;
       expect(header.disabled).toBe(false);
       header.click();
+      flushSolid();
       expect(container?.querySelector('.code-mode-tool-call-name')?.textContent).toBe(
         'docs.lookup'
       );
@@ -497,10 +535,12 @@ describe('ToolCall', () => {
 
     const key = getToolCallExpansionKey(part);
     setToolCallExpanded(key, true);
+    flushSolid();
 
     expect(getToolCallExpanded(key)).toBe(true);
 
     resetToolCallExpansionState();
+    flushSolid();
 
     expect(getToolCallExpanded(key)).toBe(false);
   });
@@ -517,6 +557,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
     expect(container?.textContent).toContain('git status');
@@ -539,8 +580,10 @@ describe('ToolCall', () => {
       state: completedState({ query: 'details' }, 'expanded output'),
     };
     setToolCallExpanded(getToolCallExpansionKey(part), true);
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part, lightweight: true }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
     expect(container?.textContent).toContain('expanded output');
@@ -559,6 +602,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(command.length).toBeGreaterThan(100);
     expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
@@ -582,6 +626,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
     expect(header?.disabled).toBe(true);
@@ -593,6 +638,7 @@ describe('ToolCall', () => {
   it.each(['apply_patch', 'patch'])('animates pending %s calls as in-progress tools', (tool) => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -608,6 +654,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-call-icon-edit')?.classList).toContain(
       'tool-status-running'
@@ -618,6 +665,7 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('0ms');
 
     vi.advanceTimersByTime(69_000);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 9s');
   });
@@ -653,6 +701,7 @@ describe('ToolCall', () => {
       };
 
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
 
       expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
         '2 files'
@@ -692,6 +741,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-edit-action-label')?.classList).toContain(
       'shimmer-progress'
@@ -715,8 +765,10 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     expect(container?.querySelector('.terminal-command-row-output')).not.toBeNull();
     expect(container?.querySelector('.terminal-command-output-empty')?.textContent).toBe(
@@ -741,7 +793,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const errorRow = container?.querySelector('.terminal-command-row-error');
     expect(container?.querySelector('.terminal-command-row-input')).toBeNull();
@@ -785,6 +839,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const label = container?.querySelector('.file-read-error-label, .file-edit-error-label');
     expect(label?.textContent).toBe('rejected');
@@ -807,7 +862,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     expect(container?.querySelector('.terminal-command-output-empty')?.textContent).toBe(
       '(no output)'
@@ -827,6 +884,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
     expect(header?.disabled).toBe(true);
@@ -848,12 +906,14 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
     expect(
       container?.querySelector('.tool-invocation-header-shell > .tool-copy-button')
     ).toBeNull();
 
     header?.click();
+    flushSolid();
 
     expect(container?.querySelector('.terminal-command-row-input')).toBeNull();
     expect(container?.querySelector('.terminal-command-row-output')).not.toBeNull();
@@ -868,7 +928,9 @@ describe('ToolCall', () => {
     expect(copyIconElement?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(copyIcon));
 
     copy?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(writeText).toHaveBeenCalledWith(command);
     await vi.waitFor(() => {
@@ -876,6 +938,7 @@ describe('ToolCall', () => {
       expect(copy?.getAttribute('aria-label')).toBe('Copied');
       expect(copy?.getAttribute('title')).toBeNull();
     });
+    flushSolid();
     vi.unstubAllGlobals();
   });
 
@@ -894,12 +957,16 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const copy = container?.querySelector<HTMLButtonElement>('.tool-copy-button');
     expect(copy).not.toBeNull();
     copy?.click();
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(writeText).toHaveBeenCalledWith(command);
     vi.unstubAllGlobals();
@@ -917,7 +984,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     expect(container?.querySelector('.terminal-command-row-input')).not.toBeNull();
     expect(container?.querySelector('.tool-invocation-running')).toBeNull();
@@ -945,6 +1014,7 @@ describe('ToolCall', () => {
       };
 
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
 
       const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
       expect(header?.querySelector('.tool-invocation-title')?.textContent).toBe('git status');
@@ -961,7 +1031,9 @@ describe('ToolCall', () => {
       );
 
       copy?.click();
+      flushSolid();
       await Promise.resolve();
+      flushSolid();
 
       expect(writeText).toHaveBeenCalledWith('git status');
       vi.unstubAllGlobals();
@@ -986,9 +1058,12 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     cleanup();
+    flushSolid();
     cleanup = undefined;
     const updatedPart: ToolPart = {
       ...part,
@@ -1001,6 +1076,7 @@ describe('ToolCall', () => {
       },
     };
     cleanup = render(() => ToolCall({ part: updatedPart }), container!);
+    flushSolid();
 
     const output = container?.querySelector<HTMLDivElement>('.terminal-command-output-viewport');
     if (!output) throw new Error('Expected live command output');
@@ -1008,6 +1084,7 @@ describe('ToolCall', () => {
     Object.defineProperty(output, 'clientHeight', { configurable: true, value: 40 });
     output.scrollTop = 0;
     await Promise.resolve();
+    flushSolid();
 
     expect(output.textContent).toContain('test 3');
     expect(output.scrollTop).toBe(80);
@@ -1025,6 +1102,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-search');
@@ -1048,6 +1126,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const count = container?.querySelector('.tool-invocation-search-count');
     expect(count?.textContent).toBe('2 results');
@@ -1073,6 +1152,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const count = container?.querySelector('.tool-invocation-search-count');
     expect(count?.textContent).toBe('100+ results');
@@ -1091,6 +1171,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
+    flushSolid();
 
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-edit');
     expect(icon).toBeInstanceOf(HTMLSpanElement);
@@ -1098,12 +1179,15 @@ describe('ToolCall', () => {
   });
 
   it('renders failed search errors as a structured table row', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1124,7 +1208,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const detail = container?.querySelector('.tool-invocation-detail');
     const rows = Array.from(detail?.querySelectorAll('.structured-tool-row') || []);
@@ -1164,7 +1250,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     const inputRows = rows.slice(0, 2);
@@ -1202,7 +1290,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
@@ -1232,7 +1322,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const panel = container?.querySelector('.structured-tool-card');
     const rows = Array.from(panel?.querySelectorAll('.structured-tool-row') || []);
@@ -1262,7 +1354,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const resultRow = container?.querySelector('.structured-tool-row-result');
     expect(resultRow?.textContent).toContain('result');
@@ -1287,7 +1381,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     expect(container?.querySelector('.structured-tool-card')).not.toBeNull();
     expect(container?.querySelector('.structured-tool-label')?.textContent).toBe('query');
@@ -1295,12 +1391,15 @@ describe('ToolCall', () => {
   });
 
   it('does not render a second line for collapsed generic tool input', () => {
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     const part: ToolPart = {
       id: 'tool-1',
@@ -1313,6 +1412,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
     expect(container?.textContent).not.toContain('docs/spec.md');
@@ -1338,6 +1438,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
     expect(container?.textContent).not.toContain('hidden subagent summary');
@@ -1365,6 +1466,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
@@ -1390,6 +1492,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(cableTagIcon));
@@ -1416,11 +1519,13 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.chat-tool-invocation-part')?.classList).toContain(
       'tool-invocation-task'
     );
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const detailText = container?.querySelector('.tool-invocation-detail')?.textContent || '';
 
@@ -1452,8 +1557,10 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
@@ -1470,6 +1577,7 @@ describe('ToolCall', () => {
 
   it('opens long task prompts and results in Markdown preview', () => {
     const send = setExtensionSender();
+    flushSolid();
     const prompt = ['# Review', '', 'Inspect:', '- API', '- UI', '- Tests', '- Docs'].join('\n');
     const result = [
       '# Findings',
@@ -1502,13 +1610,17 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     const rowFor = (label: string) =>
       rows.find((row) => row.querySelector('.structured-tool-label')?.textContent === label);
     rowFor('prompt')?.querySelector<HTMLPreElement>('.structured-tool-value')?.click();
+    flushSolid();
     rowFor('task_result')?.querySelector<HTMLPreElement>('.structured-tool-value')?.click();
+    flushSolid();
 
     expect(send).toHaveBeenNthCalledWith(1, {
       type: 'vscode/open-text',
@@ -1531,18 +1643,21 @@ describe('ToolCall', () => {
   });
 
   it('shows the subagent model and reasoning in expanded task details', () => {
-    setState('messages', [
-      {
-        info: assistantMessage('subagent-assistant-1', {
-          sessionID: 'subagent-session-1',
-          providerID: 'openai',
-          modelID: 'gpt-5.6-sol',
-          variant: 'high',
-          time: { created: 10 },
-        }),
-        parts: [],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('subagent-assistant-1', {
+            sessionID: 'subagent-session-1',
+            providerID: 'openai',
+            modelID: 'gpt-5.6-sol',
+            variant: 'high',
+            time: { created: 10 },
+          }),
+          parts: [],
+        },
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1563,7 +1678,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     expect(
@@ -1580,15 +1697,18 @@ describe('ToolCall', () => {
   });
 
   it('shows configured model details after completed subagent messages are unloaded', () => {
-    setState('allAgents', [
-      {
-        name: 'explore',
-        mode: 'subagent',
-        permission: [],
-        model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
-        variant: 'medium',
-      },
-    ]);
+    setState(
+      storePath('allAgents', [
+        {
+          name: 'explore',
+          mode: 'subagent',
+          permission: [],
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+          variant: 'medium',
+        },
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1610,7 +1730,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     expect(
@@ -1630,23 +1752,29 @@ describe('ToolCall', () => {
   it.each([false, true])(
     'shows the native continuation child model with child messages loaded=%s',
     (messagesLoaded) => {
-      setState('allAgents', [
-        {
-          name: 'opus',
-          mode: 'all',
-          permission: [],
-          model: { providerID: 'claude-agent', modelID: 'agent-default' },
-          variant: 'medium',
-        },
-      ]);
-      setState('sessions', [
-        session('subagent-session-1', {
-          parentID: 'session-1',
-          title: 'Original review',
-          time: { created: 500, updated: 500 },
-          model: { providerID: 'claude-agent', id: 'opus', variant: 'high' },
-        }),
-      ]);
+      setState(
+        storePath('allAgents', [
+          {
+            name: 'opus',
+            mode: 'all',
+            permission: [],
+            model: { providerID: 'claude-agent', modelID: 'agent-default' },
+            variant: 'medium',
+          },
+        ])
+      );
+      flushSolid();
+      setState(
+        storePath('sessions', [
+          session('subagent-session-1', {
+            parentID: 'session-1',
+            title: 'Original review',
+            time: { created: 500, updated: 500 },
+            model: { providerID: 'claude-agent', id: 'opus', variant: 'high' },
+          }),
+        ])
+      );
+      flushSolid();
       const part: ToolPart = {
         id: 'tool-1',
         sessionID: 'session-1',
@@ -1665,34 +1793,39 @@ describe('ToolCall', () => {
           time: { start: 1_100 },
         },
       };
-      setState('messages', [
-        {
-          info: assistantMessage('message-1', {
-            providerID: 'openai',
-            modelID: 'gpt-6.1-sol-fast',
-            variant: 'low',
-            time: { created: 1_000 },
-          }),
-          parts: [part],
-        },
-        ...(messagesLoaded
-          ? [
-              {
-                info: assistantMessage('child-message', {
-                  sessionID: 'subagent-session-1',
-                  providerID: 'claude-agent',
-                  modelID: 'opus',
-                  variant: 'high',
-                  time: { created: 1_200 },
-                }),
-                parts: [],
-              },
-            ]
-          : []),
-      ]);
+      setState(
+        storePath('messages', [
+          {
+            info: assistantMessage('message-1', {
+              providerID: 'openai',
+              modelID: 'gpt-6.1-sol-fast',
+              variant: 'low',
+              time: { created: 1_000 },
+            }),
+            parts: [part],
+          },
+          ...(messagesLoaded
+            ? [
+                {
+                  info: assistantMessage('child-message', {
+                    sessionID: 'subagent-session-1',
+                    providerID: 'claude-agent',
+                    modelID: 'opus',
+                    variant: 'high',
+                    time: { created: 1_200 },
+                  }),
+                  parts: [],
+                },
+              ]
+            : []),
+        ])
+      );
+      flushSolid();
 
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
 
       const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
       expect(detail).toContain('modelclaude-agent/opus');
@@ -1709,14 +1842,17 @@ describe('ToolCall', () => {
   );
 
   it('uses the native agent model before child session details arrive', () => {
-    setState('allAgents', [
-      {
-        name: 'opus',
-        mode: 'all',
-        permission: [],
-        model: { providerID: 'claude-agent', modelID: 'opus', variant: 'high' },
-      },
-    ]);
+    setState(
+      storePath('allAgents', [
+        {
+          name: 'opus',
+          mode: 'all',
+          permission: [],
+          model: { providerID: 'claude-agent', modelID: 'opus', variant: 'high' },
+        },
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1731,19 +1867,24 @@ describe('ToolCall', () => {
         time: { start: 1_100 },
       },
     };
-    setState('messages', [
-      {
-        info: assistantMessage('message-1', {
-          providerID: 'openai',
-          modelID: 'gpt-6.1-sol-fast',
-          variant: 'low',
-        }),
-        parts: [part],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('message-1', {
+            providerID: 'openai',
+            modelID: 'gpt-6.1-sol-fast',
+            variant: 'low',
+          }),
+          parts: [part],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
     expect(detail).toContain('modelclaude-agent/opus');
@@ -1752,19 +1893,25 @@ describe('ToolCall', () => {
   });
 
   it('uses the resolved task metadata model before stale agent or parent state', () => {
-    setState('sessions', [
-      session('subagent-session-1', {
-        parentID: 'session-1',
-        model: { providerID: 'openai', id: 'stale-session-model', variant: 'low' },
-      }),
-    ]);
-    setState('allAgents', [
-      {
-        name: 'explore',
-        mode: 'subagent',
-        permission: [],
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          parentID: 'session-1',
+          model: { providerID: 'openai', id: 'stale-session-model', variant: 'low' },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('allAgents', [
+        {
+          name: 'explore',
+          mode: 'subagent',
+          permission: [],
+        },
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1786,20 +1933,25 @@ describe('ToolCall', () => {
         },
       },
     };
-    setState('messages', [
-      {
-        info: assistantMessage('message-1', {
-          mode: 'default',
-          providerID: 'openai',
-          modelID: 'gpt-5.6-sol',
-          variant: 'high',
-        }),
-        parts: [part],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('message-1', {
+            mode: 'default',
+            providerID: 'openai',
+            modelID: 'gpt-5.6-sol',
+            variant: 'high',
+          }),
+          parts: [part],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
     expect(detail).toContain('modelopenai/gpt-5.6-terra');
@@ -1809,21 +1961,27 @@ describe('ToolCall', () => {
   it.each(['running', 'completed', 'error'] as const)(
     'shows the actual child session model for a %s task without loaded child messages',
     (status) => {
-      setState('allAgents', [
-        {
-          name: 'explore',
-          mode: 'subagent',
-          permission: [],
-          model: { providerID: 'openai', modelID: 'agent-default' },
-          variant: 'high',
-        },
-      ]);
-      setState('sessions', [
-        session('subagent-session-1', {
-          parentID: 'session-1',
-          model: { providerID: 'fixture', id: 'command-override' },
-        }),
-      ]);
+      setState(
+        storePath('allAgents', [
+          {
+            name: 'explore',
+            mode: 'subagent',
+            permission: [],
+            model: { providerID: 'openai', modelID: 'agent-default' },
+            variant: 'high',
+          },
+        ])
+      );
+      flushSolid();
+      setState(
+        storePath('sessions', [
+          session('subagent-session-1', {
+            parentID: 'session-1',
+            model: { providerID: 'fixture', id: 'command-override' },
+          }),
+        ])
+      );
+      flushSolid();
       const common = {
         input: { subagent_type: 'explore' },
         metadata: { sessionID: 'subagent-session-1' },
@@ -1843,19 +2001,24 @@ describe('ToolCall', () => {
               ? { ...common, status, title: 'Command result', output: 'Done' }
               : { ...common, status, title: 'Command running' },
       };
-      setState('messages', [
-        {
-          info: assistantMessage('message-1', {
-            providerID: 'openai',
-            modelID: 'parent-model',
-            variant: 'medium',
-          }),
-          parts: [part],
-        },
-      ]);
+      setState(
+        storePath('messages', [
+          {
+            info: assistantMessage('message-1', {
+              providerID: 'openai',
+              modelID: 'parent-model',
+              variant: 'medium',
+            }),
+            parts: [part],
+          },
+        ])
+      );
+      flushSolid();
 
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
 
       const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
       expect(detail).toContain('modelfixture/command-override');
@@ -1879,45 +2042,57 @@ describe('ToolCall', () => {
       },
     };
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
-    setState('sessions', [
-      session('subagent-session-1', {
-        parentID: 'session-1',
-        model: { providerID: 'fixture', id: 'command-override', variant: 'low' },
-      }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          parentID: 'session-1',
+          model: { providerID: 'fixture', id: 'command-override', variant: 'low' },
+        }),
+      ])
+    );
+    flushSolid();
     expect(container?.textContent).toContain('modelfixture/command-override');
     expect(container?.textContent).toContain('reasoninglow');
 
-    setState('messages', [
-      {
-        info: assistantMessage('child-message', {
-          sessionID: 'subagent-session-1',
-          providerID: 'fixture',
-          modelID: 'executed-model',
-          variant: 'high',
-        }),
-        parts: [],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('child-message', {
+            sessionID: 'subagent-session-1',
+            providerID: 'fixture',
+            modelID: 'executed-model',
+            variant: 'high',
+          }),
+          parts: [],
+        },
+      ])
+    );
+    flushSolid();
     expect(container?.textContent).toContain('modelfixture/executed-model');
     expect(container?.textContent).toContain('reasoninghigh');
 
-    setState('messages', []);
+    setState(storePath('messages', []));
+    flushSolid();
     expect(container?.textContent).toContain('modelfixture/command-override');
     expect(container?.textContent).toContain('reasoninglow');
   });
 
   it('shows inherited model details for agents without a configured model', () => {
-    setState('allAgents', [
-      {
-        name: 'explore',
-        mode: 'subagent',
-        permission: [],
-        variant: 'low',
-      },
-    ]);
+    setState(
+      storePath('allAgents', [
+        {
+          name: 'explore',
+          mode: 'subagent',
+          permission: [],
+          variant: 'low',
+        },
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1933,20 +2108,25 @@ describe('ToolCall', () => {
         'Inspect the repository'
       ),
     };
-    setState('messages', [
-      {
-        info: assistantMessage('message-1', {
-          mode: 'default',
-          providerID: 'openai',
-          modelID: 'gpt-5.6-sol',
-          variant: 'high',
-        }),
-        parts: [part],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('message-1', {
+            mode: 'default',
+            providerID: 'openai',
+            modelID: 'gpt-5.6-sol',
+            variant: 'high',
+          }),
+          parts: [part],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
     expect(detail).toContain('modelopenai/gpt-5.6-sol');
@@ -1974,8 +2154,10 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     expect(container?.querySelectorAll('.tool-call-icon')).toHaveLength(1);
     const taskIcon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
@@ -2001,23 +2183,30 @@ describe('ToolCall', () => {
   it.each(['running', 'completed'] as const)(
     'shows a wait icon when a %s launch has a subagent blocked on permission',
     (status) => {
-      setState('sessions', [
-        session('session-1'),
-        session('subagent-session-1', { parentID: 'session-1' }),
-      ]);
-      setState('permissions', [
-        {
-          id: 'permission-1',
-          type: 'bash',
-          sessionID: 'subagent-session-1',
-          messageID: 'subagent-message-1',
-          callID: 'subagent-call-1',
-          title: 'Run tests',
-          metadata: {},
-          time: { created: 1 },
-        },
-      ]);
-      setState('sessionStatus', { 'subagent-session-1': { type: 'busy' } });
+      setState(
+        storePath('sessions', [
+          session('session-1'),
+          session('subagent-session-1', { parentID: 'session-1' }),
+        ])
+      );
+      flushSolid();
+      setState(
+        storePath('permissions', [
+          {
+            id: 'permission-1',
+            type: 'bash',
+            sessionID: 'subagent-session-1',
+            messageID: 'subagent-message-1',
+            callID: 'subagent-call-1',
+            title: 'Run tests',
+            metadata: {},
+            time: { created: 1 },
+          },
+        ])
+      );
+      flushSolid();
+      setState(storePath('sessionStatus', { 'subagent-session-1': { type: 'busy' } }));
+      flushSolid();
       const part: ToolPart = {
         id: 'tool-1',
         sessionID: 'session-1',
@@ -2041,6 +2230,7 @@ describe('ToolCall', () => {
       };
 
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
 
       const icon = container?.querySelector<HTMLElement>('.tool-call-icon-task');
       expect(icon).toBeInstanceOf(HTMLSpanElement);
@@ -2059,6 +2249,7 @@ describe('ToolCall', () => {
     (background) => {
       vi.useFakeTimers();
       vi.setSystemTime(10_000);
+      flushSolid();
       const part: ToolPart = {
         id: 'tool-1',
         sessionID: 'session-1',
@@ -2077,18 +2268,22 @@ describe('ToolCall', () => {
         },
       };
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       const icon = () => container?.querySelector<HTMLElement>('.tool-call-icon-task');
       const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
       expect(label()).toBeUndefined();
       expect(icon()?.classList).toContain('tool-call-spinner');
       expect(icon()?.classList).not.toContain('tool-status-completed');
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
       container?.querySelector<HTMLButtonElement>('.tool-invocation-subagent-running')?.click();
+      flushSolid();
       expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('subagent-session-1');
       selectSessionMock.mockClear();
 
       // The status can arrive after history, without changing the completed tool part.
-      setState('sessionStatus', { 'subagent-session-1': { type: 'busy' } });
+      setState(storePath('sessionStatus', { 'subagent-session-1': { type: 'busy' } }));
+      flushSolid();
       expect(label()).toBeUndefined();
       expect(icon()?.getAttribute('aria-label')).toBe('Running');
       expect(icon()?.classList).toContain('tool-call-spinner');
@@ -2104,14 +2299,18 @@ describe('ToolCall', () => {
         'The subagent is working in the background.'
       );
       container?.querySelector<HTMLButtonElement>('.tool-invocation-subagent-running')?.click();
+      flushSolid();
       expect(selectSessionMock).toHaveBeenCalledWith('subagent-session-1');
 
-      setState('sessionStatus', 'subagent-session-1', {
-        type: 'retry',
-        attempt: 2,
-        message: 'rate limit exceeded',
-        next: 15_000,
-      });
+      setState(
+        storePath('sessionStatus', 'subagent-session-1', {
+          type: 'retry',
+          attempt: 2,
+          message: 'rate limit exceeded',
+          next: 15_000,
+        })
+      );
+      flushSolid();
       expect(label()).toBeUndefined();
       expect(icon()?.classList).toContain('tool-call-spinner');
       expect(working()?.textContent).toContain('General subagent is retrying');
@@ -2120,7 +2319,8 @@ describe('ToolCall', () => {
         'retrying #2'
       );
 
-      setState('sessionStatus', 'subagent-session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'subagent-session-1', { type: 'idle' }));
+      flushSolid();
       expect(label()).toBeUndefined();
       expect(icon()?.getAttribute('aria-label')).toBe('Completed');
       expect(icon()?.classList).toContain('tool-status-completed');
@@ -2133,15 +2333,19 @@ describe('ToolCall', () => {
       expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('2s');
       expect(part.state.status).toBe('completed');
       cleanup();
+      flushSolid();
       resetToolCallExpansionState();
+      flushSolid();
       cleanup = render(() => ToolCall({ part: structuredClone(part) }), container!);
+      flushSolid();
       expect(icon()?.getAttribute('aria-label')).toBe('Completed');
     }
   );
 
   it('keeps a native follow-up running across idle until the current result arrives', () => {
     const childID = 'subagent-session-1';
-    setState('sessionStatus', { [childID]: { type: 'idle' } });
+    setState(storePath('sessionStatus', { [childID]: { type: 'idle' } }));
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -2156,17 +2360,20 @@ describe('ToolCall', () => {
       },
     };
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
 
     expect(label()).toBeUndefined();
     expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
     expect(container?.querySelector('.tool-status-completed')).toBeNull();
-    setState('sessionStatus', childID, { type: 'busy' });
+    setState(storePath('sessionStatus', childID, { type: 'busy' }));
+    flushSolid();
     expect(label()).toBeUndefined();
     expect(container?.querySelector('.tool-call-spinner')?.getAttribute('aria-label')).toBe(
       'Running'
     );
-    setState('sessionStatus', childID, { type: 'idle' });
+    setState(storePath('sessionStatus', childID, { type: 'idle' }));
+    flushSolid();
     expect(label()).toBeUndefined();
     expect(container?.querySelector('.tool-status-completed')).toBeNull();
     expect(container?.querySelector('.tool-call-spinner')?.getAttribute('aria-label')).toBe(
@@ -2215,27 +2422,38 @@ describe('ToolCall', () => {
         },
       ],
     });
-    setState('messages', [result('earlier-round', 900)]);
+    setState(storePath('messages', [result('earlier-round', 900)]));
+    flushSolid();
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     const label = () => container?.querySelector('.tool-invocation-task-status')?.textContent;
     expect(label()).toBeUndefined();
     expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
-    setState('sessionStatus', childID, { type: 'idle' });
+    setState(storePath('sessionStatus', childID, { type: 'idle' }));
+    flushSolid();
     expect(label()).toBeUndefined();
     expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
     const interim = result('interim-result', 2_100, true);
-    setState('messages', [result('earlier-round', 900), interim]);
+    setState(storePath('messages', [result('earlier-round', 900), interim]));
+    flushSolid();
     expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
     expect(container?.querySelector('.tool-status-completed')).toBeNull();
-    setState('sessionStatus', childID, {
-      type: 'busy',
-      background: true,
-      backgroundCommand: 'go test -race',
-    });
-    setState('messages', [result('earlier-round', 900), interim, result('final-result', 2_200)]);
+    setState(
+      storePath('sessionStatus', childID, {
+        type: 'busy',
+        background: true,
+        backgroundCommand: 'go test -race',
+      })
+    );
+    flushSolid();
+    setState(
+      storePath('messages', [result('earlier-round', 900), interim, result('final-result', 2_200)])
+    );
+    flushSolid();
     expect(container?.querySelector('.tool-call-spinner')).not.toBeNull();
     expect(container?.querySelector('.tool-status-completed')).toBeNull();
-    setState('sessionStatus', childID, { type: 'idle' });
+    setState(storePath('sessionStatus', childID, { type: 'idle' }));
+    flushSolid();
     expect(label()).toBeUndefined();
     expect(container?.querySelector('.tool-status-completed')?.getAttribute('aria-label')).toBe(
       'Completed'
@@ -2262,24 +2480,130 @@ describe('ToolCall', () => {
         parts: [followup],
       },
     ];
-    setState('messages', history);
-    setState('sessionStatus', childID, { type: 'busy' });
+    setState(storePath('messages', history));
+    flushSolid();
+    setState(storePath('sessionStatus', childID, { type: 'busy' }));
+    flushSolid();
     expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
       'tool-status-completed'
     );
-    setState('messages', [...history, result('followup-failed', 3_100, false, 'error')]);
-    setState('sessionStatus', childID, { type: 'idle' });
+    setState(storePath('messages', [...history, result('followup-failed', 3_100, false, 'error')]));
+    flushSolid();
+    setState(storePath('sessionStatus', childID, { type: 'idle' }));
+    flushSolid();
     cleanup();
+    flushSolid();
     cleanup = render(() => [ToolCall({ part }), ToolCall({ part: followup })], container!);
+    flushSolid();
     const icons = container!.querySelectorAll('.tool-call-icon-task');
     expect(icons[0]?.classList).toContain('tool-status-completed');
     expect(icons[1]?.classList).toContain('tool-status-error');
   });
 
+  it.each([false, true])(
+    'settles a superseded native launch without its own final result, background pending: %s',
+    (backgroundPending) => {
+      const childID = 'subagent-session-1';
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'task',
+        state: {
+          ...completedState({ sessionID: childID }, 'Fix reserve'),
+          metadata: { sessionID: childID, status: 'running' },
+          time: { start: 1_000, end: 1_001 },
+        },
+      };
+      const followup: ToolPart = {
+        ...part,
+        id: 'tool-2',
+        messageID: 'message-2',
+        callID: 'call-2',
+        state: {
+          ...completedState({ sessionID: childID }, 'Preserve reproduction'),
+          metadata: { sessionID: childID, status: 'running' },
+          time: { start: 2_000, end: 2_001 },
+        },
+      };
+      const result = (id: string, created: number, pending: boolean) => ({
+        info: {
+          id,
+          sessionID: part.sessionID,
+          role: 'user' as const,
+          agent: 'build',
+          model: { providerID: 'test', modelID: 'parent' },
+          time: { created },
+        },
+        parts: [
+          {
+            id: `${id}:text`,
+            messageID: id,
+            sessionID: part.sessionID,
+            type: 'text' as const,
+            text: 'Reserve fixed',
+            synthetic: true,
+            subagentResult: {
+              sessionID: childID,
+              state: 'completed' as const,
+              backgroundPending: pending,
+            },
+          },
+        ],
+      });
+      const history = [
+        { info: assistantMessage(part.messageID), parts: [part] },
+        ...(backgroundPending ? [result('interim-result', 1_500, true)] : []),
+      ];
+      setState(storePath('messages', history));
+      flushSolid();
+      cleanup = render(() => [ToolCall({ part }), ToolCall({ part: followup })], container!);
+      flushSolid();
+      const icons = () => container!.querySelectorAll('.tool-call-icon-task');
+      expect(icons()[0]?.classList).toContain('tool-status-running');
+
+      // The same child gets a follow-up before it delivers a final result.
+      history.push({
+        info: assistantMessage(followup.messageID, { time: { created: 2_000 } }),
+        parts: [followup],
+      });
+      setState(storePath('messages', [...history]));
+      flushSolid();
+      setState(storePath('sessionStatus', childID, { type: 'busy' }));
+      flushSolid();
+      expect(icons()[0]?.classList).toContain('tool-status-completed');
+      expect(icons()[1]?.classList).toContain('tool-status-running');
+
+      setState(storePath('sessionStatus', childID, { type: 'idle' }));
+      flushSolid();
+      expect(icons()[1]?.classList).toContain('tool-status-running');
+      setState(storePath('messages', [...history, result('final-result', 3_000, false)]));
+      flushSolid();
+      expect(icons()[0]?.classList).toContain('tool-status-completed');
+      expect(icons()[1]?.classList).toContain('tool-status-completed');
+
+      // A cold history render has no observed busy-to-idle transition.
+      cleanup();
+      flushSolid();
+      resetToolCallExpansionState();
+      flushSolid();
+      setState(storePath('sessionStatus', {}));
+      flushSolid();
+      cleanup = render(() => [ToolCall({ part }), ToolCall({ part: followup })], container!);
+      flushSolid();
+      expect(icons()[0]?.classList).toContain('tool-status-completed');
+      expect(icons()[1]?.classList).toContain('tool-status-completed');
+      expect(container?.querySelector('.tool-call-spinner')).toBeNull();
+    }
+  );
+
   it.each(['completed', 'error'] as const)(
     'does not mark a %s task running because another child is busy',
     (status) => {
-      setState('sessionStatus', { 'other-child': { type: 'busy' } });
+      setState(storePath('sessionStatus', { 'other-child': { type: 'busy' } }));
+      flushSolid();
       const part: ToolPart = {
         id: 'tool-1',
         sessionID: 'session-1',
@@ -2302,23 +2626,27 @@ describe('ToolCall', () => {
               },
       };
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       expect(container?.querySelector('.tool-call-spinner')).toBeNull();
       expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
         `tool-status-${status}`
       );
 
       if (status === 'error') {
-        setState('sessionStatus', 'subagent-session-1', { type: 'busy' });
+        setState(storePath('sessionStatus', 'subagent-session-1', { type: 'busy' }));
+        flushSolid();
         expect(container?.querySelector('.tool-call-spinner')).toBeNull();
         expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
           'tool-status-error'
         );
       }
+      flushSolid();
     }
   );
 
   it('opens the running subagent session from its status card', () => {
-    setState('activeSessionId', 'session-1');
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -2339,7 +2667,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const runningStatus = container?.querySelector<HTMLButtonElement>(
       '.tool-invocation-subagent-running'
@@ -2348,6 +2678,7 @@ describe('ToolCall', () => {
     expect(runningStatus?.title).toBe('Open subagent session');
 
     runningStatus?.click();
+    flushSolid();
 
     expect(selectSessionMock).toHaveBeenCalledWith('subagent-session-1');
     expect(getDirectSessionReturnId('subagent-session-1')).toBe('session-1');
@@ -2356,10 +2687,14 @@ describe('ToolCall', () => {
   it.each(['completed', 'error'] as const)(
     'opens a %s child using native metadata instead of a matching title',
     (status) => {
-      setState('activeSessionId', 'session-1');
-      setState('sessions', [
-        session('wrong-child', { title: 'Audit auth', parentID: 'session-1' }),
-      ]);
+      setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setState(
+        storePath('sessions', [
+          session('wrong-child', { title: 'Audit auth', parentID: 'session-1' }),
+        ])
+      );
+      flushSolid();
       const part: ToolPart = {
         id: 'native-result',
         sessionID: 'session-1',
@@ -2382,33 +2717,41 @@ describe('ToolCall', () => {
               },
       };
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
       expect(selectSessionMock).not.toHaveBeenCalled();
       expect(container?.querySelector('.tool-invocation-header-shell')?.textContent).not.toContain(
         'Open subagent session'
       );
       expect(container?.querySelector('.tool-invocation-subagent-link')).toBeNull();
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
       const open = container?.querySelector<HTMLButtonElement>(
         '.tool-invocation-detail .tool-invocation-subagent-link'
       );
       expect(open?.textContent).toBe('Open subagent session');
       open?.click();
+      flushSolid();
       expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('native-child');
       expect(getDirectSessionReturnId('native-child')).toBe('session-1');
       container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      flushSolid();
       expect(container?.querySelector('.tool-invocation-subagent-link')).toBeNull();
     }
   );
 
   it('opens a resumed subagent session from task_id', () => {
-    setState('activeSessionId', 'session-1');
-    setState('sessions', [
-      session('session-1', { time: { created: 1_000, updated: 2_000 } }),
-      session('subagent-session-1', {
-        parentID: 'session-1',
-        time: { created: 500, updated: 2_000 },
-      }),
-    ]);
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('session-1', { time: { created: 1_000, updated: 2_000 } }),
+        session('subagent-session-1', {
+          parentID: 'session-1',
+          time: { created: 500, updated: 2_000 },
+        }),
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -2428,15 +2771,20 @@ describe('ToolCall', () => {
         time: { start: 2_100 },
       },
     };
-    setState('messages', [
-      {
-        info: assistantMessage('message-1', { time: { created: 2_000 } }),
-        parts: [part],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('message-1', { time: { created: 2_000 } }),
+          parts: [part],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const runningStatus = container?.querySelector<HTMLButtonElement>(
       '.tool-invocation-subagent-running'
@@ -2444,20 +2792,24 @@ describe('ToolCall', () => {
     expect(runningStatus?.disabled).toBe(false);
 
     runningStatus?.click();
+    flushSolid();
 
     expect(selectSessionMock).toHaveBeenCalledWith('subagent-session-1');
     expect(getDirectSessionReturnId('subagent-session-1')).toBe('session-1');
   });
 
   it('shows retry status when subagent session is retrying', () => {
-    setState('sessionStatus', {
-      'subagent-session-1': {
-        type: 'retry' as const,
-        attempt: 2,
-        message: 'rate limit exceeded',
-        next: Date.now() + 5000,
-      },
-    });
+    setState(
+      storePath('sessionStatus', {
+        'subagent-session-1': {
+          type: 'retry' as const,
+          attempt: 2,
+          message: 'rate limit exceeded',
+          next: Date.now() + 5000,
+        },
+      })
+    );
+    flushSolid();
 
     const part: ToolPart = {
       id: 'tool-1',
@@ -2478,11 +2830,13 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const retryLabel = container?.querySelector('.tool-invocation-retry-label');
     expect(retryLabel?.textContent).toContain('retrying #2');
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
     const runningDiv = container?.querySelector('.tool-invocation-running');
     expect(runningDiv?.textContent).toContain('Subagent is retrying');
     expect(runningDiv?.textContent).toContain('Attempt 2');
@@ -2509,37 +2863,42 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-retry-label')).toBeNull();
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
       'Subagent is working'
     );
   });
 
   it('shows live subagent token counts for running tasks', () => {
-    setState('messages', [
-      {
-        info: assistantMessage('subagent-assistant-1', {
-          sessionID: 'subagent-session-1',
-          tokens: {
-            input: 3,
-            output: 50,
-            reasoning: 6,
-            cache: { read: 1_000, write: 1_231 },
-          },
-        }),
-        parts: [],
-      },
-      {
-        info: assistantMessage('other-assistant', {
-          sessionID: 'other-session',
-          tokens: { input: 9_999, output: 9_999, reasoning: 0, cache: { read: 0, write: 0 } },
-        }),
-        parts: [],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('subagent-assistant-1', {
+            sessionID: 'subagent-session-1',
+            tokens: {
+              input: 3,
+              output: 50,
+              reasoning: 6,
+              cache: { read: 1_000, write: 1_231 },
+            },
+          }),
+          parts: [],
+        },
+        {
+          info: assistantMessage('other-assistant', {
+            sessionID: 'other-session',
+            tokens: { input: 9_999, output: 9_999, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+          parts: [],
+        },
+      ])
+    );
+    flushSolid();
 
     const part: ToolPart = {
       id: 'tool-1',
@@ -2560,6 +2919,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const stats = container?.querySelector('.tool-invocation-token-stats');
     expect(stats?.textContent).toBe('↑ 1,234 ↓ 56');
@@ -2567,21 +2927,26 @@ describe('ToolCall', () => {
     expect(stats?.querySelector('.diff-lines-removed')).toBeNull();
     expect(container?.querySelector('.tool-invocation-cost')).toBeNull();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
     const costRow = () =>
       [...(container?.querySelectorAll('.structured-tool-row') ?? [])].find(
         (row) => row.querySelector('.structured-tool-label')?.textContent === 'cost'
       );
     expect(costRow()).toBeUndefined();
-    setState('messages', 0, 'info', { cost: 0.009 });
+    setState(storePath('messages', 0, 'info', { cost: 0.009 }));
+    flushSolid();
     expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('<$0.01');
     expect(
       costRow()?.previousElementSibling?.querySelector('.structured-tool-label')?.textContent
     ).toBe('reasoning');
-    setState('messages', 0, 'info', { cost: 0.01 });
+    setState(storePath('messages', 0, 'info', { cost: 0.01 }));
+    flushSolid();
     expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.01');
-    setState('sessions', [session('subagent-session-1', { cost: 0.07 })]);
+    setState(storePath('sessions', [session('subagent-session-1', { cost: 0.07 })]));
+    flushSolid();
     expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.07');
-    setState('messages', 0, 'info', { cost: 0.08 });
+    setState(storePath('messages', 0, 'info', { cost: 0.08 }));
+    flushSolid();
     expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.08');
     expect(container?.querySelector('.tool-invocation-header')?.textContent).not.toContain('$');
   });
@@ -2606,6 +2971,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
   });
@@ -2615,6 +2981,7 @@ describe('ToolCall', () => {
     (tool) => {
       vi.useFakeTimers();
       vi.setSystemTime(10_000);
+      flushSolid();
       const part: ToolPart = {
         id: 'tool-1',
         sessionID: 'session-1',
@@ -2632,13 +2999,16 @@ describe('ToolCall', () => {
       };
 
       cleanup = render(() => ToolCall({ part }), container!);
+      flushSolid();
 
       expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('5s');
 
       vi.advanceTimersByTime(2_000);
+      flushSolid();
 
       expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('7s');
       vi.advanceTimersByTime(62_000);
+      flushSolid();
 
       expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('1m 9s');
     }
@@ -2647,11 +3017,15 @@ describe('ToolCall', () => {
   it('shows the running subagent session activity age only while Alt is held', () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
-    setState('sessions', [
-      session('subagent-session-1', {
-        time: { created: 1_000, updated: 7_000 },
-      }),
-    ]);
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          time: { created: 1_000, updated: 7_000 },
+        }),
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -2669,10 +3043,12 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    flushSolid();
 
     const activityAge = container?.querySelector('.tool-invocation-activity-age');
     expect(activityAge?.textContent).toBe('last active 3s ago');
@@ -2682,12 +3058,15 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
 
     vi.advanceTimersByTime(2_000);
+    flushSolid();
     expect(activityAge?.textContent).toBe('last active 5s ago');
 
-    setState('sessions', 0, 'time', 'updated', 11_000);
+    setState(storePath('sessions', 0, 'time', 'updated', 11_000));
+    flushSolid();
     expect(activityAge?.textContent).toBe('last active 1s ago');
 
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('11s');
@@ -2696,11 +3075,15 @@ describe('ToolCall', () => {
   it('clears the running subagent activity age when the window loses focus', () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
-    setState('sessions', [
-      session('subagent-session-1', {
-        time: { created: 1_000, updated: 7_000 },
-      }),
-    ]);
+    flushSolid();
+    setState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          time: { created: 1_000, updated: 7_000 },
+        }),
+      ])
+    );
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -2718,26 +3101,32 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-activity-age')?.textContent).toBe(
       'last active 3s ago'
     );
 
     window.dispatchEvent(new Event('blur'));
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
   });
 
   it('uses subagent session token snapshots when message tokens are unavailable', () => {
-    setState('sessions', [
-      session('subagent-session-1', {
-        tokens: {
-          input: 3,
-          output: 130,
-          reasoning: 5,
-          cache: { read: 2_000, write: 2_465 },
-        },
-      }),
-    ]);
+    setState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          tokens: {
+            input: 3,
+            output: 130,
+            reasoning: 5,
+            cache: { read: 2_000, write: 2_465 },
+          },
+        }),
+      ])
+    );
+    flushSolid();
 
     const part: ToolPart = {
       id: 'tool-1',
@@ -2758,6 +3147,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
       '↑ 2,468 ↓ 135'
@@ -2795,32 +3185,39 @@ describe('ToolCall', () => {
         time: { start: 0 },
       },
     };
-    setState('sessions', [
-      session('child-1', {
-        parentID: 'session-1',
-        title: 'Research Varro SDK usage (@explore subagent)',
-        tokens: { input: 321, output: 45, reasoning: 0, cache: { read: 0, write: 0 } },
-        time: { created: 11, updated: 12 },
-      }),
-      session('child-2', {
-        parentID: 'session-1',
-        title: 'Research auth flow (@explore subagent)',
-        tokens: { input: 999, output: 999, reasoning: 0, cache: { read: 0, write: 0 } },
-        time: { created: 12, updated: 13 },
-      }),
-    ]);
-    setState('messages', [
-      {
-        info: assistantMessage('message-1', {
-          mode: 'default',
-          sessionID: 'session-1',
-          time: { created: 10 },
+    setState(
+      storePath('sessions', [
+        session('child-1', {
+          parentID: 'session-1',
+          title: 'Research Varro SDK usage (@explore subagent)',
+          tokens: { input: 321, output: 45, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 11, updated: 12 },
         }),
-        parts: [part, otherTask],
-      },
-    ]);
+        session('child-2', {
+          parentID: 'session-1',
+          title: 'Research auth flow (@explore subagent)',
+          tokens: { input: 999, output: 999, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 12, updated: 13 },
+        }),
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('messages', [
+        {
+          info: assistantMessage('message-1', {
+            mode: 'default',
+            sessionID: 'session-1',
+            time: { created: 10 },
+          }),
+          parts: [part, otherTask],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
       '↑ 321 ↓ 45'
@@ -2849,8 +3246,10 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const resultRow = container?.querySelector('.structured-tool-row-result');
 
@@ -2875,6 +3274,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const header = container?.querySelector('.tool-invocation-header');
     const icon = container?.querySelector('.tool-call-icon');
@@ -2886,6 +3286,7 @@ describe('ToolCall', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (header as HTMLButtonElement).click();
+    flushSolid();
 
     const detail = container?.querySelector('.tool-invocation-error');
 
@@ -2897,6 +3298,7 @@ describe('ToolCall', () => {
 
   it('clamps generic tool errors and opens the full error in an editor tab', () => {
     const send = setExtensionSender();
+    flushSolid();
     const error = Array.from({ length: 7 }, (_, index) => `browser failure ${index + 1}`).join(
       '\n'
     );
@@ -2916,7 +3318,9 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
 
     const detail = container?.querySelector<HTMLPreElement>('.tool-invocation-error');
     expect(container?.querySelector('.structured-tool-row-error')).not.toBeNull();
@@ -2924,6 +3328,7 @@ describe('ToolCall', () => {
     expect(detail?.textContent).not.toContain('browser failure 6');
 
     detail?.click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-text',
@@ -2957,9 +3362,11 @@ describe('ToolCall', () => {
       time: { created: 1 },
     };
 
-    setState('permissions', [permission]);
+    setState(storePath('permissions', [permission]));
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const toolHeader = container?.querySelector('.tool-invocation-header');
     const permissionPrompt = container?.querySelector('.permission-prompt');
@@ -2992,30 +3399,34 @@ describe('ToolCall', () => {
       state: completedState({ command: 'npm test' }, 'npm test'),
     };
 
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'bash',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'bash git status',
-        metadata: {},
-        time: { created: 1 },
-      },
-      {
-        id: 'perm-2',
-        type: 'bash',
-        sessionID: 'session-1',
-        messageID: 'message-2',
-        callID: 'call-2',
-        title: 'bash npm test',
-        metadata: {},
-        time: { created: 2 },
-      },
-    ]);
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'bash',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'bash git status',
+          metadata: {},
+          time: { created: 1 },
+        },
+        {
+          id: 'perm-2',
+          type: 'bash',
+          sessionID: 'session-1',
+          messageID: 'message-2',
+          callID: 'call-2',
+          title: 'bash npm test',
+          metadata: {},
+          time: { created: 2 },
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.permission-prompt')).toBeNull();
     expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
@@ -3039,25 +3450,29 @@ describe('ToolCall', () => {
       state: completedState({ command: 'git status' }, 'git status'),
     };
 
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'external_directory',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'external_directory /tmp/*',
-        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
-        time: { created: 2 },
-        duplicateIDs: ['perm-1', 'perm-2'],
-        groupMembers: [
-          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
-          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
-        ],
-      },
-    ]);
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'external_directory',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'external_directory /tmp/*',
+          metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+          time: { created: 2 },
+          duplicateIDs: ['perm-1', 'perm-2'],
+          groupMembers: [
+            { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+            { id: 'perm-2', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+          ],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
     expect(container?.querySelector('.permission-prompt-count')?.textContent).toBe('×2');
@@ -3074,25 +3489,29 @@ describe('ToolCall', () => {
       state: completedState({ command: 'git status' }, 'git status'),
     };
 
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'external_directory',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'external_directory /tmp/*',
-        metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
-        time: { created: 1 },
-        duplicateIDs: ['perm-1', 'perm-2'],
-        groupMembers: [
-          { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
-          { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
-        ],
-      },
-    ]);
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'external_directory',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'external_directory /tmp/*',
+          metadata: { filepath: '/tmp/file-a', parentDir: '/tmp' },
+          time: { created: 1 },
+          duplicateIDs: ['perm-1', 'perm-2'],
+          groupMembers: [
+            { id: 'perm-1', sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+            { id: 'perm-2', sessionID: 'session-1', messageID: 'message-2', callID: 'call-2' },
+          ],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(0);
     expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
@@ -3123,9 +3542,11 @@ describe('ToolCall', () => {
       ],
     };
 
-    setState('questions', [question]);
+    setState(storePath('questions', [question]));
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-header')?.textContent).toContain(
       'git status'
@@ -3158,9 +3579,11 @@ describe('ToolCall', () => {
       ],
     };
 
-    setState('questions', [question]);
+    setState(storePath('questions', [question]));
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
     expect(container?.querySelector('.question-prompt-card')).not.toBeNull();
@@ -3186,17 +3609,20 @@ describe('ToolCall', () => {
         sessionID: 'session-1',
         questions: [{ question: 'Choose one', header: 'Survey', options: [] }],
       };
-      setState('questions', [question]);
+      setState(storePath('questions', [question]));
+      flushSolid();
 
       cleanup = render(
         () => createComponent(ToolCall, { part, questionRequest: null }),
         container!
       );
+      flushSolid();
 
       expect(container?.querySelector('.tool-invocation-header')).toBeNull();
       expect(container?.querySelector('.question-prompt-card')).toBeNull();
 
-      setState('questions', []);
+      setState(storePath('questions', []));
+      flushSolid();
       expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
     }
   );
@@ -3224,13 +3650,18 @@ describe('ToolCall', () => {
       if (scenario === 'other-tool') {
         question.tool = { messageID: 'message-2', callID: 'call-2' };
       }
-      setState('sessions', [session('session-1'), session('child-1', { parentID: 'session-1' })]);
-      setState('questions', [question]);
+      setState(
+        storePath('sessions', [session('session-1'), session('child-1', { parentID: 'session-1' })])
+      );
+      flushSolid();
+      setState(storePath('questions', [question]));
+      flushSolid();
 
       cleanup = render(
         () => createComponent(ToolCall, { part, questionRequest: null }),
         container!
       );
+      flushSolid();
 
       expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
       expect(container?.querySelector('.question-prompt-card')).toBeNull();
@@ -3249,6 +3680,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.question-summary-title')?.textContent).toBe('Question');
   });
@@ -3280,6 +3712,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const summary = container?.querySelector('.question-summary-card');
     expect(summary?.querySelector('.question-summary-title')?.textContent).toBe(
@@ -3333,6 +3766,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const summary = container?.querySelector('.question-summary-card.is-skipped');
     expect(summary?.querySelector('.question-summary-title')?.textContent).toBe('Question skipped');
@@ -3370,9 +3804,11 @@ describe('ToolCall', () => {
       ],
     };
 
-    setState('questions', [question]);
+    setState(storePath('questions', [question]));
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(
       container
@@ -3381,6 +3817,7 @@ describe('ToolCall', () => {
     ).toBe(toCssUrl(chatBubbleQuestionIcon));
     const option = container?.querySelector<HTMLLabelElement>('.question-option');
     option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(option?.classList.contains('selected')).toBe(true);
     expect(container?.querySelector('.question-radio.checked')).not.toBeNull();
@@ -3413,14 +3850,17 @@ describe('ToolCall', () => {
       ],
     };
 
-    setState('questions', [question]);
+    setState(storePath('questions', [question]));
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     if (!input) throw new Error('Expected custom answer input');
     input.value = 'npm run dev';
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSolid();
 
     expect(container?.querySelector('.question-option-custom.selected')).not.toBeNull();
     expect(container?.querySelector('.question-radio.checked')).not.toBeNull();
@@ -3440,51 +3880,62 @@ describe('ToolCall', () => {
       state: completedState({ command: 'git status' }, 'git status'),
     };
 
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 1 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        parentID: 'session-1',
-        title: 'Child 1',
-        version: '1',
-        time: { created: 0, updated: 2 },
-      },
-    ]);
-    setState('permissions', [
-      {
-        id: 'perm-1',
-        type: 'bash',
-        sessionID: 'session-1',
-        messageID: 'message-1',
-        callID: 'call-1',
-        title: 'bash git status',
-        metadata: {},
-        time: { created: 1 },
-      },
-    ]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Session 1',
+          version: '1',
+          time: { created: 0, updated: 1 },
+        },
+        {
+          id: 'child-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          parentID: 'session-1',
+          title: 'Child 1',
+          version: '1',
+          time: { created: 0, updated: 2 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('permissions', [
+        {
+          id: 'perm-1',
+          type: 'bash',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+          title: 'bash git status',
+          metadata: {},
+          time: { created: 1 },
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
   });
 
   it('renders file reads with computed line ranges and file open links', () => {
     const sendSpy = setExtensionSender();
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     const part: ToolPart = {
       id: 'tool-1',
@@ -3500,6 +3951,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const target = container?.querySelector<HTMLAnchorElement>('.file-read-target');
 
@@ -3514,6 +3966,7 @@ describe('ToolCall', () => {
     expect(icon?.style.getPropertyValue('--ui-icon-mask')).toBe(toCssUrl(eyeIcon));
 
     target?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -3539,6 +3992,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-read-running-label')).toBeNull();
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
@@ -3562,18 +4016,23 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-read-duration')).toBeNull();
   });
 
   it('renders directory and current-directory read states distinctly', () => {
     const sendSpy = setExtensionSender();
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     const directoryPart: ToolPart = {
       id: 'tool-1',
@@ -3593,6 +4052,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part: directoryPart }), container!);
+    flushSolid();
 
     const directoryLink = container?.querySelector<HTMLAnchorElement>('.file-read-target');
 
@@ -3604,6 +4064,7 @@ describe('ToolCall', () => {
     );
 
     directoryLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -3611,6 +4072,7 @@ describe('ToolCall', () => {
     });
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container!.innerHTML = '';
 
@@ -3625,6 +4087,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part: currentDirectoryPart }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-read-target-text')?.textContent).toBe(
       'current directory'
@@ -3635,6 +4098,7 @@ describe('ToolCall', () => {
 
   it('recognizes a conventional folder when the read output lacks directory markers', () => {
     const sendSpy = setExtensionSender();
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-docs',
       sessionID: 'session-1',
@@ -3646,6 +4110,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('.file-read-target');
     expect(link?.querySelector('.file-read-folder-icon')?.getAttribute('src')).toBe(
@@ -3655,6 +4120,7 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.file-read-meta')?.textContent).toBe('directory');
 
     link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: { path: '/repo/docs', kind: 'directory' },
@@ -3676,6 +4142,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-read-card')).not.toBeNull();
     expect(container?.querySelector('.file-read-target')?.textContent).toBe(
@@ -3705,6 +4172,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const header = container?.querySelector('.file-change-card-header');
     expect(header?.classList).toContain('is-standalone');
@@ -3722,9 +4190,11 @@ describe('FileChangeCard', () => {
     expect(fileStatusSpy).not.toHaveBeenCalled();
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container!.innerHTML = '';
     cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
+    flushSolid();
 
     const compactHeader = container?.querySelector('.file-change-card-header');
     expect(compactHeader?.classList).not.toContain('is-standalone');
@@ -3750,6 +4220,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const action = container?.querySelector('.file-edit-action-label');
     expect(action?.textContent).toBe('(added)');
@@ -3772,6 +4243,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const action = container?.querySelector('.file-edit-action-label');
     expect(action?.textContent).toBe('(removed)');
@@ -3798,6 +4270,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(moved)');
     expect(fileStatusSpy).not.toHaveBeenCalled();
@@ -3805,12 +4278,16 @@ describe('FileChangeCard', () => {
 
   it('shows move paths, diff stats, and open-path links for completed renames', () => {
     const sendSpy = setExtensionSender();
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     const part: ToolPart = {
       id: 'tool-1',
@@ -3830,6 +4307,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const links = Array.from(
       container?.querySelectorAll<HTMLAnchorElement>('.file-edit-path-link') || []
@@ -3841,7 +4319,9 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-duration')).toBeNull();
 
     links[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     links[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(sendSpy).toHaveBeenNthCalledWith(1, {
       type: 'vscode/open',
@@ -3855,12 +4335,16 @@ describe('FileChangeCard', () => {
 
   it('shows separate rows and per-file stats for multi-file apply_patch metadata', () => {
     const sendSpy = setExtensionSender();
-    setState('editorContext', {
-      workspacePath: '/repo',
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-    });
+    flushSolid();
+    setState(
+      storePath('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      })
+    );
+    flushSolid();
 
     const part: ToolPart = {
       id: 'tool-1',
@@ -3885,6 +4369,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll<HTMLElement>('.file-change-card') || []);
     const links = Array.from(
@@ -3912,6 +4397,7 @@ describe('FileChangeCard', () => {
     expect(rows[1]?.querySelector('.file-edit-diff-stats')?.textContent).toContain('-1');
 
     links[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -3921,6 +4407,7 @@ describe('FileChangeCard', () => {
 
   it('renders every completed file change as a separate row', () => {
     const sendSpy = setExtensionSender();
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -3946,6 +4433,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll<HTMLElement>('.file-change-card') || []);
     const links = Array.from(
@@ -3973,6 +4461,7 @@ describe('FileChangeCard', () => {
       getFileTypeIcon('src/four.mjs'),
     ]);
     links[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    flushSolid();
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -4018,19 +4507,23 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
     expect(container?.querySelectorAll('.file-change-card')).toHaveLength(4);
     expect(container?.querySelector('.file-edit-more-count')).toBeNull();
 
     setShowFileDiffs(true);
+    flushSolid();
     expect(container?.querySelector('.file-change-card')).toBeNull();
     expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
       4
     );
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container!.innerHTML = '';
     cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
+    flushSolid();
 
     expect(container?.querySelectorAll('.file-change-card')).toHaveLength(4);
     expect(container?.querySelector('.file-change-inline-diffs')).toBeNull();
@@ -4062,6 +4555,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-change-card')).not.toBeNull();
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edited)');
@@ -4071,6 +4565,7 @@ describe('FileChangeCard', () => {
 
   it('shows live apply_patch changes inline when enabled', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-inline-patch',
       sessionID: 'session-1',
@@ -4097,6 +4592,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-change-card')).not.toBeNull();
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('(edit)');
@@ -4145,8 +4641,10 @@ describe('FileChangeCard', () => {
           }),
         container!
       );
+      flushSolid();
       const header = container!.querySelector<HTMLElement>('.file-change-card-header')!;
       header.click();
+      flushSolid();
       expect(container!.querySelector('.file-edit-error-detail')).toBeNull();
       expect(getToolCallExpanded(getToolCallExpansionKey(initial))).toBe(false);
       setPart({
@@ -4158,15 +4656,20 @@ describe('FileChangeCard', () => {
           time: { start: 0, end: 1 },
         },
       });
+      flushSolid();
       expect(container!.querySelector('.file-change-card-header')).toBe(header);
       expect(header.classList).toContain('is-expandable');
       header.click();
+      flushSolid();
       expect(container!.querySelector('.file-edit-error-detail')?.textContent).toBe('Edit failed');
       header.click();
+      flushSolid();
       expect(container!.querySelector('.file-edit-error-detail')).toBeNull();
       setPart(initial);
+      flushSolid();
       expect(container!.querySelector('.file-change-card-header')).toBe(header);
       header.click();
+      flushSolid();
       expect(getToolCallExpanded(getToolCallExpansionKey(initial))).toBe(false);
     }
   );
@@ -4175,6 +4678,7 @@ describe('FileChangeCard', () => {
     'opens current paths from retained %s links after input replacement',
     (kind) => {
       const send = setExtensionSender();
+      flushSolid();
       const input = (name: string) =>
         kind === 'edit'
           ? { filePath: `src/${name}.ts` }
@@ -4200,16 +4704,19 @@ describe('FileChangeCard', () => {
           }),
         container!
       );
+      flushSolid();
       const links = Array.from(
         container!.querySelectorAll<HTMLAnchorElement>('.file-edit-path-link')
       );
       expect(links).toHaveLength(kind === 'edit' ? 1 : 2);
       setPart({ ...initial, state: { ...initial.state, input: input('b') } });
+      flushSolid();
       const currentLinks = Array.from(container!.querySelectorAll('.file-edit-path-link'));
       for (const [index, link] of links.entries()) {
         expect(currentLinks[index]).toBe(link);
         expect(link.textContent).toContain(index === 0 ? 'b.ts' : 'b-moved.ts');
         link.click();
+        flushSolid();
         expect(send).toHaveBeenLastCalledWith({
           type: 'vscode/open',
           payload: {
@@ -4224,7 +4731,9 @@ describe('FileChangeCard', () => {
 
   it('keeps failed apply_patch status visible beside proposed inline changes', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const sendSpy = setExtensionSender();
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-failed-patch',
       sessionID: 'session-1',
@@ -4261,6 +4770,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-edit-icon')).toBeNull();
     expect(container?.querySelector('.file-edit-action-label')).toBeNull();
@@ -4270,6 +4780,7 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-error-detail')).toBeNull();
 
     container?.querySelector<HTMLElement>('.file-edit-multi-list')?.click();
+    flushSolid();
 
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('true');
     expect(sendSpy).not.toHaveBeenCalled();
@@ -4283,6 +4794,7 @@ describe('FileChangeCard', () => {
     expect(container?.textContent).not.toContain('Edited');
 
     container?.querySelector<HTMLElement>('.file-edit-path-link')?.click();
+    flushSolid();
 
     expect(sendSpy).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -4291,14 +4803,17 @@ describe('FileChangeCard', () => {
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('true');
 
     container?.querySelector<HTMLElement>('.file-change-card-header')?.click();
+    flushSolid();
 
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.file-edit-error-detail')).toBeNull();
 
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container!.innerHTML = '';
     cleanup = render(() => ToolCall({ part, compactFileChanges: true }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('failed');
     expect(container?.querySelector('.file-edit-error-toggle')).toBeNull();
@@ -4308,6 +4823,7 @@ describe('FileChangeCard', () => {
 
   it('clamps long file edit errors and opens the full error in an editor tab', () => {
     const send = setExtensionSender();
+    flushSolid();
     const error = Array.from({ length: 8 }, (_, index) => `failure line ${index + 1}`).join('\n');
     const part: ToolPart = {
       id: 'tool-long-patch-error',
@@ -4333,8 +4849,10 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.file-edit-error-toggle')?.click();
+    flushSolid();
 
     const errorDetail = container?.querySelector<HTMLPreElement>('.file-edit-error-detail');
     expect(errorDetail?.classList).toContain('is-truncated');
@@ -4342,6 +4860,7 @@ describe('FileChangeCard', () => {
     expect(errorDetail?.textContent).not.toContain('failure line 6');
 
     errorDetail?.click();
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-text',
@@ -4355,6 +4874,7 @@ describe('FileChangeCard', () => {
 
   it('keeps aborted apply_patch status visible beside proposed inline changes', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-aborted-patch',
       sessionID: 'session-1',
@@ -4377,6 +4897,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-edit-icon')?.classList).toContain('tool-status-aborted');
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Aborted');
@@ -4388,6 +4909,7 @@ describe('FileChangeCard', () => {
 
   it('replaces the compact completed row with inline file previews', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const part: ToolPart = {
       id: 'tool-mixed-patch',
       sessionID: 'session-1',
@@ -4433,6 +4955,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-change-card')).toBeNull();
     const inlineFiles = Array.from(
@@ -4453,6 +4976,7 @@ describe('FileChangeCard', () => {
 
   it('bounds model patch file cards and shows an overflow summary', () => {
     setShowFileDiffs(true);
+    flushSolid();
     const patchText = [
       '*** Begin Patch',
       ...Array.from(
@@ -4478,6 +5002,7 @@ describe('FileChangeCard', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
+    flushSolid();
 
     expect(container?.querySelector('.file-change-card-header')?.textContent).not.toContain(
       '64+ files'

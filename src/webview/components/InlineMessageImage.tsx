@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { createEffect, Show, createMemo, createSignal, onSettled, untrack } from 'solid-js';
 import { isFunction } from '../lib/runtime-values';
 import { createDeferredImage, deferredFilePath, IMAGE_PLACEHOLDER } from '../lib/deferred-content';
 
@@ -89,50 +89,50 @@ export function InlineMessageImage(props: { src: string; alt: string; allowCover
   const source = createMemo(() => props.src);
   const name = createMemo(() => props.alt);
   const content = createDeferredImage(source, true, visible);
-  const [src, setSrc] = createSignal(content.url());
-  let previousSource = props.src;
-  let previousAlt = props.alt;
+  const [src, setSrc] = createSignal(untrack(content.url));
+  let previousSource = untrack(source);
+  let previousAlt = untrack(name);
   let handoffSource: string | undefined;
-  createEffect(() => {
-    const original = source();
-    const alt = name();
-    const next = content.url();
-    if (original !== previousSource || alt !== previousAlt) {
-      // Only retain the same local attachment during its acknowledgement. Carousel navigation
-      // and replacement attachments must never display the previous attachment as a fallback.
-      handoffSource =
-        deferredFilePath(original) &&
-        previousSource.startsWith('data:image/') &&
-        alt === previousAlt
-          ? original
-          : undefined;
-      previousSource = original;
-      previousAlt = alt;
-    }
-    if (handoffSource === original) {
-      if (next === IMAGE_PLACEHOLDER) return;
-      const image = new Image();
-      image.src = next;
-      let cancelled = false;
-      void image
-        .decode()
-        .then(() => {
-          if (cancelled) return;
-          handoffSource = undefined;
-          setSrc(next);
-        })
-        .catch(() => {
-          // Keep the already painted local image if a generated thumbnail cannot be decoded.
-        });
-      onCleanup(() => {
-        cancelled = true;
-      });
+  createEffect(
+    () => [source(), name(), content.url()] as const,
+    ([original, alt, next]) => {
+      if (original !== previousSource || alt !== previousAlt) {
+        // Only retain the same local attachment during its acknowledgement. Carousel navigation
+        // and replacement attachments must never display the previous attachment as a fallback.
+        handoffSource =
+          deferredFilePath(original) &&
+          previousSource.startsWith('data:image/') &&
+          alt === previousAlt
+            ? original
+            : undefined;
+        previousSource = original;
+        previousAlt = alt;
+      }
+      if (handoffSource === original) {
+        if (next === IMAGE_PLACEHOLDER) return;
+        const image = new Image();
+        image.src = next;
+        let cancelled = false;
+        void image
+          .decode()
+          .then(() => {
+            if (cancelled) return;
+            handoffSource = undefined;
+            setSrc(next);
+          })
+          .catch(() => {
+            // Keep the already painted local image if a generated thumbnail cannot be decoded.
+          });
+        return () => {
+          cancelled = true;
+        };
+      }
+      setSrc(next);
       return;
     }
-    setSrc(next);
-  });
+  );
   const [presentation, setPresentation] = createSignal<InlineImagePresentation>('contain');
-  let currentSrc = src();
+  let currentSrc = untrack(src);
   let imageRef: HTMLImageElement | undefined;
 
   const updatePresentationFromDimensions = (
@@ -158,8 +158,7 @@ export function InlineMessageImage(props: { src: string; alt: string; allowCover
     updatePresentationFromDimensions(image, image.naturalWidth, image.naturalHeight);
   };
 
-  createEffect(() => {
-    const nextSrc = src();
+  createEffect(src, (nextSrc) => {
     if (nextSrc === currentSrc) return;
     currentSrc = nextSrc;
     setPresentation('contain');
@@ -179,25 +178,29 @@ export function InlineMessageImage(props: { src: string; alt: string; allowCover
     });
   });
 
-  createEffect(() => {
-    if (!deferredFilePath(source()) || !imageRef) return;
-    setVisible(false);
-    if (typeof IntersectionObserver === 'undefined') setVisible(true);
-    else {
-      const observer = new IntersectionObserver(
-        (entries) => {
-          if (!entries.some((entry) => entry.isIntersecting)) return;
-          setVisible(true);
-          observer.disconnect();
-        },
-        { rootMargin: '200px' }
-      );
-      observer.observe(imageRef);
-      onCleanup(() => observer.disconnect());
+  createEffect(
+    () => deferredFilePath(source()),
+    (path) => {
+      if (!path || !imageRef) return;
+      setVisible(false);
+      if (typeof IntersectionObserver === 'undefined') setVisible(true);
+      else {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            if (!entries.some((entry) => entry.isIntersecting)) return;
+            setVisible(true);
+            observer.disconnect();
+          },
+          { rootMargin: '200px' }
+        );
+        observer.observe(imageRef);
+        return () => observer.disconnect();
+      }
+      return;
     }
-  });
+  );
 
-  onMount(() => {
+  onSettled(() => {
     if (!imageRef) return;
     const cachedDimensions = getCachedImageDimensions(currentSrc);
     if (cachedDimensions) {

@@ -1,4 +1,4 @@
-import { createEffect, on, onCleanup } from 'solid-js';
+import { createEffect } from 'solid-js';
 import { hasUnsettledToolPart } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
 import type { AssistantMessage, MessageEntry, SessionStatus } from '../../types';
@@ -276,30 +276,36 @@ export function registerStuckSessionWatchdogEffect(deps: {
   runReconcile(): Promise<void>;
 }) {
   createEffect(
-    on(
-      () =>
-        deps.getServerState() === 'running' && deps.isDocumentVisible() && deps.hasBusySession(),
-      (active) => {
-        if (!active) return;
-        let cancelled = false;
-        let inFlight = false;
-        const tick = async () => {
-          if (cancelled || inFlight) return;
-          inFlight = true;
-          try {
-            await deps.runReconcile();
-          } finally {
-            inFlight = false;
-          }
+    () => deps.getServerState() === 'running' && deps.isDocumentVisible() && deps.hasBusySession(),
+    (active) => {
+      const cleanups: Array<() => void> = [];
+
+      if (!active)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
         };
-        void tick();
-        const timer = window.setInterval(() => void tick(), STUCK_SESSION_WATCHDOG_INTERVAL_MS);
-        onCleanup(() => {
-          cancelled = true;
-          window.clearInterval(timer);
-        });
-      }
-    )
+      let cancelled = false;
+      let inFlight = false;
+      const tick = async () => {
+        if (cancelled || inFlight) return;
+        inFlight = true;
+        try {
+          await deps.runReconcile();
+        } finally {
+          inFlight = false;
+        }
+      };
+      void tick();
+      const timer = window.setInterval(() => void tick(), STUCK_SESSION_WATCHDOG_INTERVAL_MS);
+      cleanups.push(() => {
+        cancelled = true;
+        window.clearInterval(timer);
+      });
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
   );
 }
 

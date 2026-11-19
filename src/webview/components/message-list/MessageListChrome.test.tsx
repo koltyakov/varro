@@ -1,6 +1,7 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import { markLoadingActivity, setState, startLoading, stopLoading } from '../../lib/state';
 import {
   backgroundProcessView,
@@ -49,40 +50,55 @@ describe('MessageListChrome', () => {
 
   afterEach(() => {
     cleanup?.();
+    flushSolid();
     cleanup = undefined;
     container?.remove();
+    flushSolid();
     container = null;
     vi.useRealTimers();
     vi.unstubAllGlobals();
     stopLoading();
+    flushSolid();
     closeBackgroundProcessView();
-    setState('activeSessionId', null);
+    flushSolid();
+    setState(storePath('activeSessionId', null));
+    flushSolid();
   });
 
   it('keeps elapsed time moving after a stale loading session resumes', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-27T12:00:00Z'));
+    flushSolid();
     startLoading();
+    flushSolid();
     cleanup = render(() => <LoadingRow compacting={false} visible />, container!);
+    flushSolid();
 
     vi.advanceTimersByTime(91_000);
+    flushSolid();
     expect(container?.querySelector('.loading-indicator')?.classList.contains('stale')).toBe(true);
 
     markLoadingActivity();
+    flushSolid();
     expect(container?.querySelector('.loading-indicator')?.classList.contains('stale')).toBe(false);
 
     vi.advanceTimersByTime(10_000);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 41s');
 
     stopLoading();
+    flushSolid();
     startLoading();
+    flushSolid();
     vi.advanceTimersByTime(10_000);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
   });
 
   it('shows the background process card with its elapsed duration and no stale-session warning', () => {
     vi.useFakeTimers();
     startLoading();
+    flushSolid();
     const startedAt = Date.now() - 13_000;
     cleanup = render(
       () => (
@@ -90,10 +106,12 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
     expect(
       container?.querySelector('.background-process .tool-invocation-duration')?.textContent
     ).toBe('13s');
     vi.advanceTimersByTime(180_000);
+    flushSolid();
     expect(
       container?.querySelector('.background-process .tool-invocation-title')?.textContent
     ).toBe('Background process');
@@ -109,78 +127,103 @@ describe('MessageListChrome', () => {
   });
 
   it('opens a session-scoped details view without changing the loading slot', () => {
-    setState('activeSessionId', 'ses_background');
+    setState(storePath('activeSessionId', 'ses_background'));
+    flushSolid();
     startLoading();
+    flushSolid();
     cleanup = render(() => <LoadingRow compacting={false} visible waiting />, container!);
+    flushSolid();
     const button = container!.querySelector<HTMLButtonElement>(
       '[aria-label="View background process details"]'
     )!;
     expect(button.getAttribute('aria-haspopup')).toBe('dialog');
     button.click();
+    flushSolid();
     expect(backgroundProcessView()?.sessionID).toBe('ses_background');
     expect(container!.querySelector('.background-process')).not.toBeNull();
     expect(container!.querySelector('.loading-indicator')).toBeNull();
   });
   it('shows the command and retains it during the resume handoff without leaking across sessions', () => {
-    setState('activeSessionId', 'ses_background');
+    setState(storePath('activeSessionId', 'ses_background'));
+    flushSolid();
     const [command, setCommand] = createSignal<string | undefined>('python3 tools/serve.py 18765');
     startLoading();
+    flushSolid();
     cleanup = render(
       () => <LoadingRow compacting={false} visible waiting waitingCommand={command()} />,
       container!
     );
+    flushSolid();
     const title = () => container!.querySelector('.background-process .tool-invocation-title');
     expect(title()?.textContent).toBe('Background process: python3 tools/serve.py 18765');
     expect(title()?.getAttribute('title')).toBe('python3 tools/serve.py 18765');
     setCommand(undefined);
+    flushSolid();
     expect(title()?.textContent).toBe('Background process: python3 tools/serve.py 18765');
-    setState('activeSessionId', 'ses_other');
+    setState(storePath('activeSessionId', 'ses_other'));
+    flushSolid();
     expect(title()?.textContent).toBe('Background process');
   });
 
   it('counts from the last completion without resetting on ordinary activity', () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
+    flushSolid();
     startLoading(0);
+    flushSolid();
     const [completedAt, setCompletedAt] = createSignal(80_000);
     cleanup = render(
       () => <LoadingRow compacting={false} visible elapsedStartedAt={completedAt()} />,
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('20s');
     markLoadingActivity();
+    flushSolid();
     vi.advanceTimersByTime(2_000);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('22s');
     setCompletedAt(Date.now());
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
     vi.advanceTimersByTime(10_000);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
   });
 
   it('shows duration after the first second of the turn', () => {
     vi.useFakeTimers();
     startLoading();
+    flushSolid();
     cleanup = render(() => <LoadingRow compacting={false} visible />, container!);
+    flushSolid();
     vi.advanceTimersByTime(999);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     vi.advanceTimersByTime(1);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1s');
   });
 
   it('keeps rotating verbs and showing duration through frequent completions and hidden previews', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
+    flushSolid();
     startLoading();
+    flushSolid();
     const [completedAt, setCompletedAt] = createSignal(0);
     const [visible, setVisible] = createSignal(true);
     cleanup = render(
       () => <LoadingRow compacting={false} visible={visible()} elapsedStartedAt={completedAt()} />,
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     for (let second = 1; second <= 18; second += 1) {
       vi.advanceTimersByTime(1_000);
+      flushSolid();
       setCompletedAt(Date.now());
+      flushSolid();
       expect(container?.querySelector('.loading-verb')?.textContent).toBe(
         second < 6
           ? 'Thinking'
@@ -193,9 +236,13 @@ describe('MessageListChrome', () => {
       expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
     }
     setVisible(false);
+    flushSolid();
     vi.advanceTimersByTime(6_000);
+    flushSolid();
     setCompletedAt(Date.now());
+    flushSolid();
     setVisible(true);
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Musing');
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('0s');
   });
@@ -203,7 +250,9 @@ describe('MessageListChrome', () => {
   it('hides loading duration whenever the preceding active tool displays its own timer', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(60_000);
+    flushSolid();
     startLoading(0);
+    flushSolid();
     const [duration, setDuration] = createSignal<string | null>('1m');
     const [followingText, setFollowingText] = createSignal(false);
     const [emptyRowText, setEmptyRowText] = createSignal('');
@@ -235,66 +284,97 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).not.toBe('Waiting');
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     setEmptyRowText('A new response');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 00s');
     setEmptyRowText('');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     setDuration('59s');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     setDuration('1m 1s');
+    flushSolid();
     vi.advanceTimersByTime(1_000);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     setFollowingText(true);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
     setFollowingText(false);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     setDuration(null);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
     setDuration('1m 1s');
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     setRunningDuration(false);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
     setRunningDuration(true);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')).toBeNull();
     setToolsRunning(false);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1m 01s');
   });
 
   it('keeps the normal verb cycle while tools run', () => {
     vi.useFakeTimers();
     startLoading();
+    flushSolid();
     const [toolsRunning, setToolsRunning] = createSignal(true);
     const [compacting, setCompacting] = createSignal(false);
     cleanup = render(
       () => <LoadingRow compacting={compacting()} visible toolsRunning={toolsRunning()} />,
       container!
     );
+    flushSolid();
     const row = container?.querySelector('.interactive-loading-row');
     const verb = container?.querySelector('.shimmer-progress.loading-verb');
     const dots = verb?.querySelector('.chat-animated-ellipsis');
     expect(dots).not.toBeNull();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Thinking');
     vi.advanceTimersByTime(7_000);
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Analyzing');
     setCompacting(true);
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Compacting');
     setCompacting(false);
+    flushSolid();
     setToolsRunning(false);
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Analyzing');
     vi.advanceTimersByTime(3_000);
+    flushSolid();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
     setToolsRunning(true);
+    flushSolid();
     expect(container?.querySelector('.loading-verb')?.textContent).toBe('Analyzing');
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('10s');
     expect(container?.querySelector('.loading-verb')).toBe(verb);
@@ -318,6 +398,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const wrapper = container?.querySelector('.latest-user-message-sticky-wrap');
 
@@ -345,6 +426,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.latest-user-message-sticky-text')?.textContent).toBe(
       'Change the agent chip icon to SVG18 KB'
@@ -385,6 +467,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(
       container?.querySelector('.latest-user-message-sticky-text .inline-chip')
@@ -412,6 +495,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(
       container?.querySelector('.latest-user-message-sticky-shell > .prompt-number-badge')
@@ -448,6 +532,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const markers = container?.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker');
     expect(markers).toHaveLength(2);
@@ -461,6 +546,7 @@ describe('MessageListChrome', () => {
     expect(markers?.[0]?.getAttribute('aria-label')).toBe('Go to turn 1: First prompt');
 
     markers?.[0]?.click();
+    flushSolid();
     expect(onSelect).toHaveBeenCalledWith(turns[0]);
   });
 
@@ -482,10 +568,13 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
     const dot = container!.querySelector<HTMLButtonElement>('.turn-navigation-marker')!;
     vi.spyOn(dot, 'getBoundingClientRect').mockReturnValue(new DOMRect(8, 100, 12, 11));
     dot.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(150);
+    flushSolid();
     const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]')!;
     expect(tooltip.firstElementChild?.textContent).toBe('Turn 1 of 1');
     const prompt = tooltip.querySelector('.turn-navigation-tooltip-prompt');
@@ -502,6 +591,7 @@ describe('MessageListChrome', () => {
     expect(dot.hasAttribute('title')).toBe(false);
     expect(onTurnHoverChange).toHaveBeenCalledWith('msg-1', true);
     dot.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
     expect(onTurnHoverChange).toHaveBeenLastCalledWith('msg-1', false);
   });
@@ -516,12 +606,16 @@ describe('MessageListChrome', () => {
       () => <TurnNavigationRail turns={turns()} activeTurnId="msg-1" onSelect={() => {}} />,
       container!
     );
+    flushSolid();
     const dot = container!.querySelector<HTMLButtonElement>('.turn-navigation-marker')!;
     dot.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     await vi.advanceTimersByTimeAsync(150);
+    flushSolid();
     const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]')!;
     const prompt = tooltip.querySelector('.turn-navigation-tooltip-prompt')!;
     const normalized = text.replaceAll(/\s+/g, ' ').trim();
+    flushSolid();
     expect(prompt.textContent).toBe(`${normalized.slice(0, 77)}...`);
     expect(prompt.textContent).toHaveLength(80);
     expect(tooltip.querySelector('.turn-navigation-tooltip-time')).toBeNull();
@@ -534,6 +628,7 @@ describe('MessageListChrome', () => {
         formatPrefix: 'Use this icon',
       },
     ]);
+    flushSolid();
     expect(container!.querySelector('.turn-navigation-marker')).toBe(dot);
     expect(prompt.textContent).toBe('Use this icon SVG content');
     expect(prompt.textContent).not.toContain('<svg>');
@@ -556,18 +651,24 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
     const dot = container!.querySelector<HTMLButtonElement>('.turn-navigation-marker')!;
     dot.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(onTurnHoverChange).toHaveBeenLastCalledWith('msg-1', true);
     setTurns([{ ...turns()[0]!, text: 'Updated prompt', index: 3 }]);
+    flushSolid();
     expect(container!.querySelector('.turn-navigation-marker')).toBe(dot);
     expect(dot.getAttribute('aria-label')).toBe('Go to turn 1: Updated prompt');
     expect(onTurnHoverChange).toHaveBeenCalledTimes(1);
     dot.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    flushSolid();
     expect(onTurnHoverChange).toHaveBeenCalledTimes(1);
     dot.click();
+    flushSolid();
     expect(onSelect).toHaveBeenCalledWith(turns()[0]);
     dot.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(onTurnHoverChange).toHaveBeenLastCalledWith('msg-1', false);
   });
 
@@ -584,21 +685,30 @@ describe('MessageListChrome', () => {
       () => <TurnNavigationRail turns={turns} activeTurnId="msg-120" onSelect={onSelect} />,
       container!
     );
+    flushSolid();
     const markers = () => [
       ...container!.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker'),
     ];
     expect(markers()).toHaveLength(20);
+    flushSolid();
     expect(markers()[0]!.getAttribute('aria-label')).toBe('Go to turn 101: Prompt 101');
+    flushSolid();
     expect(markers().at(-1)!.getAttribute('aria-label')).toBe('Go to turn 120: Prompt 120');
+    flushSolid();
     const earlier = container!.querySelector<HTMLButtonElement>('[aria-label="Earlier turns"]')!;
     const later = container!.querySelector<HTMLButtonElement>('[aria-label="Later turns"]')!;
     expect(later.disabled).toBe(true);
     earlier.click();
+    flushSolid();
     expect(markers()[0]!.getAttribute('aria-label')).toBe('Go to turn 82: Prompt 82');
+    flushSolid();
     markers()[0]!.click();
+    flushSolid();
     expect(onSelect).toHaveBeenCalledWith(turns[81]);
     later.click();
+    flushSolid();
     expect(markers().at(-1)!.getAttribute('aria-label')).toBe('Go to turn 120: Prompt 120');
+    flushSolid();
   });
 
   it('scrolls the dot window with pixel, line, and page wheel input without scrolling the conversation', () => {
@@ -614,11 +724,13 @@ describe('MessageListChrome', () => {
       () => <TurnNavigationRail turns={turns} activeTurnId="msg-1" onSelect={onSelect} />,
       container!
     );
+    flushSolid();
     const rail = container!.querySelector<HTMLElement>('.turn-navigation')!;
     const firstTitle = () =>
       rail.querySelector<HTMLButtonElement>('.turn-navigation-marker')!.getAttribute('aria-label');
     const bubble = vi.fn();
     container!.addEventListener('wheel', bubble);
+    flushSolid();
     const wheel = (deltaY: number, deltaMode = 0, ctrlKey = false) => {
       const event = new WheelEvent('wheel', {
         deltaY,
@@ -628,6 +740,7 @@ describe('MessageListChrome', () => {
         cancelable: true,
       });
       rail.dispatchEvent(event);
+      flushSolid();
       return event;
     };
     expect(wheel(5).defaultPrevented).toBe(true);
@@ -650,6 +763,7 @@ describe('MessageListChrome', () => {
     expect(wheel(-100, 0, true).defaultPrevented).toBe(false);
     expect(firstTitle()).toBe('Go to turn 101: Prompt 101');
     container!.removeEventListener('wheel', bubble);
+    flushSolid();
   });
 
   it('keeps a manually paged destination mounted when previews and equivalent visibility refresh', () => {
@@ -676,20 +790,27 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
     const earlier = container!.querySelector<HTMLButtonElement>('[aria-label="Earlier turns"]')!;
     earlier.click();
+    flushSolid();
     const destination = container!.querySelector<HTMLButtonElement>(
       '[aria-label^="Go to turn 82:"]'
     )!;
     expect(destination).not.toBeNull();
     setTurns(turns().map((turn) => ({ ...turn, text: `${turn.text} refreshed` })));
+    flushSolid();
     setVisibleIds(new Set(['msg-120']));
+    flushSolid();
     expect(destination.isConnected).toBe(true);
     expect(container!.querySelector('[aria-label^="Go to turn 82:"]')).toBe(destination);
     destination.click();
+    flushSolid();
     expect(onSelect).toHaveBeenCalledWith(turns()[81]);
     setActiveId('msg-1');
+    flushSolid();
     setVisibleIds(new Set(['msg-1']));
+    flushSolid();
     expect(container!.querySelector('[aria-label^="Go to turn 1:"]')).not.toBeNull();
   });
 
@@ -716,6 +837,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const timestamp = container?.querySelector<HTMLTimeElement>('.latest-user-message-sticky-time');
     expect(timestamp?.classList.contains('is-visible')).toBe(false);
@@ -724,24 +846,33 @@ describe('MessageListChrome', () => {
     );
 
     setShowSentTimestamp(true);
+    flushSolid();
 
     expect(container?.querySelector('.latest-user-message-sticky-time')).toBe(timestamp);
     expect(timestamp?.classList.contains('is-visible')).toBe(true);
 
     const sticky = container?.querySelector('.latest-user-message-sticky');
     sticky?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     vi.advanceTimersByTime(150);
+    flushSolid();
     sticky?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     vi.advanceTimersByTime(150);
+    flushSolid();
     expect(onUserMessageHoverChange).not.toHaveBeenCalled();
 
     sticky?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(onUserMessageHoverChange).not.toHaveBeenCalled();
     vi.advanceTimersByTime(299);
+    flushSolid();
     expect(onUserMessageHoverChange).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
+    flushSolid();
     expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('msg-1', true);
     sticky?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('msg-1', false);
   });
 
@@ -760,6 +891,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const clip = container?.querySelector<HTMLElement>('.latest-user-message-sticky-text-clip');
     const text = container?.querySelector<HTMLElement>('.latest-user-message-sticky-text');
@@ -772,10 +904,12 @@ describe('MessageListChrome', () => {
     });
     text!.scrollTop = 0;
     text!.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(clip?.classList.contains('has-more-below')).toBe(true);
 
     text!.scrollTop = 128;
     text!.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(clip?.classList.contains('has-more-below')).toBe(false);
   });
 
@@ -808,6 +942,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     for (let index = 0; index < 20; index += 1) {
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -821,6 +956,7 @@ describe('MessageListChrome', () => {
 
     expect(onGeometryChange).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(100);
+    flushSolid();
     expect(onGeometryChange).toHaveBeenCalledOnce();
   });
 
@@ -837,12 +973,14 @@ describe('MessageListChrome', () => {
       () => <StickyUserMessagePreviewCard preview={preview} onClick={onClick} />,
       container!
     );
+    flushSolid();
 
     const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(true);
     expect(card?.hasAttribute('title')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(onClick).toHaveBeenCalledWith(preview);
   });
 
@@ -870,7 +1008,7 @@ describe('MessageListChrome', () => {
       };
       cleanup = render(
         () => (
-          <div on:click={hostClick} on:contextmenu={hostContextMenu}>
+          <div onClick={hostClick} onContextMenu={hostContextMenu}>
             <StickyUserMessagePreviewCard
               preview={preview}
               loading={loading}
@@ -889,6 +1027,7 @@ describe('MessageListChrome', () => {
         ),
         container!
       );
+      flushSolid();
 
       const link = container?.querySelector<HTMLAnchorElement>(
         '.latest-user-message-sticky a.external-link'
@@ -896,6 +1035,7 @@ describe('MessageListChrome', () => {
       const click = new MouseEvent('click', { bubbles: true, cancelable: true });
       expect(link).not.toBeNull();
       link!.querySelector('.link-leading-label')!.dispatchEvent(click);
+      flushSolid();
 
       expect(click.defaultPrevented).toBe(true);
       if (loading) expect(onClick).not.toHaveBeenCalled();
@@ -905,6 +1045,7 @@ describe('MessageListChrome', () => {
 
       const contextMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
       link!.dispatchEvent(contextMenu);
+      flushSolid();
       expect(contextMenu.defaultPrevented).toBe(false);
       expect(hostContextMenu).toHaveBeenCalledOnce();
     }
@@ -925,6 +1066,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(false);
@@ -948,12 +1090,14 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(card?.classList.contains('is-loading')).toBe(true);
     expect(card?.textContent).not.toContain('Loading…');
     expect(card?.querySelector('.latest-user-message-sticky-spinner')).not.toBeNull();
     card?.click();
+    flushSolid();
     expect(onClick).not.toHaveBeenCalled();
   });
 
@@ -972,6 +1116,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const meta = container?.querySelector('.latest-user-message-sticky-meta');
     expect(meta).not.toBeNull();
@@ -1002,12 +1147,14 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.latest-user-message-sticky-meta')).toBeNull();
   });
 
   it('renders the chat content bottom fade shell with hidden semantics', () => {
     cleanup = render(() => <ChatContentBottomFade />, container!);
+    flushSolid();
 
     const wrapper = container?.querySelector('.interactive-list-bottom-fade-wrap');
 
@@ -1018,6 +1165,7 @@ describe('MessageListChrome', () => {
 
   it('reuses only the gradient below content without a solid spacer', () => {
     cleanup = render(() => <ChatContentBottomFade belowContent />, container!);
+    flushSolid();
     expect(
       container
         ?.querySelector('.interactive-list-bottom-fade-wrap.is-below-content')
@@ -1074,6 +1222,7 @@ describe('MessageListChrome', () => {
       ),
       container!
     );
+    flushSolid();
 
     const rows = Array.from(container?.querySelectorAll('.interactive-item-container') || []);
 

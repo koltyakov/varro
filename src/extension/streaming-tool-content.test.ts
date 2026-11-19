@@ -15,6 +15,40 @@ function event(type: string, properties: UnknownRecord): ServerEvent {
 }
 
 describe('streaming tool content', () => {
+  const foreignRoute = '/session/original/message/old/part/other?directory=%2Fprevious';
+
+  it.each(['called', 'success'])('preserves a deferred %s on the current route', (stage) => {
+    const projection = new StreamingToolContent();
+    for (const marker of [true, foreignRoute]) {
+      const fields =
+        stage === 'called'
+          ? { input: { path: 'a.ts' } }
+          : { content: [{ type: 'text', text: 'ok' }] };
+      const source = event(stage, { ...fields, deferred: marker });
+      const projected = projection.project(source);
+      expect(projected.properties).toMatchObject({
+        ...fields,
+        deferred: '/session/s1/message/m1/part/c1?directory=%2Fworkspace',
+      });
+      expect(JSON.stringify(projected)).not.toContain(foreignRoute);
+      expect(projection.project(event(stage, fields)).properties).not.toHaveProperty('deferred');
+    }
+  });
+
+  it('passes sequence-only and unrelated events through without rewriting them', () => {
+    const projection = new StreamingToolContent();
+    const sequenceOnly = {
+      ...event('success', { deferred: foreignRoute }),
+      sequenceOnly: true,
+    } satisfies ServerEvent;
+    const unrelated = {
+      type: 'session.idle',
+      properties: { sessionID: 's1' },
+    } satisfies ServerEvent;
+    expect(projection.project(sequenceOnly)).toBe(sequenceOnly);
+    expect(projection.project(unrelated)).toBe(unrelated);
+  });
+
   it('removes native image bodies and duplicate fields before forwarding progress or completion', () => {
     const projection = new StreamingToolContent();
     projection.project(event('input.started', { name: 'read' }));

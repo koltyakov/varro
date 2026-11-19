@@ -1,3 +1,4 @@
+import { flush as flushSolid } from 'solid-js';
 /* oxlint-disable anti-slop/no-module-mocking -- Capture the VS Code bridge boundary to replay delayed host acknowledgements against real queue state. */
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { QueuedMessage } from './app-state-types';
@@ -9,12 +10,15 @@ vi.mock('./bridge', () => bridge);
 
 beforeEach(() => {
   vi.resetModules();
+  flushSolid();
   bridge.postMessage.mockClear();
 });
 
 it('keeps a newer enqueue when an earlier persistence echo arrives', async () => {
   const queue = await import('./state-queued-messages');
+  flushSolid();
   const { state } = await import('./app-state');
+  flushSolid();
   const item = (id: string): QueuedMessage => ({
     id,
     sessionId: 'session-1',
@@ -26,8 +30,10 @@ it('keeps a newer enqueue when an earlier persistence echo arrives', async () =>
   const first = item('first');
   const second = item('second');
   queue.enqueueMessage(first);
+  flushSolid();
   const firstCall = bridge.postMessage.mock.calls.at(-1);
   queue.enqueueMessage(second);
+  flushSolid();
   const secondCall = bridge.postMessage.mock.calls.at(-1);
   // Read the actual emitted protocol rather than synthesizing its mutation identities.
   const firstUpdate = firstCall?.[0];
@@ -46,6 +52,7 @@ it('keeps a newer enqueue when an earlier persistence echo arrives', async () =>
     });
     if (parsed?.type !== 'queued-messages/sync') throw new Error('Snapshot rejected');
     queue.applyQueuedMessagesSnapshot(parsed.payload.messages, parsed.payload.mutationId);
+    flushSolid();
   };
   deliver([first], firstUpdate.payload.mutationId);
   expect(state.queuedMessages.map((message) => message.id)).toEqual(['first', 'second']);
@@ -56,16 +63,21 @@ it('keeps a newer enqueue when an earlier persistence echo arrives', async () =>
 
 it('accepts an authoritative lifecycle snapshot without a persistence acknowledgement', async () => {
   const queue = await import('./state-queued-messages');
+  flushSolid();
   const { state } = await import('./app-state');
+  flushSolid();
   queue.enqueueMessage({ id: 'local', sessionId: 'session-1', text: 'pending' });
+  flushSolid();
   queue.applyQueuedMessagesSnapshot([
     { id: 'transferred', sessionId: 'session-1', text: 'paused', paused: true },
   ]);
+  flushSolid();
   expect(state.queuedMessages.map((message) => message.id)).toEqual(['transferred']);
 });
 
 it('includes paused follow-up descriptions and titles in host persistence updates', async () => {
   const queue = await import('./state-queued-messages');
+  flushSolid();
   const message: QueuedMessage = {
     id: 'followup',
     sessionId: 'session-1',
@@ -74,6 +86,7 @@ it('includes paused follow-up descriptions and titles in host persistence update
     paused: true,
   };
   queue.enqueueMessage(message);
+  flushSolid();
   const update = bridge.postMessage.mock.calls.at(-1)?.[0];
   expect(update?.type).toBe('queued-messages/update');
   if (update?.type !== 'queued-messages/update') throw new Error('Queue update missing');

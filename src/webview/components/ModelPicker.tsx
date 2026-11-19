@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import type { ModelPricing } from '../../shared/protocol';
 import { client } from '../lib/client';
 import {
@@ -119,24 +119,38 @@ export function ModelPicker(props: {
   } | null>(null);
   const [detailsPlacement, setDetailsPlacement] = createSignal<'right' | 'top' | null>(null);
   const [catalogPricing, setCatalogPricing] = createSignal<ModelPricing | null>(null);
-  createEffect(() => {
-    const entry = hoveredEntry();
-    setCatalogPricing(null);
-    if (!entry) return;
-    let active = true;
-    onCleanup(() => {
-      active = false;
-    });
-    // A resource read would suspend the surrounding picker while optional pricing loads.
-    void client.config.modelPricing(entry.provider.id, entry.model.id).then(
-      (pricing) => {
-        if (active) setCatalogPricing(pricing);
-      },
-      () => {
-        // Catalog enrichment is optional; retain any nonzero OpenCode rates when offline.
-      }
-    );
-  });
+  createEffect(
+    () => {
+      const entry = hoveredEntry();
+      return entry ? { providerID: entry.provider.id, modelID: entry.model.id } : null;
+    },
+    (entry) => {
+      const cleanups: Array<() => void> = [];
+
+      setCatalogPricing(null);
+      if (!entry)
+        return () => {
+          for (const cleanup of cleanups.toReversed()) cleanup();
+        };
+      let active = true;
+      cleanups.push(() => {
+        active = false;
+      });
+      // A resource read would suspend the surrounding picker while optional pricing loads.
+      void client.config.modelPricing(entry.providerID, entry.modelID).then(
+        (pricing) => {
+          if (active) setCatalogPricing(pricing);
+        },
+        () => {
+          // Catalog enrichment is optional; retain any nonzero OpenCode rates when offline.
+        }
+      );
+
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    }
+  );
   const costRows = createMemo(() => {
     const entry = hoveredEntry();
     if (!entry) return [];
@@ -248,13 +262,12 @@ export function ModelPicker(props: {
     return idx >= 0 ? idx : 0;
   };
 
-  createEffect(() => {
-    if (normalizedQuery()) {
-      setFocusIndex(0);
-      return;
+  createEffect(
+    () => (normalizedQuery() ? 0 : initialIndex()),
+    (index) => {
+      setFocusIndex(index);
     }
-    setFocusIndex(initialIndex());
-  });
+  );
 
   const isSelected = (providerID: string, modelID: string) => {
     const sel = currentSelection();
@@ -291,7 +304,9 @@ export function ModelPicker(props: {
     });
   }
 
-  onMount(() => {
+  onSettled(() => {
+    const cleanups: Array<() => void> = [];
+
     for (const provider of visibleProviders()) {
       void refreshProviderLimit(provider.id);
     }
@@ -358,23 +373,30 @@ export function ModelPicker(props: {
     };
     repositionPopup = reposition;
 
-    if (!menuRef) return;
-    const stopObservingViewport = observePopupViewport(menuRef, reposition);
-    // Focus only after placement and reveal, without scrolling the initial anchor into view.
-    queueMicrotask(() => {
-      if (searchInputRef?.isConnected) searchInputRef.focus({ preventScroll: true });
+    if (!menuRef)
+      return () => {
+        for (const cleanup of cleanups.toReversed()) cleanup();
+      };
+    const focusAtOpen = document.activeElement;
+    const stopObservingViewport = observePopupViewport(menuRef, reposition, () => {
+      if (searchInputRef?.isConnected && document.activeElement === focusAtOpen)
+        searchInputRef.focus({ preventScroll: true });
     });
     const listObserver =
       globalThis.ResizeObserver === undefined
         ? null
         : new globalThis.ResizeObserver(updateScrollMetrics);
     if (listRef) listObserver?.observe(listRef);
-    onCleanup(() => {
+    cleanups.push(() => {
       clearTimeout(detailsHoverTimer);
       repositionPopup = undefined;
       stopObservingViewport();
       listObserver?.disconnect();
     });
+
+    return () => {
+      for (const cleanup of cleanups.toReversed()) cleanup();
+    };
   });
 
   const getItemIndex = (providerID: string, modelID: string) => {
@@ -401,8 +423,7 @@ export function ModelPicker(props: {
     });
   }
 
-  createEffect(() => {
-    filteredGroups();
+  createEffect(filteredGroups, () => {
     queueMicrotask(updateScrollMetrics);
   });
 
@@ -422,7 +443,7 @@ export function ModelPicker(props: {
         }}
         class="dropdown-menu model-picker-menu w-full"
         data-popup-position-pending
-        tabIndex={-1}
+        tabindex={-1}
         onKeyDown={handleKeyDown}
         onClick={(e) => e.stopPropagation()}
         style={{ outline: 'none' }}
@@ -457,7 +478,7 @@ export function ModelPicker(props: {
                   searchInputRef?.focus();
                 }}
                 aria-label="Clear search"
-                tabIndex={-1}
+                tabindex={-1}
               >
                 <UiIcon source={xmarkIcon} width={11} height={11} />
               </button>
@@ -610,8 +631,8 @@ export function ModelPicker(props: {
                               <Tooltip content={`${pinned() ? 'Unpin' : 'Pin'} model`}>
                                 <button
                                   type="button"
-                                  class="model-picker-pin"
-                                  classList={{ active: pinned() }}
+
+                                  class={['model-picker-pin', { active: pinned() }]}
                                   onClick={() => setModelPinned(provider.id, model.id, !pinned())}
                                   aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${entry.item.name}`}
                                 >

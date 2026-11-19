@@ -1,6 +1,7 @@
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createComponent } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { AssistantMessage, Message, Part, TextPart } from '../types';
 import { resetDefaultAppState, setState } from '../lib/state';
 import { MessageRows } from '../components/message-list/MessageRows';
@@ -16,10 +17,12 @@ vi.mock('../components/Message', async () => {
 
   return {
     Message(props: { info: Message; streamingText?: string }) {
-      createRenderEffect(() => {
-        void props.streamingText;
-        messageRenderCounts.set(props.info.id, (messageRenderCounts.get(props.info.id) ?? 0) + 1);
-      });
+      createRenderEffect(
+        () => ({ id: props.info.id, text: props.streamingText }),
+        ({ id }) => {
+          messageRenderCounts.set(id, (messageRenderCounts.get(id) ?? 0) + 1);
+        }
+      );
 
       return null;
     },
@@ -88,8 +91,9 @@ describe('MessageRows perf guards', () => {
       entry(createAssistantMessage('message-2'), [createTextPart('part-b', 'message-2', 'Beta')]),
       entry(createAssistantMessage('message-3'), [createTextPart('part-c', 'message-3', 'Gamma')]),
     ];
-    setState('streamingPartId', 'part-a');
-    setState('streamingText', 'Alpha');
+    setState(storePath('streamingPartId', 'part-a'));
+    setState(storePath('streamingText', 'Alpha'));
+    await settlePerfEffects();
 
     cleanup = render(
       () =>
@@ -117,7 +121,7 @@ describe('MessageRows perf guards', () => {
     expect(messageRenderCounts.get('message-3')).toBe(1);
 
     for (let index = 0; index < 10; index += 1) {
-      setState('streamingText', `Alpha ${index}`);
+      setState(storePath('streamingText', `Alpha ${index}`));
     }
     await settlePerfEffects();
 

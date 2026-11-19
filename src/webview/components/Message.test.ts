@@ -1,8 +1,10 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
-import { createSignal } from 'solid-js';
+import { render } from '@solidjs/web';
 import type { FilePart, MessageEntry, Part, Session, TextPart, ToolPart } from '../types';
 import { client } from '../lib/client';
+import { citationPathChecks } from '../lib/citation-path-checks';
 import { installHighlightWorker } from '../lib/highlight-worker.test-support';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
 import {
@@ -47,6 +49,7 @@ let resizeObserverDisconnectMock: () => void;
 
 beforeEach(() => {
   installHighlightWorker();
+  flushSolid();
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
@@ -65,19 +68,28 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container?.remove();
+  flushSolid();
   container = null;
   if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
   else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+  flushSolid();
   document.body.classList.remove('chat-image-preview-open');
+  flushSolid();
   retryMessageMock.mockReset();
   selectSessionMock.mockReset();
   resetProviderConnectionState();
+  flushSolid();
   setShowModels(false);
-  setAppState('sessions', []);
-  setAppState('allAgents', []);
+  flushSolid();
+  setAppState(storePath('sessions', []));
+  flushSolid();
+  setAppState(storePath('allAgents', []));
+  flushSolid();
   resetToolCallExpansionState();
+  flushSolid();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   delete window.__sendToExtension;
   vi.unstubAllGlobals();
@@ -112,6 +124,7 @@ function pressAlt() {
 
 function releaseAlt() {
   window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+  flushSolid();
 }
 
 function compactionPart(id: string, options?: { auto?: boolean; overflow?: boolean }): Part {
@@ -139,6 +152,7 @@ describe('V2 generated transcript rendering', () => {
       'session-1'
     );
     cleanup = render(() => Message(fixture<MessageEntry>(projected)), container!);
+    flushSolid();
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.querySelector('.message-compaction-divider')?.textContent).toContain(
       'Context compacted (auto)'
@@ -166,10 +180,12 @@ describe('V2 generated transcript rendering', () => {
   ] as const)('renders $type records as tool activity without a user card', (record) => {
     const projected = projectV2Message(record, 'session-1');
     cleanup = render(() => Message(fixture<MessageEntry>(projected)), container!);
+    flushSolid();
     expect(container?.querySelector('.user-message-card')).toBeNull();
     const activity = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     expect(activity?.textContent).toContain(record.type === 'skill' ? '1 skill' : '1 command');
     activity?.click();
+    flushSolid();
     expect(container?.querySelector('.chat-tool-invocation-part')).not.toBeNull();
     expect(container?.textContent).not.toContain('Internal instructions');
   });
@@ -459,6 +475,7 @@ describe('Message user prompt rendering', () => {
           }),
         container!
       );
+      flushSolid();
       const action = container?.querySelector<HTMLElement>('.stop-process-action');
       expect(action?.textContent?.trim()).toBe(`Stop process ${pid ?? 'shell-1'}`);
       expect(action?.classList).toContain('user-message-card-wrapperless');
@@ -495,6 +512,7 @@ describe('Message user prompt rendering', () => {
       ],
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.stop-process-action')).toBeNull();
     expect(container?.textContent).toContain('index.html');
     expect(container?.textContent).toContain('Also run the build.');
@@ -512,6 +530,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const action = container?.querySelector<HTMLElement>('.plan-implementation-action');
     expect(action?.textContent?.trim()).toBe('Implement the plan');
@@ -540,6 +559,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
     const action = container?.querySelector<HTMLElement>('.followup-action');
     expect(action?.textContent?.trim()).toBe('Inspect parser failures');
     expect(action?.querySelector('.ui-icon')).not.toBeNull();
@@ -569,6 +589,7 @@ describe('Message user prompt rendering', () => {
       ],
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.followup-action')).toBeNull();
     expect(container?.textContent).toContain('Investigate the parser failures.');
     expect(container?.textContent).toContain('report.pdf');
@@ -591,6 +612,7 @@ describe('Message user prompt rendering', () => {
       ],
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.plan-implementation-action')).toBeNull();
     expect(container?.textContent).toContain('plan.pdf');
@@ -606,6 +628,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const scrollContainer = container?.querySelector('.user-message-text-scroll');
     expect(scrollContainer).toBeInstanceOf(HTMLDivElement);
@@ -632,6 +655,7 @@ describe('Message user prompt rendering', () => {
       ],
       container!
     );
+    flushSolid();
 
     const cards = container?.querySelectorAll('.user-message-card');
     const planRail = cards?.[0]?.querySelector(
@@ -660,6 +684,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const scrollContainer = container?.querySelector<HTMLElement>('.user-message-text-scroll');
     expect(scrollContainer).not.toBeNull();
@@ -670,10 +695,12 @@ describe('Message user prompt rendering', () => {
 
     scrollContainer!.scrollTop = 0;
     scrollContainer!.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(scrollContainer?.classList.contains('has-more-below')).toBe(true);
 
     scrollContainer!.scrollTop = 140;
     scrollContainer!.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(scrollContainer?.classList.contains('has-more-below')).toBe(false);
   });
 
@@ -691,6 +718,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelectorAll('.user-message-text')).toHaveLength(2);
     expect(container?.querySelectorAll('.user-message-text')[0]?.textContent).toBe('Before');
@@ -712,6 +740,7 @@ describe('Message user prompt rendering', () => {
       scrollHeight: { configurable: true, value: 240 },
     });
     scrollContainer?.dispatchEvent(new Event('scroll'));
+    flushSolid();
     expect(codeBlock?.classList.contains('is-truncated')).toBe(true);
 
     await vi.waitFor(() => {
@@ -719,6 +748,7 @@ describe('Message user prompt rendering', () => {
         'const'
       );
     });
+    flushSolid();
   });
 
   it('compacts standalone SVG prompt markup into a chip that opens in an editor', () => {
@@ -734,6 +764,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const chip = container?.querySelector('.user-message-format-chip');
     expect(chip?.textContent).toBe('SVG59 B');
@@ -742,6 +773,7 @@ describe('Message user prompt rendering', () => {
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (chip as HTMLButtonElement | null)?.click();
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-text',
       payload: {
@@ -769,6 +801,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const messageText = container?.querySelectorAll('.user-message-text');
     expect(messageText).toHaveLength(2);
@@ -790,6 +823,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.user-message-format-chip')).toBeNull();
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(malformed);
@@ -804,6 +838,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const attachments = container?.querySelector('.message-attachments');
 
@@ -840,6 +875,7 @@ describe('Message user prompt rendering', () => {
           }),
         container!
       );
+      flushSolid();
 
       expect(container?.querySelector('.user-message-text .inline-chip')?.textContent).toBe(
         filename
@@ -866,6 +902,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const rendered = container?.querySelector('.rendered-markdown');
     const children = Array.from(rendered?.children ?? []);
@@ -898,6 +935,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const card = container?.querySelector('.user-message-card');
     expect(card?.classList).not.toContain('user-message-card-wrapperless');
@@ -925,6 +963,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const terminalBlock = container?.querySelector('.user-message-terminal-code-block');
     expect(terminalBlock).toBeInstanceOf(HTMLDivElement);
@@ -951,6 +990,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const messageText = container?.querySelector('.user-message-text');
 
@@ -972,6 +1012,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.user-message-text')?.textContent).toBe('README.md');
     expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(1);
@@ -982,16 +1023,19 @@ describe('Message user prompt rendering', () => {
   });
 
   it('links workspace session IDs in user messages and leaves unknown IDs unchanged', () => {
-    setAppState('sessions', [
-      {
-        id: 'ses_found123',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Permission request states',
-        version: '1',
-        time: { created: 0, updated: 0 },
-      },
-    ]);
+    setAppState(
+      storePath('sessions', [
+        {
+          id: 'ses_found123',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Permission request states',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      ])
+    );
+    flushSolid();
     cleanup = render(
       () =>
         Message({
@@ -1000,6 +1044,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
     expect(link?.textContent).toBe('Permission request states');
@@ -1010,6 +1055,7 @@ describe('Message user prompt rendering', () => {
     expect(container?.textContent).toContain('session:ses_missing456');
 
     link?.click();
+    flushSolid();
     expect(selectSessionMock).toHaveBeenCalledWith('ses_found123', { directory: '/repo' });
   });
 
@@ -1027,6 +1073,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.external-link');
     expect(link?.getAttribute('href')).toBe('https://example.test/docs?q=(one)');
@@ -1040,6 +1087,7 @@ describe('Message user prompt rendering', () => {
     );
 
     link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-external',
       payload: { url: 'https://example.test/docs?q=(one)' },
@@ -1047,6 +1095,7 @@ describe('Message user prompt rendering', () => {
     const httpLink = container?.querySelector<HTMLAnchorElement>('a[href="http://localhost:3000"]');
     expect(httpLink?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
     httpLink?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    flushSolid();
     expect(send).toHaveBeenLastCalledWith({
       type: 'vscode/open-external',
       payload: { url: 'http://localhost:3000' },
@@ -1062,6 +1111,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.message-attachments')).toBeNull();
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(
@@ -1081,6 +1131,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
       'https://example.test/docs\n'
@@ -1103,6 +1154,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const messageText = container?.querySelector('.user-message-text');
     const inlineChips = messageText?.querySelectorAll('.inline-chip');
@@ -1158,6 +1210,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(
       "What's on this image? Image 1 Vision"
@@ -1170,13 +1223,16 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders known textual agent mentions as chips when no agent part is returned', () => {
-    setAppState('allAgents', [
-      {
-        name: 'vision',
-        mode: 'subagent',
-        permission: [],
-      },
-    ]);
+    setAppState(
+      storePath('allAgents', [
+        {
+          name: 'vision',
+          mode: 'subagent',
+          permission: [],
+        },
+      ])
+    );
+    flushSolid();
     cleanup = render(
       () =>
         Message({
@@ -1185,6 +1241,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const chip = container?.querySelector('.user-message-text .inline-chip');
     expect(chip?.textContent).toBe('Vision');
@@ -1200,6 +1257,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const imageChip = container?.querySelector('.user-message-text .inline-chip');
     expect(imageChip?.textContent?.trim()).toBe('Image 1');
@@ -1228,6 +1286,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const imageChips = container?.querySelectorAll('.user-message-text .inline-chip');
     expect(Array.from(imageChips ?? []).map((chip) => chip.textContent?.trim())).toEqual([
@@ -1251,6 +1310,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const imageChip = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.user-message-text .inline-chip-clickable') ??
@@ -1260,6 +1320,7 @@ describe('Message user prompt rendering', () => {
     expect(imageChip).toBeInstanceOf(HTMLButtonElement);
 
     imageChip?.click();
+    flushSolid();
 
     const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
     const overlayCaption = document.body.querySelector('.chat-image-preview-caption');
@@ -1281,6 +1342,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const inlineChips = container?.querySelectorAll('.user-message-text .inline-chip');
     const attachmentStrip = container?.querySelector('.message-attachments');
@@ -1303,6 +1365,7 @@ describe('Message user prompt rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const messageText = container?.querySelector('.user-message-text');
 
@@ -1333,9 +1396,12 @@ describe('Message tool call expansion', () => {
         }),
       container!
     );
+    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+    flushSolid();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
 
     setParts([
@@ -1349,6 +1415,7 @@ describe('Message tool call expansion', () => {
       ),
       textPart('text-1', 'The current page is cursor.com.'),
     ]);
+    flushSolid();
 
     expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
   });
@@ -1431,6 +1498,7 @@ describe('parseUserMessageContent', () => {
     expect(getUserMessagePreviewText([textPart('text-1', text)])).toBe(
       text.replace(/\s+/g, ' ').trim()
     );
+    flushSolid();
     expect(getUserMessageEditText([textPart('text-1', text)])).toBe(text);
     expect(getUserMessageEditContext([textPart('text-1', text)]).files).toEqual([]);
 
@@ -1438,6 +1506,7 @@ describe('parseUserMessageContent', () => {
       () => Message({ info: userMessage('message-plain-text'), parts: [textPart('text-1', text)] }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.message-attachments')).toBeNull();
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(text);
@@ -1569,6 +1638,7 @@ describe('parseUserMessageContent', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.message-attachments-leading .chip-label')?.textContent).toBe(
       'ПД Оккервиль ЛСТ Квартплата 5397.pdf'
@@ -1599,6 +1669,7 @@ describe('parseUserMessageContent', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.message-attachments')?.textContent).toContain('spec.pdf');
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(
@@ -1665,6 +1736,7 @@ describe('Message user rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
     expect(timestamp?.classList.contains('is-visible')).toBe(false);
@@ -1674,33 +1746,44 @@ describe('Message user rendering', () => {
     expect(timestamp?.dateTime).toBe(created.toISOString());
 
     setShowSentTimestamp(true);
+    flushSolid();
 
     expect(container?.querySelector('.message-sent-time')).toBe(timestamp);
     expect(timestamp?.classList.contains('is-visible')).toBe(true);
 
     setShowSentTimestamp(false);
+    flushSolid();
     const card = container?.querySelector('.user-message-card');
     card?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     vi.advanceTimersByTime(150);
+    flushSolid();
     card?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     vi.advanceTimersByTime(150);
+    flushSolid();
     expect(onUserMessageHoverChange).not.toHaveBeenCalled();
     expect(timestamp?.classList.contains('is-visible')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     expect(onUserMessageHoverChange).not.toHaveBeenCalled();
     expect(timestamp?.classList.contains('is-visible')).toBe(false);
     vi.advanceTimersByTime(299);
+    flushSolid();
     expect(onUserMessageHoverChange).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
+    flushSolid();
     expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('message-timestamp-today', true);
     expect(timestamp?.classList.contains('is-visible')).toBe(true);
     expect(timestamp?.classList.contains('is-transition-active')).toBe(true);
     card?.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
     expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('message-timestamp-today', false);
     expect(timestamp?.classList.contains('is-visible')).toBe(false);
     expect(timestamp?.classList.contains('is-transition-active')).toBe(true);
     vi.advanceTimersByTime(160);
+    flushSolid();
     expect(timestamp?.classList.contains('is-transition-active')).toBe(false);
   });
 
@@ -1716,6 +1799,7 @@ describe('Message user rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.message-sent-time')?.textContent).toBe('2 days ago');
   });
@@ -1733,9 +1817,12 @@ describe('Message user rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     container?.querySelector('.user-message-card')?.dispatchEvent(new MouseEvent('mouseenter'));
+    flushSolid();
     vi.advanceTimersByTime(300);
+    flushSolid();
 
     expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('message-series-last', true);
     expect(container?.querySelector('.message-sent-time')?.classList.contains('is-visible')).toBe(
@@ -1760,6 +1847,7 @@ describe('Message user rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.textContent).toBe('');
     expect(container?.querySelector('.user-message-empty')).toBeNull();
@@ -1777,6 +1865,7 @@ describe('Message user rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const notice = container?.querySelector('.change-set-omission');
     expect(notice?.textContent).toContain('Large change set condensed');
@@ -1804,13 +1893,16 @@ describe('Message user rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const messageCard = container?.querySelector<HTMLElement>('.rendered-markdown');
     const selection = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(messageCard!);
     selection?.removeAllRanges();
+    flushSolid();
     selection?.addRange(range);
+    flushSolid();
 
     const setData = vi.fn();
     const event = new Event('copy', { bubbles: true, cancelable: true });
@@ -1819,6 +1911,7 @@ describe('Message user rendering', () => {
     });
 
     messageCard?.dispatchEvent(event);
+    flushSolid();
 
     expect(setData).toHaveBeenCalledWith(
       'text/plain',
@@ -1920,7 +2013,7 @@ describe('getUserMessageEditContext', () => {
 
 describe('Message user editing', () => {
   function renderEditableUserMessage(messageId = 'message-edit') {
-    setAppState('activeSessionId', 'session-1');
+    setAppState(storePath('activeSessionId', 'session-1'));
     cleanup = render(
       () =>
         Message({
@@ -1947,18 +2040,24 @@ describe('Message user editing', () => {
   }
 
   afterEach(() => {
-    setAppState('activeSessionId', null);
-    setAppState('sessions', []);
-    setAppState('sessionStatus', {});
+    setAppState(storePath('activeSessionId', null));
+    flushSolid();
+    setAppState(storePath('sessions', []));
+    flushSolid();
+    setAppState(storePath('sessionStatus', {}));
+    flushSolid();
     resetMessageEditState();
+    flushSolid();
   });
 
   it('labels automatic continuation prompts and prevents editing them as user messages', () => {
-    setAppState('activeSessionId', 'session-1');
+    setAppState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const text =
       'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.';
     const parts: Part[] = [{ ...textPart('continuation', text), synthetic: true }];
     cleanup = render(() => Message({ info: userMessage('continuation'), parts }), container!);
+    flushSolid();
 
     const notice = container?.querySelector<HTMLElement>('.assistant-activity-summary');
     expect(notice?.textContent).toContain('1 action');
@@ -1966,15 +2065,18 @@ describe('Message user editing', () => {
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.querySelector('.user-message-card-editable')).toBeNull();
     notice?.click();
+    flushSolid();
     expect(container?.textContent).toContain('Continued after context compaction');
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
     expect(container?.textContent).toContain(text);
     expect(editingMessage()).toBeNull();
     expect(getUserMessagePreviewText(parts)).toBe('(no content)');
   });
 
   it('summarizes automatic context outside a mixed user prompt and excludes it from editing', () => {
-    setAppState('activeSessionId', 'session-1');
+    setAppState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const parts: Part[] = [
       textPart('prompt', 'Test message'),
       {
@@ -2000,11 +2102,13 @@ describe('Message user editing', () => {
       },
     ];
     cleanup = render(() => Message({ info: userMessage('mixed'), parts }), container!);
+    flushSolid();
     expect(container?.querySelector('.user-message-card')?.textContent).toBe('Test message');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       '3 actions'
     );
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+    flushSolid();
     expect(container?.textContent).toContain('Added file context');
     expect(container?.textContent).toContain('Added skill instructions');
     expect(container?.textContent).not.toContain('private file contents');
@@ -2069,17 +2173,21 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       '1 action'
     );
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.textContent).not.toContain(text);
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-header')?.textContent).toContain(label);
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
     expect(container?.querySelector('.tool-invocation-detail')?.textContent).toContain(
       text.startsWith('<shell ') ? 'Long test output' : text
     );
+    flushSolid();
   });
 
   it('hides generic session instruction updates', () => {
@@ -2093,6 +2201,7 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.chat-turn')).toBeNull();
@@ -2100,7 +2209,8 @@ describe('Message user editing', () => {
   });
 
   it('keeps a user-authored continuation prompt editable even with synthetic context', () => {
-    setAppState('activeSessionId', 'session-1');
+    setAppState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     const text =
       'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.';
     cleanup = render(
@@ -2121,6 +2231,7 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.user-message-card-editable')).not.toBeNull();
@@ -2128,13 +2239,16 @@ describe('Message user editing', () => {
 
   it('starts a composer edit with the message text on click and highlights the target', () => {
     renderEditableUserMessage();
+    flushSolid();
 
     window.getSelection()?.removeAllRanges();
+    flushSolid();
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(true);
     expect(card?.hasAttribute('title')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(editingMessage()).toEqual({
       messageId: 'message-edit',
@@ -2151,8 +2265,10 @@ describe('Message user editing', () => {
     'renders delivered steering as read-only with attachments=%s',
     (withImage) => {
       const onTurnHoverChange = vi.fn();
-      setAppState('activeSessionId', 'session-1');
-      setAppState('sessionStatus', {});
+      setAppState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      setAppState(storePath('sessionStatus', {}));
+      flushSolid();
       const parts: Part[] = [textPart('steer-text', 'Change direction')];
       if (withImage)
         parts.push({
@@ -2167,20 +2283,24 @@ describe('Message user editing', () => {
         () => Message({ info: userMessage('steer'), parts, steering: true, onTurnHoverChange }),
         container!
       );
+      flushSolid();
       const card = container!.querySelector<HTMLElement>('.user-message-card')!;
       expect(card.classList).toContain('user-message-steering');
       expect(card.classList).not.toContain('user-message-card-editable');
       expect(card.hasAttribute('title')).toBe(false);
       card.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSolid();
       expect(onTurnHoverChange).not.toHaveBeenCalled();
       card.click();
+      flushSolid();
       expect(editingMessage()).toBeNull();
       if (withImage) expect(card.querySelector('.user-message-image-text-bubble')).not.toBeNull();
     }
   );
 
   it('opens mixed-message image previews without starting a message edit', () => {
-    setAppState('activeSessionId', 'session-1');
+    setAppState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(
       () =>
         Message({
@@ -2192,12 +2312,14 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
 
     const card = container?.querySelector('.user-message-card');
     const imageTile = container?.querySelector<HTMLButtonElement>('.user-message-image-tile');
     expect(card?.classList.contains('user-message-card-editable')).toBe(true);
 
     imageTile?.click();
+    flushSolid();
 
     const overlay = document.body.querySelector<HTMLElement>('.chat-image-preview-overlay');
     expect(overlay).not.toBeNull();
@@ -2205,6 +2327,7 @@ describe('Message user editing', () => {
     expect(card?.classList.contains('user-message-card-editable')).toBe(true);
 
     overlay?.click();
+    flushSolid();
 
     expect(document.body.querySelector('.chat-image-preview-overlay')).toBeNull();
     expect(editingMessage()).toBeNull();
@@ -2214,17 +2337,21 @@ describe('Message user editing', () => {
   it('opens a user message as Markdown on Alt-click without editing it', () => {
     const send = vi.fn();
     fixture<UnknownRecord>(window).__sendToExtension = send;
-    setAppState('sessions', [
-      fixture<Session>({
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'Replace edit header icon',
-        version: '1',
-        time: { created: 0, updated: 0 },
-      }),
-    ]);
-    setAppState('activeSessionId', 'session-1');
+    setAppState(
+      storePath('sessions', [
+        fixture<Session>({
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Replace edit header icon',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        }),
+      ])
+    );
+    flushSolid();
+    setAppState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(
       () =>
         Message({
@@ -2234,12 +2361,15 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
 
     window.getSelection()?.removeAllRanges();
+    flushSolid();
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+    flushSolid();
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-text',
@@ -2253,7 +2383,8 @@ describe('Message user editing', () => {
   });
 
   it('starts a composer edit for image-only user messages', () => {
-    setAppState('activeSessionId', 'session-1');
+    setAppState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(
       () =>
         Message({
@@ -2262,13 +2393,16 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
 
     window.getSelection()?.removeAllRanges();
+    flushSolid();
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(true);
     expect(card?.classList.contains('user-message-card-wrapperless')).toBe(true);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
 
     expect(editingMessage()).toEqual({
       messageId: 'message-image-only',
@@ -2294,7 +2428,8 @@ describe('Message user editing', () => {
   it('edits from a terminal header and opens terminal content from its body', () => {
     const send = vi.fn();
     fixture<UnknownRecord>(window).__sendToExtension = send;
-    setAppState('activeSessionId', 'session-1');
+    setAppState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
     cleanup = render(
       () =>
         Message({
@@ -2308,9 +2443,12 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
 
     window.getSelection()?.removeAllRanges();
+    flushSolid();
     container?.querySelector<HTMLElement>('pre.code-block')?.click();
+    flushSolid();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-text',
       payload: {
@@ -2322,6 +2460,7 @@ describe('Message user editing', () => {
     expect(editingMessage()).toBeNull();
 
     container?.querySelector<HTMLElement>('.code-block-header')?.click();
+    flushSolid();
     expect(editingMessage()).toMatchObject({
       messageId: 'message-terminal-edit',
       sessionId: 'session-1',
@@ -2332,7 +2471,8 @@ describe('Message user editing', () => {
   });
 
   it('does not offer editing when the message belongs to another session', () => {
-    setAppState('activeSessionId', 'session-2');
+    setAppState(storePath('activeSessionId', 'session-2'));
+    flushSolid();
     cleanup = render(
       () =>
         Message({
@@ -2349,43 +2489,53 @@ describe('Message user editing', () => {
         }),
       container!
     );
+    flushSolid();
 
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(editingMessage()).toBeNull();
   });
 
   it('does not offer editing while the active session is working', () => {
-    setAppState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setAppState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+    flushSolid();
     renderEditableUserMessage();
+    flushSolid();
 
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(editingMessage()).toBeNull();
   });
 
   it('does not offer editing in a managed sub-agent session', () => {
-    setAppState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        parentID: 'parent',
-        title: 'Child session',
-        version: '1',
-        time: { created: 0, updated: 1 },
-      },
-    ]);
+    setAppState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          parentID: 'parent',
+          title: 'Child session',
+          version: '1',
+          time: { created: 0, updated: 1 },
+        },
+      ])
+    );
+    flushSolid();
     renderEditableUserMessage();
+    flushSolid();
 
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSolid();
     expect(editingMessage()).toBeNull();
   });
 });
@@ -2425,6 +2575,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.question-prompt-card')).toBeInstanceOf(HTMLDivElement);
   });
@@ -2441,6 +2592,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('h2')?.textContent).toBe('Accessibility');
     expect(container?.querySelector('table')).toBeInstanceOf(HTMLTableElement);
@@ -2458,6 +2610,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.interactive-result-code-block')).toBeInstanceOf(
       HTMLDivElement
@@ -2483,9 +2636,11 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.thinking-label-text')?.textContent).toContain('Plan');
     container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    flushSolid();
     expect(container?.querySelector('.thinking-text')?.textContent).toContain('Inspect logs');
   });
 
@@ -2501,6 +2656,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
   });
@@ -2517,6 +2673,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const finalItem = container?.querySelector('.assistant-message-flow-item-final');
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
@@ -2534,12 +2691,17 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.textContent).toContain('Compacted session summary.');
     expect(container?.querySelectorAll('hr')).toHaveLength(0);
   });
 
   it('keeps a completed compact summary streaming buffer in pending Markdown mode', async () => {
+    citationPathChecks.clear();
+    vi.spyOn(citationPathChecks, 'check').mockResolvedValue(
+      '/repo/src/webview/components/MarkdownRenderer.tsx'
+    );
     const [streamingText, setStreamingText] = createSignal(
       'Files: `src/webview/components/MarkdownRenderer'
     );
@@ -2555,6 +2717,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const indicator = container?.querySelector('.streaming-markdown-indicator');
     expect(indicator?.getAttribute('aria-label')).toBe('Streaming content');
@@ -2563,12 +2726,14 @@ describe('Message streamed assistant text rendering', () => {
     expect(container?.querySelector('a.file-path-link')).toBeNull();
 
     setStreamingText('Files: `src/webview/components/MarkdownRenderer.tsx`');
+    flushSolid();
     await vi.waitFor(() => {
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
       expect(container?.querySelector('a.file-path-link')?.textContent).toBe(
         'src/webview/components/MarkdownRenderer.tsx'
       );
     });
+    flushSolid();
   });
 
   it('preserves a compact stream boundary that completes a bare URL', () => {
@@ -2582,6 +2747,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(
@@ -2598,6 +2764,7 @@ describe('Message streamed assistant text rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.textContent).toContain('Goal');
     expect(container?.querySelectorAll('hr')).toHaveLength(0);
@@ -2624,8 +2791,10 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     await Promise.resolve();
+    flushSolid();
 
     expect(resizeObserverObserveMock).toHaveBeenCalledTimes(1);
     expect(resizeObserverObserveMock).toHaveBeenCalledWith(
@@ -2634,6 +2803,7 @@ describe('Message assistant final answer rendering', () => {
     );
 
     host.remove();
+    flushSolid();
   });
 
   it('shows the read mode toggle for large final answers only while Alt is pressed', () => {
@@ -2662,10 +2832,12 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
 
     pressAlt();
+    flushSolid();
 
     const toggle = container?.querySelector<HTMLButtonElement>('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
@@ -2688,6 +2860,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
   });
@@ -2718,13 +2891,16 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     pressAlt();
+    flushSolid();
 
     const toggle = container?.querySelector<HTMLButtonElement>('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
     toggle?.click();
+    flushSolid();
 
     const overlay = document.querySelector('.assistant-read-overlay');
     const overlayContent = document.querySelector('.assistant-read-mode-content');
@@ -2737,6 +2913,7 @@ describe('Message assistant final answer rendering', () => {
     expect(overlayContent?.textContent).not.toContain('Thinking');
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSolid();
 
     expect(document.querySelector('.assistant-read-overlay')).toBeNull();
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(false);
@@ -2756,6 +2933,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
     const finalItem = container?.querySelector('.assistant-message-flow-item-final');
@@ -2785,6 +2963,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
 
@@ -2795,8 +2974,11 @@ describe('Message assistant final answer rendering', () => {
         return DOMRect.fromRect({ height });
       });
     setInfo(assistantMessage('message-final-pulse'));
+    flushSolid();
     setHighlightFinalAnswer(true);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
     getBoundingClientRect.mockRestore();
 
     const pulse = container?.querySelector<HTMLElement>('.assistant-final-mark-pulse');
@@ -2809,7 +2991,9 @@ describe('Message assistant final answer rendering', () => {
     const animationEnd = new Event('animationend', { bubbles: true });
     Object.defineProperty(animationEnd, 'animationName', { value: 'assistant-final-mark-pulse' });
     container?.querySelector('.assistant-message-flow-item-final')?.dispatchEvent(animationEnd);
+    flushSolid();
     await Promise.resolve();
+    flushSolid();
 
     expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
     expect(pulse?.style.getPropertyValue('--assistant-final-mark-pulse-duration')).toBe('');
@@ -2835,13 +3019,18 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     setInfo(assistantMessage('message-final-follow-up'));
+    flushSolid();
     setHighlightFinalAnswer(true);
+    flushSolid();
     expect(container?.querySelector('.assistant-final-mark-pulse')).toBeInstanceOf(HTMLDivElement);
 
     setHighlightFinalAnswer(false);
+    flushSolid();
     setHighlightFinalAnswer(true);
+    flushSolid();
 
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
       HTMLDivElement
@@ -2859,6 +3048,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
       HTMLDivElement
@@ -2886,6 +3076,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     expect(container?.querySelector('.assistant-turn-content-plain')).toBeInstanceOf(
       HTMLDivElement
@@ -2918,10 +3109,12 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     await vi.waitFor(() => {
       expect(container?.querySelector('.diff-summary')).toBeInstanceOf(HTMLDivElement);
     });
+    flushSolid();
 
     const chatTurn = container?.querySelector('.chat-turn-assistant');
     const responseBlock = container?.querySelector('.chat-turn-content');
@@ -2949,6 +3142,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
     const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
@@ -2979,6 +3173,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
     const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
@@ -3002,6 +3197,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const figure = container?.querySelector('.message-image-carousel-figure');
     const captionRow = container?.querySelector('.message-image-carousel-caption-row');
@@ -3026,6 +3222,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
     const card = container?.querySelector('.user-message-card');
@@ -3034,6 +3231,7 @@ describe('Message assistant final answer rendering', () => {
     expect(card?.hasAttribute('title')).toBe(false);
 
     trigger?.click();
+    flushSolid();
 
     const overlay = document.body.querySelector('.chat-image-preview-overlay');
     const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
@@ -3046,6 +3244,7 @@ describe('Message assistant final answer rendering', () => {
     );
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSolid();
 
     expect(document.body.querySelector('.chat-image-preview-overlay')).toBeNull();
     expect(document.body.classList.contains('chat-image-preview-open')).toBe(false);
@@ -3060,6 +3259,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const nextButton = container?.querySelectorAll<HTMLButtonElement>(
       '.message-image-carousel-nav'
@@ -3067,12 +3267,14 @@ describe('Message assistant final answer rendering', () => {
     expect(nextButton).toBeInstanceOf(HTMLButtonElement);
 
     nextButton?.click();
+    flushSolid();
 
     const trigger = container?.querySelector<HTMLButtonElement>(
       '.message-image-carousel-preview-trigger'
     );
     expect(trigger?.hasAttribute('title')).toBe(false);
     trigger?.click();
+    flushSolid();
 
     const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
     const overlayCaption = document.body.querySelector('.chat-image-preview-caption');
@@ -3091,17 +3293,20 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const trigger = container?.querySelector<HTMLButtonElement>(
       '.message-image-carousel-preview-trigger'
     );
     trigger?.click();
+    flushSolid();
 
     const nextOverlayButton =
       document.body.querySelectorAll<HTMLButtonElement>('.chat-image-preview-nav')[1];
     expect(nextOverlayButton).toBeInstanceOf(HTMLButtonElement);
 
     nextOverlayButton?.click();
+    flushSolid();
 
     let overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
     let overlayCaption = document.body.querySelector('.chat-image-preview-caption');
@@ -3114,6 +3319,7 @@ describe('Message assistant final answer rendering', () => {
     );
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+    flushSolid();
 
     overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
     overlayCaption = document.body.querySelector('.chat-image-preview-caption');
@@ -3138,6 +3344,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const errorText = container?.querySelector('.assistant-message-flow-item-error');
     const diffSummary = container?.querySelector('.diff-summary');
@@ -3162,6 +3369,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const errorText = container?.querySelector('.assistant-message-flow-item-error');
 
@@ -3171,6 +3379,7 @@ describe('Message assistant final answer rendering', () => {
     expect(header?.textContent).toBe('Not Found');
     expect(errorText?.textContent).not.toContain('The provider-1 provider');
     header?.click();
+    flushSolid();
     expect(
       errorText?.querySelector('.assistant-message-flow-item-error-details')?.textContent
     ).toContain(
@@ -3200,6 +3409,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const detailsToggle = container?.querySelector<HTMLButtonElement>(
       '.assistant-message-flow-item-error-details-toggle'
@@ -3210,6 +3420,7 @@ describe('Message assistant final answer rendering', () => {
     expect(container?.querySelector('.assistant-message-flow-item-error-details')).toBeNull();
 
     detailsToggle?.click();
+    flushSolid();
 
     const details = container?.querySelector('.assistant-message-flow-item-error-details');
     expect(details?.textContent).toContain('provider-1 / model-1');
@@ -3223,6 +3434,7 @@ describe('Message assistant final answer rendering', () => {
     expect(detailsId).toBeTruthy();
     expect(details?.id).toBe(detailsId);
     detailsToggle?.click();
+    flushSolid();
     expect(detailsToggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.assistant-message-flow-item-error-details')).toBeNull();
   });
@@ -3236,12 +3448,16 @@ describe('Message assistant final answer rendering', () => {
       },
     };
     cleanup = render(() => Message({ info, parts: [] }), container!);
+    flushSolid();
     container
       ?.querySelector<HTMLButtonElement>('.assistant-message-flow-item-error-details-toggle')
       ?.click();
+    flushSolid();
     cleanup();
+    flushSolid();
 
     cleanup = render(() => Message({ info, parts: [] }), container!);
+    flushSolid();
 
     expect(
       container
@@ -3267,6 +3483,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
     const notice = container?.querySelector('.assistant-message-flow-item-error-notice');
     expect(notice?.textContent).toBe('Provider reconnected.');
     expect(notice?.querySelector('.assistant-message-flow-item-error-details-toggle')).toBeNull();
@@ -3275,6 +3492,7 @@ describe('Message assistant final answer rendering', () => {
 
   it('renders a retry action for the latest assistant error and retries that turn', async () => {
     const { setState } = await import('../lib/state');
+    flushSolid();
     const user = userMessage('message-2');
     const assistant = {
       ...assistantMessage('message-3'),
@@ -3285,16 +3503,19 @@ describe('Message assistant final answer rendering', () => {
       },
     };
 
-    setState('messages', [
-      {
-        info: user,
-        parts: [textPart('text-user-1', 'Try again')],
-      },
-      {
-        info: assistant,
-        parts: [reasoningPart('reason-1', 'Inspecting')],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: user,
+          parts: [textPart('text-user-1', 'Try again')],
+        },
+        {
+          info: assistant,
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -3305,6 +3526,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const retryButton = container?.querySelector<HTMLButtonElement>(
       '.assistant-message-flow-item-error-action'
@@ -3314,6 +3536,7 @@ describe('Message assistant final answer rendering', () => {
     expect(retryButton?.textContent).toContain('Retry');
 
     retryButton?.click();
+    flushSolid();
 
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
   });
@@ -3321,7 +3544,9 @@ describe('Message assistant final answer rendering', () => {
   it('shows a live countdown on the latest provider retry button', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
+    flushSolid();
     const { setState } = await import('../lib/state');
+    flushSolid();
     const info = {
       ...assistantMessage('retry-countdown'),
       error: {
@@ -3330,34 +3555,44 @@ describe('Message assistant final answer rendering', () => {
       },
     };
     try {
-      setState('sessionStatus', 'session-1', {
-        type: 'retry',
-        attempt: 1,
-        message: 'Not Found',
-        next: 5000,
-      });
+      setState(
+        storePath('sessionStatus', 'session-1', {
+          type: 'retry',
+          attempt: 1,
+          message: 'Not Found',
+          next: 5000,
+        })
+      );
+      flushSolid();
       cleanup = render(() => Message({ info, parts: [], isLastAssistant: true }), container!);
+      flushSolid();
       const button = container?.querySelector<HTMLButtonElement>(
         '.assistant-message-flow-item-error-action'
       );
       expect(button?.textContent).toContain('(5s)');
       expect(button?.disabled).toBe(true);
       await vi.advanceTimersByTimeAsync(2000);
+      flushSolid();
       expect(button?.textContent).toContain('(3s)');
-      setState('sessionStatus', 'session-1', { type: 'idle' });
+      setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
+      flushSolid();
       expect(button?.textContent).toBe('Retry');
       expect(button?.disabled).toBe(false);
     } finally {
       cleanup?.();
+      flushSolid();
       cleanup = undefined;
-      setState('sessionStatus', {});
+      setState(storePath('sessionStatus', {}));
+      flushSolid();
       vi.useRealTimers();
     }
   });
 
   it('hides the latest usage-limit error card while the usage-limit banner is active', async () => {
     const { setState, setSessionUsageLimit } = await import('../lib/state');
+    flushSolid();
     const { parseUsageLimitNotice } = await import('../lib/usage-limit');
+    flushSolid();
     const assistant = {
       ...assistantMessage('message-3'),
       error: {
@@ -3366,21 +3601,28 @@ describe('Message assistant final answer rendering', () => {
       },
     };
 
-    setState('sessions', [
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/repo',
-        title: 'session-1',
-        version: '1',
-        time: { created: 0, updated: 0 },
-      },
-    ]);
-    setState('messages', [{ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }]);
+    setState(
+      storePath('sessions', [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'session-1',
+          version: '1',
+          time: { created: 0, updated: 0 },
+        },
+      ])
+    );
+    flushSolid();
+    setState(
+      storePath('messages', [{ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }])
+    );
+    flushSolid();
     setSessionUsageLimit(
       'session-1',
       parseUsageLimitNotice('429 usage limit reached. retry in 45s attempt #2')!
     );
+    flushSolid();
 
     try {
       cleanup = render(
@@ -3392,22 +3634,28 @@ describe('Message assistant final answer rendering', () => {
           }),
         container!
       );
+      flushSolid();
 
       expect(container?.querySelector('.assistant-message-flow-item-error')).toBeNull();
 
       setSessionUsageLimit('session-1', null);
+      flushSolid();
 
       const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
       expect(errorBlock?.textContent).toContain('429 usage limit reached');
     } finally {
       setSessionUsageLimit('session-1', null);
-      setState('sessions', []);
-      setState('messages', []);
+      flushSolid();
+      setState(storePath('sessions', []));
+      flushSolid();
+      setState(storePath('messages', []));
+      flushSolid();
     }
   });
 
   it('explains a logged-out provider and runs re-authentication', async () => {
     const { setState } = await import('../lib/state');
+    flushSolid();
     const [isLastAssistant, setIsLastAssistant] = createSignal(true);
     const assistant = {
       ...assistantMessage('message-3'),
@@ -3420,12 +3668,15 @@ describe('Message assistant final answer rendering', () => {
       },
     };
 
-    setState('messages', [
-      {
-        info: assistant,
-        parts: [reasoningPart('reason-1', 'Inspecting')],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistant,
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () =>
@@ -3438,6 +3689,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
     const reauthenticateButton = container?.querySelector<HTMLButtonElement>(
@@ -3455,8 +3707,10 @@ describe('Message assistant final answer rendering', () => {
         ?.textContent
     ).toBe('Re-authenticate');
     expect(reauthenticateButton?.closest('.assistant-message-flow-item-error-card')).toBeNull();
+    flushSolid();
 
     reauthenticateButton?.click();
+    flushSolid();
 
     expect(providerConnectionRequest()?.providerID).toBe('github-copilot');
     expect(providerRequiresReconnection('github-copilot')).toBe(true);
@@ -3464,6 +3718,7 @@ describe('Message assistant final answer rendering', () => {
     expect(retryMessageMock).not.toHaveBeenCalled();
 
     resolveProviderAuthFailure('github-copilot');
+    flushSolid();
 
     expect(errorBlock?.textContent).toContain('Provider reconnected.');
     expect(errorBlock?.classList.contains('assistant-message-flow-item-error-notice')).toBe(true);
@@ -3474,12 +3729,16 @@ describe('Message assistant final answer rendering', () => {
     expect(retryMessageMock).not.toHaveBeenCalled();
 
     setIsLastAssistant(false);
+    flushSolid();
     expect(errorBlock?.textContent).toBe('Provider reconnected.');
     expect(errorBlock?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
     setIsLastAssistant(true);
+    flushSolid();
 
     const { markProviderAuthFailure } = await import('../lib/provider-connection-state');
+    flushSolid();
     markProviderAuthFailure('github-copilot', 'message-4', assistant.time.created + 1);
+    flushSolid();
 
     expect(errorBlock?.textContent).toContain(
       'You are signed out of this provider. Re-authenticate to continue.'
@@ -3503,20 +3762,25 @@ describe('Message assistant final answer rendering', () => {
       },
     };
     try {
-      setAppState('selectedModel', { providerID: 'openai', modelID: 'gpt-6' });
+      setAppState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-6' }));
+      flushSolid();
       cleanup = render(() => Message({ info, parts: [], isLastAssistant: true }), container!);
+      flushSolid();
       expect(
         container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
       ).toBe('Re-authenticate');
-      setAppState('selectedModel', { providerID: 'anthropic', modelID: 'claude' });
+      setAppState(storePath('selectedModel', { providerID: 'anthropic', modelID: 'claude' }));
+      flushSolid();
       expect(container?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
       expect(container?.querySelector('.assistant-message-flow-item-error')).not.toBeNull();
-      setAppState('selectedModel', { providerID: 'openai', modelID: 'gpt-6' });
+      setAppState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-6' }));
+      flushSolid();
       expect(
         container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
       ).toBe('Re-authenticate');
     } finally {
-      setAppState('selectedModel', null);
+      setAppState(storePath('selectedModel', null));
+      flushSolid();
     }
   });
 
@@ -3539,7 +3803,9 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
     resolveProviderAuthFailure(info().providerID);
+    flushSolid();
     setInfo({
       ...info(),
       error: {
@@ -3547,6 +3813,7 @@ describe('Message assistant final answer rendering', () => {
         data: { message: 'OpenCode failed before a response was recorded.' },
       },
     });
+    flushSolid();
     const notice = container?.querySelector('.assistant-message-flow-item-error-notice');
     expect(notice?.textContent).toBe('Provider reconnected.');
     expect(notice?.querySelector('.assistant-message-flow-item-error-details-toggle')).toBeNull();
@@ -3576,6 +3843,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
     const retryButton = container?.querySelector<HTMLButtonElement>(
@@ -3588,6 +3856,7 @@ describe('Message assistant final answer rendering', () => {
     expect(providerRequiresReconnection('amazon-bedrock')).toBe(false);
 
     retryButton?.click();
+    flushSolid();
 
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
     expect(providerConnectionRequest()).toBeNull();
@@ -3605,6 +3874,7 @@ describe('Message assistant final answer rendering', () => {
         }),
       container!
     );
+    flushSolid();
 
     const errorText = container?.querySelector('.assistant-message-flow-item-error');
     expect(errorText?.textContent).toContain('Output length exceeded');
@@ -3612,6 +3882,7 @@ describe('Message assistant final answer rendering', () => {
 
   it('does not render a retry action for aborted assistant errors', async () => {
     const { setState } = await import('../lib/state');
+    flushSolid();
     const assistant = {
       ...assistantMessage('message-3'),
       error: {
@@ -3620,17 +3891,21 @@ describe('Message assistant final answer rendering', () => {
       },
     };
 
-    setState('messages', [
-      {
-        info: assistant,
-        parts: [reasoningPart('reason-1', 'Inspecting')],
-      },
-    ]);
+    setState(
+      storePath('messages', [
+        {
+          info: assistant,
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+        },
+      ])
+    );
+    flushSolid();
 
     cleanup = render(
       () => Message({ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }),
       container!
     );
+    flushSolid();
 
     const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
     const retryButton = container?.querySelector('.assistant-message-flow-item-error-action');

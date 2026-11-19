@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { DroppedFile } from '../../../shared/protocol';
 import type { ClipboardImage } from '../../lib/app-state-types';
 import { AttachmentStrip } from './AttachmentStrip';

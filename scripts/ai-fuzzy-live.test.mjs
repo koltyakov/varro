@@ -53,6 +53,80 @@ const ready = {
   nestedActivityScroller: { hasRange: true },
 };
 
+test('frame and event evidence stay in the installed document when action worlds change', async () => {
+  const controller = Object.assign(Object.create(CdpController.prototype), {
+    targetId: 'iframe',
+    frameId: 'content',
+    targetContext: { viewId: 'sidebar' },
+    contextId: 1,
+    mainContextUniqueId: 'document-A',
+  });
+  const world = vm.createContext({ window: new EventTarget(), performance, structuredClone });
+  controller.call = async (method, params) => {
+    assert.equal(method, 'Runtime.evaluate');
+    assert.equal(params.uniqueContextId, 'document-A');
+    assert.equal(params.contextId, undefined);
+    try {
+      return { result: { value: vm.runInContext(params.expression, world) } };
+    } catch (error) {
+      return { exceptionDetails: { text: String(error) } };
+    }
+  };
+  const owner = controller.observationOwner();
+  await controller.startSessionEventCapture(owner);
+  await controller.evaluateObservation(
+    owner,
+    'Install test frame observer',
+    'globalThis.observer = { stop: () => 42 }; true'
+  );
+  world.window.dispatchEvent(
+    new MessageEvent('message', {
+      data: { type: 'server/event', payload: { type: 'session.idle' } },
+    })
+  );
+  controller.contextId = 2;
+  assert.equal(await controller.evaluateObservation(owner, 'Stop', 'observer.stop()'), 42);
+  assert.equal((await controller.finishSessionEventCapture(owner))[0].event.type, 'session.idle');
+  await assert.rejects(
+    controller.finishSessionEventCapture(owner),
+    /Installed session-event capture is missing/
+  );
+  controller.mainContextUniqueId = 'document-B';
+  await assert.rejects(
+    controller.evaluateObservation(owner, 'Stop', 'observer.stop()'),
+    /Stop.*document-A.*owner changed.*document-B/
+  );
+});
+
+test('AI-08 retains completed action evidence and identifies the interrupted step', async () => {
+  const results = [];
+  const started = [];
+  let top = 0;
+  const cdp = {
+    captureActionState: async () => ({
+      transcript: { scrollTop: top, firstVisibleMessageId: 'one', firstVisibleTop: -top },
+    }),
+    wheel: async () => {
+      if (top) throw new Error('action target lost');
+      top = 100;
+      return true;
+    },
+  };
+  const plan = [1, 2].map((step) => ({ step, action: 'wheel transcript', delta: 100 }));
+  await assert.rejects(
+    executeActionPlan(cdp, plan, '', 0, {
+      results,
+      onActionStart: ({ step }) => started.push(step),
+    }),
+    /action target lost/
+  );
+  assert.deepEqual(started, [1, 2]);
+  assert.deepEqual(
+    results.map(({ step, executed }) => ({ step, executed })),
+    [{ step: 1, executed: true }]
+  );
+});
+
 test('AI-18 defaults to the current pinned fixture layout', async () => {
   const { DEFAULT_AI18_FIXTURE_EDIT_PATH } = await import('./ai-fuzzy-live.mjs');
   assert.equal(DEFAULT_AI18_FIXTURE_EDIT_PATH, 'packages/util/src/bom.ts');

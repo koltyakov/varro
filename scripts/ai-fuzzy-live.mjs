@@ -525,6 +525,7 @@ async function inspectVarroTarget(port, target) {
     );
     if (!mainContext) throw new Error('default content execution context is unavailable');
     controller.mainContextId = mainContext.id;
+    controller.mainContextUniqueId = mainContext.uniqueId;
     const inspected = await controller.call('Runtime.evaluate', {
       contextId: mainContext.id,
       expression: `(() => {
@@ -696,9 +697,50 @@ export class CdpController {
     return result.result.value;
   }
 
-  startSessionEventCapture() {
-    return this.evaluate(`(() => {
-      globalThis.__varroSessionEventCapture?.stop();
+  observationOwner() {
+    const owner = {
+      targetId: this.targetId,
+      frameId: this.frameId,
+      viewId: this.targetContext?.viewId,
+      uniqueContextId: this.mainContextUniqueId,
+    };
+    if (!owner.targetId || !owner.frameId || !owner.viewId || !owner.uniqueContextId)
+      throw new Error(`Missing observation owner: ${JSON.stringify(owner)}`);
+    return owner;
+  }
+
+  async evaluateObservation(owner, phase, expression) {
+    try {
+      const current = this.observationOwner();
+      if (Object.keys(owner).some((key) => owner[key] !== current[key])) {
+        throw new Error(`observation owner changed to ${JSON.stringify(current)}`);
+      }
+      // A focus recovery may replace the action's isolated world. A real document
+      // replacement must fail rather than collect a new observer with no history.
+      const result = await this.call('Runtime.evaluate', {
+        uniqueContextId: owner.uniqueContextId,
+        expression,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      if (result.exceptionDetails)
+        throw new Error(
+          result.exceptionDetails.exception?.description ?? result.exceptionDetails.text
+        );
+      return result.result.value;
+    } catch (error) {
+      throw new Error(`${phase} in ${JSON.stringify(owner)}: ${controllerErrorMessage(error)}`, {
+        cause: error,
+      });
+    }
+  }
+
+  startSessionEventCapture(owner) {
+    return this.evaluateObservation(
+      owner,
+      'Start session-event capture',
+      `(() => {
+      if (globalThis.__varroSessionEventCapture) throw new Error('Session-event capture already installed');
       const startedAt = performance.now();
       const events = [];
       const listener = (message) => {
@@ -714,17 +756,22 @@ export class CdpController {
         stop() { window.removeEventListener('message', listener); },
       };
       return true;
-    })()`);
+    })()`
+    );
   }
 
-  finishSessionEventCapture() {
-    return this.evaluate(`(() => {
+  finishSessionEventCapture(owner) {
+    return this.evaluateObservation(
+      owner,
+      'Finish session-event capture',
+      `(() => {
       const capture = globalThis.__varroSessionEventCapture;
-      if (!capture) return [];
+      if (!capture) throw new Error('Installed session-event capture is missing');
       capture.stop();
       delete globalThis.__varroSessionEventCapture;
       return capture.events;
-    })()`);
+    })()`
+    );
   }
 
   evaluateInCurrentContext(expression) {
@@ -759,6 +806,7 @@ export class CdpController {
     this.requests = rebound.requests;
     this.contextId = rebound.contextId;
     this.mainContextId = rebound.mainContextId;
+    this.mainContextUniqueId = rebound.mainContextUniqueId;
     this.frameId = rebound.frameId;
     this.targetId = rebound.targetId;
     this.targetContext = rebound.targetContext;
@@ -2264,8 +2312,9 @@ export function verifyActionEffect(action, before, after, details = {}) {
 }
 
 export async function executeActionPlan(cdp, plan, currentTitle, port, options = {}) {
-  const results = [];
+  const results = options.results ?? [];
   for (const action of plan) {
+    options.onActionStart?.(action);
     if (options.isActive && !(await options.isActive())) {
       results.push({ ...action, executed: false, reason: 'model stream settled' });
       break;
@@ -4235,6 +4284,7 @@ async function runLive(options) {
   let controllerError = null;
   let descendantsBefore = null;
   let playbackSource = null;
+  let observationOwner;
   let activityObservationStarted = false;
   try {
     let childEdit;
@@ -4308,8 +4358,9 @@ async function runLive(options) {
           client.getSession(tracked.id),
           client.messages(tracked.id, 1000),
         ]);
+        observationOwner = cdp.observationOwner();
+        await cdp.startSessionEventCapture(observationOwner);
         playbackSource = { session, initialMessages };
-        await cdp.startSessionEventCapture();
       }
       if (scenario === 'AI-17') {
         if (!(await waitForSessionQuiescence(client, cdp, tracked.id, timeoutMs * 3))) {
@@ -4459,7 +4510,9 @@ async function runLive(options) {
       let scope = null;
       let activityExecution = null;
       if (scenario === 'AI-07' || scenario === 'AI-08') {
-        await cdp.evaluate(
+        await cdp.evaluateObservation(
+          observationOwner,
+          'Start frame observation',
           `(() => { (${installObserver.toString()})(); globalThis.varroAiStreamingObserver.start(); })()`
         );
         activityObservationStarted = true;
@@ -4580,12 +4633,23 @@ async function runLive(options) {
           break;
         }
 
-        actions = await executeActionPlan(
+        attemptRecord.actions = actions;
+        await executeActionPlan(
           cdp,
           manifest.actionPlan,
           tracked.title,
           launch.remoteDebuggingPort,
           {
+            results: actions,
+            onActionStart: (action) => {
+              attemptRecord.lastActionStarted = {
+                ...action,
+                targetId: cdp.targetId,
+                frameId: cdp.frameId,
+                actionContextId: cdp.contextId,
+                documentContextId: cdp.mainContextUniqueId,
+              };
+            },
             isActive: () => client.isBusy(tracked.id),
             readMessageOrder: async () =>
               (await client.messages(tracked.id, 1000)).map((message) => message.info.id),
@@ -4594,7 +4658,6 @@ async function runLive(options) {
             scope,
           }
         );
-        attemptRecord.actions = actions;
         const attemptActionFailure = actions.find((action) => !action.executed);
         if (!shouldRetryAi08WithFreshStream(attemptActionFailure, attempt, maxPrompts)) break;
       }
@@ -4626,8 +4689,12 @@ async function runLive(options) {
       }
       if (activityObservationStarted) {
         await new Promise((resolve) => setTimeout(resolve, 250));
-        activityObservation = await cdp.evaluate('globalThis.varroAiStreamingObserver.stop()');
         activityObservationStarted = false;
+        activityObservation = await cdp.evaluateObservation(
+          observationOwner,
+          'Finish frame observation',
+          'globalThis.varroAiStreamingObserver.stop()'
+        );
       }
       const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
       const actionFailure = actions.find((action) => !action.executed);
@@ -4678,6 +4745,7 @@ async function runLive(options) {
       if (scenario === 'AI-07' || scenario === 'AI-08') {
         Object.assign(result, {
           preparation: { passed: best?.missing.length === 0 },
+          observationOwner,
           activityExecution,
           activityObservation,
           scenarioVerification: 'NEEDS_AI_REVIEW',
@@ -4712,24 +4780,44 @@ async function runLive(options) {
     })();
   } catch (error) {
     controllerError = error;
+    if (observationOwner) {
+      Object.assign(manifest.livePreparation[scenario], { observationOwner, attempts });
+      const attempt = attempts.at(-1);
+      const last = attempt?.lastActionStarted;
+      const failed = attempt?.actions?.find((action) => !action.executed);
+      if (failed && !manifest.livePreparation[scenario].actionFailure) {
+        manifest.livePreparation[scenario].actionFailure = failed;
+      }
+      if (last && !attempt.actions.some((action) => action.step === last.step)) {
+        controllerError = new Error(
+          `${scenario} step ${last.step} (${last.action}): ${controllerErrorMessage(error)}`,
+          { cause: error }
+        );
+      }
+    }
   }
   if (activityObservationStarted) {
     try {
-      manifest.livePreparation[scenario].activityObservation = await cdp.evaluate(
+      manifest.livePreparation[scenario].activityObservation = await cdp.evaluateObservation(
+        observationOwner,
+        'Clean up frame observation',
         'globalThis.varroAiStreamingObserver.stop()'
       );
       await writeJsonAtomic(manifestPath, manifest);
     } catch (error) {
-      controllerError = new AggregateError(
-        [controllerError, error].filter(Boolean),
-        `${scenario} frame observation cleanup failed`
-      );
+      controllerError = controllerError
+        ? new AggregateError(
+            [controllerError, error],
+            `${scenario} controller failure followed by frame observation cleanup failure`,
+            { cause: controllerError }
+          )
+        : error;
     }
   }
   if (playbackSource) {
     try {
       const [events, finalMessages] = await Promise.all([
-        cdp.finishSessionEventCapture(),
+        cdp.finishSessionEventCapture(observationOwner),
         client.messages(tracked.id, 1000),
       ]);
       const capture = {
@@ -4746,6 +4834,15 @@ async function runLive(options) {
       await writeJsonAtomic(capturePath, capture);
       manifest.livePreparation[scenario].playbackCapture = capturePath;
       await writeJsonAtomic(manifestPath, manifest);
+      const initialIds = new Set(playbackSource.initialMessages.map((message) => message.info.id));
+      if (
+        capture.events.length === 0 &&
+        finalMessages.some((message) => !initialIds.has(message.info.id))
+      ) {
+        throw new Error(
+          `No captured session events for new canonical messages in ${JSON.stringify(observationOwner)}; incomplete capture saved at ${capturePath}`
+        );
+      }
       const playback = playbackLabel ? savePlaybackCapture(playbackDatabase, capture) : null;
       process.stdout.write(`${JSON.stringify({ capturePath, playback }, null, 2)}\n`);
     } catch (error) {

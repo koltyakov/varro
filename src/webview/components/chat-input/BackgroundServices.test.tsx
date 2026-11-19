@@ -1,6 +1,6 @@
+import { flush as flushSolid, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
-import { render } from 'solid-js/web';
+import { render } from '@solidjs/web';
 import type { BackgroundProcess } from '../../../shared/background-process';
 import { client } from '../../lib/client';
 import {
@@ -26,6 +26,7 @@ async function settle() {
 }
 beforeEach(() => {
   resetDefaultAppState();
+  flushSolid();
   container = document.createElement('div');
   document.body.append(container);
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
@@ -39,15 +40,20 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup?.();
+  flushSolid();
   cleanup = undefined;
   container.remove();
+  flushSolid();
   closeBackgroundProcessView();
+  flushSolid();
   vi.restoreAllMocks();
+  flushSolid();
 });
 
 describe('BackgroundServices', () => {
   it('keeps the same command row mounted through send and steering status changes', async () => {
     sessionStore.setSessionStatusEntry('ses_one', { type: 'idle', backgroundServices: 1 });
+    flushSolid();
     cleanup = render(
       () => (
         <BackgroundServices
@@ -57,16 +63,21 @@ describe('BackgroundServices', () => {
       ),
       container
     );
+    flushSolid();
     await settle();
+    flushSolid();
     const row = container.querySelector('.chat-background-service');
     for (const type of ['busy', 'idle', 'busy'] as const) {
       sessionStore.setSessionStatusEntry('ses_one', { type });
+      flushSolid();
       await settle();
+      flushSolid();
       expect(container.querySelector('.chat-background-service')).toBe(row);
       expect(row?.textContent).toContain(service.command);
     }
     expect(client.session.backgroundProcesses).toHaveBeenCalledTimes(1);
     sessionStore.setSessionStatusEntry('ses_one', { type: 'idle', backgroundServices: 0 });
+    flushSolid();
     expect(container.querySelector('.chat-background-service')).toBeNull();
   });
   it('shows only running services in compact queue rows, and opens the selected process without reading logs', async () => {
@@ -79,7 +90,9 @@ describe('BackgroundServices', () => {
       () => <BackgroundServices sessionID="ses_one" directory="/repo" count={1} />,
       container
     );
+    flushSolid();
     await settle();
+    flushSolid();
     const row = container.querySelector<HTMLButtonElement>('.chat-background-service')!;
     expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(1);
     expect(row.classList.contains('chat-queue-item')).toBe(true);
@@ -90,6 +103,7 @@ describe('BackgroundServices', () => {
     ).toBe('true');
     expect(row.textContent).toContain(service.command);
     row.click();
+    flushSolid();
     expect(backgroundProcessView()).toEqual({
       sessionID: 'ses_one',
       directory: '/repo',
@@ -99,7 +113,9 @@ describe('BackgroundServices', () => {
   });
   it('does not fetch processes when there are no services', async () => {
     cleanup = render(() => <BackgroundServices sessionID="ses_one" count={0} />, container);
+    flushSolid();
     await settle();
+    flushSolid();
     expect(container.textContent).toBe('');
     expect(client.session.backgroundProcesses).not.toHaveBeenCalled();
   });
@@ -115,21 +131,28 @@ describe('BackgroundServices', () => {
       )
       .mockResolvedValue([]);
     cleanup = render(() => <BackgroundServices sessionID={sessionID()} count={1} />, container);
+    flushSolid();
     const signal = vi.mocked(client.session.backgroundProcesses).mock.calls[0]?.[1]?.signal;
     setSessionID('ses_two');
+    flushSolid();
     resolve([service]);
+    flushSolid();
     await settle();
+    flushSolid();
     expect(signal?.aborted).toBe(true);
     expect(container.textContent).not.toContain(service.command);
   });
   it('keeps details accessible if loading fails', async () => {
     vi.mocked(client.session.backgroundProcesses).mockRejectedValue(new Error('Offline'));
     cleanup = render(() => <BackgroundServices sessionID="ses_one" count={1} />, container);
+    flushSolid();
     await settle();
+    flushSolid();
     expect(
       container.querySelector('.chat-queue-body > .chat-background-service-icon')
     ).not.toBeNull();
     container.querySelector<HTMLButtonElement>('button')!.click();
+    flushSolid();
     expect(backgroundProcessView()?.sessionID).toBe('ses_one');
   });
 });

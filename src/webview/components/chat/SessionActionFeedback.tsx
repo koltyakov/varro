@@ -1,6 +1,6 @@
-import { Show, batch, createSignal, onCleanup } from 'solid-js';
-import type { Accessor } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { Show, createSignal, onCleanup, type Accessor } from 'solid-js';
+
+import { Portal } from '@solidjs/web';
 import { checkIcon, xmarkIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
 
@@ -56,11 +56,11 @@ export function showSessionActionFeedback(
   nextAnchor?: HTMLElement
 ) {
   reset();
-  batch(() => {
+  (() => {
     setKind(nextKind);
     setAnchor(nextAnchor);
     setMessage(nextMessage);
-  });
+  })();
   const visibleMs = nextKind === 'warning' ? WARNING_VISIBLE_MS : SUCCESS_VISIBLE_MS;
   leaveTimeout = setTimeout(() => setLeaving(true), visibleMs);
   clearTimeoutHandle = setTimeout(() => {
@@ -98,7 +98,7 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
   return (
     <Show when={currentMessage()}>
       {(visibleMessage) => (
-        <Portal mount={currentAnchor()} ref={(el) => (el.style.display = 'contents')}>
+        <Portal mount={currentAnchor()}>
           <div
             class={`session-action-feedback ${currentAnchor() ? 'is-input-anchored' : ''} ${currentError() ? 'is-error' : hasWarningTone() ? 'is-warning' : ''} ${!currentError() && leaving() ? 'is-leaving' : ''}`.trim()}
             role={currentError() ? 'alert' : 'status'}

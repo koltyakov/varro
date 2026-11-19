@@ -1,4 +1,5 @@
-import { produce, reconcile } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+import { reconcile } from 'solid-js';
 import type { PermissionMode } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
 import { postMessage } from './bridge';
@@ -88,33 +89,28 @@ export function setPermissionModeForSession(
     return;
   }
 
-  if (state.sessionPermissionModes[sessionId] === mode) return;
   if (!pendingSessionPermissionModes.has(sessionId)) {
     confirmedSessionPermissionModes[sessionId] = mode;
   }
 
-  const nextModes = { ...state.sessionPermissionModes, [sessionId]: mode };
-
-  setState('sessionPermissionModes', nextModes);
-  writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+  setState((draft) => {
+    if (draft.sessionPermissionModes[sessionId] === mode) return;
+    const nextModes = { ...draft.sessionPermissionModes, [sessionId]: mode };
+    draft.sessionPermissionModes = nextModes;
+    writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+  });
 }
 
 export function removePermissionModeForSession(sessionId: string) {
-  if (!state.sessionPermissionModes[sessionId]) return;
-  if (!pendingSessionPermissionModes.has(sessionId)) {
-    delete confirmedSessionPermissionModes[sessionId];
-  }
-  const nextModes = Object.fromEntries(
-    Object.entries(state.sessionPermissionModes).filter(([id]) => id !== sessionId)
-  );
-  setState(
-    'sessionPermissionModes',
-    produce((draft) => {
-      delete draft[sessionId];
-    })
-  );
-  writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
-  postMessage({ type: 'permission-mode/update', payload: { sessionId, mode: null } });
+  setState((draft) => {
+    if (!draft.sessionPermissionModes[sessionId]) return;
+    if (!pendingSessionPermissionModes.has(sessionId)) {
+      delete confirmedSessionPermissionModes[sessionId];
+    }
+    delete draft.sessionPermissionModes[sessionId];
+    writeStored(STORAGE_KEYS.sessionPermissionModes, draft.sessionPermissionModes);
+    postMessage({ type: 'permission-mode/update', payload: { sessionId, mode: null } });
+  });
 }
 
 export function applySessionPermissionModesSnapshot(
@@ -126,15 +122,22 @@ export function applySessionPermissionModesSnapshot(
   for (const [sessionId, pending] of pendingSessionPermissionModes) {
     effectiveModes[sessionId] = pending.mode;
   }
-  setState('sessionPermissionModes', reconcile(effectiveModes));
-  setState('permissionModeRecoverySessionIds', recoveringSessionIds);
+  setState((draft) => {
+    const current = draft['sessionPermissionModes'];
+    const incoming = effectiveModes satisfies typeof current;
+    if (incoming === null || incoming === undefined || current === null || current === undefined)
+      draft['sessionPermissionModes'] = incoming;
+    else reconcile(incoming)(current);
+  });
+  setState(storePath('permissionModeRecoverySessionIds', recoveringSessionIds));
   writeStored(STORAGE_KEYS.sessionPermissionModes, effectiveModes);
 }
 
 export function setPendingSessionPermissionMode(
   sessionId: string,
   mode: PermissionMode | null,
-  generation?: number
+  generation?: number,
+  outcome?: 'confirmed'
 ): number | null {
   if (mode !== null) {
     const nextGeneration = ++nextPendingSessionPermissionModeGeneration;
@@ -144,12 +147,19 @@ export function setPendingSessionPermissionMode(
   const pending = pendingSessionPermissionModes.get(sessionId);
   if (generation !== undefined && pending?.generation !== generation) return null;
   pendingSessionPermissionModes.delete(sessionId);
-  const nextModes = { ...state.sessionPermissionModes };
-  const confirmedMode = confirmedSessionPermissionModes[sessionId];
-  if (confirmedMode) nextModes[sessionId] = confirmedMode;
-  else delete nextModes[sessionId];
-  setState('sessionPermissionModes', reconcile(nextModes));
-  writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+  if (pending && outcome === 'confirmed') {
+    // Promote the optimistic selection without publishing the previous host mode in between.
+    setPermissionModeForSession(sessionId, pending.mode);
+    return pending.generation;
+  }
+  setState((draft) => {
+    const nextModes = { ...draft.sessionPermissionModes };
+    const confirmedMode = confirmedSessionPermissionModes[sessionId];
+    if (confirmedMode) nextModes[sessionId] = confirmedMode;
+    else delete nextModes[sessionId];
+    reconcile(nextModes)(draft.sessionPermissionModes);
+    writeStored(STORAGE_KEYS.sessionPermissionModes, nextModes);
+  });
   return pending?.generation ?? null;
 }
 

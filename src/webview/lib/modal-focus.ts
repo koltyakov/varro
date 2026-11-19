@@ -2,6 +2,17 @@
 // technology that the rest of the page is inert, so the dialog has to actually hold focus:
 // move focus in on open, keep Tab inside, and hand focus back to the opener on close.
 
+import { onSettled } from 'solid-js';
+
+/** Owned setup for modal refs. The ref only captures the element. */
+export function modalFocus(options?: { preventScrollOnRestore?: boolean }) {
+  let element: HTMLElement | undefined;
+  onSettled(() => (element ? trapModalFocus(element, options) : undefined));
+  return (target: HTMLElement) => {
+    element = target;
+  };
+}
+
 const FOCUSABLE_SELECTOR = [
   'a[href]',
   'area[href]',
@@ -107,7 +118,11 @@ export function trapModalFocus(
     document.removeEventListener('focusin', handleFocusIn);
     // Only reclaim focus if the dialog still owns it. If something else took focus in the
     // meantime, moving it again would be the more surprising behavior.
-    if (previouslyFocused?.isConnected && container.contains(document.activeElement)) {
+    const lostFocusOnRemoval = !container.isConnected && document.activeElement === document.body;
+    if (
+      previouslyFocused?.isConnected &&
+      (container.contains(document.activeElement) || lostFocusOnRemoval)
+    ) {
       previouslyFocused.focus(
         options?.preventScrollOnRestore ? { preventScroll: true } : undefined
       );

@@ -1,4 +1,3 @@
-import { batch } from 'solid-js';
 import {
   isLoading,
   loadingStartedAt,
@@ -89,9 +88,9 @@ export function requestSessionSearchFocus() {
 }
 
 export function requestMessageListScrollToBottom(targetMessageId?: string) {
-  batch(() => {
+  (() => {
     for (const listener of beforeMessageListScrollToBottomListeners) listener(targetMessageId);
     setMessageListScrollTargetMessageId(targetMessageId ?? null);
     setMessageListScrollRequestKey((value) => value + 1);
-  });
+  })();
 }

@@ -1,4 +1,5 @@
-import { createRoot } from 'solid-js';
+import { flush as flushSolid, createRoot } from 'solid-js';
+import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEventName } from '../../shared/protocol';
 import {
@@ -37,15 +38,19 @@ describe('useOpenCode todo synchronization', () => {
     ]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
       await hookModule.selectSession('session-1');
+      flushSolid();
 
       expect(clientMocks.sessionTodos).toHaveBeenCalledWith('session-1', {
         directory: '/repo',
@@ -61,6 +66,7 @@ describe('useOpenCode todo synchronization', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -88,22 +94,29 @@ describe('useOpenCode todo synchronization', () => {
     ]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        { info: userMessage('user-1'), parts: [] },
-        {
-          info: assistantMessage('assistant-1', 'user-1'),
-          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'in_progress')],
-        },
-      ]);
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1', 'user-1'),
+            parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'in_progress')],
+          },
+        ])
+      );
+      flushSolid();
 
       handlers.get('todo.updated')?.({
         properties: {
@@ -118,6 +131,7 @@ describe('useOpenCode todo synchronization', () => {
           ],
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([
         {
@@ -129,6 +143,7 @@ describe('useOpenCode todo synchronization', () => {
       ]);
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.todos).toEqual([
@@ -140,8 +155,10 @@ describe('useOpenCode todo synchronization', () => {
           },
         ]);
       });
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -161,22 +178,29 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        { info: userMessage('user-1'), parts: [] },
-        {
-          info: assistantMessage('assistant-1', 'user-1'),
-          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
-        },
-      ]);
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1', 'user-1'),
+            parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
+          },
+        ])
+      );
+      flushSolid();
 
       handlers.get('todo.updated')?.({
         properties: {
@@ -191,6 +215,7 @@ describe('useOpenCode todo synchronization', () => {
           ],
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([
         {
@@ -209,6 +234,7 @@ describe('useOpenCode todo synchronization', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([
         {
@@ -220,6 +246,7 @@ describe('useOpenCode todo synchronization', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -250,22 +277,29 @@ describe('useOpenCode todo synchronization', () => {
     ]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        { info: userMessage('user-1'), parts: [] },
-        {
-          info: assistantMessage('assistant-1', 'user-1'),
-          parts: [],
-        },
-      ]);
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1', 'user-1'),
+            parts: [],
+          },
+        ])
+      );
+      flushSolid();
 
       handlers.get('todo.updated')?.({
         properties: {
@@ -280,6 +314,7 @@ describe('useOpenCode todo synchronization', () => {
           ],
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([]);
 
@@ -291,16 +326,20 @@ describe('useOpenCode todo synchronization', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([]);
 
       handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      flushSolid();
 
       await vi.waitFor(() => {
         expect(stateModule.state.todos).toEqual([]);
       });
+      flushSolid();
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -320,32 +359,44 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        { info: userMessage('user-1'), parts: [] },
-        {
-          info: assistantMessage('assistant-1', 'user-1'),
-          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'in_progress')],
-        },
-      ]);
-      stateModule.setState('sessionStatus', { 'session-1': { type: 'busy' } });
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1', 'user-1'),
+            parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'in_progress')],
+          },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
+      flushSolid();
       stateModule.startLoading();
-      stateModule.setState('todos', [
-        {
-          id: 'todo-part-1-todo',
-          content: 'Summarize findings',
-          status: 'in_progress',
-          priority: 'medium',
-        },
-      ]);
+      flushSolid();
+      stateModule.setState(
+        storePath('todos', [
+          {
+            id: 'todo-part-1-todo',
+            content: 'Summarize findings',
+            status: 'in_progress',
+            priority: 'medium',
+          },
+        ])
+      );
+      flushSolid();
 
       handlers.get('message.updated')?.({
         properties: {
@@ -355,6 +406,7 @@ describe('useOpenCode todo synchronization', () => {
           },
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([
         {
@@ -366,6 +418,7 @@ describe('useOpenCode todo synchronization', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -385,30 +438,40 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        { info: userMessage('user-1'), parts: [] },
-        {
-          info: assistantMessage('assistant-1', 'user-1'),
-          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'in_progress')],
-        },
-      ]);
-      stateModule.setState('todos', [
-        {
-          id: 'todo-part-1-todo',
-          content: 'Summarize findings',
-          status: 'in_progress',
-          priority: 'medium',
-        },
-      ]);
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: assistantMessage('assistant-1', 'user-1'),
+            parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'in_progress')],
+          },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(
+        storePath('todos', [
+          {
+            id: 'todo-part-1-todo',
+            content: 'Summarize findings',
+            status: 'in_progress',
+            priority: 'medium',
+          },
+        ])
+      );
+      flushSolid();
 
       handlers.get('todo.updated')?.({
         properties: {
@@ -423,6 +486,7 @@ describe('useOpenCode todo synchronization', () => {
           ],
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([
         {
@@ -434,6 +498,7 @@ describe('useOpenCode todo synchronization', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 
@@ -453,35 +518,45 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.questionList.mockResolvedValue([]);
 
     const { stateModule, hookModule } = await loadModules();
+    flushSolid();
     const dispose = createRoot((cleanup) => {
       hookModule.useOpenCode();
       return cleanup;
     });
+    flushSolid();
 
     try {
       await Promise.resolve();
+      flushSolid();
       const completedAssistant = assistantMessage('assistant-1', 'user-1');
       if (completedAssistant.role !== 'assistant') {
         throw new Error('Expected an assistant message fixture');
       }
       completedAssistant.time.completed = 1;
 
-      stateModule.setState('activeSessionId', 'session-1');
-      stateModule.setState('messages', [
-        { info: userMessage('user-1'), parts: [] },
-        {
-          info: completedAssistant,
-          parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
-        },
-      ]);
-      stateModule.setState('todos', [
-        {
-          id: 'todo-part-1-todo',
-          content: 'Summarize findings',
-          status: 'completed',
-          priority: 'medium',
-        },
-      ]);
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(
+        storePath('messages', [
+          { info: userMessage('user-1'), parts: [] },
+          {
+            info: completedAssistant,
+            parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
+          },
+        ])
+      );
+      flushSolid();
+      stateModule.setState(
+        storePath('todos', [
+          {
+            id: 'todo-part-1-todo',
+            content: 'Summarize findings',
+            status: 'completed',
+            priority: 'medium',
+          },
+        ])
+      );
+      flushSolid();
 
       handlers.get('todo.updated')?.({
         properties: {
@@ -496,6 +571,7 @@ describe('useOpenCode todo synchronization', () => {
           ],
         },
       });
+      flushSolid();
 
       expect(stateModule.state.todos).toEqual([
         {
@@ -507,6 +583,7 @@ describe('useOpenCode todo synchronization', () => {
       ]);
     } finally {
       dispose();
+      flushSolid();
     }
   });
 });

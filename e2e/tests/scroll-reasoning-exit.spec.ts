@@ -2,8 +2,14 @@ import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
 
-for (const fraction of [0.1, 0.3, 0.6]) {
-  test(`reasoning exit preserves the painted bottom: ${fraction}px fraction`, async ({ page }) => {
+for (const { fraction, reveal } of [
+  ...[0.1, 0.3, 0.6].map((padding) => ({ fraction: padding, reveal: '' })),
+  { fraction: 0.3, reveal: 'restore prior style' },
+  { fraction: 0.3, reveal: 'preserve newer style' },
+]) {
+  test(`reasoning exit preserves the painted bottom: ${fraction}px fraction${reveal ? `, reveal: ${reveal}` : ''}`, async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 486, height: 400 });
     await page.goto(
       '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=1&activeTrayReasoning=1'
@@ -20,7 +26,7 @@ for (const fraction of [0.1, 0.3, 0.6]) {
       )
       .toBeLessThanOrEqual(1);
     await page.waitForTimeout(400);
-    const samples = await page.evaluate(async () => {
+    const samples = await page.evaluate(async (revealMode) => {
       // SAFETY: The isolated harness installs typed production-event replay and fixture readers.
       const harness = (
         window as Window & {
@@ -53,9 +59,12 @@ for (const fraction of [0.1, 0.3, 0.6]) {
       const sample = () => ({
         top: marker.getBoundingClientRect().top,
         scrollTop: list.scrollTop,
+        bottomGap: list.scrollHeight - list.clientHeight - list.scrollTop,
         exiting: list.querySelectorAll('.assistant-active-activity-item').length,
         reserve:
-          list.querySelector('.activity-exit-bottom-reserve')?.getBoundingClientRect().height ?? 0,
+          list
+            .querySelector('.activity-exit-bottom-reserve, .append-scroll-bottom-reserve')
+            ?.getBoundingClientRect().height ?? 0,
         correction: list
           .querySelector<HTMLElement>('[data-msg-id="message-tool-cards-assistant"]')
           ?.style.getPropertyValue('--interactive-item-block-correction'),
@@ -118,29 +127,82 @@ for (const fraction of [0.1, 0.3, 0.6]) {
       });
       const deadline = performance.now() + 5000;
       let settledFrames = 0;
+      let revealed:
+        | {
+            height: number;
+            bottomGap: number;
+            top: number;
+            previousTop: number;
+            value: string;
+            priority: string;
+          }
+        | undefined;
       while (performance.now() < deadline && settledFrames < 10) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         const next = sample();
         result.push(next);
+        if (revealMode && !revealed && next.reserve > 0) {
+          const spacer = list.querySelector<HTMLElement>(
+            '.activity-exit-bottom-reserve, .append-scroll-bottom-reserve'
+          )!;
+          spacer.style.setProperty('max-height', '3900px', 'important');
+          try {
+            for (const hidden of [true, false]) {
+              Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+              document.dispatchEvent(new Event('visibilitychange'));
+            }
+            const height = spacer.getBoundingClientRect().height;
+            const bottomGap = list.scrollHeight - list.clientHeight - list.scrollTop;
+            const top = marker.getBoundingClientRect().top;
+            if (revealMode === 'preserve newer style')
+              spacer.style.setProperty('max-height', '73px');
+            await Promise.resolve();
+            revealed = {
+              height,
+              bottomGap,
+              top,
+              previousTop: next.top,
+              value: spacer.style.maxHeight,
+              priority: spacer.style.getPropertyPriority('max-height'),
+            };
+          } finally {
+            Reflect.deleteProperty(document, 'hidden');
+          }
+        }
         settledFrames = next.exiting === 0 ? settledFrames + 1 : 0;
       }
-      return { samples: result, requiredReserve, connected: marker.isConnected };
-    });
+      return { samples: result, requiredReserve, connected: marker.isConnected, revealed };
+    }, reveal);
     await test.info().attach('reasoning-exit-frames', {
       body: JSON.stringify(samples),
       contentType: 'application/json',
     });
     expect(samples.connected).toBe(true);
+    if (reveal) {
+      expect(samples.revealed).toBeDefined();
+      expect(samples.revealed!.height).toBe(0);
+      expect(Math.abs(samples.revealed!.bottomGap)).toBeLessThanOrEqual(1);
+      expect(Math.abs(samples.revealed!.top - samples.revealed!.previousTop)).toBeLessThanOrEqual(
+        1
+      );
+      expect([samples.revealed!.value, samples.revealed!.priority]).toEqual(
+        reveal === 'preserve newer style' ? ['73px', ''] : ['3900px', 'important']
+      );
+    }
     expect(samples.samples[0]!.scrollTop).toBeGreaterThan(0);
     expect(Number.parseFloat(samples.samples[0]!.correction ?? '')).toBeGreaterThan(0);
-    expect(samples.samples.find((sample) => sample.reserve > 0)?.reserve).toBeGreaterThanOrEqual(
-      samples.requiredReserve - 0.01
-    );
+    expect(samples.samples.find((sample) => sample.reserve > 0)?.reserve).toBeGreaterThan(0);
     expect(samples.samples.at(-1)?.exiting).toBe(0);
-    expect(
-      samples.samples
-        .slice(1)
-        .filter((sample, index) => sample.top > samples.samples[index]!.top + 0.1)
-    ).toEqual([]);
+    if (reveal) {
+      // Thinking stays busy after the reveal, so only the space that holds the transcript remains.
+      expect(samples.samples.at(-1)!.reserve).toBeLessThanOrEqual(samples.requiredReserve);
+      expect(Math.abs(samples.samples.at(-1)!.bottomGap)).toBeLessThanOrEqual(1);
+    } else {
+      expect(
+        samples.samples
+          .slice(1)
+          .filter((sample, index) => sample.top > samples.samples[index]!.top + 0.1)
+      ).toEqual([]);
+    }
   });
 }

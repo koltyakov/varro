@@ -1,5 +1,6 @@
-import { batch } from 'solid-js';
-import { produce, reconcile } from 'solid-js/store';
+import { storePath } from '@solidjs/signals';
+
+import { reconcile } from 'solid-js';
 import type { Permission, QuestionRequest } from '../types';
 import { setState, state } from './app-state';
 import type { PermissionReconciliation } from './permission-grouping';
@@ -27,7 +28,7 @@ export function setQuestions(questions: QuestionRequest[]) {
     if (!questionGenerations.has(question.id)) questionGenerations.set(question.id, 1);
   }
   const nextQuestionIds = new Set(nextQuestions.map((question) => question.id));
-  batch(() => {
+  (() => {
     for (const question of state.questions) {
       if (nextQuestionIds.has(question.id) || resolvedQuestionIds.has(question.id)) continue;
       const wasTransitioned = transitionedQuestionIds.has(question.id);
@@ -36,8 +37,16 @@ export function setQuestions(questions: QuestionRequest[]) {
       transitionedQuestionIds.add(question.id);
       if (!wasTransitioned) markQuestionResponsePending(question.id, question.sessionID);
     }
-    setState('questions', reconcile(nextQuestions, { key: 'id' }));
-  });
+    setState((draft) => {
+      const previous = new Map(draft.questions.map((question) => [question.id, question]));
+      draft.questions = nextQuestions.map((question) => {
+        const retained = previous.get(question.id);
+        if (!retained) return question;
+        reconcile(question)(retained);
+        return retained;
+      });
+    });
+  })();
 }
 
 export function upsertQuestion(question: QuestionRequest) {
@@ -47,7 +56,7 @@ export function upsertQuestion(question: QuestionRequest) {
   else if (reusesResolvedID) {
     questionGenerations.set(question.id, questionGenerations.get(question.id)! + 1);
   }
-  batch(() => {
+  (() => {
     // An initial/replayed ask can restore a checkpoint before questions hydrate.
     // Only an explicit ask reusing a resolved ID starts a fresh draft.
     if (reusesResolvedID) nativeFormDrafts.remove(question.id);
@@ -58,14 +67,15 @@ export function upsertQuestion(question: QuestionRequest) {
       clearQuestionResponsePendingRequest(question.id);
     }
     setState(
-      'questions',
-      produce((questions) => {
+      storePath('questions', (questions) => {
         const idx = questions.findIndex((item) => item.id === question.id);
         if (idx !== -1) questions[idx] = question;
         else questions.push(question);
+
+        return questions;
       })
     );
-  });
+  })();
 }
 
 export function removeQuestion(requestID: string) {
@@ -77,10 +87,11 @@ export function removeQuestion(requestID: string) {
 function removeQuestionEntry(requestID: string) {
   nativeFormDrafts.remove(requestID);
   setState(
-    'questions',
-    produce((questions) => {
+    storePath('questions', (questions) => {
       const idx = questions.findIndex((item) => item.id === requestID);
       if (idx !== -1) questions.splice(idx, 1);
+
+      return questions;
     })
   );
 }
@@ -96,12 +107,12 @@ export function removeResolvedQuestion(requestID: string, expectedGeneration?: n
   const sessionID =
     state.questions.find((question) => question.id === requestID)?.sessionID ??
     resolvedQuestionSessions.get(requestID);
-  batch(() => {
+  (() => {
     if (sessionID && !wasTransitioned) markQuestionResponsePending(requestID, sessionID);
     rememberResolvedQuestion(requestID, sessionID);
     transitionedQuestionIds.add(requestID);
     removeQuestionEntry(requestID);
-  });
+  })();
   return true;
 }
 
@@ -137,7 +148,7 @@ export function resetQuestionResolutionState() {
   resolvedQuestionSessions.clear();
   questionGenerations.clear();
   questionResponsePendingRequests.clear();
-  setState('questionResponsePendingSessionIds', []);
+  setState(storePath('questionResponsePendingSessionIds', []));
 }
 
 function rememberResolvedQuestion(requestID: string, sessionID?: string) {
@@ -163,15 +174,15 @@ function syncQuestionResponsePendingSessions() {
   const nextSessionIDs = [
     ...new Set([...questionResponsePendingRequests.values()].map((entry) => entry.sessionID)),
   ];
-  if (
-    nextSessionIDs.length === state.questionResponsePendingSessionIds.length &&
-    nextSessionIDs.every(
-      (sessionID, index) => state.questionResponsePendingSessionIds[index] === sessionID
+  setState((draft) => {
+    const current = draft.questionResponsePendingSessionIds;
+    if (
+      nextSessionIDs.length === current.length &&
+      nextSessionIDs.every((sessionID, index) => current[index] === sessionID)
     )
-  ) {
-    return;
-  }
-  setState('questionResponsePendingSessionIds', nextSessionIDs);
+      return;
+    draft.questionResponsePendingSessionIds = nextSessionIDs;
+  });
 }
 
 export function clearQuestionResponsePending(sessionID: string, authoritativeAt?: number) {
@@ -190,8 +201,7 @@ export function addPermission(permission: Permission) {
   // replace their incomplete approval data, or remove an already-resolved request.
   if (!permission.recoveredIncomplete) markPermissionMutations([permission.id]);
   setState(
-    'permissions',
-    produce((perms) => {
+    storePath('permissions', (perms) => {
       if (
         perms.find(
           (p) =>
@@ -200,7 +210,7 @@ export function addPermission(permission: Permission) {
             p.groupMembers?.some((member) => member.id === permission.id)
         )
       ) {
-        return;
+        return perms;
       }
 
       const signature = getPermissionSignature(permission);
@@ -212,7 +222,7 @@ export function addPermission(permission: Permission) {
           duplicateIDs: [...new Set(getPermissionGroupMembers(permission).map((m) => m.id))],
           groupMembers: getPermissionGroupMembers(permission),
         });
-        return;
+        return perms;
       }
 
       const existing = perms[existingIndex]!;
@@ -233,6 +243,8 @@ export function addPermission(permission: Permission) {
         existing.groupMembers = merged;
         existing.duplicateIDs = mergedIds;
       }
+
+      return perms;
     })
   );
 }
@@ -252,8 +264,7 @@ export function setPermissionAutoApprovePresentation(
 
   markPermissionMutations(getPermissionGroupMembers(matchedPermission).map((member) => member.id));
   setState(
-    'permissions',
-    produce((permissions) => {
+    storePath('permissions', (permissions) => {
       const permission = permissions.find(
         (item) =>
           item.id === permissionId ||
@@ -264,6 +275,8 @@ export function setPermissionAutoApprovePresentation(
         permission.autoApproveReason = reason;
         if (actionSummary) permission.actionSummary = actionSummary;
       }
+
+      return permissions;
     })
   );
 }
@@ -281,21 +294,20 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
       ? getPermissionGroupMembers(matchedPermission).map((member) => member.id)
       : [permissionId]
   );
-  batch(() => {
+  (() => {
     if (matchedPermission) prepareForPermissionRemoval(permissionId, removeGroup);
     setState(
-      'permissions',
-      produce((perms) => {
+      storePath('permissions', (perms) => {
         const idx = perms.findIndex(
           (p) =>
             p.id === permissionId ||
             p.duplicateIDs?.includes(permissionId) ||
             p.groupMembers?.some((member) => member.id === permissionId)
         );
-        if (idx === -1) return;
+        if (idx === -1) return perms;
         if (removeGroup) {
           perms.splice(idx, 1);
-          return;
+          return perms;
         }
 
         const permission = perms[idx]!;
@@ -304,7 +316,7 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
         );
         if (groupMembers.length === 0) {
           perms.splice(idx, 1);
-          return;
+          return perms;
         }
 
         const nextLeader = groupMembers[0]!;
@@ -315,9 +327,11 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
         permission.groupMembers = groupMembers.length > 1 ? groupMembers : undefined;
         permission.duplicateIDs =
           groupMembers.length > 1 ? groupMembers.map((member) => member.id) : undefined;
+
+        return perms;
       })
     );
-  });
+  })();
 }
 
 export function reconcilePermissions(
@@ -345,7 +359,7 @@ export function reconcilePermissions(
       }
     }
 
-    setState('permissions', groupPermissions(nextPermissions));
+    setState(storePath('permissions', groupPermissions(nextPermissions)));
   } finally {
     finishPermissionReconciliation(reconciliation);
   }
