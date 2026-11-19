@@ -145,12 +145,12 @@ export function ProviderConnectionDialog(props: {
       loading: props.isLoadingProviders,
       id: props.initialProviderID?.trim(),
       methodID: props.initialMethodID,
-      providers: providers(),
+      providerOptions: providers(),
     }),
-    ({ loading, id, methodID, providers }) => {
+    ({ loading, id, methodID, providerOptions }) => {
       if (initialProviderApplied || loading) return;
       initialProviderApplied = true;
-      const provider = providers.find((provider) => provider.id === id);
+      const provider = providerOptions.find((option) => option.id === id);
       if (id && provider) {
         chooseProvider(id);
         if (methodID) {

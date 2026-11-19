@@ -21,13 +21,13 @@ export function BackgroundServices(props: {
       sessionID: props.sessionID,
       directory: props.directory,
       count: props.count,
-      visible: visible(),
+      pageVisible: visible(),
     }),
-    ({ sessionID, directory, count, visible }) => {
+    ({ sessionID, directory, count, pageVisible }) => {
       const cleanups: Array<() => void> = [];
 
       setServices([]);
-      if (!sessionID || count <= 0 || !visible)
+      if (!sessionID || count <= 0 || !pageVisible)
         return () => {
           for (const cleanup of cleanups.toReversed()) cleanup();
         };

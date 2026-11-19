@@ -1,6 +1,6 @@
 import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRoot, flush } from 'solid-js';
+import { createRoot, flush as flushSolid } from 'solid-js';
 import { createAppState } from './app-state';
 import { isFunction } from './runtime-values';
 import type { MessageEntry } from '../types';
@@ -190,7 +190,7 @@ describe('streaming delta store transactions', () => {
       appState.setState(storePath('messages', [message]));
       appState.setState(storePath('streamingPartId', 'existing'));
       appState.setState(storePath('streamingText', 'before complete'));
-      flush();
+      flushSolid();
       const retainedPart = appState.state.messages[0]!.parts[0];
       const pending: Array<() => void> = [];
       const setState = appState.setState;
@@ -223,7 +223,7 @@ describe('streaming delta store transactions', () => {
         expect(appState.messageIndex.getIndexedPartLocation('p1')).toBeNull();
         pending.splice(0).forEach((apply) => apply());
       }
-      flush();
+      flushSolid();
 
       const parts = appState.state.messages[0]!.parts;
       expect(parts.map((part) => part.id)).toEqual(['existing', 'p1', 'p2', 'p3']);
@@ -268,7 +268,7 @@ describe('streaming deltas while frames are withheld', () => {
       info: { id: 'm1', sessionID: 's1', role: 'user', time: { created: 0 } },
       parts: [{ id: 'p1', messageID: 'm1', sessionID: 's1', type: 'text', text: '' }],
     } as MessageEntry);
-    flush();
+    flushSolid();
   });
 
   afterEach(() => {
@@ -292,7 +292,7 @@ describe('streaming deltas while frames are withheld', () => {
     expect(state.streamingText).toBe('');
 
     frames.splice(0).forEach((frame) => frame(0));
-    flush();
+    flushSolid();
 
     expect(state.streamingPartId).toBe('p1');
     expect(state.streamingText).toBe('one two three four');
@@ -304,7 +304,7 @@ describe('streaming deltas while frames are withheld', () => {
     applyMessagePartDelta('m1', 'p1', 'answer', 's1');
 
     finishMessageStreaming('m1');
-    flush();
+    flushSolid();
 
     const part = state.messages[0]?.parts[0];
     expect(part?.type === 'text' ? part.text : null).toBe('partial answer');

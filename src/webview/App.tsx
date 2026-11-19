@@ -26,10 +26,14 @@ import { UiIcon } from './components/UiIcon';
 import { RalphForm } from './components/ralph/RalphForm';
 import { requestProviderConnection } from './lib/provider-connection-state';
 
+function renderAppError(error: Accessor<unknown>) {
+  return <AppErrorFallback error={error} />;
+}
+
 export function AppRoot() {
   onCleanup(cleanupBridge);
   return (
-    <Errored fallback={(error) => <AppErrorFallback error={error} />}>
+    <Errored fallback={renderAppError}>
       <InitializedApp />
     </Errored>
   );

@@ -401,10 +401,10 @@ it('acquires the selected completed edit detail while the projected stream is pa
   expect(lines()).toEqual(['39', '40', '41', '42', '43', '44']);
   expect({
     mountedRoute: part.deferred,
-    reads: requests.map(({ method, path: requestPath }) => `${method} ${requestPath}`).sort(),
+    reads: requests.map(({ method, path: requestPath }) => `${method} ${requestPath}`).toSorted(),
   }).toEqual({
     mountedRoute: currentPath(callID),
-    reads: files.map(({ id }) => `GET ${currentPath(id)}`).sort(),
+    reads: files.map(({ id }) => `GET ${currentPath(id)}`).toSorted(),
   });
   const selected = requests.find((r) => r.path === currentPath(callID))!;
   respond(selected, {

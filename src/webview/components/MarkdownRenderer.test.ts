@@ -345,8 +345,8 @@ describe('MarkdownRenderer', () => {
               marker: 'SLOTMARKER',
               render: () => {
                 mounted();
-                createEffect(value, (value) => {
-                  effect(value);
+                createEffect(value, (current) => {
+                  effect(current);
                 });
                 onCleanup(disposed);
                 return document.createElement('button');
@@ -387,8 +387,8 @@ describe('MarkdownRenderer', () => {
         mounted(marker);
         onCleanup(() => disposed(marker));
         const button = document.createElement('button');
-        createEffect(value, (value) => {
-          effect(marker, value);
+        createEffect(value, (current) => {
+          effect(marker, current);
           button.textContent = `${marker} ${value}`;
         });
         return button;

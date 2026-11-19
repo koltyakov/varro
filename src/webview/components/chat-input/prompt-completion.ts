@@ -38,14 +38,14 @@ export class PromptCompletion {
         draft: options.draft(),
         requestKey: key(),
         eligible: options.eligible(),
-        dismissed: dismissed(),
+        dismissedKey: dismissed(),
         scope: options.scope(),
         model: options.model(),
       }),
-      ({ draft, requestKey, eligible, dismissed, scope, model }) => {
+      ({ draft, requestKey, eligible, dismissedKey, scope, model }) => {
         const cleanups: Array<() => void> = [];
 
-        const wasDismissed = dismissed === requestKey;
+        const wasDismissed = dismissedKey === requestKey;
         setSuggestion('');
         if (!draft.trim()) setError('');
         const nextErrorScope = JSON.stringify([scope, model]);
