@@ -24,6 +24,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isBoolean, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import { parseFollowupTitle } from '../shared/followups';
+import { parseSessionGoal } from '../shared/session-goal';
 import { compareVersions, extractVersion } from './server-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { parseSkillAttachment } from '../shared/skill-reference';
@@ -72,6 +73,7 @@ import {
   v2ModelRef,
   v2Rules,
   isV2TranscriptMessage,
+  isV2UserPrompt,
   normalizeV2Error,
   type V2MessageContext,
 } from './opencode-v2-projection';
@@ -384,8 +386,16 @@ export class OpenCodeV2Adapter {
       const model = asRecord(data.model);
       if (type === 'session.model.selected' && isString(model?.id) && isString(model.providerID))
         context.model = model as ModelRef;
-      if (type === 'session.inbox.enqueued' && isString(data.inboxID))
-        this.inputTypes.set(data.inboxID, String(asRecord(data.item)?.type));
+      if (type === 'session.inbox.enqueued' && isString(data.inboxID)) {
+        const item = asRecord(data.item);
+        const payload = asRecord(item?.payload);
+        const goalKickoff =
+          item?.type === 'synthetic' &&
+          asRecord(payload?.metadata)?.source === 'goal' &&
+          isString(payload?.description) &&
+          payload.description.length > 0;
+        this.inputTypes.set(data.inboxID, goalKickoff ? 'user' : String(item?.type));
+      }
       if (type === 'session.inbox.delivered' && isString(data.inboxID)) {
         if (this.inputTypes.get(data.inboxID) === 'user') {
           context.parentID = data.inboxID;
@@ -799,6 +809,17 @@ export class OpenCodeV2Adapter {
       const sessionID = decodeURIComponent(sessionRoute[1]!);
       const endpoint = `/api/session/${encodeURIComponent(sessionID)}`;
       const action = sessionRoute[2] ?? '';
+      if (action === 'goal' && method === 'GET') {
+        const response = asRecord(
+          await raw('POST', query('/api/rpc/opencode.goal/get', true), {
+            input: { sessionID },
+          })
+        );
+        if (response?.output === null) return null;
+        const goal = parseSessionGoal(response?.output);
+        if (!goal) throw new Error('Invalid OpenCode goal response');
+        return goal;
+      }
       if (
         (action === 'child-task-controls' && method === 'GET') ||
         ((action === 'interrupt-child' || action === 'background-parent') && method === 'POST')
@@ -1215,7 +1236,7 @@ export class OpenCodeV2Adapter {
             (message.type === 'idle' &&
               (message.outcome === 'failed' || message.outcome === 'interrupted'))
         );
-        const firstUser = ordered.findIndex((message) => message.type === 'user');
+        const firstUser = ordered.findIndex(isV2UserPrompt);
         let parent =
           firstAssistant >= 0 ? (this.messageParents.get(ordered[firstAssistant]!.id) ?? '') : '';
         let assistantFailed = false;
@@ -1235,7 +1256,7 @@ export class OpenCodeV2Adapter {
             bytes += Buffer.byteLength(JSON.stringify(context.data));
             if (bytes > (options.maxResponseBytes ?? 16 * 1024 * 1024))
               throw new OpenCodeResponseTooLargeError(options.maxResponseBytes ?? 16 * 1024 * 1024);
-            const user = context.data.find((message) => message.type === 'user');
+            const user = context.data.find(isV2UserPrompt);
             const preceding = context.data.slice(0, user ? context.data.indexOf(user) : undefined);
             assistantFailed ||= preceding.some(
               (message) => message.type === 'assistant' && !!message.error
@@ -1263,7 +1284,7 @@ export class OpenCodeV2Adapter {
             { ...context, ...this.failures.get(message.id) },
             options
           );
-          if (message.type === 'user') {
+          if (isV2UserPrompt(message)) {
             parent = message.id;
             assistantFailed = false;
           }
@@ -1283,12 +1304,13 @@ export class OpenCodeV2Adapter {
         const messageIDs = new Set(messages.map((message) => message.info.id));
         for (const item of inbox.toSorted((a, b) => a.time.created - b.time.created)) {
           if (messageIDs.has(item.id)) continue;
-          // Restart cancellation notices are admitted without waking an idle owner.
-          // Show the canonical notice now, under the same ID it keeps on delivery.
+          // Restart notices may not wake an idle owner, and a goal kickoff is the
+          // user's prompt. Show both now, under the same ID they keep on delivery.
           if (
             item.type === 'synthetic' &&
-            item.payload.metadata?.source === 'shell' &&
-            item.payload.metadata.state === 'cancelled'
+            ((item.payload.metadata?.source === 'shell' &&
+              item.payload.metadata.state === 'cancelled') ||
+              (item.payload.metadata?.source === 'goal' && !!item.payload.description))
           ) {
             const notice = projectV2Message(
               { ...item.payload, id: item.id, type: 'synthetic', time: item.time },

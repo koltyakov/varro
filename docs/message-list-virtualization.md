@@ -141,6 +141,10 @@ the shared invariants below remain true.
   Native subagent result notifications render as ordinary automatic-action tools inside Explored,
   not as a second standalone subagent task card. Preserve their result text, status, and native IDs;
   the original task card remains the subagent navigation entry.
+- Native goal kickoffs are an exception to synthetic-action rendering. Show the `/goal` objective as
+  the user's prompt under the native message and part IDs, including while it waits in the inbox.
+  It owns subsequent assistant replies. Hide internal goal continuations and resume instructions;
+  the backend-driven goal row above the composer shows their current state and controls.
 - `virtualMetrics.prefix.at(index)` must describe the same ordered ID list used by the renderer.
 - Published prefixes are immutable snapshots. Large prefixes share complete 256-entry chunks;
   a dirty suffix copies its partial boundary chunk before writing. Earlier snapshots must remain

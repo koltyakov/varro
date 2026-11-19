@@ -262,6 +262,7 @@ import {
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
 import { BackgroundServices } from './chat-input/BackgroundServices';
+import { SessionGoalRow } from './chat-input/SessionGoalRow';
 import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
@@ -964,36 +965,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       state.nativePdfs.length > 0 ||
       !!state.terminalSelection ||
       !!state.attachedDiagnostics
-  );
-
-  createEffect(
-    () => [workspaceSendPending(), hasSendableComposerContent()] as const,
-    ([sendPending, draftNonempty]) => {
-      if (sendPending) return;
-      if (!draftNonempty && previousDraftNonempty) setManualWorkspaceSelection(false);
-      previousDraftNonempty = draftNonempty;
-    }
-  );
-
-  createEffect(
-    () => {
-      const activeWorkspacePath = state.editorContext.activeWorkspacePath;
-      if (
-        !activeWorkspacePath ||
-        !canSelectWorkspace() ||
-        hasSendableComposerContent() ||
-        manualWorkspaceSelection() ||
-        isSameWorkspacePath(activeWorkspacePath, state.editorContext.workspacePath) ||
-        isSameWorkspacePath(activeWorkspacePath, pendingWorkspacePath())
-      ) {
-        return;
-      }
-
-      return activeWorkspacePath;
-    },
-    (path) => {
-      if (path) requestWorkspaceSelection(path);
-    }
   );
 
   async function attachNativePdfFiles(files: File[], sequences?: ReadonlyMap<File, number>) {
@@ -5837,6 +5808,37 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     canDelegateVision(state.allAgents, state.providers)
   );
 
+  // Effect computations run during registration, so image capability memos must exist first.
+  createEffect(
+    () => [workspaceSendPending(), hasSendableComposerContent()] as const,
+    ([sendPending, draftNonempty]) => {
+      if (sendPending) return;
+      if (!draftNonempty && previousDraftNonempty) setManualWorkspaceSelection(false);
+      previousDraftNonempty = draftNonempty;
+    }
+  );
+
+  createEffect(
+    () => {
+      const activeWorkspacePath = state.editorContext.activeWorkspacePath;
+      if (
+        !activeWorkspacePath ||
+        !canSelectWorkspace() ||
+        hasSendableComposerContent() ||
+        manualWorkspaceSelection() ||
+        isSameWorkspacePath(activeWorkspacePath, state.editorContext.workspacePath) ||
+        isSameWorkspacePath(activeWorkspacePath, pendingWorkspacePath())
+      ) {
+        return;
+      }
+
+      return activeWorkspacePath;
+    },
+    (path) => {
+      if (path) requestWorkspaceSelection(path);
+    }
+  );
+
   function currentPromptCanHandleImages() {
     return (
       currentModelSupportsVision() || (currentModelSupportsTools() && canDelegateCurrentImages())
@@ -6732,6 +6734,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       </Show>
 
       <Show when={!props.newSession && !hasExpandedDiffOverlay() && !composerEditingMessage()}>
+        <Show when={state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 2}>
+          <SessionGoalRow
+            sessionID={composerSessionId()}
+            directory={composerBackgroundServiceDirectory()}
+          />
+        </Show>
         <BackgroundServices
           sessionID={composerSessionId()}
           directory={composerBackgroundServiceDirectory()}

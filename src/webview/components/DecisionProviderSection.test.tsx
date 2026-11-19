@@ -59,7 +59,7 @@ describe('Jev auto-approve', () => {
     expect(checkbox.disabled).toBe(true);
     expect(checkbox.checked).toBe(true);
 
-    pending.resolve({ jev: { ...connected, autoApprove: true } } as DecisionProviderStatus);
+    pending.resolve({ jev: { ...connected, autoApprove: true } });
     await vi.waitFor(() => {
       flushSolid();
       expect(checkbox.disabled).toBe(false);

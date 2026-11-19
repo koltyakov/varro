@@ -28,6 +28,7 @@ import { resetToolCallExpansionState } from './ToolCall';
 import { fixture } from '../test-fixtures';
 import type { UnknownRecord } from '../../shared/type-utils';
 import { projectV2Message } from '../../extension/opencode-v2-projection';
+import { formatSkillAttachment } from '../../shared/skill-reference';
 import { buildPlanImplementationPrompt } from './message-list/plan-actions';
 import { buildStopProcessPrompt } from '../lib/background-process-action';
 import { xmarkCircleSolidIcon } from '../lib/ui-icons';
@@ -105,6 +106,27 @@ function textPart(id: string, text: string): TextPart {
   };
 }
 
+it('renders a native goal kickoff as a visible prompt instead of collapsed automatic activity', () => {
+  const message = fixture<MessageEntry>(
+    projectV2Message(
+      {
+        id: 'msg_goal',
+        type: 'synthetic',
+        description: 'Goal: Wait for 1 minute',
+        metadata: { source: 'goal' },
+        text: '<untrusted_objective>\nWait for 1 minute\n</untrusted_objective>',
+        time: { created: 1 },
+      },
+      'session-1'
+    )
+  );
+  cleanup = render(() => Message(message), container!);
+  flushSolid();
+  expect(container?.textContent).toContain('/goal Wait for 1 minute');
+  expect(container?.querySelector('.chat-tool-invocation-part')).toBeNull();
+  expect(getUserMessagePreviewText(message.parts)).toBe('/goal Wait for 1 minute');
+});
+
 function reasoningPart(id: string, text: string, completed = false): Part {
   const time: Extract<Part, { type: 'reasoning' }>['time'] = { start: 0 };
   if (completed) time.end = 1;
@@ -139,6 +161,87 @@ function compactionPart(id: string, options?: { auto?: boolean; overflow?: boole
 }
 
 describe('V2 generated transcript rendering', () => {
+  it.each([
+    ['Review this code', 'Review this code', ['review']],
+    ['$[review] Review this code', 'Review this code', ['review']],
+    ['$[review] $[unslop]\nReview this code', 'Review this code', ['review', 'unslop']],
+    ['Check <untrusted_objective> literally', 'Check <untrusted_objective> literally', ['review']],
+  ] as const)('keeps the native skill prompt bubble for %s', (text, visibleText, skills) => {
+    const projected = fixture<MessageEntry>(
+      projectV2Message(
+        {
+          id: 'msg_skill_prompt',
+          type: 'user',
+          text,
+          metadata: { source: 'skill' },
+          skills: skills.map((id) => ({ id, name: id, text: 'Private skill instructions' })),
+          time: { created: 1_000 },
+        },
+        'session-1'
+      )
+    );
+    cleanup = render(() => Message(projected), container!);
+    flushSolid();
+    const bubble = container?.querySelector('.user-message-card');
+    expect(bubble).not.toBeNull();
+    expect(bubble?.querySelector('.user-message-text-scroll')?.textContent).toBe(visibleText);
+    expect(
+      [...(container?.querySelectorAll('.message-attachment-chip .chip-label') ?? [])].map(
+        (label) => label.textContent
+      )
+    ).toEqual(skills);
+    expect(container?.textContent).not.toContain('Private skill instructions');
+    expect(getUserMessageEditText(projected.parts)).toBe(text);
+    expect(getUserMessagePreviewText(projected.parts)).toBe(visibleText);
+  });
+
+  it.each(['separate', 'joined'] as const)(
+    'keeps the prompt bubble with %s legacy skill attachments and synthetic instructions',
+    (layout) => {
+      const prompt = '$[review] $[unslop]\nReview this code';
+      const attached = [formatSkillAttachment('review'), formatSkillAttachment('unslop')];
+      const parts: Part[] = [
+        ...(layout === 'joined'
+          ? [textPart('prompt', [prompt, ...attached].join('\n'))]
+          : [
+              textPart('prompt', prompt),
+              ...attached.map((text, index) => ({
+                ...textPart(`skill-${index}`, text),
+                synthetic: true,
+              })),
+            ]),
+        {
+          ...textPart(
+            'skill-instructions',
+            'The user explicitly invoked the review skill. Private skill instructions'
+          ),
+          synthetic: true,
+        },
+      ];
+      cleanup = render(
+        () => Message({ info: userMessage('msg_legacy_skill_prompt'), parts }),
+        container!
+      );
+      flushSolid();
+      const bubble = container?.querySelector('.user-message-card');
+      expect(bubble).not.toBeNull();
+      expect(bubble?.querySelector('.user-message-text-scroll')?.textContent).toBe(
+        'Review this code'
+      );
+      expect(container?.querySelectorAll('.message-attachment-chip')).toHaveLength(2);
+      const activity = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+      expect(activity).not.toBeNull();
+      activity?.click();
+      flushSolid();
+      expect(container?.querySelector('.user-message-card')).toBe(bubble);
+      expect(bubble?.textContent).toContain('Review this code');
+      expect(container?.textContent).toContain('Added skill instructions');
+      expect(container?.textContent).not.toContain('Private skill instructions');
+      expect(getUserMessageEditText(parts)).toBe(prompt);
+      expect(getUserMessagePreviewText(parts)).toBe('Review this code');
+    }
+  );
+
   it('renders a completed native summary as a context divider without a user card', () => {
     const projected = projectV2Message(
       {

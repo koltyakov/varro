@@ -2083,6 +2083,7 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'DELETE' && optionalDirectoryQuery(url)
   ),
   route('/session/:id/todo', ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)),
+  route('/session/:id/goal', ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)),
   route(
     '/session/:id/child-task-controls',
     ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)

@@ -2,6 +2,7 @@
 import type { FormInfo, PermissionRequest } from '@opencode/client';
 import { asRecord, isString, isNumber, type UnknownRecord } from '../shared/type-utils';
 import { parseServerEvent } from '../shared/protocol';
+import { parseSessionGoal } from '../shared/session-goal';
 import {
   projectV2Form,
   projectV2Permission,
@@ -44,6 +45,11 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
   const idleStatus = { type: 'idle', ...serviceStatus };
   const busyStatus = { type: 'busy', ...serviceStatus };
   if (event.type === 'server.connected') return emit('server.connected');
+  if (event.type === 'rpc.opencode.goal.changed') {
+    const goal = parseSessionGoal(data.goal);
+    if (!sessionID || (data.goal !== null && !goal)) return [];
+    return emit('session.goal.updated', { sessionID, goal });
+  }
   if (event.type === 'session.created')
     return emit('session.created', {
       info: {

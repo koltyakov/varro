@@ -13,6 +13,9 @@ for (const sendMethod of ['Enter', 'button']) {
 
     await expect(page.locator('.chat-header-title-text').first()).toHaveText('Mock Session 4');
     await expect(page.locator('.chat-turn-user').last()).toContainText('check machines');
+    const bubble = page.locator('.user-message-card').last();
+    await expect(bubble).toBeVisible();
+    await expect(bubble).toContainText('check machines');
     await expect(page.getByLabel('Search sessions')).not.toBeVisible();
     await expect(page.locator('.rich-composer').first()).toBeEmpty();
   });

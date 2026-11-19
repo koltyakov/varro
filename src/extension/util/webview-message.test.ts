@@ -60,6 +60,12 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
+  it('allows only session-scoped read-only goal inspection', () => {
+    expect(isAllowedApiRequest('GET', '/session/ses_one/goal?directory=%2Frepo')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/ses_one/goal')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session/ses_one/goal?sessionID=ses_other')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/api/rpc/opencode.goal/get')).toBe(false);
+  });
   it('accepts only bounded dictation requests with fixed actions and providers', () => {
     for (const action of ['status', 'start', 'stop', 'cancel']) {
       const message = { type: 'dictation/request', payload: { requestId: 'dictation-1', action } };

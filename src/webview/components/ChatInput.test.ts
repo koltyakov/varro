@@ -1558,6 +1558,32 @@ describe('ChatInput', () => {
       vi.mocked(imageLoading.loadImage).mockRejectedValue(new Error('Could not decode the image'));
     });
 
+    it.each([false, true])(
+      'initializes an existing image draft without reactive errors (delegation: %s)',
+      async (delegation) => {
+        if (delegation) setupVisionDelegationModelState();
+        setInputText('[Image 1]');
+        setManualWorkspaceSelection(true);
+        flushSolid();
+        const error = vi.spyOn(console, 'error');
+        try {
+          cleanup = render(() => ChatInput(), container!);
+          flushSolid();
+          await flushAsyncWork();
+          flushSolid();
+          expect(error).not.toHaveBeenCalled();
+          expect(manualWorkspaceSelection()).toBe(true);
+          setState(storePath('clipboardImages', []));
+          setInputText('');
+          flushSolid();
+          expect(manualWorkspaceSelection()).toBe(false);
+          expect(error).not.toHaveBeenCalled();
+        } finally {
+          error.mockRestore();
+        }
+      }
+    );
+
     it('keeps the original attachment enabled, exposes the decode reason, and prevents previews', async () => {
       cleanup = render(() => ChatInput(), container!);
       flushSolid();

@@ -2,6 +2,7 @@ import type { SessionWorkspaceScope } from './protocol';
 import type { UnknownRecord } from './type-utils';
 import type { FileChange } from './tool-file-change';
 import type { NativeForm } from './native-form';
+import type { SessionGoal } from './session-goal';
 
 export type OutputFormatText = {
   type: 'text';
@@ -930,6 +931,7 @@ export type ServerEventPropertiesByName = {
   'session.unarchived': { sessionID: string };
   'session.deleted': { sessionID?: string; info: { id: string } };
   'session.status': { sessionID: string; status: SessionStatus };
+  'session.goal.updated': { sessionID: string; goal: SessionGoal | null };
   'session.error': SessionErrorProperties;
   'session.idle': { sessionID: string };
   'session.compacted': { sessionID: string };

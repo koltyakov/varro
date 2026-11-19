@@ -332,6 +332,7 @@ describe('MarkdownRenderer', () => {
   );
 
   it('does not create inline roots after disposal before queued hydration', async () => {
+    const warn = vi.spyOn(console, 'warn');
     const [value, setValue] = createSignal(0);
     const mounted = vi.fn();
     const effect = vi.fn();
@@ -370,6 +371,7 @@ describe('MarkdownRenderer', () => {
     expect(mounted).toHaveBeenCalledOnce();
     expect(effect).toHaveBeenCalledTimes(effectCount);
     expect(disposed).toHaveBeenCalledOnce();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('appends safe stable prose without replacing nodes or remounting inline slots', async () => {
@@ -449,7 +451,10 @@ describe('MarkdownRenderer', () => {
     cleanup();
     flushSolid();
     cleanup = undefined;
-    expect(disposed.mock.calls).toEqual([['SLOTONE'], ['SLOTTWO']]);
+    expect(disposed.mock.calls.map(([marker]) => marker).toSorted()).toEqual([
+      'SLOTONE',
+      'SLOTTWO',
+    ]);
   });
 
   it('matches full parsing after repeated safe appends and completion', async () => {
@@ -1559,6 +1564,7 @@ $$`,
     'shows the URL in a custom tooltip after 400 ms for %s',
     async (label) => {
       vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn');
       const href = 'https://example.test/docs?one=1&two=2';
       cleanup = render(
         () =>
@@ -1582,8 +1588,58 @@ $$`,
       link.dispatchEvent(new MouseEvent('mouseleave'));
       flushSolid();
       expect(document.querySelector('[role="tooltip"]')).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
     }
   );
+
+  it('disposes replaced link tooltips and pending hover timers without reactive warnings', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn');
+    const [content, setContent] = createSignal('[First](https://example.test/first)');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          cacheByContent: true,
+        }),
+      container!
+    );
+    flushSolid();
+    const first = container!.querySelector('a')!;
+    first.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(400);
+    flushSolid();
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'https://example.test/first'
+    );
+
+    setContent('[Second](https://example.test/second)');
+    flushSolid();
+    await vi.advanceTimersByTimeAsync(16);
+    flushSolid();
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(first.hasAttribute('aria-describedby')).toBe(false);
+    const second = container!.querySelector('a')!;
+    second.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(400);
+    flushSolid();
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'https://example.test/second'
+    );
+    second.dispatchEvent(new MouseEvent('mouseleave'));
+    flushSolid();
+    second.dispatchEvent(new MouseEvent('mouseenter'));
+    cleanup();
+    cleanup = undefined;
+    flushSolid();
+    await vi.advanceTimersByTimeAsync(400);
+    flushSolid();
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(second.hasAttribute('aria-describedby')).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+  });
 
   it.each([
     [
@@ -1866,6 +1922,7 @@ $$`,
   });
 
   it('offers click-to-load placeholders only for generated Markdown image tokens', () => {
+    const warn = vi.spyOn(console, 'warn');
     setState(storePath('remoteImages', 'ask'));
     flushSolid();
     cleanup = render(
@@ -1888,6 +1945,7 @@ $$`,
     expect(container?.querySelector('[data-remote-image-load]')?.textContent).toBe('Load image');
     expect(container?.querySelector('img')).toBeNull();
     expect(container?.textContent).toContain('Forged');
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('changes image presentation without reparsing or fetching Markdown', () => {
@@ -1921,6 +1979,7 @@ $$`,
     'file:///workspace/screenshots/example.png',
     'screenshots/example%20image.png',
   ])('reserves inline local images even with remote images off: %s', (source) => {
+    const warn = vi.spyOn(console, 'warn');
     cleanup = render(
       () =>
         MarkdownRenderer({ content: `![Local screenshot](${source})`, directory: '/workspace' }),
@@ -1931,6 +1990,7 @@ $$`,
     expect(container?.querySelector('.local-markdown-image')).not.toBeNull();
     expect(container?.textContent).toContain('Local screenshot');
     expect(container?.querySelector('[data-remote-image]')).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('does not hydrate forged local image attributes', () => {

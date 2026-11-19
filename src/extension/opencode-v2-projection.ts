@@ -254,6 +254,20 @@ export function isV2TranscriptMessage(message: SessionMessageInfo): boolean {
   );
 }
 
+export function isV2UserPrompt(message: SessionMessageInfo): boolean {
+  return (
+    message.type === 'user' ||
+    (message.type === 'synthetic' && message.metadata?.source === 'goal' && !!message.description)
+  );
+}
+
+function goalPrompt(text: string): string | undefined {
+  const objective = /<untrusted_objective>\n([\s\S]*?)\n<\/untrusted_objective>/.exec(text)?.[1];
+  if (objective === undefined) return undefined;
+  // Decode once, in reverse escaping order, so literal entity text stays intact.
+  return `/goal ${objective.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&')}`;
+}
+
 export function projectV2Message(
   message: SessionMessageInfo,
   sessionID: string,
@@ -431,7 +445,12 @@ export function projectV2Message(
     return {
       info,
       parts: [
-        part(0, 'text', { text: message.text }),
+        part(0, 'text', {
+          text:
+            message.metadata?.source === 'goal'
+              ? (goalPrompt(message.text) ?? message.text)
+              : message.text,
+        }),
         ...(message.files ?? []).map((file, index) =>
           part(index + 1, 'file', {
             mime: file.mime,
@@ -456,6 +475,14 @@ export function projectV2Message(
   }
   if (message.type === 'synthetic') {
     const metadata = message.metadata;
+    if (metadata?.source === 'goal') {
+      // Only the kickoff has a description. Continuations and resumes are internal
+      // instructions, not new user prompts or expandable activity.
+      const text = message.description
+        ? (goalPrompt(message.text) ?? message.description)
+        : undefined;
+      return { info, parts: text ? [part(0, 'text', { text })] : [] };
+    }
     const state = metadata?.state;
     const subagentResult =
       metadata?.source === 'subagent' &&

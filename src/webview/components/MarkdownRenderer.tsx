@@ -1,15 +1,14 @@
 import {
   createEffect,
+  For,
   Show,
   createSignal,
   createMemo,
-  getOwner,
-  runWithOwner,
   onSettled,
   onCleanup,
   untrack,
 } from 'solid-js';
-import { type JSX, Portal, render } from '@solidjs/web';
+import { type JSX, Portal } from '@solidjs/web';
 
 import DOMPurify from 'dompurify';
 import { renderToString as renderKatex } from 'katex';
@@ -2373,7 +2372,6 @@ function hydrateRenderedMarkdown(root: HTMLDivElement | undefined, flags: Markdo
 }
 
 export function MarkdownRenderer(props: MarkdownProps) {
-  const owner = getOwner();
   const sessionDirectory = createMemo(() => {
     const sessionID = props.sessionID ?? state.activeSessionId;
     return props.directory || state.sessions.find((entry) => entry.id === sessionID)?.directory;
@@ -2422,7 +2420,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     const segments = getMarkdownRenderSegments(content, cacheByContent);
     const lightweight = lw();
     const disablePathLinkify = !!props.disablePathLinkify;
-    const escapeHtml = !!props.escapeHtml;
+    const shouldEscapeHtml = !!props.escapeHtml;
     const directory = sessionDirectory();
     const stableHtml = segments.stableContent
       ? parseMarkdown(segments.stableContent, {
@@ -2431,7 +2429,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
           disablePathLinkify,
           disableCodeHighlighting: lightweight,
           allowMermaidHydration: lightweight,
-          escapeHtml,
+          escapeHtml: shouldEscapeHtml,
         })
       : '';
     const tailParseOptions = {
@@ -2440,14 +2438,14 @@ export function MarkdownRenderer(props: MarkdownProps) {
       disablePathLinkify,
       disableCodeHighlighting: segments.hasUnclosedFence || lightweight,
       allowMermaidHydration: lightweight && !segments.hasUnclosedFence,
-      escapeHtml,
+      escapeHtml: shouldEscapeHtml,
     };
     return {
       cacheByContent,
       segments,
       lightweight,
       disablePathLinkify,
-      escapeHtml,
+      escapeHtml: shouldEscapeHtml,
       workspacePath: state.editorContext.workspacePath || '',
       directory,
       sessionContextKey: getSessionReferenceContextKey(content),
@@ -2479,16 +2477,26 @@ export function MarkdownRenderer(props: MarkdownProps) {
   const remoteImageDisposers = new Map<HTMLElement, () => void>();
   const linkTooltips = new Map<
     HTMLAnchorElement,
-    { dispose: () => void; setContent: (content: string) => void }
+    { content: () => string; setContent: (content: string) => void }
   >();
+  const [linkTooltipAnchors, setLinkTooltipAnchors] = createSignal<HTMLAnchorElement[]>([]);
+  const [markdownIslands, setMarkdownIslands] = createSignal<
+    { host: HTMLElement; render: () => JSX.Element }[]
+  >([]);
   let disposed = false;
 
+  function mountMarkdownIsland(content: () => JSX.Element, host: HTMLElement) {
+    const island = { host, render: content };
+    setMarkdownIslands((islands) => [...islands, island]);
+    return () => setMarkdownIslands((islands) => islands.filter((item) => item !== island));
+  }
+
   function disposeLinkTooltips(root?: HTMLElement) {
-    for (const [anchor, tooltip] of linkTooltips) {
+    for (const anchor of linkTooltips.keys()) {
       if (root && !root.contains(anchor)) continue;
-      tooltip.dispose();
       linkTooltips.delete(anchor);
     }
+    setLinkTooltipAnchors((anchors) => anchors.filter((anchor) => linkTooltips.has(anchor)));
   }
 
   function hydrateLinkTooltip(anchor: HTMLAnchorElement) {
@@ -2501,14 +2509,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
     if (!content) return;
     anchor.removeAttribute('title');
     const [tooltipContent, setContent] = createSignal(content);
-    const host = document.createElement('div');
-    linkTooltips.set(anchor, {
-      dispose: render(
-        () => <Tooltip target={anchor} content={tooltipContent()} delay={400} />,
-        host
-      ),
-      setContent,
-    });
+    linkTooltips.set(anchor, { content: tooltipContent, setContent });
+    setLinkTooltipAnchors((anchors) => [...anchors, anchor]);
   }
 
   function hydrateLinkTooltips(root: HTMLDivElement | undefined) {
@@ -2550,7 +2552,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       element.replaceChildren();
       remoteImageDisposers.set(
         element,
-        render(
+        mountMarkdownIsland(
           () => <RemoteMarkdownImage source={source} alt={alt} onLoadAll={loadAllRemoteImages} />,
           element
         )
@@ -2568,7 +2570,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       element.replaceChildren();
       remoteImageDisposers.set(
         element,
-        render(
+        mountMarkdownIsland(
           () => (
             <LocalMarkdownImage
               source={source}
@@ -2646,7 +2648,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
         host.dataset.markdownInlineSlot = nextMarker;
         fragment.append(host);
         const slot = slotByMarker.get(nextMarker)!;
-        inlineSlotDisposers.set(host, render(slot.render, host));
+        inlineSlotDisposers.set(host, mountMarkdownIsland(slot.render, host));
         offset = nextIndex + nextMarker.length;
       }
       textNode.replaceWith(fragment);
@@ -3107,21 +3109,19 @@ export function MarkdownRenderer(props: MarkdownProps) {
       for (const cleanup of cleanups.toReversed()) cleanup();
     };
   });
-  // Hydration creates separately disposed tooltip/slot roots. The effect apply
-  // phase permits that setup; owner-backed settled callbacks do not.
+  // Hydration registers declarative tooltip and portal children. Do not call render()
+  // here: its implicit flush would run inside this effect's apply phase.
   createEffect(
     () => null,
     () => {
       // One-time mount hydration with the current link context. Later input changes
       // re-render through the update effect, which hydrates again.
-      runWithOwner(owner, () =>
-        untrack(() => {
-          hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
-          hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
-          stableHighlights.reconcile([stableRef], initial.cacheByContent ? 0 : 1);
-          tailHighlights.reconcile([tailRef], initial.cacheByContent ? 0 : 1);
-        })
-      );
+      untrack(() => {
+        hydrateMarkdownRoot(stableRef, lastAppliedStableHydrationFlags);
+        hydrateMarkdownRoot(tailRef, lastAppliedTailHydrationFlags);
+        stableHighlights.reconcile([stableRef], initial.cacheByContent ? 0 : 1);
+        tailHighlights.reconcile([tailRef], initial.cacheByContent ? 0 : 1);
+      });
     }
   );
   onCleanup(() => {
@@ -3150,6 +3150,15 @@ export function MarkdownRenderer(props: MarkdownProps) {
           innerHTML={tailHtml()}
         />
       </div>
+      <For each={linkTooltipAnchors()}>
+        {(anchor) => {
+          const tooltip = linkTooltips.get(anchor)!;
+          return <Tooltip target={anchor} content={tooltip.content()} delay={400} />;
+        }}
+      </For>
+      <For each={markdownIslands()}>
+        {(island) => <Portal mount={island.host}>{island.render()}</Portal>}
+      </For>
       <MermaidPreviewOverlay preview={mermaidPreview()} onClose={closeMermaidPreview} />
     </>
   );

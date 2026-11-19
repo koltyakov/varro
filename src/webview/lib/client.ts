@@ -1,4 +1,6 @@
 import { apiCall, onMessage, postMessage } from './bridge';
+import { parseSessionGoal } from '../../shared/session-goal';
+import type { SessionGoal } from '../../shared/session-goal';
 import type { FollowupAction, FollowupSuggestionSet, FollowupSource } from '../../shared/followups';
 import { FOLLOWUP_REQUEST_TIMEOUT_MS } from '../../shared/followups';
 import type {
@@ -99,6 +101,17 @@ export const client = {
   },
 
   session: {
+    async goal(
+      id: string,
+      options?: { directory?: string; signal?: AbortSignal }
+    ): Promise<SessionGoal | null> {
+      const path = withDirectory(`/session/${encodeURIComponent(id)}/goal`, options?.directory);
+      const response = await apiCall('GET', path, undefined, { signal: options?.signal });
+      if (response === null) return null;
+      const goal = parseSessionGoal(response);
+      if (!goal) throw malformedResponse(path, 'a session goal');
+      return goal;
+    },
     async childTaskControls(
       id: string,
       directory?: string,

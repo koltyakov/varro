@@ -43,6 +43,30 @@ async function loadClient() {
 
 type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
 
+it('reads and validates session-scoped goals', async () => {
+  const { client } = await loadClient();
+  const goal = {
+    id: 'goal-1',
+    objective: 'Wait for 1 minute',
+    status: 'paused',
+    rounds: 1,
+    maxRounds: 50,
+    updatedAt: 100,
+  };
+  bridgeMocks.apiCall.mockResolvedValueOnce(goal);
+  await expect(client.session.goal('session/1', { directory: '/repo' })).resolves.toEqual(goal);
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+    'GET',
+    '/session/session%2F1/goal?directory=%2Frepo',
+    undefined,
+    { signal: undefined }
+  );
+  bridgeMocks.apiCall.mockResolvedValueOnce(null);
+  await expect(client.session.goal('session-1')).resolves.toBeNull();
+  bridgeMocks.apiCall.mockResolvedValueOnce({ ...goal, status: 'unknown' });
+  await expect(client.session.goal('session-1')).rejects.toThrow('Malformed response');
+});
+
 it('looks up session metadata by exact ID and opens references without trusting a client path', async () => {
   const { client } = await loadClient();
   const reference = { id: 'ses_other', title: 'Other', directory: '/other', external: true };

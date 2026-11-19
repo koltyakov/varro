@@ -14,6 +14,7 @@ import { isPermissionMode, VARRO_API_ENDPOINTS } from '../../src/shared/protocol
 import { parseMcpConfigSnippet } from '../../src/shared/mcp-config';
 import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../../src/shared/background-process';
 import type { BackgroundProcess } from '../../src/shared/background-process';
+import type { SessionGoal } from '../../src/shared/session-goal';
 import type { FollowupSuggestionSet } from '../../src/shared/followups';
 import { getSessionPermissionRulesForMode } from '../../src/shared/permission-rules';
 import { normalizeWorkspaceIdentity } from '../../src/shared/workspace-path';
@@ -222,6 +223,7 @@ type HarnessWindow = Window & {
     session: Session;
     initialMessages: MessageEntry[];
     followups?: ScenarioState['followups'];
+    goal?: SessionGoal | null;
   };
   __varroE2E?: {
     requests: RequestLog[];
@@ -871,6 +873,8 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.persistedActiveSessionId = capture.session.id;
     if (capture.followups) {
       state.followups = capture.followups;
+    }
+    if (capture.followups || capture.goal !== undefined) {
       state.readyStatus = { state: 'running', url: 'mock://opencode', apiVersion: 2 };
     }
     state.nextSequence = 300;
@@ -5885,6 +5889,12 @@ async function handleApiRequest(
   const backgroundRoute = path.match(
     /^\/session\/([^/]+)\/background-process(?:\/([^/]+)\/output)?$/
   );
+  if (method === 'GET' && /^\/session\/[^/]+\/goal$/.test(path)) {
+    const capture = (window as HarnessWindow).varroPlaybackCapture;
+    return capture?.session.id === decodeURIComponent(path.split('/')[2]!)
+      ? (capture.goal ?? null)
+      : null;
+  }
   if (method === 'GET' && backgroundRoute) {
     const fixture = (window as HarnessWindow).varroBackgroundProcessFixture;
     if (!fixture || fixture.sessionID !== decodeURIComponent(backgroundRoute[1]!)) return [];
@@ -6332,6 +6342,29 @@ async function handleApiRequest(
   }
 
   const skillCommandMatch = path.match(/^\/session\/([^/]+)\/command$/);
+  if (skillCommandMatch && method === 'POST') {
+    const capture = (window as HarnessWindow).varroPlaybackCapture;
+    const payload = asRecord(body);
+    const sessionID = decodeURIComponent(skillCommandMatch[1]!);
+    if (capture?.goal && capture.session.id === sessionID && payload.command === 'goal') {
+      const action = payload.arguments;
+      if (action !== 'pause' && action !== 'resume' && action !== 'clear')
+        throw new Error('Unexpected goal control');
+      capture.goal =
+        action === 'clear'
+          ? null
+          : {
+              ...capture.goal,
+              status: action === 'pause' ? 'paused' : 'active',
+              updatedAt: Date.now(),
+            };
+      dispatchToWebview({
+        type: 'server/event',
+        payload: { type: 'session.goal.updated', properties: { sessionID, goal: capture.goal } },
+      });
+      return undefined;
+    }
+  }
   if (
     skillCommandMatch &&
     method === 'POST' &&
