@@ -53,6 +53,8 @@ for (const width of [360, 1100]) {
     await expect(page.locator('.user-message-card')).toContainText(`/goal ${goal.objective}`);
     const row = page.getByRole('group', { name: 'Session goal', exact: true });
     await expect(row).toContainText(`Goal: ${goal.objective}`);
+    await expect(row).not.toContainText('Active');
+    await expect(row.locator('.chat-queue-item')).toHaveCSS('padding-left', '8px');
     const pause = row.getByRole('button', { name: 'Pause goal' });
     const clear = row.getByRole('button', { name: 'Clear goal' });
     await expect(pause).toBeVisible();
@@ -70,7 +72,7 @@ for (const width of [360, 1100]) {
     const resume = row.getByRole('button', { name: 'Resume goal' });
     await expect(resume).toBeVisible();
     await resume.click();
-    await expect(row).toContainText('Active');
+    await expect(row.locator('.chat-queue-paused-label')).toHaveCount(0);
     await expect(pause).toBeVisible();
     await expect(page.locator('.rich-composer')).toHaveText('Keep this draft');
     await page.screenshot({ path: testInfo.outputPath('goal-controls.png') });
@@ -98,12 +100,17 @@ for (const width of [360, 1100]) {
         },
         { sessionID: session.id, goal, status, reason }
       );
-      await expect(row).toContainText(status === 'paused' ? 'Paused' : 'Complete');
-      const reasonBlock = row.getByLabel('Goal reason');
-      await expect(reasonBlock).toBeVisible();
-      await expect(reasonBlock).toHaveText(reason);
-      const reasonBox = (await reasonBlock.boundingBox())!;
-      expect(reasonBox.x + reasonBox.width).toBeLessThanOrEqual(width);
+      await expect(row.locator('.chat-queue-label')).toHaveAttribute(
+        'title',
+        `${goal.objective}\n${reason}`
+      );
+      await expect(row).not.toContainText(reason);
+      await expect(row).not.toContainText('Complete');
+      await expect(row.locator('.chat-queue-paused-label')).toHaveCount(
+        status === 'paused' ? 1 : 0
+      );
+      expect((await row.boundingBox())!.height).toBe(rowBox.height);
+      await page.screenshot({ path: testInfo.outputPath(`goal-${status}.png`) });
     }
     await expect(row.getByRole('button', { name: 'Pause goal' })).toHaveCount(0);
     await expect(row.getByRole('button', { name: 'Resume goal' })).toHaveCount(0);

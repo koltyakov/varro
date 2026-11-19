@@ -2389,19 +2389,14 @@
   flex-shrink: 0;
 }
 
-.chat-goal-reason,
+.chat-session-goal .chat-queue-item {
+  padding-inline-start: 8px;
+}
+
 .chat-goal-error {
   padding: 2px 4px;
   font-size: 11px;
   overflow-wrap: anywhere;
-}
-
-.chat-goal-reason {
-  color: var(--color-vscode-muted);
-  user-select: text;
-}
-
-.chat-goal-error {
   color: var(--color-vscode-error);
 }
 

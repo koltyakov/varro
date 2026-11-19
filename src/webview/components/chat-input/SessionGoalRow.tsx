@@ -84,17 +84,22 @@ export function SessionGoalRow(props: { sessionID: string | null; directory?: st
         <div class="chat-queue-container chat-session-goal" role="group" aria-label="Session goal">
           <div class="chat-queue-item">
             <span class="chat-queue-body">
-              <span class="chat-queue-label" title={current().objective}>
+              <span
+                class="chat-queue-label"
+                title={
+                  current().reason
+                    ? `${current().objective}\n${current().reason}`
+                    : current().objective
+                }
+              >
                 Goal: {current().objective}
               </span>
             </span>
-            <span class="chat-background-service-status" title={current().reason}>
-              {current().status === 'active'
-                ? 'Active'
-                : current().status === 'paused'
-                  ? 'Paused'
-                  : 'Complete'}
-            </span>
+            <Show when={current().status === 'paused'}>
+              <span class="chat-queue-paused-label" title={current().reason}>
+                Paused
+              </span>
+            </Show>
             <div class="chat-goal-controls">
               <Show when={current().status !== 'complete'}>
                 <button
@@ -124,11 +129,6 @@ export function SessionGoalRow(props: { sessionID: string | null; directory?: st
               </button>
             </div>
           </div>
-          <Show when={current().status !== 'active' && current().reason}>
-            <div class="chat-goal-reason" aria-label="Goal reason">
-              {current().reason}
-            </div>
-          </Show>
           <Show when={error()}>
             <div class="chat-goal-error" role="alert">
               {error()}

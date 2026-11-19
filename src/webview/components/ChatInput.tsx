@@ -3449,7 +3449,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             (command) => command.source === 'skill' && command.name.toLowerCase() === name
           )
         : undefined;
-    if (builtInCommand === null && !fallbackCommand && !skillCommand) return false;
+    const serverCommandName = fallbackCommand?.serverCommand ?? skillCommand?.name;
+    if (builtInCommand === null && !fallbackCommand && !serverCommandName) return false;
     setHistoryIndex(null);
     setHistoryDraft('');
     invalidatePendingPdfAttachments();
@@ -3461,13 +3462,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       await builtInCommand;
       return true;
     }
-    if (skillCommand) {
+    if (serverCommandName) {
       setWorkspaceSendPending(true);
       let sent = false;
       try {
         sent = options
-          ? await runSlashCommandByName(skillCommand.name, args, options)
-          : await runSlashCommandByName(skillCommand.name, args);
+          ? await runSlashCommandByName(serverCommandName, args, options)
+          : await runSlashCommandByName(serverCommandName, args);
       } catch (error) {
         setError(error instanceof Error ? error.message : String(error));
       } finally {

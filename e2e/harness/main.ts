@@ -2419,7 +2419,10 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       },
     };
     state.nextSequence = 120;
-    if (new URLSearchParams(window.location.search).get('nativeCommand') === '1') {
+    if (
+      new URLSearchParams(window.location.search).get('nativeCommand') === '1' ||
+      new URLSearchParams(window.location.search).get('goalCommand') === '1'
+    ) {
       state.readyStatus = { state: 'running', url: 'mock://opencode', apiVersion: 2 };
     }
     return state;
@@ -6110,6 +6113,9 @@ async function handleApiRequest(
     if (new URLSearchParams(window.location.search).get('skillCommand') === '1') {
       return [{ name: 'control', template: 'Check machines', source: 'skill' }];
     }
+    if (new URLSearchParams(window.location.search).get('goalCommand') === '1') {
+      return [{ name: 'goal', template: '', source: 'command', hints: ['objective'] }];
+    }
     if (new URLSearchParams(window.location.search).get('nativeCommand') === '1') {
       return [{ name: 'audit', source: 'command', description: '', template: '', hints: [] }];
     }
@@ -6368,10 +6374,14 @@ async function handleApiRequest(
   if (
     skillCommandMatch &&
     method === 'POST' &&
-    new URLSearchParams(window.location.search).get('skillCommand') === '1'
+    (new URLSearchParams(window.location.search).get('skillCommand') === '1' ||
+      new URLSearchParams(window.location.search).get('goalCommand') === '1')
   ) {
     if (new URLSearchParams(window.location.search).get('skillCommandFailure') === '1') {
       throw new Error('Skill command rejected');
+    }
+    if (new URLSearchParams(window.location.search).get('goalCommandFailure') === '1') {
+      throw new Error('Goal command rejected');
     }
     const sessionId = decodeURIComponent(skillCommandMatch[1]!);
     const payload = asRecord(body);
@@ -6385,7 +6395,7 @@ async function handleApiRequest(
       ...(state.messagesBySessionId[sessionId] ?? []),
       message,
     ];
-    return message;
+    return payload.command === 'goal' ? undefined : message;
   }
 
   const activationMatch = path.match(/^\/varro\/session\/([^/]+)\/activate$/);

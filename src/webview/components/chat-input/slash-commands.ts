@@ -297,6 +297,7 @@ export function getSlashCommands(props: {
           : undefined,
       acceptsArguments: command.source === 'command' || (command.hints?.length ?? 0) > 0,
       source: command.source,
+      serverCommand: command.name,
       action: (args) => {
         void runSlashCommandByName(command.name, args);
       },

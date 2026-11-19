@@ -53,7 +53,8 @@ describe('SessionGoalRow', () => {
     expect(container.querySelector('.chat-queue-item')?.textContent).toContain(
       'Goal: Wait for 1 minute'
     );
-    expect(container.textContent).toContain('Active');
+    expect(container.textContent).not.toContain('Active');
+    expect(container.querySelector('.chat-queue-paused-label')).toBeNull();
     expect(button('Pause goal')).not.toBeNull();
     expect(button('Clear goal')).not.toBeNull();
     expect(button('Pause goal')?.closest('.chat-queue-actions')).toBeNull();
@@ -73,7 +74,7 @@ describe('SessionGoalRow', () => {
       { command: 'goal', arguments: 'pause' },
       { directory: '/repo' }
     );
-    expect(container.textContent).toContain('Active');
+    expect(button('Pause goal')).not.toBeNull();
     change({ ...goal, status: 'paused', reason: 'Paused by the user' });
     expect(container.textContent).toContain('Paused');
     button('Resume goal')!.click();
@@ -103,24 +104,35 @@ describe('SessionGoalRow', () => {
     expect(container.textContent).toContain(goal.objective);
     change({ ...goal, status: 'paused', reason: 'Not making progress' });
     expect(button('Resume goal')).not.toBeNull();
-    expect(container.querySelector('.chat-goal-reason')?.textContent).toBe('Not making progress');
+    expect(container.querySelector('.chat-queue-paused-label')?.textContent).toBe('Paused');
+    expect(container.querySelector('.chat-queue-paused-label')?.getAttribute('title')).toBe(
+      'Not making progress'
+    );
+    expect(container.textContent).not.toContain('Not making progress');
     change({ ...goal, status: 'complete', reason: 'Verified' });
-    expect(container.textContent).toContain('Complete');
-    expect(container.querySelector('.chat-goal-reason')?.textContent).toBe('Verified');
+    expect(container.textContent).not.toContain('Complete');
+    expect(container.querySelector('.chat-queue-paused-label')).toBeNull();
+    expect(container.querySelector('.chat-queue-label')?.getAttribute('title')).toContain(
+      'Verified'
+    );
     expect(button('Pause goal')).toBeNull();
     expect(button('Resume goal')).toBeNull();
     expect(button('Clear goal')).not.toBeNull();
   });
 
-  it('omits an absent reason and hides a previous pause reason when active again', async () => {
+  it('keeps reasons in tooltips without adding a second row', async () => {
     cleanup = render(() => <SessionGoalRow sessionID="ses_one" />, container);
     await settle();
     expect(container.querySelector('.chat-goal-reason')).toBeNull();
     change({ ...goal, status: 'paused' });
     expect(container.querySelector('.chat-goal-reason')).toBeNull();
     change({ ...goal, status: 'paused', reason: 'Paused by the user' });
-    expect(container.querySelector('.chat-goal-reason')?.textContent).toBe('Paused by the user');
+    expect(container.textContent).not.toContain('Paused by the user');
+    expect(container.querySelector('.chat-queue-paused-label')?.getAttribute('title')).toBe(
+      'Paused by the user'
+    );
     change({ ...goal, reason: 'Resumed by the user' });
+    expect(container.querySelector('.chat-queue-paused-label')).toBeNull();
     expect(container.querySelector('.chat-goal-reason')).toBeNull();
   });
 
@@ -189,7 +201,7 @@ describe('SessionGoalRow', () => {
     reject(new Error('Connection lost'));
     await settle();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('Connection lost');
-    expect(container.textContent).toContain('Active');
+    expect(container.textContent).toContain(goal.objective);
     expect(button('Pause goal')?.disabled).toBe(false);
   });
 

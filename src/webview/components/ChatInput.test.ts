@@ -6117,23 +6117,27 @@ describe('ChatInput', () => {
     }
   );
 
-  it.each(['Enter', 'button'])(
-    'starts a new session for a skill command from the sessions list with %s',
-    async (sendMethod) => {
+  it.each([
+    ['Enter', 'control', 'skill', 'check machines'],
+    ['button', 'control', 'skill', 'check machines'],
+    ['Enter', 'goal', 'command', 'Wait for 1 minute'],
+    ['button', 'goal', 'command', 'Wait for 1 minute'],
+  ] as const)(
+    'starts a new session from the sessions list with %s for /%s',
+    async (sendMethod, commandName, source, args) => {
       setState(storePath('activeSessionId', 'existing-session'));
       flushSolid();
-      setState(
-        storePath('commands', [{ name: 'control', template: 'Check machines', source: 'skill' }])
-      );
+      setState(storePath('commands', [{ name: commandName, template: '', source }]));
       flushSolid();
-      setInputText('/control check machines');
+      setInputText(`/${commandName} ${args}`);
       flushSolid();
       const onBeforeSend = vi.fn();
       cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
       flushSolid();
-      expect(container?.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
-        'control'
-      );
+      if (source === 'skill')
+        expect(container?.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
+          commandName
+        );
 
       if (sendMethod === 'Enter') {
         container
@@ -6148,7 +6152,7 @@ describe('ChatInput', () => {
       await flushAsyncWork();
       flushSolid();
 
-      expect(runSlashCommandByNameMock).toHaveBeenCalledWith('control', 'check machines', {
+      expect(runSlashCommandByNameMock).toHaveBeenCalledWith(commandName, args, {
         targetSessionId: null,
         newSessionWorkspace: { scope: 'folder', directory: null },
         onAccepted: onBeforeSend,
@@ -6158,16 +6162,20 @@ describe('ChatInput', () => {
     }
   );
 
-  it.each([false, true])(
-    'restores a failed sessions-list skill command without sending it as a prompt (throws: %s)',
-    async (throws) => {
+  it.each([
+    [false, 'control', 'skill'],
+    [true, 'control', 'skill'],
+    [false, 'goal', 'command'],
+    [true, 'goal', 'command'],
+  ] as const)(
+    'restores a failed sessions-list command without sending it as a prompt (throws: %s, /%s)',
+    async (throws, commandName, source) => {
       setState(storePath('activeSessionId', 'existing-session'));
       flushSolid();
-      setState(
-        storePath('commands', [{ name: 'control', template: 'Check machines', source: 'skill' }])
-      );
+      setState(storePath('commands', [{ name: commandName, template: '', source }]));
       flushSolid();
-      setInputText('/control check machines');
+      const draft = `/${commandName} check machines`;
+      setInputText(draft);
       flushSolid();
       if (throws) runSlashCommandByNameMock.mockRejectedValueOnce(new Error('Command failed'));
       else runSlashCommandByNameMock.mockResolvedValueOnce(false);
@@ -6179,10 +6187,11 @@ describe('ChatInput', () => {
       await flushAsyncWork();
       flushSolid();
 
-      expect(inputText()).toBe('/control check machines');
-      expect(container?.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
-        'control'
-      );
+      expect(inputText()).toBe(draft);
+      if (source === 'skill')
+        expect(container?.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
+          commandName
+        );
       expect(sendMessageMock).not.toHaveBeenCalled();
       expect(onBeforeSend).not.toHaveBeenCalled();
     }
