@@ -238,6 +238,7 @@ type HarnessWindow = Window & {
     updateMessageInfo?: (info: Message) => void;
     updateMessagePart?: (part: Part) => void;
     updateSessionStatus?: (sessionId: string, status: SessionStatus) => void;
+    updateSessionLocation?: (sessionId: string, directory: string) => void;
     updateMcpStatus?: (name: string, status: ScenarioState['mcpStatus'][string]) => void;
     releaseHistoryRequests?: () => void;
     releaseStartup?: () => void;
@@ -5801,6 +5802,16 @@ async function handleApiRequest(
 ) {
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
+  if (
+    new URLSearchParams(window.location.search).has('sessionMoves') &&
+    method === 'GET' &&
+    /^\/session\/[^/]+(?:\/message)?$/.test(path)
+  ) {
+    const sessionId = decodeURIComponent(path.split('/')[2]!);
+    const session = state.sessions.find((entry) => entry.id === sessionId);
+    if (session?.transfer && url.searchParams.get('directory') !== session.directory)
+      throw new Error('404 Session not found');
+  }
 
   if (
     method === 'GET' &&
@@ -7206,6 +7217,18 @@ function setUpHarness() {
     },
     updateSessionStatus: (sessionId, status) => {
       scenarioState.sessionStatuses[sessionId] = status;
+    },
+    updateSessionLocation: (sessionId, directory) => {
+      const session = getSession(scenarioState, sessionId);
+      session.transfer = {
+        originDirectory: session.transfer?.originDirectory ?? session.directory,
+        available: true,
+      };
+      session.directory = directory;
+      dispatchToWebview({
+        type: 'session/transferred',
+        payload: { sessionId, directory, available: true },
+      });
     },
     updateMcpStatus: (name, status) => {
       scenarioState.mcpStatus[name] = status;

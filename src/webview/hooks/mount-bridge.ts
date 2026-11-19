@@ -1,6 +1,6 @@
 import { storePath } from '@solidjs/signals';
 
-import { reconcile } from 'solid-js';
+import { flush, reconcile } from 'solid-js';
 import { clearRemoteImagePreviews } from '../lib/remote-image-previews';
 import { syncWindowChatTheme } from '../lib/window-chat-theme';
 import type {
@@ -92,6 +92,8 @@ export function createMountBridgeOperations(deps: {
             if (available) delete draft.transferredSessions[sessionId];
             else draft.transferredSessions[sessionId] = directory;
           });
+          // Commit the move before reopening: selection reads the session's folder and availability.
+          flush();
           void deps.reloadSessionCatalog?.();
           if (appStore.state.activeSessionId !== sessionId) return;
           // Refresh in place without clearing the transcript or draft.

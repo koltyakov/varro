@@ -775,13 +775,13 @@ function setSessionMessagesIncremental(
 
 async function fetchSessionMessages(
   sessionId: string,
-  options?: { isCurrent?: () => boolean }
+  options?: { isCurrent?: () => boolean; directory?: string }
 ): Promise<MessageEntry[]> {
   const requestRevision = getSessionMessageWindowRevision(sessionId);
   const requestMutationRevision = getSessionMessageSnapshotMutationRevision(sessionId);
   const incoming = await client.session.messages(sessionId, {
     limit: MESSAGE_HISTORY_WINDOW,
-    directory: getSessionDirectory(sessionId),
+    directory: options?.directory ?? getSessionDirectory(sessionId),
   });
   const activeMessages = appStore.state.messages.filter(
     (entry) => entry.info.sessionID === sessionId
@@ -978,19 +978,22 @@ function loadSessionBoundaryPrompts(
 
 async function loadSessionWithMessages(
   sessionId: string,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  directory = getSessionDirectory(sessionId)
 ): Promise<{
   session: Session;
   messages: MessageEntry[];
 }> {
+  // A transfer can refresh before its new directory is visible in the session store.
   const messagesPromise = fetchSessionMessages(sessionId, {
     isCurrent,
+    directory,
   }).catch((err) => {
     if (isNotFoundError(err)) return [];
     throw err;
   });
   const [session, messages] = await Promise.all([
-    client.session.get(sessionId, { directory: getSessionDirectory(sessionId) }),
+    client.session.get(sessionId, { directory }),
     messagesPromise,
   ]);
   return { session, messages };
@@ -2803,11 +2806,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       resetTodoSync,
       clearMessages: sessionStore.clearMessages,
       setMessagesLoading: (loading) => appStore.setState(storePath('messagesLoading', loading)),
-      loadSession: (sessionId, isCurrentSelection = () => true) => {
+      loadSession: (sessionId, isCurrentSelection = () => true, directory) => {
         const generation = workspaceGeneration;
         return loadSessionWithMessages(
           sessionId,
-          () => generation === workspaceGeneration && isCurrentSelection()
+          () => generation === workspaceGeneration && isCurrentSelection(),
+          directory
         );
       },
       isCurrentSelectionGeneration: (generation) =>

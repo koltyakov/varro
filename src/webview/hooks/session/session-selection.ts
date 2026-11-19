@@ -45,7 +45,8 @@ type SessionSelectionDeps = {
   setMessagesLoading?(loading: boolean): void;
   loadSession(
     id: string,
-    isCurrent?: () => boolean
+    isCurrent?: () => boolean,
+    directory?: string
   ): Promise<{ session: Session; messages: MessageEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
@@ -147,7 +148,7 @@ export async function selectSessionWithDependencies(
 
   let loaded: { session: Session; messages: MessageEntry[] };
   try {
-    loaded = await deps.loadSession(id, isCurrentSelection);
+    loaded = await deps.loadSession(id, isCurrentSelection, options?.directory);
   } catch (error) {
     if (!isCurrentSelection()) {
       clearMessagesLoadingIfOwned();

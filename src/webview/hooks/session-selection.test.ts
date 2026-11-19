@@ -151,13 +151,16 @@ describe('selection outcomes', () => {
 
   it('refreshes a transferred session without clearing its transcript, draft state, or scroll anchor', async () => {
     const pending = deferred<Awaited<ReturnType<SelectionDependencies['loadSession']>>>();
+    const loadSession = vi.fn(() => pending.promise);
     const deps = createSelectionDependencies({
       getActiveSessionId: () => 'session-1',
-      loadSession: () => pending.promise,
+      loadSession,
     });
     const selection = selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1', {
       preserveTranscript: true,
+      directory: '/repo',
     });
+    expect(loadSession).toHaveBeenCalledWith('session-1', expect.any(Function), '/repo');
     expect(deps.clearMessages).not.toHaveBeenCalled();
     expect(deps.clearDraftCurrentDocumentState).not.toHaveBeenCalled();
     expect(deps.resetToolCallExpansionState).not.toHaveBeenCalled();

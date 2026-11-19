@@ -92,6 +92,155 @@ function mockRuntimeBootstrap() {
 }
 
 describe('useOpenCode session state flows', () => {
+  it('follows an active worktree chat back to the project without reopening it manually', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    mockRuntimeBootstrap();
+    const moved = {
+      ...session(),
+      version: '2',
+      directory: '/worktrees/feature',
+      transfer: { originDirectory: '/repo', available: true },
+    };
+    const returned = { ...moved, directory: '/repo' };
+    const messages = [userEntry('retained-prompt')];
+    clientMocks.sessionList.mockResolvedValue([moved]);
+    clientMocks.sessionActivate.mockResolvedValue(moved);
+    clientMocks.sessionGet.mockResolvedValue(moved);
+    clientMocks.sessionMessages.mockResolvedValue(messages);
+    // SAFETY: The fixture supplies the project's context, not the worktree execution directory.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+    flushSolid();
+    try {
+      stateModule.setState(storePath('sessions', [moved]));
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', moved.id));
+      flushSolid();
+      stateModule.setState(storePath('messages', messages));
+      flushSolid();
+      expect(stateModule.state.activeSessionId).toBe(moved.id);
+      expect(stateModule.state.sessions.find((entry) => entry.id === moved.id)?.directory).toBe(
+        moved.directory
+      );
+      stateModule.setInputText('Keep this draft');
+      flushSolid();
+      clientMocks.sessionGet.mockClear().mockImplementation(async (_id, options) => {
+        if (options?.directory !== '/repo') throw new Error('404 Session not found');
+        return returned;
+      });
+      clientMocks.sessionMessages.mockClear().mockImplementation(async (_id, options) => {
+        if (options?.directory !== '/repo') throw new Error('404 Session not found');
+        return messages;
+      });
+      clientMocks.sessionList.mockResolvedValue([returned]);
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler({
+        type: 'session/transferred',
+        payload: { sessionId: moved.id, directory: '/repo', available: true },
+      });
+      flushSolid();
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(stateModule.state.messagesLoading).toBe(false);
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith(moved.id, { directory: '/repo' });
+      });
+      expect(clientMocks.sessionMessages).toHaveBeenCalledWith(
+        moved.id,
+        expect.objectContaining({ directory: '/repo' })
+      );
+      expect(stateModule.error()).toBeNull();
+      expect(stateModule.state.activeSessionId).toBe(moved.id);
+      expect(stateModule.state.messages).toEqual(messages);
+      expect(stateModule.inputText()).toBe('Keep this draft');
+    } finally {
+      dispose();
+      flushSolid();
+    }
+  });
+
+  it('keeps an active chat moved to a closed worktree read-only', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    mockRuntimeBootstrap();
+    const current = { ...session(), version: '2', directory: '/repo' };
+    const moved = {
+      ...current,
+      directory: '/worktrees/feature',
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    const messages = [userEntry('retained-prompt')];
+    clientMocks.sessionList.mockResolvedValue([current]);
+    clientMocks.sessionGet.mockResolvedValue(moved);
+    clientMocks.sessionMessages.mockResolvedValue(messages);
+    // SAFETY: The fixture supplies the project's context; the worktree is not open in any window.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'Repo', path: '/repo' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+    flushSolid();
+    try {
+      stateModule.setState(storePath('sessions', [current]));
+      stateModule.setState(storePath('activeSessionId', current.id));
+      stateModule.setState(storePath('messages', messages));
+      flushSolid();
+      clientMocks.sessionActivate.mockClear();
+      clientMocks.sessionList.mockResolvedValue([moved]);
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler({
+        type: 'session/transferred',
+        payload: { sessionId: current.id, directory: '/worktrees/feature', available: false },
+      });
+      flushSolid();
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(stateModule.state.messagesLoading).toBe(false);
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith(current.id, {
+          directory: '/worktrees/feature',
+        });
+      });
+      expect(clientMocks.sessionActivate).not.toHaveBeenCalled();
+      expect(stateModule.state.activeSessionId).toBe(current.id);
+    } finally {
+      dispose();
+      flushSolid();
+    }
+  });
+
   it('reopens a persisted transferred session read-only without activating its closed folder', async () => {
     const { stateModule, hookModule } = await loadModules();
     flushSolid();
