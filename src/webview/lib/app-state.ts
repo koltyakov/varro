@@ -1,3 +1,4 @@
+import { storePath } from '@solidjs/signals';
 import {
   createSignal,
   untrack,
@@ -767,6 +768,18 @@ export const defaultAppState = createAppState();
 
 export const state = defaultAppState.state;
 export const setState = defaultAppState.setState;
+
+let pinnedSessionsSyncRevision = 0;
+
+/** Apply the host's authoritative pin order, which supersedes any in-flight local change. */
+export function applyPinnedSessionsSync(sessionIds: readonly string[]) {
+  pinnedSessionsSyncRevision += 1;
+  setState(storePath('pinnedSessionIds', [...sessionIds]));
+}
+
+export function getPinnedSessionsSyncRevision() {
+  return pinnedSessionsSyncRevision;
+}
 
 /** Store reads return the committed value until flush; a draft also sees this tick's writes. */
 export function readLatestActiveSessionId(): string | null {

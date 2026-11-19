@@ -446,17 +446,21 @@ the shared invariants below remain true.
   Disable native CSS scroll anchoring during this hold too: a detached non-virtualized list can
   otherwise let browser anchor adjustments fight its thumb position during activity growth.
   Restore the stylesheet's anchoring policy on release without writing a scroll position.
-  Track the held scroll range even while detached, reserving lost range when a tray shrinks;
-  the pinned exit-reserve path alone does not cover detached tool churn. Reserve detached activity
-  collapses before removal: resize delivery is too late to prevent native thumb mapping from seeing
-  the shorter range. Keep offscreen reserve through the hold, consume it against the held range,
-  and exclude reserve from new range growth so repeated replacements cannot accumulate blank space.
-  On pointer release or cancellation, discard reserve wholly below the viewport even if no further
-  scroll or resize event arrives. Otherwise a later drag can inherit that obsolete range and land
-  below every message. Preserve reserve intersecting the viewport and do not write a scroll position.
-  If a measurement correction leaves the entire held viewport inside trailing reserve, retire that
-  obsolete range and let the browser clamp to real content. There is no painted anchor to preserve
-  there; range protection must not maintain a wholly blank viewport during or after the gesture.
+  Hold the track at its grabbed height for the whole gesture, with equal `min-height` and
+  `max-height` and vertical `overflow: clip`. Chromium maps the held thumb's pixel position through
+  the scroll range, so any range change remaps it, sometimes backward for a frame. That includes
+  genuine growth and a reserve that reaches the page a frame after a replacement row. The fixed
+  height absorbs detached tool churn in the same layout, and growth below it stays clipped until
+  release. Fold any existing reserve into the held height, and do not publish held-range reserve
+  while it is in place. Measure content from in-flow children only: out-of-flow and sticky children
+  paint where they are positioned, not where the content ends.
+  On pointer release or cancellation, hand the held height's blank part to the bottom reserve before
+  removing it, then discard reserve wholly below the viewport even if no further scroll or resize
+  event arrives. Otherwise a later drag can inherit that obsolete range and land below every
+  message. Preserve reserve intersecting the viewport and do not write a scroll position.
+  If a measurement correction leaves the entire held viewport below every message, shrink the held
+  height to the content and let the browser clamp. There is no painted anchor to preserve there;
+  range protection must not maintain a wholly blank viewport during or after the gesture.
   Finish activity-entry height animations immediately while the pointer owns scrolling. Their
   incremental growth otherwise changes native thumb mapping even when no JavaScript scroll write
   occurs. Preserve animation-end cleanup and restore normal entry timing on release.

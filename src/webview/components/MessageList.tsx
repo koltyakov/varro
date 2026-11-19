@@ -3291,22 +3291,33 @@ export function MessageList() {
     visibleActive: Accessor<ReadonlySet<string>>,
     retained: Accessor<ReadonlySet<string>>,
     exiting: Accessor<ReadonlySet<string>>
-  ) =>
-    getCompactActivityLayoutSignatures(entries, (part) => {
+  ) => {
+    // Read the shared lookups once per pass. Each reactive read inside the per-part callback
+    // adds a subscription, and long transcripts have thousands of activity parts.
+    const loading = state.messagesLoading;
+    const rootId = activeSessionRootId();
+    const questions = questionRequestsByToolCall();
+    const permissions = permissionRequestsByToolCall();
+    const active = visibleActive();
+    const retainedKeys = retained();
+    const exitingKeys = exiting();
+    return getCompactActivityLayoutSignatures(entries, (part) => {
       const key = getAssistantActivityPartKey(part);
-      if (part.type === 'tool') {
-        const question = getQuestionRequestForTool(part);
+      if (part.type === 'tool' && !loading) {
+        const lookupKey = getToolCallLookupKey(rootId, part.messageID, part.callID);
+        const question = lookupKey ? questions.get(lookupKey) : undefined;
         if (question) return `question:${question.id}`;
-        const permission = getPermissionMatchForTool(part);
+        const permission = lookupKey ? permissions.get(lookupKey) : undefined;
         if (permission) {
           return `permission:${permission.permission.id}:${permission.isActive ? 'active' : 'queued'}`;
         }
       }
-      if (visibleActive().has(key)) return 'active';
-      if (retained().has(key)) return 'retained';
-      if (exiting().has(key)) return 'exiting';
+      if (active.has(key)) return 'active';
+      if (retainedKeys.has(key)) return 'retained';
+      if (exitingKeys.has(key)) return 'exiting';
       return isAssistantActivityPartRunning(part) ? 'delayed' : 'grouped';
     });
+  };
   const historyCompactActivityLayoutSignatures = mergeHistorySegmentMaps(
     mapHistorySegments((segment, index) =>
       createMemo(() =>

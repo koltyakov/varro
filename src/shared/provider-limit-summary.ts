@@ -1,5 +1,8 @@
 import type { ProviderLimitStatus, ProviderLimitWindow } from './protocol';
 
+/** Starts the note on a quota snapshot kept after a failed refresh. */
+export const LAST_SUCCESSFUL_QUOTA_SNAPSHOT_NOTE = 'Showing the last successful quota snapshot';
+
 export function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
   const id = window.id.toLowerCase();
   const label = window.label.toLowerCase();

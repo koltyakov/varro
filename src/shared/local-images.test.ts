@@ -27,6 +27,13 @@ describe('parseLocalImagePath', () => {
     'image.png#fragment',
     'image%00.png',
     'file:///image%0a.png',
+    '\\\\attacker.example\\share\\image.png',
+    '%5C%5Cattacker.example%5Cshare%5Cimage.png',
+    ' \\\\attacker.example\\share\\image.png',
+    '%2F%2Fattacker.example/share/image.png',
+    '\\/attacker.example/share/image.png',
+    'file:////attacker.example/share/image.png',
+    '\\\\?\\C:\\image.png',
     'a'.repeat(4097),
   ])('rejects %s', (source) => {
     expect(parseLocalImagePath(source)).toBeNull();

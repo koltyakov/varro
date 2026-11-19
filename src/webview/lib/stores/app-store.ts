@@ -1,4 +1,5 @@
 import {
+  applyPinnedSessionsSync,
   consumeInterruptedSessionIds,
   defaultAppState,
   resetDefaultAppState,
@@ -7,6 +8,7 @@ import {
 } from '../state';
 
 export const appStore = {
+  applyPinnedSessionsSync,
   defaultAppState,
   state,
   setState,

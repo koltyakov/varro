@@ -72,6 +72,20 @@ describe('LocalImages', () => {
     ).rejects.toThrow('not in an open workspace');
   });
 
+  it('rejects network share paths before resolving them', async () => {
+    const resolvePath = vi.fn(async () => null);
+    const images = new LocalImages({ resolvePath });
+    services.push(images);
+    await expect(
+      images.load(
+        '\\\\attacker.example\\share\\image.png',
+        '/workspace',
+        new AbortController().signal
+      )
+    ).rejects.toThrow('not in an open workspace');
+    expect(resolvePath).not.toHaveBeenCalled();
+  });
+
   it('rejects oversized files before allocation or conversion', async () => {
     const { root, path, images, convert } = await fixture();
     const file = await open(path, 'r+');

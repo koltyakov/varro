@@ -6,6 +6,7 @@ import type { Session } from '../../types';
 import type { SessionDiffSummary } from '../../../shared/protocol';
 import { client } from '../../lib/client';
 import {
+  applyPinnedSessionsSync,
   error,
   markSessionResponseCompleted,
   markSessionResponseInterrupted,
@@ -2606,6 +2607,34 @@ describe('SessionListView pins', () => {
         (row) => row.dataset.sessionId
       )
     ).toEqual(['first', 'second']);
+  });
+  it('keeps a pin snapshot that arrives while a failed reorder is in flight', async () => {
+    vi.spyOn(client.varro.session, 'reorderPinned').mockImplementation(async () => {
+      applyPinnedSessionsSync(['second', 'third', 'first']);
+      throw new Error('write failed');
+    });
+    const now = Date.now();
+    setState(
+      storePath('sessions', [
+        session('first', now),
+        session('second', now - 1_000),
+        session('third', now - 2_000),
+      ])
+    );
+    flushSolid();
+    setState(storePath('pinnedSessionIds', ['first', 'second']));
+    flushSolid();
+    cleanup = render(() => <SessionListView />, container);
+    flushSolid();
+
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="Reorder pinned session: first"]')!
+      .dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
+    flushSolid();
+    await vi.waitFor(() => expect(error()).toBe('write failed'));
+    flushSolid();
+
+    expect(appState.pinnedSessionIds).toEqual(['second', 'third', 'first']);
   });
 });
 

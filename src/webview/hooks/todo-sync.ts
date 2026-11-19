@@ -42,10 +42,18 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     return true;
   };
 
-  const syncTodosFromMessagesWithState = <T>(
-    messages: MessageEntry[] = appStore.state.messages,
-    latestEventPayload?: T
-  ) => {
+  const syncTodosFromMessagesWithState = <T>(messages?: MessageEntry[], latestEventPayload?: T) => {
+    // Callers usually sync right after writing a part, which the committed transcript does not
+    // show until the store flushes. That flush is already queued, so read the transcript after it.
+    // An event payload is authoritative on its own and applies at once.
+    if (!messages && latestEventPayload === undefined) {
+      queueMicrotask(() => syncTodosNow(appStore.state.messages));
+      return;
+    }
+    syncTodosNow(messages ?? appStore.state.messages, latestEventPayload);
+  };
+
+  const syncTodosNow = <T>(messages: MessageEntry[], latestEventPayload?: T) => {
     if (
       nativeTodosEnabled &&
       applyNativeTodos(latestEventPayload, { preserveAdvancedStatuses: true })

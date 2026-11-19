@@ -6,7 +6,10 @@ import type {
   ProviderLimitUpdate,
 } from '../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../shared/provider-limit-config';
-import { formatProviderLimitStatusBar } from '../shared/provider-limit-summary';
+import {
+  formatProviderLimitStatusBar,
+  LAST_SUCCESSFUL_QUOTA_SNAPSHOT_NOTE,
+} from '../shared/provider-limit-summary';
 import { compareProviderOrder, LARGE_MODEL_CATALOG_THRESHOLD } from '../shared/provider-order';
 import { asRecord } from '../shared/type-utils';
 import type { ProviderLimitService } from './provider-limit-service';
@@ -27,6 +30,7 @@ export class ProviderLimitStatusBar {
   private providers: ProviderEntry[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
   private rotationTimer: ReturnType<typeof setTimeout> | undefined;
+  private countdownTimer: ReturnType<typeof setTimeout> | undefined;
   private rotationProviderID: string | undefined;
   private rotationProviderIDs: string[] = [];
   private rotationDeadline = 0;
@@ -130,6 +134,7 @@ export class ProviderLimitStatusBar {
     this.generation += 1;
     if (this.timer) clearInterval(this.timer);
     if (this.rotationTimer) clearTimeout(this.rotationTimer);
+    if (this.countdownTimer) clearTimeout(this.countdownTimer);
     this.item.dispose();
   }
 
@@ -234,6 +239,8 @@ export class ProviderLimitStatusBar {
         remaining > 0 ? remaining : ROTATION_INTERVAL_MS
       );
     }
+    if (this.countdownTimer) clearTimeout(this.countdownTimer);
+    this.countdownTimer = undefined;
     if (!this.running || !providers.length) {
       this.item.text = '';
       this.item.tooltip = '';
@@ -250,6 +257,7 @@ export class ProviderLimitStatusBar {
       })
       .join(' · ');
     const now = Date.now();
+    let nextCountdownChange = Infinity;
     this.item.tooltip =
       providers
         .map((provider) => {
@@ -260,7 +268,14 @@ export class ProviderLimitStatusBar {
                   if (window.resetAt === null) return [];
                   const resetAt = new Date(window.resetAt);
                   if (!Number.isFinite(resetAt.getTime())) return [];
-                  const minutes = Math.max(0, Math.ceil((window.resetAt - now) / 60_000));
+                  const remainingMs = window.resetAt - now;
+                  const minutes = Math.max(0, Math.ceil(remainingMs / 60_000));
+                  // Re-render when the rounded-up minute count next drops, until the reset.
+                  if (remainingMs > 0)
+                    nextCountdownChange = Math.min(
+                      nextCountdownChange,
+                      remainingMs % 60_000 || 60_000
+                    );
                   const hours = Math.floor(minutes / 60);
                   const days = Math.floor(hours / 24);
                   const duration =
@@ -283,9 +298,21 @@ export class ProviderLimitStatusBar {
                   ];
                 })
               : [];
-          return [`${provider.name}: ${provider.summary}`, ...resets].join('\n');
+          // A snapshot kept after a failed refresh would otherwise read as current.
+          const stale =
+            limit?.status === 'available' &&
+            (limit.stale || limit.note?.startsWith(LAST_SUCCESSFUL_QUOTA_SNAPSHOT_NOTE))
+              ? [
+                  `The latest quota refresh failed. Showing data from ${new Date(
+                    limit.checkedAt
+                  ).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`,
+                ]
+              : [];
+          return [`${provider.name}: ${provider.summary}`, ...resets, ...stale].join('\n');
         })
         .join('\n\n') + (this.refreshError ? `\n\n${this.refreshError}` : '');
+    if (Number.isFinite(nextCountdownChange))
+      this.countdownTimer = setTimeout(() => this.render(), nextCountdownChange + 50);
     this.item.show();
   }
 }

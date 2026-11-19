@@ -170,6 +170,36 @@ describe('pinned provider limit status bar', () => {
     expect(mocks.item.tooltip).not.toContain('Weekly reset in');
   });
 
+  it('counts reset estimates down without a new quota poll', async () => {
+    const { bar, get } = setup({ 'claude-agent': 'Claude' });
+    const now = new Date(2026, 10, 18, 19, 50).getTime();
+    vi.setSystemTime(now);
+    const status = limit('claude-agent');
+    status.windows = status.windows.map((window) => ({
+      ...window,
+      resetAt: window.id === 'five_hour' ? now + 2 * 60_000 : null,
+    }));
+    get.mockResolvedValue(status);
+    bar.updateConnection('/repo');
+    await vi.waitFor(() => expect(mocks.item.tooltip).toContain('5-hour reset in 2m'));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mocks.item.tooltip).toContain('5-hour reset in 1m');
+  });
+
+  it('marks a last successful snapshot kept after a failed refresh', async () => {
+    const { bar, get } = setup({ 'claude-agent': 'Claude' });
+    const status = limit('claude-agent');
+    status.note =
+      'Showing the last successful quota snapshot because the latest provider poll failed: timeout';
+    get.mockResolvedValue(status);
+    bar.updateConnection('/repo');
+    await vi.waitFor(() =>
+      expect(mocks.item.tooltip).toContain('The latest quota refresh failed. Showing data from ')
+    );
+    expect(mocks.item.tooltip).not.toContain('timeout');
+  });
+
   it.each([
     [-1, true],
     [0, false],

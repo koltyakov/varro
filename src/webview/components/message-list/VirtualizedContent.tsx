@@ -202,14 +202,16 @@ export function VirtualizedContent(
     // invalidated by the same batch still re-run; serve the last seen entry in
     // that window so nothing dereferences undefined mid-flush.
     let lastMessage = initialMessage;
-    const message = () => {
+    // Memoized: dozens of row computations read the entry, and each uncached store read
+    // through props.messages adds tracking work on every streamed update.
+    const message = createMemo(() => {
       const index = absoluteIndex();
       const current = index >= 0 ? props.messages[index] : undefined;
       if (current?.info.id === messageId) {
         lastMessage = current;
       }
       return lastMessage;
-    };
+    });
     const nearViewport = createMemo(() => {
       const index = absoluteIndex();
       return (index >= coreStart() && index < coreEnd()) || index === pinnedIndex();

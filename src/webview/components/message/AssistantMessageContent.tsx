@@ -1385,7 +1385,16 @@ function AssistantActivityGroup(props: {
 }) {
   const expanded = () => isActivityGroupExpanded(props.expansionKey);
   const activityStatus = createMemo(() => getAssistantActivityStatus(props.summaryParts));
-  const activityItems = createMemo(() => getAssistantActivityCountItems(props.summaryParts));
+  const activityItems = createMemo(() => getAssistantActivityCountItems(props.summaryParts), {
+    equals: (previous, next) =>
+      previous.length === next.length &&
+      previous.every(
+        (item, index) =>
+          item.kind === next[index]!.kind &&
+          item.count === next[index]!.count &&
+          item.label === next[index]!.label
+      ),
+  });
 
   createEffect(
     () => props.showSummary && props.summaryParts.length > 0,
@@ -1519,13 +1528,13 @@ function AssistantActivitySummaryText(props: {
   let textElement: HTMLSpanElement | undefined;
   let measurementElement: HTMLSpanElement | undefined;
 
-  const fullLabel = () => {
+  const fullLabel = createMemo(() => {
     const statusLabels =
       props.aborted > 0
         ? [`${props.aborted} ${props.aborted === 1 ? 'tool aborted' : 'tools aborted'}`]
         : [];
     return `Explored: ${[...props.items.map((item) => item.label), ...statusLabels].join(', ')}`;
-  };
+  });
 
   const measure: AssistantActivityResizeMeasurement = () => {
     const button = textElement?.closest('button');
@@ -1629,22 +1638,22 @@ function AssistantActivitySummaryCandidate(props: {
       <span class="assistant-activity-summary-main">
         Explored:{' '}
         <span class="assistant-activity-summary-counts">
-          <For each={props.items}>
+          <For each={props.items} keyed={(item) => item.kind}>
             {(item, index) => (
               <>
                 <Show when={index() > 0}>, </Show>
                 <span class="assistant-activity-summary-item">
-                  {item.count}{' '}
+                  {item().count}{' '}
                   <Show
                     when={index() < compactFrom()}
-                    fallback={<AssistantActivityKindIcon kind={item.kind} />}
+                    fallback={<AssistantActivityKindIcon kind={item().kind} />}
                   >
                     <span class="assistant-activity-summary-noun">
-                      {item.label.slice(String(item.count).length + 1)}
+                      {item().label.slice(String(item().count).length + 1)}
                     </span>
                   </Show>
                   <Show when={props.measureIcons}>
-                    <AssistantActivityKindIcon kind={item.kind} measure />
+                    <AssistantActivityKindIcon kind={item().kind} measure />
                   </Show>
                 </span>
               </>

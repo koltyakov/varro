@@ -1,6 +1,7 @@
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { isNetworkOrDevicePath } from '../shared/local-images';
 import type { LocalImageResponse } from '../shared/local-images';
 import type { ContextProvider } from './context-provider';
 import { ImageThumbnails } from './image-thumbnails';
@@ -35,6 +36,8 @@ export class LocalImages {
     original = false
   ): Promise<LocalImageResponse> {
     signal.throwIfAborted();
+    // Resolution can stat the path, which already reaches a network host.
+    if (isNetworkOrDevicePath(path)) throw new Error('Local image is not in an open workspace');
     const resolved = await this.context.resolvePath(path, {
       restrictToWorkspace: true,
       workspaceDirectory: directory,

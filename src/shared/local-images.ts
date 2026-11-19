@@ -6,6 +6,14 @@ export type LocalImageRequest = {
   original?: boolean;
 };
 
+/**
+ * Two leading separators name a network share or device path. Resolving one on Windows can send
+ * the user's credentials to that host, so reject it before any file system access.
+ */
+export function isNetworkOrDevicePath(path: string): boolean {
+  return /^[\\/]{2}/.test(path.trimStart());
+}
+
 /** Parse local Markdown targets without admitting network URLs or executable schemes. */
 export function parseLocalImagePath(source: string): string | null {
   if (!source || source.length > 4096 || source.startsWith('//')) return null;
@@ -27,6 +35,7 @@ export function parseLocalImagePath(source: string): string | null {
       // Literal percent signs are valid in local filenames.
     }
   }
+  if (!path || isNetworkOrDevicePath(path)) return null;
   // oxlint-disable-next-line no-control-regex -- Reject control characters at the local file boundary.
-  return path && !/[\u0000-\u001f\u007f]/.test(path) ? path : null;
+  return !/[\u0000-\u001f\u007f]/.test(path) ? path : null;
 }

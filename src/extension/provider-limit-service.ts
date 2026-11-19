@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 import type { ProviderLimitStatus, ProviderLimitUpdate, ServerStatus } from '../shared/protocol';
 import { PROVIDER_LIMIT_STALE_RETENTION_MS } from '../shared/provider-limit-config';
+import { LAST_SUCCESSFUL_QUOTA_SNAPSHOT_NOTE } from '../shared/provider-limit-summary';
 import { asRecord } from '../shared/type-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { fetchProviderLimitFromAdapter } from './provider-limits';
@@ -818,7 +819,7 @@ function unsupportedProviderStatus(
 }
 
 function formatLastKnownGoodNote(previousNote: string | undefined, errorNote: string) {
-  const fallbackNote = `Showing the last successful quota snapshot because the latest provider poll failed: ${errorNote}`;
+  const fallbackNote = `${LAST_SUCCESSFUL_QUOTA_SNAPSHOT_NOTE} because the latest provider poll failed: ${errorNote}`;
   return previousNote ? `${previousNote}. ${fallbackNote}` : fallbackNote;
 }
 

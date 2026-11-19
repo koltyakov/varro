@@ -777,13 +777,15 @@ export class StreamingPresentation {
 
           const displayed = entry.currentText();
           if (displayed !== entry.target && !wait) {
-            entry.catchupAt ??= now + TEXT_CATCHUP_MS;
-            if (this.immediate || now >= entry.catchupAt) {
+            // Start the catch-up window when text can first be released. Time spent waiting for
+            // a paint or preview would otherwise compress the reveal into a few large jumps.
+            if (releaseText) entry.catchupAt ??= now + TEXT_CATCHUP_MS;
+            if (this.immediate || (entry.catchupAt !== null && now >= entry.catchupAt)) {
               entry.setText(entry.target);
             } else if (releaseText && now >= entry.nextTextAt) {
               const remainingTicks = Math.max(
                 1,
-                Math.ceil((entry.catchupAt - now) / TEXT_INTERVAL_MS)
+                Math.ceil(((entry.catchupAt ?? now) - now) / TEXT_INTERVAL_MS)
               );
               const count = Math.max(
                 24,

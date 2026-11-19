@@ -1,3 +1,4 @@
+import { $TARGET } from '@solidjs/signals';
 import { snapshot } from 'solid-js';
 import { isObject, isString } from './runtime-values';
 import type { MessageEntry } from '../types';
@@ -7,7 +8,9 @@ const MAX_HISTORY_CACHE_BYTES = 24 * 1024 * 1024;
 // Conservative retained-size estimate, without serializing payloads or allocating string copies.
 // Count shared values separately across snapshots; live transcript ownership is outside this cache.
 function estimateBytes(value: readonly MessageEntry[]): number {
-  const pending: unknown[] = [snapshot(value)];
+  // A snapshot also deep-copies plain data, so copy only a store proxy.
+  const isStoreProxy = $TARGET in value;
+  const pending: unknown[] = [isStoreProxy ? snapshot(value) : value];
   const seen = new Set<object>();
   let bytes = 0;
   while (pending.length && bytes <= MAX_HISTORY_CACHE_BYTES) {
@@ -30,9 +33,15 @@ export class HistoryCacheBudget {
   private entries = new Map<string, { bytes: number; evict: () => void }>();
   private bytes = 0;
 
-  retain(key: string, value: readonly MessageEntry[], evict: () => void) {
+  /** `sizeSource` is a plain copy of `value` that is cheaper to measure than store proxies. */
+  retain(
+    key: string,
+    value: readonly MessageEntry[],
+    evict: () => void,
+    sizeSource: readonly MessageEntry[] = value
+  ) {
     this.delete(key);
-    const bytes = estimateBytes(value);
+    const bytes = estimateBytes(sizeSource);
     if (bytes > MAX_HISTORY_CACHE_BYTES) {
       evict();
       return;

@@ -615,7 +615,7 @@ describe('todo-sync', () => {
     ).toEqual(messageTodos);
   });
 
-  it('creates bound todo-sync operations from shared state dependencies', () => {
+  it('creates bound todo-sync operations from shared state dependencies', async () => {
     const messages = [
       { info: userMessage('user-1'), parts: [] },
       {
@@ -632,6 +632,8 @@ describe('todo-sync', () => {
     const operations = createTodoSyncOperations();
 
     operations.syncTodosFromMessages();
+    // The default transcript is read after the store's queued flush.
+    await Promise.resolve();
     flushSolid();
     expect(state.todos).toEqual([
       { id: 'todo-1', content: 'sync', status: 'pending', priority: 'medium' },

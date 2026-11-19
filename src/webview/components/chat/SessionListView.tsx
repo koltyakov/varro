@@ -17,6 +17,7 @@ import {
   getSelectedModelForSession,
   getSessionTreeIds,
   getSessionTreeRootId,
+  getPinnedSessionsSyncRevision,
   getSessionTreeUpdated,
   hasActiveUsageLimit,
   isLoading,
@@ -811,6 +812,7 @@ function sortSessionsForDisplay(sessions: typeof state.sessions, now: number) {
 async function reorderPinnedSession(sourceSessionId: string, targetSessionId: string) {
   if (sourceSessionId === targetSessionId) return;
   const previous = [...state.pinnedSessionIds];
+  const syncRevision = getPinnedSessionsSyncRevision();
   const sourceIndex = previous.indexOf(sourceSessionId);
   const targetIndex = previous.indexOf(targetSessionId);
   if (sourceIndex < 0 || targetIndex < 0) return;
@@ -831,9 +833,12 @@ async function reorderPinnedSession(sourceSessionId: string, targetSessionId: st
         targetDirectory: targetSession?.directory,
       }
     );
-    setState(storePath('pinnedSessionIds', pinnedSessionIds));
+    // A host snapshot received meanwhile is newer than this response.
+    if (getPinnedSessionsSyncRevision() === syncRevision)
+      setState(storePath('pinnedSessionIds', pinnedSessionIds));
   } catch (error) {
-    setState(storePath('pinnedSessionIds', previous));
+    if (getPinnedSessionsSyncRevision() === syncRevision)
+      setState(storePath('pinnedSessionIds', previous));
     setError(error instanceof Error ? error.message : String(error));
   }
 }
