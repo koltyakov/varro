@@ -2151,7 +2151,11 @@ function GenericToolCall(props: {
                         when={taskRetryStatus()}
                         fallback="Results will appear here when ready."
                       >
-                        {(retry) => `Attempt ${retry().attempt} · ${retry().message}`}
+                        {(retry) => (
+                          <>
+                            Attempt {retry().attempt} · {retry().message}
+                          </>
+                        )}
                       </Show>
                     </span>
                   </span>

@@ -6822,10 +6822,12 @@ export function MessageList() {
       // within this scroll event, before remembering the user's destination.
       batchingScrollMounts = true;
       try {
-        (() => {
-          setScrollTop(top);
-          setViewportHeight(currentViewportHeight);
-        })();
+        setScrollTop(top);
+        setViewportHeight(currentViewportHeight);
+        // Solid 2 defers these writes. Flush inside this window so the newly visible range mounts
+        // here and is measured as one batch below. Rows that mount after it are measured one by
+        // one with a scroll correction each, which walks a scrollbar jump away from its target.
+        flush();
       } finally {
         batchingScrollMounts = false;
       }

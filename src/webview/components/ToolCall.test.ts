@@ -2319,6 +2319,18 @@ describe('ToolCall', () => {
         'retrying #2'
       );
 
+      // A later retry keeps the status truthy; the running detail must still follow it.
+      setState(
+        storePath('sessionStatus', 'subagent-session-1', {
+          type: 'retry',
+          attempt: 3,
+          message: 'provider overloaded',
+          next: 30_000,
+        })
+      );
+      flushSolid();
+      expect(working()?.textContent).toContain('Attempt 3 · provider overloaded');
+
       setState(storePath('sessionStatus', 'subagent-session-1', { type: 'idle' }));
       flushSolid();
       expect(label()).toBeUndefined();
