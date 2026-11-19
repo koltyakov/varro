@@ -2315,7 +2315,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
 }
 
 .file-path-icon.low-ink-icon {
-  /* Low-drawn ink lands between whole pixels at 1x, so either integer offset reads a pixel off.
+  /* Ink outside the usual frame lands between whole pixels, so an integer offset reads a pixel off.
      The box stays on the baseline to snap with the text; the transform moves only the paint. */
   vertical-align: baseline;
   transform: translateY(calc((1 - var(--file-icon-ink-bottom)) * 0.875em));
@@ -2329,6 +2329,44 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
 .rendered-markdown :is(.file-path-icon, .session-reference-icon, .external-link-icon) {
   /* The icon artwork and the first glyph already leave some space. */
   margin-right: 0.5px;
+}
+
+/* Link artwork fills its box width, so the margin is the visible gap before the title. */
+.external-link-icon,
+.rendered-markdown .external-link-icon {
+  margin-right: 0.18em;
+}
+
+/* The artwork ends 2/24 short of its box width, so subtract that from the visible gap. */
+.session-reference-icon,
+.rendered-markdown .session-reference-icon {
+  margin-right: calc(0.18em - (2 / 24) * 0.875em);
+}
+
+/* Link artwork leaves empty space below its ink. Seat the ink itself on the text baseline, because
+   a rounded box offset lands on different pixels at each text size. */
+.external-link-icon,
+.session-reference-icon {
+  --link-icon-ink-gap: calc(6 / 32);
+
+  vertical-align: baseline;
+  transform: translateY(calc(var(--link-icon-ink-gap) * 0.875em));
+}
+
+.external-link-icon[data-chip-icon='git'] {
+  --link-icon-ink-gap: calc(1.66 / 32);
+}
+
+.session-reference-icon {
+  --link-icon-ink-gap: calc(3 / 24);
+}
+
+/* A round shape reads high when it only touches the baseline. High-density screens can overshoot
+   by a single device pixel, as round letters do; at 1x the same offset would be a whole pixel. */
+@media (min-resolution: 2dppx) {
+  .session-reference-icon {
+    transform: translateY(calc(var(--link-icon-ink-gap) * 0.875em + 0.5px));
+  }
 }
 
 .rendered-markdown .file-path-icon {

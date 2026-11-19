@@ -1636,6 +1636,9 @@ function GenericToolCall(props: {
   const isRunning = createMemo(() => {
     if (props.state.status === 'running') return true;
     if (!isTask() || props.state.status !== 'completed') return false;
+    // Follow-ups can arrive before a result. Only the newest launch owns the
+    // child's remaining work, even when an older launch has no final notice.
+    if (nextLaunch() !== Infinity) return false;
     if (childWorking()) return true;
     const notice = taskResultNotice();
     // Native idle only ends an execution period. Wait for the child result,
@@ -1644,9 +1647,7 @@ function GenericToolCall(props: {
       !!notice?.backgroundPending ||
       (isBackgroundLaunch() &&
         !notice &&
-        (isNativeBackgroundLaunch() ||
-          (nextLaunch() === Infinity &&
-            (taskChildStatus()?.type !== 'idle' || !observedChildWork()))))
+        (isNativeBackgroundLaunch() || taskChildStatus()?.type !== 'idle' || !observedChildWork()))
     );
   });
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {

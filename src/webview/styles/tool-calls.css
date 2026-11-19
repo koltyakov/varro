@@ -205,6 +205,11 @@
   flex-shrink: 0;
 }
 
+/* The agent artwork is drawn below the center of its box. */
+:is(.inline-chip-icon, .chip-icon)[data-chip-icon='agent'] {
+  transform: translateY(-1px);
+}
+
 .inline-chip .file-type-icon {
   width: 11px;
   height: 11px;

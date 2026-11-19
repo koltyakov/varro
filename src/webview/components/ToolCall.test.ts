@@ -2500,6 +2500,105 @@ describe('ToolCall', () => {
     expect(icons[1]?.classList).toContain('tool-status-error');
   });
 
+  it.each([false, true])(
+    'settles a superseded native launch without its own final result, background pending: %s',
+    (backgroundPending) => {
+      const childID = 'subagent-session-1';
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'task',
+        state: {
+          ...completedState({ sessionID: childID }, 'Fix reserve'),
+          metadata: { sessionID: childID, status: 'running' },
+          time: { start: 1_000, end: 1_001 },
+        },
+      };
+      const followup: ToolPart = {
+        ...part,
+        id: 'tool-2',
+        messageID: 'message-2',
+        callID: 'call-2',
+        state: {
+          ...completedState({ sessionID: childID }, 'Preserve reproduction'),
+          metadata: { sessionID: childID, status: 'running' },
+          time: { start: 2_000, end: 2_001 },
+        },
+      };
+      const result = (id: string, created: number, pending: boolean) => ({
+        info: {
+          id,
+          sessionID: part.sessionID,
+          role: 'user' as const,
+          agent: 'build',
+          model: { providerID: 'test', modelID: 'parent' },
+          time: { created },
+        },
+        parts: [
+          {
+            id: `${id}:text`,
+            messageID: id,
+            sessionID: part.sessionID,
+            type: 'text' as const,
+            text: 'Reserve fixed',
+            synthetic: true,
+            subagentResult: {
+              sessionID: childID,
+              state: 'completed' as const,
+              backgroundPending: pending,
+            },
+          },
+        ],
+      });
+      const history = [
+        { info: assistantMessage(part.messageID), parts: [part] },
+        ...(backgroundPending ? [result('interim-result', 1_500, true)] : []),
+      ];
+      setState(storePath('messages', history));
+      flushSolid();
+      cleanup = render(() => [ToolCall({ part }), ToolCall({ part: followup })], container!);
+      flushSolid();
+      const icons = () => container!.querySelectorAll('.tool-call-icon-task');
+      expect(icons()[0]?.classList).toContain('tool-status-running');
+
+      // The same child gets a follow-up before it delivers a final result.
+      history.push({
+        info: assistantMessage(followup.messageID, { time: { created: 2_000 } }),
+        parts: [followup],
+      });
+      setState(storePath('messages', [...history]));
+      flushSolid();
+      setState(storePath('sessionStatus', childID, { type: 'busy' }));
+      flushSolid();
+      expect(icons()[0]?.classList).toContain('tool-status-completed');
+      expect(icons()[1]?.classList).toContain('tool-status-running');
+
+      setState(storePath('sessionStatus', childID, { type: 'idle' }));
+      flushSolid();
+      expect(icons()[1]?.classList).toContain('tool-status-running');
+      setState(storePath('messages', [...history, result('final-result', 3_000, false)]));
+      flushSolid();
+      expect(icons()[0]?.classList).toContain('tool-status-completed');
+      expect(icons()[1]?.classList).toContain('tool-status-completed');
+
+      // A cold history render has no observed busy-to-idle transition.
+      cleanup();
+      flushSolid();
+      resetToolCallExpansionState();
+      flushSolid();
+      setState(storePath('sessionStatus', {}));
+      flushSolid();
+      cleanup = render(() => [ToolCall({ part }), ToolCall({ part: followup })], container!);
+      flushSolid();
+      expect(icons()[0]?.classList).toContain('tool-status-completed');
+      expect(icons()[1]?.classList).toContain('tool-status-completed');
+      expect(container?.querySelector('.tool-call-spinner')).toBeNull();
+    }
+  );
+
   it.each(['completed', 'error'] as const)(
     'does not mark a %s task running because another child is busy',
     (status) => {
