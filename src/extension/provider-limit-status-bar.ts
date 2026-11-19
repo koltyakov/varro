@@ -249,15 +249,43 @@ export class ProviderLimitStatusBar {
         return `${name}: ${provider.summary}`;
       })
       .join(' · ');
+    const now = Date.now();
     this.item.tooltip =
       providers
         .map((provider) => {
           const limit = this.limits.get(provider.id);
-          return `${provider.name}: ${provider.summary}${limit?.note ? `\n${limit.note}` : ''}`;
+          const resets =
+            limit?.status === 'available'
+              ? limit.windows.flatMap((window) => {
+                  if (window.resetAt === null) return [];
+                  const resetAt = new Date(window.resetAt);
+                  if (!Number.isFinite(resetAt.getTime())) return [];
+                  const minutes = Math.max(0, Math.ceil((window.resetAt - now) / 60_000));
+                  const hours = Math.floor(minutes / 60);
+                  const days = Math.floor(hours / 24);
+                  const duration =
+                    days > 0
+                      ? [`${days}d`, hours % 24 ? `${hours % 24}h` : '']
+                      : [
+                          hours ? `${hours}h` : '',
+                          minutes % 60 || !hours ? `${minutes % 60}m` : '',
+                        ];
+                  const time = resetAt.toLocaleTimeString([], {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  });
+                  const date =
+                    resetAt.toDateString() === new Date(now).toDateString()
+                      ? ''
+                      : `${resetAt.toLocaleDateString()} `;
+                  return [
+                    `${window.label} reset in ${duration.filter(Boolean).join(' ')} (at ${date}${time})`,
+                  ];
+                })
+              : [];
+          return [`${provider.name}: ${provider.summary}`, ...resets].join('\n');
         })
-        .join('\n\n') +
-      (this.refreshError ? `\n\n${this.refreshError}` : '') +
-      '\n\nPercentages show remaining quota. Manage pins and names in the provider list.';
+        .join('\n\n') + (this.refreshError ? `\n\n${this.refreshError}` : '');
     this.item.show();
   }
 }

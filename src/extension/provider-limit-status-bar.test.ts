@@ -118,7 +118,7 @@ describe('pinned provider limit status bar', () => {
     expect(get).toHaveBeenCalledTimes(2);
     expect(get).toHaveBeenCalledWith('openai', null, '/repo');
     expect(get).not.toHaveBeenCalledWith('google', expect.anything(), expect.anything());
-    expect(mocks.item.tooltip).toContain('Percentages show remaining quota');
+    expect(mocks.item.tooltip).toBe('OpenAI: 5h 50%, w 78%\n\nAnthropic: 5h 50%, w 78%');
   });
 
   it('follows custom provider order and puts hidden providers last without sorting by alias', async () => {
@@ -135,6 +135,94 @@ describe('pinned provider limit status bar', () => {
     bar.preferencesChanged();
     expect(mocks.item.text).toMatch(/^Work:/);
   });
+
+  it('shows each window reset estimate in details only and updates it with live quotas', async () => {
+    const { bar, get } = setup({ 'claude-agent': 'Claude' });
+    const now = new Date(2026, 10, 18, 19, 50).getTime();
+    vi.setSystemTime(now);
+    const fiveHourReset = new Date(2026, 10, 18, 23, 10).getTime();
+    const weeklyReset = now + (5 * 24 + 3) * 3600_000;
+    const timeOptions = { hour: 'numeric', minute: '2-digit' } as const;
+    const status = limit('claude-agent');
+    status.windows = status.windows.map((window) => ({
+      ...window,
+      resetAt: window.id === 'five_hour' ? fiveHourReset : weeklyReset,
+    }));
+    status.note = 'Polled provider quota endpoint';
+    get.mockResolvedValue(status);
+    bar.updateConnection('/repo');
+    await vi.waitFor(() => expect(mocks.item.text).toBe('Claude: 5h 50%, w 78%'));
+    expect(mocks.item.tooltip).toBe(
+      `Claude Agent: 5h 50%, w 78%\n5-hour reset in 3h 20m (at ${new Date(fiveHourReset).toLocaleTimeString([], timeOptions)})\nWeekly reset in 5d 3h (at ${new Date(weeklyReset).toLocaleDateString()} ${new Date(weeklyReset).toLocaleTimeString([], timeOptions)})`
+    );
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    const updated = limit('claude-agent', 80);
+    updated.windows = updated.windows.map((window) => ({
+      ...window,
+      resetAt: window.id === 'five_hour' ? fiveHourReset + 3600_000 : null,
+    }));
+    bar.acceptUpdate({ directory: '/repo', status: updated });
+    expect(mocks.item.text).toBe('Claude: 5h 20%, w 78%');
+    expect(mocks.item.tooltip).toContain(
+      `5-hour reset in 4h 19m (at ${new Date(fiveHourReset + 3600_000).toLocaleDateString()} ${new Date(fiveHourReset + 3600_000).toLocaleTimeString([], timeOptions)})`
+    );
+    expect(mocks.item.tooltip).not.toContain('Weekly reset in');
+  });
+
+  it.each([
+    [-1, true],
+    [0, false],
+    [1, true],
+  ])('includes the reset date only outside today: day offset %s', async (dayOffset, showDate) => {
+    const { bar, get } = setup({ openai: '' });
+    vi.setSystemTime(new Date(2026, 10, 18, 23, 50));
+    const resetAt = new Date(2026, 10, 18 + dayOffset, 23, 55);
+    const status = limit('openai');
+    status.windows = status.windows.map((window) => ({ ...window, resetAt: resetAt.getTime() }));
+    get.mockResolvedValue(status);
+    bar.updateConnection('/repo');
+    await vi.advanceTimersByTimeAsync(0);
+    const time = resetAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    expect(mocks.item.tooltip).toContain(
+      `(at ${showDate ? `${resetAt.toLocaleDateString()} ` : ''}${time})`
+    );
+    if (!showDate) expect(mocks.item.tooltip).not.toContain(resetAt.toLocaleDateString());
+  });
+
+  it.each([
+    [-60_000, '0m'],
+    [0, '0m'],
+    [30_000, '1m'],
+    [60_000, '1m'],
+    [3600_000, '1h'],
+    [3660_000, '1h 1m'],
+    [86400_000, '1d'],
+  ])('formats a reset %s milliseconds away as %s', async (remaining, duration) => {
+    const { bar, get } = setup({ openai: '' });
+    const status = limit('openai');
+    status.windows = status.windows.map((window) => ({
+      ...window,
+      resetAt: Date.now() + remaining,
+    }));
+    get.mockResolvedValue(status);
+    bar.updateConnection('/repo');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.item.tooltip).toContain(`reset in ${duration} (at `);
+  });
+
+  it.each([null, NaN, Infinity, 9e15])(
+    'omits unknown or invalid reset estimates: %s',
+    async (resetAt) => {
+      const { bar, get } = setup({ openai: '' });
+      const status = limit('openai');
+      status.windows = status.windows.map((window) => ({ ...window, resetAt }));
+      get.mockResolvedValue(status);
+      bar.updateConnection('/repo');
+      await vi.waitFor(() => expect(mocks.item.text).toBe('OpenAI: 5h 50%, w 78%'));
+      expect(mocks.item.tooltip).toBe('OpenAI: 5h 50%, w 78%');
+    }
+  );
 
   it('refreshes while no webview is open and ignores repeated connection updates', async () => {
     const { bar, request, get } = setup({ openai: '' });
