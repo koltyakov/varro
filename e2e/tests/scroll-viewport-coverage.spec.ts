@@ -763,29 +763,46 @@ test.describe('viewport content coverage', () => {
         element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * targetRatio);
         element.dispatchEvent(new Event('scroll'));
       }, ratio);
-      await waitForAnimationFrames(page, 4);
 
-      const sample = await list.evaluate((element, targetRatio) => {
-        const containerRect = element.getBoundingClientRect();
-        const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
-        const firstVisible = rows.find((row) => {
-          const rect = row.getBoundingClientRect();
-          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-        });
-        const id = firstVisible?.dataset.msgId ?? '';
-        const match = /message-huge-(user|assistant)-(\d+)/.exec(id);
-        return {
-          ratio: targetRatio,
-          firstIndex: match ? Number(match[2]) * 2 + (match[1] === 'assistant' ? 1 : 0) : -1,
-          renderedRowCount: rows.length,
-          topSpacerHeight:
-            element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
-              .height ?? 0,
-          bottomSpacerHeight:
-            element.querySelector<HTMLElement>('.virtual-spacer-bottom')?.getBoundingClientRect()
-              .height ?? 0,
-        };
-      }, ratio);
+      // Estimated rows are remeasured and re-anchored after a jump. Sample only once the
+      // anchor, range and first visible row hold still, so a loaded runner cannot read a
+      // frame where the new scrollTop is applied before the rows above it were measured.
+      const readSample = () =>
+        list.evaluate((element, targetRatio) => {
+          const containerRect = element.getBoundingClientRect();
+          const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+          const firstVisible = rows.find((row) => {
+            const rect = row.getBoundingClientRect();
+            return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+          });
+          const id = firstVisible?.dataset.msgId ?? '';
+          const match = /message-huge-(user|assistant)-(\d+)/.exec(id);
+          return {
+            ratio: targetRatio,
+            firstIndex: match ? Number(match[2]) * 2 + (match[1] === 'assistant' ? 1 : 0) : -1,
+            renderedRowCount: rows.length,
+            topSpacerHeight:
+              element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
+                .height ?? 0,
+            bottomSpacerHeight:
+              element.querySelector<HTMLElement>('.virtual-spacer-bottom')?.getBoundingClientRect()
+                .height ?? 0,
+            scrollTop: element.scrollTop,
+            scrollHeight: element.scrollHeight,
+          };
+        }, ratio);
+      await waitForAnimationFrames(page, 4);
+      let sample = await readSample();
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await waitForAnimationFrames(page, 2);
+        const next = await readSample();
+        const settled =
+          next.firstIndex === sample.firstIndex &&
+          next.scrollTop === sample.scrollTop &&
+          next.scrollHeight === sample.scrollHeight;
+        sample = next;
+        if (settled) break;
+      }
       samples.push(sample);
     }
 

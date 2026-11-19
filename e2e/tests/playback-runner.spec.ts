@@ -71,7 +71,13 @@ test('E2E server socket loss cannot navigate an active playback document', async
   const server = await createServer({
     mode: 'e2e',
     // Do not let this server's dependency optimizer replace the running harness's cache.
-    cacheDir: testInfo.outputPath('vite-cache'),
+    // Keep it under node_modules so Vite treats prebuilt dependencies as third-party code
+    // and does not warn about their intentional dynamic imports.
+    cacheDir: path.join(
+      process.cwd(),
+      'node_modules/.vite-e2e/playback-runner',
+      String(testInfo.parallelIndex)
+    ),
     server: { host: '127.0.0.1', port: 0 },
   });
   try {

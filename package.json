@@ -92,8 +92,8 @@
     "@imagemagick/magick-wasm": "0.0.46",
     "@opencode-ai/sdk": "^1.19.6",
     "@opencode/client": "^2.3.2",
-    "@solidjs/signals": "2.0.1",
-    "@solidjs/web": "2.0.1",
+    "@solidjs/signals": "2.0.3",
+    "@solidjs/web": "2.0.3",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.18",
     "highlight.js": "11.12.0",
@@ -101,7 +101,7 @@
     "katex": "0.19.1",
     "marked": "18.2.1",
     "mermaid": "^12.3.0",
-    "solid-js": "2.0.1"
+    "solid-js": "2.0.3"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",
