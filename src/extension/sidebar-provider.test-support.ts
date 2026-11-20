@@ -48,7 +48,7 @@ const mocks = vi.hoisted(() => ({
         dispose: vi.fn(),
       })),
       createWebviewPanel: vi.fn(),
-      onDidChangeWindowState: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidChangeWindowState: vi.fn((_listener: () => void) => ({ dispose: vi.fn() })),
       onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
       activeColorTheme: { kind: 2 },
       showOpenDialog: vi.fn(() => Promise.resolve(undefined)),

@@ -16,6 +16,7 @@ import {
 async function createHarness(enabled = true) {
   const { NativeNotifications } = await import('./native-notifications');
   const show = vi.spyOn(NativeNotifications.prototype, 'show').mockResolvedValue();
+  const dismiss = vi.spyOn(NativeNotifications.prototype, 'dismiss').mockResolvedValue();
   const sound = vi.spyOn(NativeNotifications.prototype, 'playSound').mockResolvedValue();
   const editorVisible = vi
     .spyOn(MacOSNotificationHelper.prototype, 'isEditorVisible')
@@ -58,6 +59,7 @@ async function createHarness(enabled = true) {
     state,
     view,
     show,
+    dismiss,
     sound,
     editorVisible,
     vscode,
@@ -651,6 +653,30 @@ describe('SidebarProvider desktop notifications', () => {
       });
       await vi.advanceTimersByTimeAsync(300);
       expect(test.show).not.toHaveBeenCalled();
+    } finally {
+      await test.provider.dispose();
+    }
+  });
+
+  it('dismisses delivered banners on window focus without acknowledging unread chats', async () => {
+    const test = await createHarness();
+    try {
+      test.state.markSessionBusy('root');
+      test.state.handleServerEvent({ type: 'session.idle', properties: { sessionID: 'root' } });
+      test.state.setSessionUnreadState('root', 'completed', true, '/repo', Date.now());
+      await vi.advanceTimersByTimeAsync(300);
+      expect(test.show).toHaveBeenCalledOnce();
+      const unread = test.traySnapshot();
+      const onFocus = test.vscode.window.onDidChangeWindowState.mock.calls.at(-1)?.[0];
+      if (!onFocus) throw new Error('Missing window focus listener');
+      onFocus();
+      expect(test.dismiss).not.toHaveBeenCalled();
+      test.vscode.window.state.focused = true;
+      onFocus();
+      onFocus();
+      expect(test.dismiss).toHaveBeenCalledOnce();
+      expect(test.traySnapshot()).toEqual(unread);
+      expect(test.state.completed.has('root')).toBe(true);
     } finally {
       await test.provider.dispose();
     }

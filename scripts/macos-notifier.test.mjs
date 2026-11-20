@@ -12,6 +12,7 @@ const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let directory = '';
 let executable = '';
+let dismissalExecutable = '';
 
 before(async () => {
   if (process.platform !== 'darwin') return;
@@ -35,11 +36,44 @@ before(async () => {
     ],
     { timeout: 30_000 }
   );
+  dismissalExecutable = join(directory, 'dismissal-test');
+  await run(
+    '/usr/bin/xcrun',
+    [
+      'clang',
+      '-fobjc-arc',
+      '-framework',
+      'Cocoa',
+      '-framework',
+      'CoreGraphics',
+      '-framework',
+      'UserNotifications',
+      '-mmacosx-version-min=11.0',
+      join(root, 'native/macos-notifications/dismissal.test.m'),
+      '-o',
+      dismissalExecutable,
+    ],
+    { timeout: 30_000 }
+  );
 });
 
 after(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
+
+test(
+  'dismisses only explicit window-owned IDs and waits for the center',
+  {
+    skip: process.platform !== 'darwin',
+  },
+  async () => {
+    const { stdout } = await run(dismissalExecutable, [], { timeout: 5000 });
+    assert.deepEqual(JSON.parse(stdout), {
+      status: 'dismissed',
+      ids: ['window-a-first', 'window-a-second'],
+    });
+  }
+);
 
 const url = 'vscode://file/Users/test/Project%20%231/Project.code-workspace';
 const safeUrl = `${url}?windowId=_blank`;

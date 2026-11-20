@@ -23,6 +23,8 @@ The extension verifies the archive checksum and installs the app under its globa
 
 Notifications use the originating VS Code window's focus, not process-wide editor visibility. An unfocused window can notify while another VS Code window is active, even in side-by-side use. The extension rechecks focus, event validity, and notification settings before each alert burst. Banners and sounds remain independently opt-in and off by default. The helper's `--windows PID` command remains available for geometry diagnostics but does not gate notification delivery.
 
+Returning to the originating window dismisses its existing desktop notifications. Each extension instance tracks only its own notification IDs; other windows and projects are untouched. A focus return cancels delivery still preparing and waits for in-flight delivery acceptance before removing its ID. Dismissal does not mark chats read or resolve pending permissions or questions. Notifications from a previous extension-host instance are not tracked.
+
 The first `--notify` requests alert authorization. A denial produces an actionable error; Varro never changes OS permission settings. The helper exits after the OS accepts the request. Acceptance alone does not prove a banner appeared. Focus modes and banner settings still apply.
 
 The title is the project name, the subtitle is the chat title, and the body describes the event. Project notifications store a built-in VS Code project URI in their `userInfo`, using the saved `.code-workspace` file for multi-root workspaces or the workspace folder otherwise. Folderless scratch windows instead use Varro's `/notification` callback resolved through `vscode.env.asExternalUri`, which routes to the originating window and opens the notification's chat there. Never use an open-folder URI for the internal scratch directory: VS Code may replace the active window with it. Callback resolution failures are reported without falling back to that unsafe route.
@@ -38,6 +40,9 @@ varro-notifier --diagnose
 varro-notifier --windows EDITOR_MAIN_PID
 varro-notifier --notify 'Project: My project' 'Chat title' 'Response ready' varro-test
 varro-notifier --delivered varro-test
+varro-notifier --dismiss varro-test
 ```
 
 An optional URI follows the ID in `--notify PROJECT CHAT DETAILS [ID [URL]]`, for example `vscode://file/Users/name/project?windowId=_blank`. Use the editor's URI scheme and an encoded absolute folder or workspace-file path. Project URLs accept only the optional `windowId=_blank` query. `--diagnose` reads authorization and presentation settings without requesting permission. `--delivered` reports only the matching notification, including its three text fields, project URI, and whether it carried a sound. Sending is bounded to 45 seconds for the initial authorization prompt; the extension's process timeout is 50 seconds. Disposing the extension cancels its running commands.
+
+`--dismiss ID...` removes only the listed pending and delivered requests without requesting notification permission. Windows uses unique toast tags with tag-specific history removal. Linux keeps each `notify-send --wait --print-id` process alive until its notification closes, then uses its SIGINT handler for dismissal. This keeps closure on the original D-Bus connection, as required by GNOME, rather than attempting it from a separate `gdbus` process. Linux requires a `notify-send` version with SIGINT closure support, verified with libnotify 0.8.8.

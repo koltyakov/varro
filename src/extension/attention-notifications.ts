@@ -9,6 +9,7 @@ export interface AttentionNotificationSettings {
 
 export interface AttentionNotificationTransport {
   show(notification: AttentionNotification): Promise<void>;
+  dismiss(): Promise<void>;
   playSound(): Promise<void>;
   dispose(): void;
 }
@@ -28,7 +29,7 @@ export interface AttentionNotificationHost {
   isInScope(sessionID: string): boolean;
   titleFor(sessionID: string): string | undefined;
   projectNameFor(sessionID: string): string | undefined;
-  reportError(channel: 'sound' | 'native', error: Error): void;
+  reportError(channel: 'sound' | 'native' | 'dismiss', error: Error): void;
 }
 
 interface CompletedNotification {
@@ -45,11 +46,14 @@ export class AttentionNotifications {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private nextDeliveryAt = 0;
   private disposed = false;
+  private focused: boolean;
 
   constructor(
     private readonly host: AttentionNotificationHost,
     private readonly transport: AttentionNotificationTransport
-  ) {}
+  ) {
+    this.focused = host.isFocused();
+  }
 
   complete(sessionID: string, kind: CompletedNotification['kind']): void {
     if (this.disposed) return;
@@ -63,6 +67,11 @@ export class AttentionNotifications {
 
   update(): void {
     if (this.disposed) return;
+    const focused = this.host.isFocused();
+    if (focused && !this.focused) {
+      void this.deliverChannel('dismiss', this.transport.dismiss());
+    }
+    this.focused = focused;
     const pending = this.host.getPending();
     const settings = this.host.getSettings();
     for (const id of this.observed) {
@@ -217,7 +226,7 @@ export class AttentionNotifications {
   }
 
   private async deliverChannel(
-    channel: 'native' | 'sound',
+    channel: 'native' | 'sound' | 'dismiss',
     operation: Promise<void>
   ): Promise<void> {
     try {

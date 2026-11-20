@@ -43,6 +43,17 @@ static NSURL *notificationURL(id value) {
   return url.URL;
 }
 
+static void dismissNotifications(UNUserNotificationCenter *center, NSArray<NSString *> *identifiers) {
+  // Identifiers belong to the calling editor window. Never remove all Varro notifications.
+  [center removePendingNotificationRequestsWithIdentifiers:identifiers];
+  [center removeDeliveredNotificationsWithIdentifiers:identifiers];
+  // Keep the process alive until Notification Center has processed the preceding removals.
+  [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> *notifications) {
+    (void)notifications;
+    output(@{ @"status": @"dismissed", @"ids": identifiers }, 0);
+  }];
+}
+
 static NSDictionary *boundsJSON(CGRect bounds) {
   return @{ @"x": @(bounds.origin.x), @"y": @(bounds.origin.y),
             @"width": @(bounds.size.width), @"height": @(bounds.size.height) };
@@ -107,7 +118,7 @@ static void editorWindows(const char *argument) {
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
   (void)notification;
   NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
-  os_log(OS_LOG_DEFAULT, "Varro helper launch: version=5 argumentCount=%{public}lu", (unsigned long)args.count);
+  os_log(OS_LOG_DEFAULT, "Varro helper launch: version=6 argumentCount=%{public}lu", (unsigned long)args.count);
   if (args.count == 1) {
     // Notification Center may relaunch the app after its banner is clicked.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ exit(0); });
@@ -115,7 +126,7 @@ static void editorWindows(const char *argument) {
   }
   UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
   if (args.count == 2 && [args[1] isEqualToString:@"--version"]) {
-    output(@{ @"name": @"Varro", @"version": @"5", @"bundleId": NSBundle.mainBundle.bundleIdentifier }, 0);
+    output(@{ @"name": @"Varro", @"version": @"6", @"bundleId": NSBundle.mainBundle.bundleIdentifier }, 0);
   } else if (args.count == 2 && [args[1] isEqualToString:@"--diagnose"]) {
     [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
       output(@{
@@ -127,6 +138,12 @@ static void editorWindows(const char *argument) {
         @"notificationCenterEnabled": @(settings.notificationCenterSetting == UNNotificationSettingEnabled)
       }, 0);
     }];
+  } else if (args.count >= 3 && [args[1] isEqualToString:@"--dismiss"]) {
+    NSArray<NSString *> *identifiers = [args subarrayWithRange:NSMakeRange(2, args.count - 2)];
+    for (NSString *identifier in identifiers) {
+      if (!identifier.length || identifier.length > 256) fail(@"Invalid notification identifier.", 2);
+    }
+    dismissNotifications(center, identifiers);
   } else if (args.count == 3 && [args[1] isEqualToString:@"--delivered"]) {
     NSString *identifier = args[2];
     [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> *notifications) {
@@ -169,7 +186,7 @@ static void editorWindows(const char *argument) {
       }
     }];
   } else {
-    fail(@"Usage: varro-notifier --notify PROJECT CHAT DETAILS [ID [URL]] | --windows PID | --diagnose | --delivered ID | --version", 2);
+    fail(@"Usage: varro-notifier --notify PROJECT CHAT DETAILS [ID [URL]] | --dismiss ID... | --windows PID | --diagnose | --delivered ID | --version", 2);
   }
 }
 

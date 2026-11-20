@@ -30,6 +30,7 @@ function createNotifications() {
   };
   const transport = {
     show: vi.fn<AttentionNotificationTransport['show']>(async () => {}),
+    dismiss: vi.fn<AttentionNotificationTransport['dismiss']>(async () => {}),
     playSound: vi.fn(async () => {}),
     dispose: vi.fn(),
   };
@@ -298,6 +299,39 @@ describe('AttentionNotifications', () => {
     expect(test.transport.playSound).not.toHaveBeenCalled();
   });
 
+  it('dismisses only the returning window once without clearing pending attention', async () => {
+    const returning = createNotifications();
+    const background = createNotifications();
+    for (const window of [returning, background]) window.add('request');
+    await vi.advanceTimersByTimeAsync(300);
+    returning.host.isFocused.mockReturnValue(true);
+    returning.settings.native = false;
+    returning.notifications.update();
+    returning.notifications.update();
+    background.notifications.update();
+    expect(returning.transport.dismiss).toHaveBeenCalledOnce();
+    expect(background.transport.dismiss).not.toHaveBeenCalled();
+    expect(returning.pending.has('request')).toBe(true);
+    returning.host.isFocused.mockReturnValue(false);
+    returning.notifications.update();
+    returning.host.isFocused.mockReturnValue(true);
+    returning.notifications.update();
+    expect(returning.transport.dismiss).toHaveBeenCalledTimes(2);
+    expect(returning.transport.show).toHaveBeenCalledOnce();
+  });
+
+  it('reports dismissal failures separately from showing notifications and playing sound', async () => {
+    const test = createNotifications();
+    const error = new Error('Dismissal unavailable');
+    test.transport.dismiss.mockRejectedValue(error);
+    test.host.isFocused.mockReturnValue(true);
+    test.notifications.update();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.host.reportError).toHaveBeenCalledExactlyOnceWith('dismiss', error);
+    expect(test.transport.show).not.toHaveBeenCalled();
+    expect(test.transport.playSound).not.toHaveBeenCalled();
+  });
+
   it('keeps sound independent of native delivery failure and reports the failure', async () => {
     const test = createNotifications();
     const error = new Error('notification service unavailable');
@@ -317,6 +351,7 @@ describe('AttentionNotifications', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(test.transport.show).not.toHaveBeenCalled();
     expect(test.transport.playSound).not.toHaveBeenCalled();
+    expect(test.transport.dismiss).not.toHaveBeenCalled();
     expect(test.transport.dispose).toHaveBeenCalledOnce();
   });
 });
