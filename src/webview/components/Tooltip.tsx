@@ -27,6 +27,9 @@ export function Tooltip(props: {
   /** Attach to an existing editor-owned element without reparenting it. */
   target?: HTMLElement;
   placement?: 'top' | 'bottom' | 'left' | 'right';
+  variant?: 'tooltip' | 'panel';
+  /** Align a description panel to the full owning row rather than its text trigger. */
+  anchor?: () => HTMLElement | undefined;
   delay?: number;
   disabled?: boolean;
 }) {
@@ -38,12 +41,15 @@ export function Tooltip(props: {
   let tooltip: HTMLDivElement | undefined;
   let showTimer: ReturnType<typeof setTimeout> | undefined;
   let unregisterComposerDismiss: (() => void) | undefined;
+  let panelResizeObserver: ResizeObserver | undefined;
 
   const hide = () => {
     if (showTimer) clearTimeout(showTimer);
     showTimer = undefined;
     unregisterComposerDismiss?.();
     unregisterComposerDismiss = undefined;
+    panelResizeObserver?.disconnect();
+    panelResizeObserver = undefined;
     setVisible(false);
     setPosition(null);
   };
@@ -51,10 +57,13 @@ export function Tooltip(props: {
   const updatePosition = () => {
     if (!trigger || !tooltip) return;
 
-    const triggerBox = trigger.getBoundingClientRect();
+    const triggerBox = (props.anchor?.() ?? trigger).getBoundingClientRect();
+    if (props.variant === 'panel') {
+      tooltip.style.width = `${Math.min(triggerBox.width, Math.max(0, window.innerWidth - 16))}px`;
+    }
     const tooltipBox = tooltip.getBoundingClientRect();
     const viewportMargin = 8;
-    const gap = 6;
+    const gap = props.variant === 'panel' ? 7 : 6;
     if (props.placement === 'left' || props.placement === 'right') {
       const left =
         props.placement === 'right'
@@ -116,7 +125,16 @@ export function Tooltip(props: {
         return;
       }
       setVisible(true);
-      queueMicrotask(updatePosition);
+      queueMicrotask(() => {
+        if (!visible()) return;
+        updatePosition();
+        if (props.variant !== 'panel' || !tooltip || !globalThis.ResizeObserver) return;
+        panelResizeObserver?.disconnect();
+        panelResizeObserver = new ResizeObserver(updatePosition);
+        panelResizeObserver.observe(tooltip);
+        const anchor = props.anchor?.();
+        if (anchor) panelResizeObserver.observe(anchor);
+      });
     }, props.delay ?? DEFAULT_TOOLTIP_DELAY);
   };
 
@@ -208,6 +226,7 @@ export function Tooltip(props: {
             class={[
               'themed-tooltip',
               {
+                panel: props.variant === 'panel',
                 visible: position() !== null,
                 top: position()?.placement === 'top',
                 bottom: position()?.placement === 'bottom',
@@ -219,15 +238,19 @@ export function Tooltip(props: {
             style={{ left: `${position()?.left ?? 0}px`, top: `${position()?.top ?? 0}px` }}
           >
             {props.content}
-            <span
-              class="themed-tooltip-arrow"
-              style={{
-                left: `${position()?.arrowLeft ?? 0}px`,
-                top:
-                  position()?.arrowTop === undefined ? undefined : `${position()?.arrowTop ?? 0}px`,
-              }}
-              aria-hidden="true"
-            />
+            <Show when={props.variant !== 'panel'}>
+              <span
+                class="themed-tooltip-arrow"
+                style={{
+                  left: `${position()?.arrowLeft ?? 0}px`,
+                  top:
+                    position()?.arrowTop === undefined
+                      ? undefined
+                      : `${position()?.arrowTop ?? 0}px`,
+                }}
+                aria-hidden="true"
+              />
+            </Show>
           </div>
         </Portal>
       </Show>

@@ -16,6 +16,7 @@ import checkIcon from 'iconoir/icons/check.svg';
 import checkCircleIcon from 'iconoir/icons/check-circle.svg';
 import checkSquareIcon from 'iconoir/icons/check-square.svg';
 import clockIcon from 'iconoir/icons/clock.svg';
+import clipboardCheckIcon from 'iconoir/icons/clipboard-check.svg';
 import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
 import coinsIcon from 'iconoir/icons/coins.svg';
 import compressIcon from 'iconoir/icons/compress.svg';
@@ -56,6 +57,7 @@ import navArrowRightIcon from 'iconoir/icons/nav-arrow-right.svg';
 import navArrowUpIcon from 'iconoir/icons/nav-arrow-up.svg';
 import openNewWindowIcon from 'iconoir/icons/open-new-window.svg';
 import pageIcon from 'iconoir/icons/page.svg';
+import pasteClipboardIcon from 'iconoir/icons/paste-clipboard.svg';
 import pauseIcon from 'iconoir/icons/pause.svg';
 import pauseSolidIcon from 'iconoir/icons/pause-solid.svg';
 import pinIcon from 'iconoir/icons/pin.svg';
@@ -111,6 +113,7 @@ export {
   checkIcon,
   checkSquareIcon,
   clockIcon,
+  clipboardCheckIcon,
   codeBracketsSquareIcon,
   coinsIcon,
   compressIcon,
@@ -146,6 +149,7 @@ export {
   navArrowUpIcon,
   openNewWindowIcon,
   pageIcon,
+  pasteClipboardIcon,
   pauseIcon,
   pauseSolidIcon,
   pinIcon,

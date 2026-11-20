@@ -122,7 +122,10 @@ it('renders a native goal kickoff as a visible prompt instead of collapsed autom
   );
   cleanup = render(() => Message(message), container!);
   flushSolid();
-  expect(container?.textContent).toContain('/goal Wait for 1 minute');
+  expect(container?.textContent).toContain('goal Wait for 1 minute');
+  const chip = container?.querySelector('.inline-chip[data-copy-marker="/goal"]');
+  expect(chip?.querySelector('.inline-chip-label')?.textContent).toBe('goal');
+  expect(chip?.querySelector('[data-chip-icon="skill"]')).not.toBeNull();
   expect(container?.querySelector('.chat-tool-invocation-part')).toBeNull();
   expect(getUserMessagePreviewText(message.parts)).toBe('/goal Wait for 1 minute');
 });

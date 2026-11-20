@@ -32,6 +32,20 @@
   transform: translateY(0);
 }
 
+.themed-tooltip.panel {
+  max-width: calc(100vw - 16px);
+  max-height: 140px;
+  padding: 9px 10px;
+  overflow-y: auto;
+  border-color: var(--color-vscode-border-soft);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-surface-soft);
+  box-shadow: none;
+  color: var(--color-vscode-fg-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .problems-tooltip-content {
   display: flex;
   flex-direction: column;

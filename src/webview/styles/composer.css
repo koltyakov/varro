@@ -2393,6 +2393,19 @@
   padding-inline-start: 8px;
 }
 
+.chat-session-goal .chat-queue-body {
+  gap: 6px;
+}
+
+.chat-goal-icon {
+  flex-shrink: 0;
+  color: var(--color-vscode-muted);
+}
+
+.chat-goal-tooltip-objective + .chat-goal-tooltip-reason {
+  margin-top: 6px;
+}
+
 .chat-goal-error {
   padding: 2px 4px;
   font-size: 11px;
@@ -2732,13 +2745,15 @@
   text-align: left;
 }
 
-.chat-quota-warning-close {
+.chat-quota-warning-close,
+.chat-goal-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 20px;
   height: 20px;
   border-radius: 50%;
+  color: var(--color-vscode-fg-soft);
 }
 
 .chat-quota-warning-usage:hover,
@@ -2746,7 +2761,9 @@
   color: var(--color-vscode-fg);
 }
 
-.chat-quota-warning-close:hover {
+.chat-quota-warning-close:hover,
+.chat-goal-close:hover:not(:disabled) {
+  color: var(--color-vscode-fg);
   background: var(--color-vscode-hover);
 }
 

@@ -97,6 +97,64 @@ describe('Tooltip', () => {
     expect(tooltip?.classList.contains('bottom')).toBe(true);
   });
 
+  it('renders a description panel without an arrow', async () => {
+    cleanup = render(
+      () => (
+        <Tooltip content="Goal description" variant="panel">
+          <button>Goal</button>
+        </Tooltip>
+      ),
+      container
+    );
+    container.querySelector('button')?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+    const tooltip = document.querySelector('[role="tooltip"]');
+    expect(tooltip?.classList.contains('panel')).toBe(true);
+    expect(tooltip?.textContent).toBe('Goal description');
+    expect(tooltip?.querySelector('.themed-tooltip-arrow')).toBeNull();
+  });
+
+  it('aligns a description panel above the full owning row and follows resizing', async () => {
+    let width = 420;
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.id === 'goal-row') return new DOMRect(20, 500, width, 28);
+        if (this.getAttribute('role') === 'tooltip')
+          return new DOMRect(0, 0, Number.parseFloat(this.style.width), 60);
+        return new DOMRect(40, 508, 200, 14);
+      });
+    try {
+      cleanup = render(
+        () => (
+          <div id="goal-row">
+            <Tooltip
+              content="Goal description"
+              variant="panel"
+              anchor={() => container.querySelector<HTMLElement>('#goal-row') ?? undefined}
+            >
+              <button>Goal</button>
+            </Tooltip>
+          </div>
+        ),
+        container
+      );
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+      const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]');
+      expect(tooltip?.style.width).toBe('420px');
+      expect(tooltip?.style.left).toBe('20px');
+      expect(tooltip?.style.top).toBe('433px');
+      width = 240;
+      window.dispatchEvent(new Event('resize'));
+      await vi.waitFor(() => expect(tooltip?.style.width).toBe('240px'));
+      expect(tooltip?.style.left).toBe('20px');
+      expect(tooltip?.style.top).toBe('433px');
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
   it('supports a per-tooltip delay and cancels before it elapses', async () => {
     cleanup = render(
       () => (

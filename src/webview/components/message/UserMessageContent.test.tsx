@@ -692,6 +692,45 @@ describe('UserMessageContent', () => {
     }
   );
 
+  it.each(['/goal Wait for 1 minute', '/goal **Wait** for 1 minute'])(
+    'renders the leading goal command as a skill chip: %s',
+    (prompt) => {
+      const parts = [textPart('prompt', prompt)];
+      renderUserContent(parts);
+      flushSolid();
+      const chip = container?.querySelector('.inline-chip[data-copy-marker="/goal"]');
+      expect(chip?.querySelector('.inline-chip-label')?.textContent).toBe('goal');
+      expect(chip?.querySelector('[data-chip-icon="skill"]')).not.toBeNull();
+      expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
+        'goal Wait for 1 minute'
+      );
+      expect(getUserMessageEditText(parts)).toBe(prompt);
+      expect(getUserMessagePreviewText(parts)).toBe(prompt);
+      expect(container?.querySelector('.message-attachments')).toBeNull();
+    }
+  );
+
+  it.each([
+    'Discuss /goal Wait for 1 minute',
+    '/goals Wait for 1 minute',
+    '/goal.md',
+    '`/goal Wait for 1 minute`',
+    '```text\n/goal Wait for 1 minute\n```',
+  ])('does not turn goal-like prose or code into a command chip: %s', (prompt) => {
+    renderUserContent([textPart('prompt', prompt)]);
+    flushSolid();
+    expect(container?.querySelector('[data-copy-marker="/goal"]')).toBeNull();
+  });
+
+  it('keeps goal-like paths in a Markdown objective as text', () => {
+    renderUserContent([textPart('prompt', '/goal **Read** /goals and /goal.md')]);
+    flushSolid();
+    expect(container?.querySelectorAll('.inline-chip[data-copy-marker="/goal"]')).toHaveLength(1);
+    expect(container?.querySelector('.user-message-text')?.textContent?.trim()).toBe(
+      'goal Read /goals and /goal.md'
+    );
+  });
+
   it('shows an inline skill without an attachment row', () => {
     renderUserContent([
       textPart('prompt', 'What machines can you see using $[control]'),
@@ -2084,9 +2123,43 @@ describe('UserMessageContent', () => {
 
     expect(setData).toHaveBeenCalledWith('text/plain', 'Check @handlers.js and @README.md today');
   });
+
+  it('copies a goal skill chip as the original slash command', () => {
+    renderUserContent([textPart('prompt', '/goal Wait for 1 minute')]);
+    flushSolid();
+    const message = container?.querySelector<HTMLElement>('.rendered-markdown');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(message!);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const setData = vi.fn();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { setData } });
+    message?.dispatchEvent(event);
+    flushSolid();
+    expect(setData).toHaveBeenCalledWith('text/plain', '/goal Wait for 1 minute');
+  });
 });
 
 describe('UserMessagePreviewContent', () => {
+  it('formats the goal command as a skill chip in the sticky preview', () => {
+    cleanup = render(
+      () => (
+        <UserMessagePreviewContent
+          parts={[textPart('prompt', '/goal Wait for 1 minute')]}
+          fallback="Fallback"
+        />
+      ),
+      container!
+    );
+    flushSolid();
+    const chip = container?.querySelector('.inline-chip[data-copy-marker="/goal"]');
+    expect(chip?.textContent).toBe('goal');
+    expect(chip?.querySelector('[data-chip-icon="skill"]')).not.toBeNull();
+    expect(container?.textContent).toBe('goal Wait for 1 minute');
+  });
+
   it('renders the first meaningful text with inline chips', () => {
     cleanup = render(
       () =>

@@ -184,6 +184,7 @@ type InlineRenderableAttachment =
 
 type InlineTextSegment =
   | { type: 'text'; content: string }
+  | { type: 'goal-command' }
   | { type: 'attachment'; attachment: InlineRenderableAttachment }
   | { type: 'session'; reference: SessionReference }
   | Extract<ExternalLinkTextSegment, { type: 'external-link' }>;
@@ -1506,6 +1507,22 @@ function UserMessageTextContent(props: {
       props.fileParts
     )) {
       if (segment.type === 'session' || segment.type === 'text') continue;
+      if (segment.type === 'goal-command') {
+        const marker = /^\/goal(?:\s|$)/.exec(props.text)?.[0] ?? '/goal';
+        slots.set(marker, {
+          marker,
+          render: () => (
+            <>
+              <InlineMessageAttachmentChip
+                attachment={{ type: 'skill', name: 'goal' }}
+                marker="/goal"
+              />
+              {marker.slice('/goal'.length)}
+            </>
+          ),
+        });
+        continue;
+      }
       if (segment.type === 'external-link') {
         if (segment.kind !== 'git') continue;
         slots.set(segment.href, {
@@ -1630,6 +1647,14 @@ function InlineAttachmentText(props: {
     <For each={segments()}>
       {(segment) => {
         if (segment.type === 'text') return segment.content;
+        if (segment.type === 'goal-command') {
+          return (
+            <InlineMessageAttachmentChip
+              attachment={{ type: 'skill', name: 'goal' }}
+              marker="/goal"
+            />
+          );
+        }
         if (segment.type === 'session') {
           return <SessionReferenceLink reference={segment.reference} />;
         }
@@ -1902,6 +1927,11 @@ function buildInlineTextSegments(
   agentParts: AgentPart[],
   fileParts: FilePart[] = []
 ): InlineTextSegment[] {
+  const attachmentSegments: InlineTextSegment[] = [];
+  if (/^\/goal(?=\s|$)/.test(content)) {
+    attachmentSegments.push({ type: 'goal-command' });
+    content = content.slice('/goal'.length);
+  }
   const attachmentByMarker = new Map<string, InlineRenderableAttachment>();
 
   for (const part of fileParts) {
@@ -1961,7 +1991,6 @@ function buildInlineTextSegments(
   const markers = Array.from(attachmentByMarker.keys())
     .filter((marker) => content.includes(marker))
     .toSorted((a, b) => b.length - a.length);
-  const attachmentSegments: InlineTextSegment[] = [];
   if (markers.length === 0) {
     attachmentSegments.push({ type: 'text', content });
   } else {
@@ -2252,7 +2281,7 @@ function InlineAgentChip(props: { part: AgentPart; marker: string }) {
   return <AgentChip part={props.part} inline marker={props.marker} />;
 }
 
-function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
+function InlineMessageAttachmentChip(props: { attachment: MessageAttachment; marker?: string }) {
   if (props.attachment.type === 'problem-reference')
     return <ProblemReferenceChip reference={props.attachment.reference} inline />;
   if (props.attachment.type === 'issues') {
@@ -2275,7 +2304,7 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
     return (
       <span
         class="inline-chip"
-        data-copy-marker={getInlineAttachmentCopyMarker(props.attachment)}
+        data-copy-marker={props.marker ?? getInlineAttachmentCopyMarker(props.attachment)}
         title={getAttachmentTitle(props.attachment)}
       >
         <MaterialChipIcon kind="skill" class="inline-chip-icon" />
