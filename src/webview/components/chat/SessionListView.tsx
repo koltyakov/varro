@@ -9,8 +9,10 @@ import {
   untrack,
   createMemo,
   createUniqueId,
+  mapArray,
 } from 'solid-js';
 import { storePath } from '@solidjs/signals';
+import { createRecordSnapshots } from '../../lib/record-snapshots';
 import {
   getModelDisplayName,
   getSelectedAgentForSession,
@@ -1323,9 +1325,17 @@ export function SessionListView(props: {
   const pendingBackgroundIds = createPendingBackgroundSessionIds(() =>
     props.rawSessionIndicators ? {} : state.sessionStatus
   );
+  const indicatorSessions = createRecordSnapshots(() => state.sessions);
+  const indicatorReads = mapArray(
+    () => state.sessions,
+    (session) => createMemo(() => [session.id, readSessionIndicatorState(session.id)] as const),
+    { keyed: true }
+  );
+  const indicatorReadState = createMemo(() => new Map(indicatorReads().map((read) => read())));
   const rawSessionIndicators = createMemo(
     () =>
-      props.rawSessionIndicators ?? deriveSessionIndicators(state.sessions, pendingBackgroundIds())
+      props.rawSessionIndicators ??
+      deriveSessionIndicators(indicatorSessions(), pendingBackgroundIds(), indicatorReadState())
   );
   const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
   const queuedMessageCounts = createMemo(() => {
@@ -2940,9 +2950,18 @@ function rootSessionId(sessionId: string) {
   return getSessionTreeRootId(sessionId) || sessionId;
 }
 
+function readSessionIndicatorState(sessionId: string) {
+  return {
+    selectedAgent: getSelectedAgentForSession(sessionId),
+    completedUnread: isSessionCompletedResponseUnread(sessionId),
+    interruptedUnread: isSessionInterruptedResponseUnread(sessionId),
+  };
+}
+
 export function deriveSessionIndicators(
   sessions: typeof state.sessions,
-  pendingBackgroundIds: ReadonlySet<string> = new Set()
+  pendingBackgroundIds: ReadonlySet<string> = new Set(),
+  readState?: ReadonlyMap<string, ReturnType<typeof readSessionIndicatorState>>
 ): SessionIndicatorSets {
   const subagentCounts = new Map<string, number>();
   const failedSessionIds = new Set(state.failedSessionIds);
@@ -3043,7 +3062,13 @@ export function deriveSessionIndicators(
       }
       continue;
     }
-    if (isSessionInterruptedResponseUnread(sessionId) && !running && !needsAttention) continue;
+    const sessionReadState = readState?.get(sessionId);
+    if (
+      (sessionReadState?.interruptedUnread ?? isSessionInterruptedResponseUnread(sessionId)) &&
+      !running &&
+      !needsAttention
+    )
+      continue;
     if (needsAttention) {
       attentionIds.add(displaySessionId);
       attentionIds.add(sessionId);
@@ -3070,7 +3095,9 @@ export function deriveSessionIndicators(
       continue;
     }
     if (editorSessionIds.has(displaySessionId)) continue;
-    const selectedAgent = getSelectedAgentForSession(sessionId);
+    const selectedAgent = sessionReadState
+      ? sessionReadState.selectedAgent
+      : getSelectedAgentForSession(sessionId);
     if (selectedAgent === 'plan') {
       // An empty session cannot contain a plan; the plan agent may have been
       // registered for it merely by selecting the session in the list.
@@ -3082,7 +3109,7 @@ export function deriveSessionIndicators(
       }
       continue;
     }
-    if (!isSessionCompletedResponseUnread(sessionId)) {
+    if (!(sessionReadState?.completedUnread ?? isSessionCompletedResponseUnread(sessionId))) {
       continue;
     }
     newlyCompletedIds.add(sessionId);

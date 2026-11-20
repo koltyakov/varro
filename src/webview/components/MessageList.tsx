@@ -109,6 +109,7 @@ import {
 } from '../lib/message-window';
 import { loadOlderSessionHistoryPage, loadOlderSessionPrompts } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
+import { createRecordSnapshots } from '../lib/record-snapshots';
 import { navArrowDownIcon, xmarkIcon } from '../lib/ui-icons';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
@@ -932,6 +933,9 @@ export function MessageList() {
   const [stickyPreviewViewportHeight, setStickyPreviewViewportHeight] = createSignal(0);
   const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
   const [showLoadingRow, setShowLoadingRow] = createSignal(false);
+  const [transferredLoadingRowSessionId, setTransferredLoadingRowSessionId] = createSignal<
+    string | null
+  >(null);
   const [loadingRowCommittedTextKey, setLoadingRowCommittedTextKey] = createSignal<string | null>(
     null
   );
@@ -1017,11 +1021,20 @@ export function MessageList() {
   onCleanup(() => pendingMountedRowMeasurements.clear());
   let previousVisibleStructureSessionId: string | null = null;
   let previousVisibleStructureMessageIds: readonly string[] | null = null;
+  const canonicalMessageSnapshots = createRecordSnapshots(() => state.messages);
   const messages = createMemo(() => {
     messageStructureVersion();
     const sessionId = state.activeSessionId;
-    const visibleMessages = getVisibleThreadMessages(state.messages, sessionId, state.sessions);
-    const currentIds = visibleMessages.map((entry) => entry.info.id);
+    const snapshots = canonicalMessageSnapshots();
+    const visibleSnapshots = new Set(
+      getVisibleThreadMessages(snapshots, sessionId, state.sessions)
+    );
+    // Snapshot order matches the canonical collection. Keep the original objects in rows and
+    // anchors while visibility subscribes to per-message snapshots, not every nested field.
+    const visibleMessages = untrack(() =>
+      state.messages.filter((_entry, index) => visibleSnapshots.has(snapshots[index]!))
+    );
+    const currentIds = untrack(() => visibleMessages.map((entry) => entry.info.id));
     const previousIds = previousVisibleStructureMessageIds;
     const structureChanged =
       previousIds !== null &&
@@ -1100,11 +1113,29 @@ export function MessageList() {
   // Settled history before the last user message is derived once and reused while the trailing
   // turn streams. A sticky frozen boundary splits it again, so a new turn only rederives the
   // recent segment. Segment derivations must read their restricted views, not trailing-turn state.
-  const historySegmentEnd = createMemo(() => getHistorySegmentEnd(messages()));
+  const messageSnapshots = createRecordSnapshots(messages);
+  const historySegmentEnd = createMemo(() => getHistorySegmentEnd(messageSnapshots()));
   const historyMessages = createMemo(() => messages().slice(0, historySegmentEnd()), {
     equals: sameEntries,
   });
-  const tailMessages = createMemo(() => messages().slice(historySegmentEnd()));
+  const tailMessages = createMemo(
+    () => {
+      const snapshots = messageSnapshots();
+      const start = historySegmentEnd();
+      return messages()
+        .slice(start)
+        .map((entry, index) => {
+          const view = snapshots[start + index]!;
+          // Completed steps can use cached scan views. Unfinished steps must retain their
+          // canonical identity and fine-grained fields throughout presentation and measurement.
+          return view.info.role === 'assistant' && view.info.time.completed ? view : entry;
+        });
+    },
+    { equals: sameEntries }
+  );
+  // Presentation probes need canonical live parts. A derived snapshot may settle after the
+  // structural-version notification and cannot be the authority for an in-flight stream.
+  const liveTailMessages = createMemo(() => messages().slice(historySegmentEnd()));
   const errorActionMessageID = createMemo(
     () => tailMessages().findLast((message) => isAssistantMessage(message.info))?.info.id ?? null
   );
@@ -1114,7 +1145,7 @@ export function MessageList() {
     { equals: sameFrozenSegmentBoundary }
   );
   const createHistorySegment = (range: Accessor<readonly [number, number]>) => {
-    const entries = createMemo(() => messages().slice(...range()), { equals: sameEntries });
+    const entries = createMemo(() => messageSnapshots().slice(...range()), { equals: sameEntries });
     const messageIds = createMemo<ReadonlySet<string>>(
       () => new Set(entries().map((message) => message.info.id)),
       { equals: sameKeys }
@@ -1175,13 +1206,15 @@ export function MessageList() {
   const streamingPart = createMemo(() => {
     const streamingPartId = state.streamingPartId;
     messageStructureVersion();
+    const historyParts = historySegments.map((segment) => segment.partsById());
+    const tail = liveTailMessages();
     return untrack(
       () =>
         (streamingPartId &&
-          historySegments
-            .map((segment) => segment.partsById().get(streamingPartId))
+          historyParts
+            .map((parts) => parts.get(streamingPartId))
             .find((part) => part !== undefined)) ||
-        findStreamingPart(tailMessages(), streamingPartId)
+        findStreamingPart(tail, streamingPartId)
     );
   });
   const streamingTextLength = createMemo(() => state.streamingText.length);
@@ -1232,11 +1265,9 @@ export function MessageList() {
   );
   const visibleRunningToolPart = createMemo(() => {
     messageStructureVersion();
-    return untrack(
-      () =>
-        historyVisibleRunningToolPart.some((running) => running()) ||
-        hasVisibleRunningToolPart(tailMessages())
-    );
+    const historyRunning = historyVisibleRunningToolPart.map((running) => running());
+    const tail = liveTailMessages();
+    return untrack(() => historyRunning.some(Boolean) || hasVisibleRunningToolPart(tail));
   });
   const hasVisibleRunningInlineFileEdit = (entries: readonly MessageEntry[]) =>
     entries.some((message) =>
@@ -1257,19 +1288,18 @@ export function MessageList() {
   );
   const visibleRunningInlineFileEdit = createMemo(() => {
     messageStructureVersion();
-    return untrack(
-      () =>
-        historyVisibleRunningInlineFileEdit.some((running) => running()) ||
-        hasVisibleRunningInlineFileEdit(tailMessages())
-    );
+    const historyRunning = historyVisibleRunningInlineFileEdit.map((running) => running());
+    const tail = liveTailMessages();
+    return untrack(() => historyRunning.some(Boolean) || hasVisibleRunningInlineFileEdit(tail));
   });
   const committedTextBlockKey = createMemo(() => {
     messageStructureVersion();
     const currentStreamingPartId = state.streamingPartId;
     const currentLoadingStartedAt = loadingStartedAt();
+    const visibleMessages = messages();
     return untrack(() =>
       getCommittedVisibleTextLastPartKey(
-        messages(),
+        visibleMessages,
         currentStreamingPartId,
         currentLoadingStartedAt
       )
@@ -1308,6 +1338,7 @@ export function MessageList() {
       ? olderPrompts
       : null;
   });
+  const olderPromptSnapshots = createRecordSnapshots(() => olderPromptsOutsideTranscript() ?? []);
   const historyPromptNumbers = chainHistorySegments<ReturnType<typeof numberPrompts>>(
     (segment, previous) => createMemo(() => numberPrompts(segment.entries(), previous?.()))
   );
@@ -1315,7 +1346,7 @@ export function MessageList() {
     const olderPrompts = olderPromptsOutsideTranscript();
     const history = olderPrompts ? [] : historyPromptNumbers.map((numbers) => numbers());
     const segments = olderPrompts
-      ? [numberPrompts(mergeOlderHistory(messages(), olderPrompts))]
+      ? [numberPrompts(mergeOlderHistory(messageSnapshots(), olderPromptSnapshots()))]
       : [...history, numberPrompts(tailMessages(), history.at(-1))];
     return {
       numbers: segments.reduce(
@@ -1352,7 +1383,7 @@ export function MessageList() {
     const olderPrompts = olderPromptsOutsideTranscript();
     if (olderPrompts) {
       return getUserMessageNavigationPreviews(
-        mergeOlderHistory(messages(), olderPrompts),
+        mergeOlderHistory(messageSnapshots(), olderPromptSnapshots()),
         subagentSessionIds()
       );
     }
@@ -2845,7 +2876,7 @@ export function MessageList() {
     messageInfoVersion();
     const turn = trailingAssistantTurn();
     let completedAt: number | undefined;
-    const entries = messages();
+    const entries = messageSnapshots();
     const indexes = messageIndexById();
     const recordCompletion = (end: number | undefined) => {
       if (end !== undefined && Number.isFinite(end)) {
@@ -2879,6 +2910,20 @@ export function MessageList() {
           !committedTextBlocksReappear() &&
           !visibleRunningInlineFileEdit() &&
           !hasVisibleActivityTrayRows()))
+  );
+
+  createEffect(
+    () => ({
+      showing: showLoadingRow() && shouldShowLoadingRow(),
+      reserved: reserveLoadingRow(),
+      sessionId: state.activeSessionId,
+      transferred: transferredLoadingRowSessionId(),
+    }),
+    ({ showing, reserved, sessionId, transferred }) => {
+      if (transferred && (showing || !reserved || transferred !== sessionId)) {
+        setTransferredLoadingRowSessionId(null);
+      }
+    }
   );
 
   createEffect(
@@ -3199,9 +3244,10 @@ export function MessageList() {
       );
     });
   });
+  const renderedMessageSnapshots = createRecordSnapshots(renderedMessages);
   const linkedToolCalls = createMemo(() => {
     messageStructureVersion();
-    return getLinkedToolCallKeys(renderedMessages());
+    return getLinkedToolCallKeys(renderedMessageSnapshots());
   });
   createEffect(
     () => pendingPermissionSequence().activePermission?.id ?? null,
@@ -5270,6 +5316,7 @@ export function MessageList() {
         (isLoading() || presentation.pending() || presentation.canSmoothFollow()) &&
         getResponseContentSignature() !== activityExitHeldResponseContentSignature
       ) {
+        transferLoadingRowReserve(anchor.sessionId);
         clearActivityExitSummaryAnchor();
         performScroll({ force: true });
         startFollowLoop(anchor.sessionId, { observedStreaming: true });
@@ -5288,6 +5335,32 @@ export function MessageList() {
       childList: true,
       subtree: true,
     });
+  }
+
+  // Imperative handoff: snapshot the current geometry/state without subscribing its caller.
+  function transferLoadingRowReserve(sessionId: string) {
+    untrack(() => transferLoadingRowReserveNow(sessionId));
+  }
+
+  function transferLoadingRowReserveNow(sessionId: string) {
+    if (
+      state.activeSessionId !== sessionId ||
+      shouldShowLoadingRow() ||
+      transferredLoadingRowSessionId() === sessionId ||
+      untrack(appendBottomReserve) <= 0.5
+    ) {
+      return;
+    }
+    // The hidden Thinking slot is replacement space too. Transfer it into the same
+    // consumable reserve before releasing the summary owner, rather than retaining
+    // a second blank row beside the entering continuation.
+    const reservedLoadingRow = trackRef?.querySelector<HTMLElement>(
+      ':scope > .interactive-loading-row:not(.trailing-assistant-summary-row):not(.is-background-waiting)'
+    );
+    const loadingHeight = reservedLoadingRow?.getBoundingClientRect().height ?? 0;
+    if (loadingHeight <= 0.5) return;
+    setTransferredLoadingRowSessionId(sessionId);
+    setAppendBottomReserve((current) => current + loadingHeight);
   }
 
   function startActivityExitSummarySettle(anchor: ActivityExitSummaryAnchor) {
@@ -8902,7 +8975,11 @@ export function MessageList() {
       return replacementStreaming && exitingActivityPartKeys().size === 0;
     },
     (clear) => {
-      if (clear) clearActivityExitSummaryAnchor();
+      if (clear) {
+        if (activityExitSummaryAnchor)
+          transferLoadingRowReserve(activityExitSummaryAnchor.sessionId);
+        clearActivityExitSummaryAnchor();
+      }
     }
   );
   createEffect(isLoading, (loading) => {
@@ -9954,10 +10031,11 @@ export function MessageList() {
     previousCompactActivityDisclosureLayoutSignatures = new Map(current);
   });
 
-  const assistantDialogMessages = createMemo(() => {
+  const assistantDialogSourceMessages = createMemo(() => {
     messageStructureVersion();
     return mergeOlderHistory(state.messages, getPrefetchedSessionHistory(state.activeSessionId));
   });
+  const assistantDialogMessages = createRecordSnapshots(assistantDialogSourceMessages);
 
   const collectingLeadingDialogStats = createMemo(() => {
     const sessionId = state.activeSessionId;
@@ -11399,7 +11477,10 @@ export function MessageList() {
                   turnStartedAt={loadingTurnStartedAt()}
                   elapsedStartedAt={loadingElapsedStartedAt()}
                   visible={!state.messagesLoading && showLoadingRow()}
-                  collapsed={hasVisibleActivityTrayRows()}
+                  collapsed={
+                    hasVisibleActivityTrayRows() ||
+                    transferredLoadingRowSessionId() === state.activeSessionId
+                  }
                 />
               </Show>
             }

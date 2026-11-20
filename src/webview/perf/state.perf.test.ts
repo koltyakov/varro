@@ -1,9 +1,10 @@
-import { createEffect, flush as flushSolid } from 'solid-js';
+import { createEffect, flush as flushSolid, OBSERVE } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearMessages,
   getMessageById,
+  getMessageLookup,
   getMessagePartById,
   messageInfoVersion,
   messageStructureVersion,
@@ -98,6 +99,66 @@ describe('state perf guards', () => {
 
   afterEach(() => {
     resetDefaultAppState();
+  });
+
+  it('keeps lookup cache population out of its callers dependencies and follows structural changes', async () => {
+    setMessagesIncremental(
+      Array.from({ length: 1000 }, (_, index) => ({
+        info: createAssistantMessage(`lookup-${index}`),
+        parts: [],
+      }))
+    );
+    await settlePerfEffects();
+    const diagnostics = OBSERVE!.diagnostics.capture();
+    const passes = [0, 0];
+    const sizes = [0, 0];
+    const dispose = createPerfRoot(() => {
+      for (const index of [0, 1]) {
+        createEffect(
+          () => {
+            passes[index]! += 1;
+            return getMessageLookup().bySessionId.get('session-1')?.length ?? 0;
+          },
+          (size) => {
+            sizes[index] = size;
+          }
+        );
+      }
+    });
+    try {
+      await settlePerfEffects();
+      expect(passes).toEqual([1, 1]);
+      expect(sizes).toEqual([1000, 1000]);
+      // Non-identifying metadata does not change membership. The first reader must not
+      // acquire the cache builder's incidental subscriptions to every entry's info slot.
+      setState(
+        storePath('messages', 0, 'info', { ...createAssistantMessage('lookup-0'), cost: 1 })
+      );
+      await settlePerfEffects();
+      expect(passes).toEqual([1, 1]);
+
+      upsertMessage({ info: createAssistantMessage('lookup-new'), parts: [] });
+      await settlePerfEffects();
+      expect(sizes).toEqual([1001, 1001]);
+      setMessagesIncremental([
+        { info: createAssistantMessage('lookup-older'), parts: [] },
+        ...state.messages,
+      ]);
+      await settlePerfEffects();
+      expect(sizes).toEqual([1002, 1002]);
+      expect(getMessageLookup().bySessionId.get('session-1')?.[0]?.info.id).toBe('lookup-older');
+      removeMessage('session-1', 'lookup-new');
+      await settlePerfEffects();
+      expect(sizes).toEqual([1001, 1001]);
+      expect(getMessageLookup().byId.has('lookup-new')).toBe(false);
+      clearMessages();
+      await settlePerfEffects();
+      expect(sizes).toEqual([0, 0]);
+      expect(diagnostics.events.filter((event) => event.code === 'HUGE_FAN_IN')).toEqual([]);
+    } finally {
+      dispose();
+      diagnostics.stop();
+    }
   });
 
   it.each(['upsertMessage', 'upsertMessageInfo'] as const)(

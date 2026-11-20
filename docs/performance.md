@@ -65,12 +65,29 @@ any saving described here.
   `src/webview/components/message-list/history-segments.ts`) or return stable references.
 - Row props derived from global maps fan out to every mounted row. Prefer per-ID lookups behind memos
   with structural equality.
+- Full-record scans use `src/webview/lib/record-snapshots.ts`: keyed per-record memos track nested
+  changes and preserve unchanged snapshot references, while 128-record chunks bound aggregation
+  dependencies. Keep these immutable views in derivations only. Canonical message and part objects
+  still own rows, scroll anchors, editing, and mutations. Restrict snapshots to the same frozen,
+  recent, and trailing ranges so tail updates do not rederive settled history.
+  Within the trailing turn, only completed steps use snapshot scan views. Unfinished steps retain
+  canonical objects and fine-grained fields for presentation and measurement. Stream probes must
+  track their range and lookup accessors before an untracked traversal; a structural version alone
+  does not invalidate a result cached before a derived snapshot settles. Keep the first-send and
+  following-text regressions in `scroll-short-transcript.spec.ts` and `scroll-tool-grouping.spec.ts`.
 - Keep expensive derivations, such as regular expressions over prompt text, in their own memo. A
   compiled element's render effect reruns all of its bindings together.
 - `class={...}` bindings write the attribute on every notification, even when the string is unchanged.
   A `MutationObserver` that counts same-value class writes exposes excess reruns.
 - To find fan-out, instrument Solid's `writeSignal` in a scratch copy of an unminified build and log
   writes that reach many observers. Do not edit `node_modules` or sources for diagnosis.
+- Solid's `HUGE_FAN_IN` diagnostic reports one computation tracking at least 2,000 sources, not
+  2,000 messages or reruns. A passing work-count assertion does not establish that those subscriptions
+  are necessary. Do not suppress it globally or across a test file. Use
+  `src/test/expected-solid-diagnostics.ts` only inside a test that deliberately creates an extreme
+  condition, with an explicit list of expected computation names and a comment explaining why.
+  Restore output after fixture setup if subsequent interactions must remain bounded. Ordinary
+  pagination, the 60-row scroll case, and unknown computation names retain their warnings.
 
 ## Layout and scrolling
 

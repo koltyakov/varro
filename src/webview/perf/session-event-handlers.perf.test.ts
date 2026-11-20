@@ -29,6 +29,7 @@ import {
 import { sessionStore } from '../lib/stores/session-store';
 import type { AssistantMessage, MessageEntry } from '../types';
 import { createPerfRoot, settlePerfEffects } from './harness';
+import { suppressExpectedHugeFanIn } from '../../test/expected-solid-diagnostics';
 
 function assistant(id: string, completed?: number): AssistantMessage {
   return {
@@ -69,6 +70,9 @@ describe('settlement event perf guards', () => {
   ])(
     'publishes $boundary settlement once after long reasoning history, pending delta: $pendingDelta, busy child: $busyChild',
     async ({ boundary, pendingDelta, busyChild }) => {
+      // This test-owned observer intentionally subscribes to every historical field to count
+      // publication passes. Do not suppress findings from application computations.
+      suppressExpectedHugeFanIn(['settlement-test-observer']);
       const markdown =
         '# Settlement report\n\n- Generated fixture item\n\n```ts\nconst ready = true;\n```\n'.repeat(
           120
@@ -202,7 +206,8 @@ describe('settlement event perf guards', () => {
           },
           () => {
             recomputations += 1;
-          }
+          },
+          { name: 'settlement-test-observer' }
         );
       });
       try {

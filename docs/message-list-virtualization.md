@@ -432,6 +432,12 @@ the shared invariants below remain true.
   Appended assistant steps must not start a measured append transition while this owner or its
   retained summary anchor is active. A group-collapse settle restores that summary instead of
   briefly jumping to a different bottom target and letting the summary undo it next frame.
+  When continuation text releases that owner, transfer the hidden Thinking row's measured height
+  into the consumable append reserve and collapse its placeholder. Keeping both the blank Thinking
+  slot and entering text makes a short replacement scroll the preceding summary after the exit
+  reserve is exhausted. Restore the row's normal height when Thinking is visible again, and clear
+  the transfer on row removal or session replacement. Check every continuation frame, not only the
+  exit frames or a single text-visible sample; combined reserved space must not grow during transfer.
   A summary below a separate active tray cannot own that tray's geometry, including when the tray
   belongs to an earlier assistant step. Release an already-retained summary owner before restoring
   it against that preview's growth, and do not recapture it on collapse. Preserve the painted scroll

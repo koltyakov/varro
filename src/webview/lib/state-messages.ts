@@ -1,4 +1,5 @@
 import { storePath } from '@solidjs/signals';
+import { untrack } from 'solid-js';
 
 import type { AssistantMessage, Message, MessageEntry, Part } from '../types';
 import {
@@ -1208,17 +1209,22 @@ export function getMessageLookup(): MessageLookup {
   if (cachedMessageLookupMessages === messages && cachedMessageLookupVersion === version) {
     return cachedMessageLookup;
   }
-  const byId = new Map<string, MessageEntry>();
-  const bySessionId = new Map<string, MessageEntry[]>();
-  for (const entry of messages) {
-    if (!byId.has(entry.info.id)) byId.set(entry.info.id, entry);
-    const sessionMessages = bySessionId.get(entry.info.sessionID);
-    if (sessionMessages) sessionMessages.push(entry);
-    else bySessionId.set(entry.info.sessionID, [entry]);
-  }
+  // The collection and structural version above own invalidation, not whichever caller
+  // happens to populate the cache first.
+  const lookup = untrack(() => {
+    const byId = new Map<string, MessageEntry>();
+    const bySessionId = new Map<string, MessageEntry[]>();
+    for (const entry of messages) {
+      if (!byId.has(entry.info.id)) byId.set(entry.info.id, entry);
+      const sessionMessages = bySessionId.get(entry.info.sessionID);
+      if (sessionMessages) sessionMessages.push(entry);
+      else bySessionId.set(entry.info.sessionID, [entry]);
+    }
+    return { byId, bySessionId };
+  });
   cachedMessageLookupMessages = messages;
   cachedMessageLookupVersion = version;
-  cachedMessageLookup = { byId, bySessionId };
+  cachedMessageLookup = lookup;
   return cachedMessageLookup;
 }
 

@@ -1,6 +1,6 @@
-import { flush as flushSolid, reconcile } from 'solid-js';
+import { flush as flushSolid, OBSERVE, reconcile } from 'solid-js';
 import { storePath } from '@solidjs/signals';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { render } from '@solidjs/web';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
@@ -86,6 +86,7 @@ import {
 } from '../../shared/chat-annotation';
 import { pastedTextDataUrl } from '../../shared/pasted-text';
 import { resetSessionStatusSnapshotTracking, sessionStore } from '../lib/stores/session-store';
+import { suppressExpectedHugeFanIn } from '../../test/expected-solid-diagnostics';
 
 describe('composer dictation integration', () => {
   it('places the mic immediately before Attach and focuses the composer on activation', async () => {
@@ -16543,6 +16544,18 @@ describe('ChatInput', () => {
   });
 
   it.each([20, 10_000])('does not reread %i loaded messages on keystrokes', async (count) => {
+    const diagnostics = OBSERVE!.diagnostics.capture();
+    onTestFinished(() => {
+      diagnostics.stop();
+    });
+    // Only these initial prompt/token aggregates in the deliberately oversized fixture are expected.
+    const expectedFanIn = [
+      'messageHistory',
+      'createSettledHistoryRanges.frozen',
+      'tokenFrozenTotals',
+      'tokenHistoryTotals',
+    ];
+    const restoreWarnings = count === 10_000 ? suppressExpectedHugeFanIn(expectedFanIn) : undefined;
     setupModelState();
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
@@ -16559,6 +16572,9 @@ describe('ChatInput', () => {
               ? historyEntry(id, `Prompt ${index}`)
               : assistantMessageEntry({ input: 100, output: 20 });
           const info = { ...entry.info, id, time: { created: index, completed: index + 1 } };
+          // Each reply belongs to the preceding prompt, not the helper's absent "user-1".
+          // Missing-parent searches are a different stress condition from loaded-history typing.
+          if (info.role === 'assistant') info.parentID = `history-${index - 1}`;
           const parts: TextPart[] = [
             {
               id: `text-${index}`,
@@ -16589,6 +16605,8 @@ describe('ChatInput', () => {
     const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
     expect(infoReads).toBeGreaterThan(0);
     expect(partsReads).toBeGreaterThan(0);
+    // Any new wide subscription while typing is a regression, not fixture noise.
+    restoreWarnings?.();
     infoReads = 0;
     partsReads = 0;
 
@@ -16602,6 +16620,13 @@ describe('ChatInput', () => {
     expect(inputText()).toBe(text);
     expect(infoReads).toBe(0);
     expect(partsReads).toBe(0);
+    expect(
+      diagnostics.events.filter(
+        (event) =>
+          event.code === 'HUGE_FAN_IN' &&
+          (count !== 10_000 || !expectedFanIn.includes(event.nodeName ?? ''))
+      )
+    ).toEqual([]);
   });
 
   it('does not inspect historical prompts while typing without images', async () => {

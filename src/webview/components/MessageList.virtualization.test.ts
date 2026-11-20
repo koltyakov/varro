@@ -1,6 +1,6 @@
-import { flush as flushSolid, untrack } from 'solid-js';
+import { flush as flushSolid, OBSERVE, untrack } from 'solid-js';
 import { storePath } from '@solidjs/signals';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { render } from '@solidjs/web';
 import {
   replaceMessages,
@@ -1200,6 +1200,10 @@ describe('MessageList history pagination', () => {
   });
 
   it('bounds measurement work when history arrives after input becomes idle', async () => {
+    const diagnostics = OBSERVE!.diagnostics.capture();
+    onTestFinished(() => {
+      diagnostics.stop();
+    });
     const buildMessages = (prefix: string, messageCount: number) =>
       Array.from({ length: messageCount }, (_, index) => {
         const messageId = `${prefix}-${index}`;
@@ -1227,6 +1231,7 @@ describe('MessageList history pagination', () => {
     expect(rectSpy.mock.calls.length).toBeLessThan(500);
     expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
+    expect(diagnostics.events.filter((event) => event.code === 'HUGE_FAN_IN')).toEqual([]);
     harness.animationFrames.restore();
     flushSolid();
   });

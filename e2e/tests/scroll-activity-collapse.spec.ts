@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This regression test accesses only the controlled E2E harness and mounted DOM. */
+import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import type { MessageEntry, Part } from '../../src/webview/types';
 
@@ -313,6 +314,11 @@ for (const scenario of exitCases) {
       const originalReserve = await appendReserve.evaluate(
         (element) => element.getBoundingClientRect().height
       );
+      const replacementBudget =
+        originalReserve +
+        (await page
+          .locator('.interactive-loading-row')
+          .evaluate((element) => element.getBoundingClientRect().height));
       const appendText = (text: string) =>
         page.evaluate(
           (payload) => {
@@ -337,8 +343,36 @@ for (const scenario of exitCases) {
           },
           { sessionId, messageID: targetMessageId, text }
         );
-      // Small real growth must not move the preceding transcript or grow the reserve. A large
+      // Small real growth must not move the preceding transcript or grow reserved space. A large
       // all-at-once replacement only proves eventual cleanup and misses premature consumption.
+      const continuationGeometry = page
+        .locator('.interactive-list')
+        .evaluate(async (element, messageId) => {
+          const samples = [];
+          for (let frame = 0; frame < 30; frame += 1) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const row = element.querySelector<HTMLElement>(`[data-msg-id="${messageId}"]`)!;
+            const summary = row.querySelector<HTMLElement>('.assistant-activity-summary')!;
+            const loading = element.querySelector<HTMLElement>('.interactive-loading-row');
+            samples.push({
+              frame,
+              top: summary.getBoundingClientRect().top - element.getBoundingClientRect().top,
+              scrollTop: element.scrollTop,
+              scrollHeight: element.scrollHeight,
+              viewport: element.clientHeight,
+              rowHeight: row.getBoundingClientRect().height,
+              loadingHeight: loading?.getBoundingClientRect().height ?? 0,
+              loadingReserved: loading?.classList.contains('is-reserved'),
+              append:
+                element.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect()
+                  .height ?? 0,
+              text:
+                row.querySelector('[data-assistant-render-key="part:activity-replacement-text"]')
+                  ?.textContent ?? '',
+            });
+          }
+          return samples;
+        }, targetMessageId);
       await appendText('A short continuation.');
       await expect(page.locator('.interactive-list')).toContainText('A short continuation.');
       await expect
@@ -348,12 +382,6 @@ for (const scenario of exitCases) {
             .evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
         )
         .toBeLessThanOrEqual(1);
-      // The continuation may consume the whole reserve, which removes its spacer.
-      expect(
-        await appendReserve.evaluateAll((elements) =>
-          elements.reduce((total, element) => total + element.getBoundingClientRect().height, 0)
-        )
-      ).toBeLessThanOrEqual(originalReserve);
       const top = await page
         .locator(`[data-msg-id="${targetMessageId}"] .assistant-activity-summary`)
         .evaluate(
@@ -361,7 +389,45 @@ for (const scenario of exitCases) {
             element.getBoundingClientRect().top -
             element.closest('.interactive-list')!.getBoundingClientRect().top
         );
+      const continuationSamples = await continuationGeometry;
+      const continuationGeometryPath = test.info().outputPath('continuation-geometry.json');
+      await writeFile(
+        continuationGeometryPath,
+        JSON.stringify(
+          {
+            before: result.before,
+            originalReserve,
+            replacementBudget,
+            top,
+            samples: continuationSamples,
+          },
+          null,
+          2
+        )
+      );
+      await test.info().attach('continuation-geometry', {
+        path: continuationGeometryPath,
+        contentType: 'application/json',
+      });
+      // The hidden Thinking slot can transfer into the consumable spacer while text enters.
+      // Assert that combined replacement space never grows, then check the settled spacer too.
+      expect(
+        Math.max(
+          ...continuationSamples.map(
+            (sample) => sample.append + (sample.loadingReserved ? sample.loadingHeight : 0)
+          )
+        )
+      ).toBeLessThanOrEqual(replacementBudget + 1);
+      // The continuation may consume the whole reserve, which removes its spacer.
+      expect(
+        await appendReserve.evaluateAll((elements) =>
+          elements.reduce((total, element) => total + element.getBoundingClientRect().height, 0)
+        )
+      ).toBeLessThanOrEqual(originalReserve);
       expect(Math.abs(top - result.before)).toBeLessThanOrEqual(1);
+      expect(
+        Math.max(...continuationSamples.map((sample) => Math.abs(sample.top - result.before)))
+      ).toBeLessThanOrEqual(1);
       await appendText(
         Array.from({ length: 24 }, (_, index) => `Replacement paragraph ${index + 1}.`).join('\n\n')
       );
@@ -436,12 +502,10 @@ test('summary anchoring does not accumulate reserve for already-reachable layout
     }
     return { before, samples };
   });
-  await test
-    .info()
-    .attach('reachable-summary-growth', {
-      body: JSON.stringify(result, null, 2),
-      contentType: 'application/json',
-    });
+  await test.info().attach('reachable-summary-growth', {
+    body: JSON.stringify(result, null, 2),
+    contentType: 'application/json',
+  });
   expect(
     Math.max(...result.samples.map((sample) => sample.reserve)),
     'Real content growth must not be counted again as empty space'

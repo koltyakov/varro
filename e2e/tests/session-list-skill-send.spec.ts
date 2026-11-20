@@ -30,9 +30,28 @@ for (const sendMethod of ['Enter', 'button']) {
     else await page.getByLabel('Send (Enter)').click();
 
     await expect(page.locator('.chat-header-title-text').first()).toHaveText('Mock Session 4');
-    await expect(page.locator('.user-message-card').last()).toContainText(
-      '/goal Wait for 1 minute'
-    );
+    const bubble = page.locator('.user-message-card').last();
+    await expect(bubble).toContainText('goal Wait for 1 minute');
+    const goalChip = bubble.locator('.inline-chip[data-copy-marker="/goal"]');
+    await expect(goalChip.locator('.inline-chip-label')).toHaveText('goal');
+    await expect(goalChip.locator('[data-chip-icon="skill"]')).toBeVisible();
+    const commands = await page.evaluate(() => {
+      // SAFETY: The isolated harness exposes the requests submitted by this page.
+      const harness = (
+        window as typeof window & {
+          __varroE2E: { requests: Array<{ method: string; path: string; body?: unknown }> };
+        }
+      ).__varroE2E;
+      return harness.requests
+        .filter(
+          (request) =>
+            request.method === 'POST' && /\/session\/[^/]+\/command(?:\?|$)/.test(request.path)
+        )
+        .map((request) => request.body);
+    });
+    expect(commands).toEqual([
+      expect.objectContaining({ command: 'goal', arguments: 'Wait for 1 minute' }),
+    ]);
     await expect(page.getByLabel('Search sessions')).not.toBeVisible();
     await expect(page.locator('.rich-composer').first()).toBeEmpty();
   });
