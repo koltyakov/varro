@@ -24,3 +24,14 @@
 @import './styles/prompts.css' layer(components);
 @import './styles/ralph.css' layer(components);
 @import './styles/motion.css' layer(overrides);
+
+/* Keep this host override unlayered: older editors inject unlayered code defaults. */
+.interactive-result-code-block pre.code-block code {
+  background: none;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  color: var(--color-vscode-fg);
+  white-space: pre;
+}

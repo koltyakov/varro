@@ -29,6 +29,109 @@ async function expectSelectionEdgeContinuity(
   }
 }
 
+test('fenced code overrides unlayered host defaults without changing inline code', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+  const markdown = page.locator('[data-msg-id="message-rendering-assistant"] .rendered-markdown');
+  await expect(markdown.locator('pre code')).toBeVisible();
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'message-rendering-assistant-part-1',
+              sessionID: 'session-message-rendering',
+              messageID: 'message-rendering-assistant',
+              type: 'text',
+              text: [
+                'Inline `sample value`.',
+                '',
+                '```text',
+                'CPS audio testing',
+                '│',
+                '└── Check the environment',
+                '```',
+                '',
+                '```ts',
+                'const blockValue = 1;',
+                '```',
+              ].join('\n'),
+            },
+          },
+        },
+      },
+      '*'
+    );
+  });
+  const inlineCode = markdown.locator('p > code');
+  await expect(inlineCode).toHaveText('sample value');
+  await expect(markdown.locator('.hljs-keyword')).toHaveText('const');
+  const inlineStyles = () =>
+    inlineCode.evaluate((code) => {
+      const style = getComputedStyle(code);
+      return {
+        background: style.backgroundColor,
+        color: style.color,
+        padding: style.padding,
+        border: style.border,
+        borderRadius: style.borderRadius,
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        whiteSpace: style.whiteSpace,
+      };
+    });
+  const before = await inlineStyles();
+  expect(before).toMatchObject({
+    background: 'rgba(255, 255, 255, 0.1)',
+    color: 'rgb(215, 186, 125)',
+    padding: '1px 3px',
+    borderRadius: '4px',
+    whiteSpace: 'pre-wrap',
+  });
+
+  // Older editor hosts inject these defaults without a cascade layer.
+  await page.addStyleTag({
+    content: `
+      :root {
+        --vscode-textPreformat-foreground: #d7ba7d;
+        --vscode-textPreformat-background: #ffffff1a;
+        --monaco-monospace-font: var(--font-mono);
+      }
+      code {
+        font-family: var(--monaco-monospace-font);
+        color: var(--vscode-textPreformat-foreground);
+        background-color: var(--vscode-textPreformat-background);
+        padding: 1px 3px;
+        border-radius: 4px;
+      }
+      pre code { padding: 0; }
+    `,
+  });
+
+  expect(await inlineStyles()).toEqual(before);
+  const blocks = markdown.locator('.interactive-result-code-block pre.code-block > code.hljs');
+  await expect(blocks).toHaveCount(2);
+  await expect(blocks.nth(0)).toHaveText('CPS audio testing\n│\n└── Check the environment');
+  await expect(blocks.nth(1)).toHaveText('const blockValue = 1;');
+  for (const code of await blocks.all()) {
+    await expect(code).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(code).toHaveCSS('color', 'rgb(204, 204, 204)');
+    await expect(code).toHaveCSS('padding', '0px');
+    await expect(code).toHaveCSS('border-width', '0px');
+    await expect(code).toHaveCSS('border-radius', '0px');
+    await expect(code).toHaveCSS('white-space', 'pre');
+    const preFontSize = await code.evaluate(
+      (element) => getComputedStyle(element.parentElement!).fontSize
+    );
+    await expect(code).toHaveCSS('font-size', preFontSize);
+  }
+  await expect(markdown.locator('.hljs-keyword')).not.toHaveCSS('color', 'rgb(204, 204, 204)');
+});
+
 test('a pathological code line preserves text and leaves the browser event loop responsive', async ({
   page,
 }) => {

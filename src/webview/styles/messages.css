@@ -3027,16 +3027,6 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .remote-markdown-ima
   background: var(--color-vscode-result-editor-bg) !important;
 }
 
-.interactive-result-code-block pre.code-block code {
-  background: none;
-  border: none;
-  padding: 0;
-  border-radius: 0;
-  font-size: inherit;
-  color: var(--color-vscode-fg);
-  white-space: pre;
-}
-
 .interactive-result-code-block pre.code-block code .hljs-comment,
 .interactive-result-code-block pre.code-block code .hljs-quote {
   color: var(--color-code-comment);
