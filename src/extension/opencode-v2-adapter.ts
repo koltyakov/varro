@@ -30,6 +30,12 @@ import { withStartupDeadline } from '../shared/startup';
 import { parseSkillAttachment } from '../shared/skill-reference';
 import { isNativeFormAnswer, parseNativeForm } from '../shared/native-form';
 import { isSameWorkspacePath } from '../shared/workspace-path';
+import { readPastedTextDataUrl } from '../shared/pasted-text';
+import {
+  appendPromptTextAttachments,
+  isPromptTextAttachmentName,
+  type PromptTextAttachment,
+} from '../shared/prompt-text-attachments';
 import {
   getPdfDataUrlSize,
   getPdfInputSupport,
@@ -1495,6 +1501,23 @@ export class OpenCodeV2Adapter {
               { value: input.system }
             );
           }
+          // Command arguments replace the prompt text, so their pasted text stays attached.
+          const promptTextAttachments = new Map<UnknownRecord, PromptTextAttachment>();
+          if (action !== 'command') {
+            for (const part of parts) {
+              if (
+                part.type !== 'file' ||
+                part.mime !== 'text/plain' ||
+                !isString(part.filename) ||
+                !isPromptTextAttachmentName(part.filename) ||
+                !isString(part.url)
+              )
+                continue;
+              const content = readPastedTextDataUrl(part.url);
+              if (content !== null)
+                promptTextAttachments.set(part, { name: part.filename, text: content });
+            }
+          }
           const followupTitle = parseFollowupTitle(input.followupTitle);
           const metadata: UnknownRecord = {};
           if (input.delivery === 'steer' || input.delivery === 'queue')
@@ -1502,9 +1525,12 @@ export class OpenCodeV2Adapter {
           if (followupTitle) metadata.varroFollowupTitle = followupTitle;
           const payload = {
             id: input.messageID,
-            text: action === 'command' ? (input.arguments ?? text) : text,
+            text:
+              action === 'command'
+                ? (input.arguments ?? text)
+                : appendPromptTextAttachments(text, [...promptTextAttachments.values()]),
             files: parts
-              .filter((part) => part.type === 'file')
+              .filter((part) => part.type === 'file' && !promptTextAttachments.has(part))
               .map((part) => ({ uri: part.url, name: part.filename })),
             agents: parts
               .filter((part) => part.type === 'agent')

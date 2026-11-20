@@ -2,7 +2,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { FormInfo, ModelInfo, SessionMessageAssistant, SessionInfo } from '@opencode/client';
+import type {
+  FormInfo,
+  ModelInfo,
+  SessionMessageAssistant,
+  SessionMessageUser,
+  SessionInfo,
+} from '@opencode/client';
 import { OpenCodeStartupOutput, openCodeApiVersion } from './opencode-connection';
 import {
   projectV2Message,
@@ -23,6 +29,8 @@ import { parseServerEvent } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
 import { normalizeRecycleBinSession } from '../shared/recycle-bin';
 import { formatSkillAttachment } from '../shared/skill-reference';
+import { pastedTextDataUrl } from '../shared/pasted-text';
+import { appendPromptTextAttachments } from '../shared/prompt-text-attachments';
 import { nativePdfFixture } from '../shared/native-pdf.test-support';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
@@ -410,6 +418,68 @@ describe('v2 prompt delivery', () => {
       expect(wire).toHaveBeenCalledTimes(2);
     }
   );
+
+  it('sends pasted text and annotations inside the prompt so compaction keeps them', async () => {
+    const wire = vi.fn(async () => ({ data: { id: 'ses_paste' } }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    const annotation = 'Chat annotation\n\nSelected text:\n> passage\n\nComment:\nКак так?';
+    await adapter.request('POST', '/session/ses_paste/prompt_async', {
+      parts: [
+        { type: 'text', text: 'Check @annotation-a781acb7.txt' },
+        {
+          type: 'file',
+          mime: 'text/plain',
+          filename: 'annotation-a781acb7.txt',
+          url: pastedTextDataUrl(annotation),
+        },
+        {
+          type: 'file',
+          mime: 'image/png',
+          url: 'data:image/png;base64,aGVsbG8=',
+          filename: 'a.png',
+        },
+      ],
+      noReply: true,
+    });
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/session/ses_paste/prompt',
+      expect.objectContaining({
+        text: appendPromptTextAttachments('Check @annotation-a781acb7.txt', [
+          { name: 'annotation-a781acb7.txt', text: annotation },
+        ]),
+        files: [{ uri: 'data:image/png;base64,aGVsbG8=', name: 'a.png' }],
+      }),
+      expect.anything()
+    );
+  });
+
+  it('projects prompt text attachments back to file parts', () => {
+    const annotation = 'Chat annotation\n\nSelected text:\n> passage\n\nComment:\nnote';
+    const user: SessionMessageUser = {
+      id: 'msg_paste',
+      type: 'user',
+      text: appendPromptTextAttachments('Check @annotation-a781acb7.txt', [
+        { name: 'annotation-a781acb7.txt', text: annotation },
+      ]),
+      time: { created: 1 },
+      files: [{ data: 'aGVsbG8=', mime: 'image/png', name: 'a.png', source: { type: 'inline' } }],
+      agents: [{ name: 'explore' }],
+    };
+    const projected = projectV2Message(user, 'ses_paste');
+    expect(projected.parts).toMatchObject([
+      { id: 'msg_paste:content:0', type: 'text', text: 'Check @annotation-a781acb7.txt' },
+      { id: 'msg_paste:content:1', type: 'file', filename: 'a.png' },
+      {
+        id: 'msg_paste:content:2',
+        type: 'file',
+        mime: 'text/plain',
+        filename: 'annotation-a781acb7.txt',
+        url: pastedTextDataUrl(annotation),
+      },
+      { id: 'msg_paste:content:3', type: 'agent', name: 'explore' },
+    ]);
+  });
 
   it('keeps unbacked skill markers and attachment examples as plain text', async () => {
     const wire = vi.fn(async () => ({ data: { id: 'ses_skills' } }));

@@ -11,6 +11,7 @@ import {
 } from './session-transcript-archive';
 import type { TranscriptArchiveSession } from './session-transcript-archive';
 import { pastedTextDataUrl } from '../shared/pasted-text';
+import { appendPromptTextAttachments } from '../shared/prompt-text-attachments';
 import { LocalSessionTranscriptReader } from './local-session-transcript';
 
 const directories: string[] = [];
@@ -313,6 +314,40 @@ describe('trimmed transcript archive', () => {
                 { text: 'Pasted request\n精确', omitted: false },
                 { text: 'Selected text and comment', omitted: false },
                 { name: 'image.png', omitted: true },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('archives prompt text attachments as attachments, not prompt text', async () => {
+    const f = await fixture();
+    localHistory(f, [
+      user(
+        'prompt',
+        appendPromptTextAttachments('Check @annotation-1234abcd.txt', [
+          { name: 'annotation-1234abcd.txt', text: 'Selected text and comment' },
+        ])
+      ),
+      assistant('answer'),
+      idle('done'),
+    ]);
+    await f.archive.archive([f.session]);
+    expect(readArchive().turns).toMatchObject([
+      {
+        data: {
+          prompts: [
+            {
+              text: 'Check @annotation-1234abcd.txt',
+              attachments: [
+                {
+                  name: 'annotation-1234abcd.txt',
+                  mime: 'text/plain',
+                  text: 'Selected text and comment',
+                  omitted: false,
+                },
               ],
             },
           ],

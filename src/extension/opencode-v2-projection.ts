@@ -14,6 +14,8 @@ import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type
 import { parseFollowupTitle } from '../shared/followups';
 import { formatSkillAttachment } from '../shared/skill-reference';
 import { parseNativeForm } from '../shared/native-form';
+import { pastedTextDataUrl } from '../shared/pasted-text';
+import { splitPromptTextAttachments } from '../shared/prompt-text-attachments';
 import type { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 
 export function v2PartId(messageID: string, type: string, ordinal: number): string {
@@ -442,30 +444,34 @@ export function projectV2Message(
     if (followupTitle) info.followupTitle = followupTitle;
     const delivery = message.metadata?.varroDelivery;
     if (delivery === 'steer' || delivery === 'queue') info.delivery = delivery;
+    const prompt = splitPromptTextAttachments(message.text);
+    const files = [
+      ...(message.files ?? []).map((file) => ({
+        mime: file.mime,
+        filename: file.name,
+        url: file.source.type === 'uri' ? file.source.uri : `data:${file.mime};base64,${file.data}`,
+      })),
+      ...prompt.attachments.map((attachment) => ({
+        mime: 'text/plain',
+        filename: attachment.name,
+        url: pastedTextDataUrl(attachment.text),
+      })),
+    ];
     return {
       info,
       parts: [
         part(0, 'text', {
           text:
             message.metadata?.source === 'goal'
-              ? (goalPrompt(message.text) ?? message.text)
-              : message.text,
+              ? (goalPrompt(prompt.text) ?? prompt.text)
+              : prompt.text,
         }),
-        ...(message.files ?? []).map((file, index) =>
-          part(index + 1, 'file', {
-            mime: file.mime,
-            filename: file.name,
-            url:
-              file.source.type === 'uri'
-                ? file.source.uri
-                : `data:${file.mime};base64,${file.data}`,
-          })
-        ),
+        ...files.map((file, index) => part(index + 1, 'file', file)),
         ...(message.agents ?? []).map((agent, index) =>
-          part((message.files?.length ?? 0) + index + 1, 'agent', { name: agent.name })
+          part(files.length + index + 1, 'agent', { name: agent.name })
         ),
         ...(message.skills ?? []).map((skill, index) =>
-          part((message.files?.length ?? 0) + (message.agents?.length ?? 0) + index + 1, 'text', {
+          part(files.length + (message.agents?.length ?? 0) + index + 1, 'text', {
             text: formatSkillAttachment(skill.id),
             synthetic: true,
           })

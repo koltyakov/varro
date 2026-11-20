@@ -3,6 +3,7 @@ import { dirname, join, parse } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { asRecord, type UnknownRecord } from '../shared/type-utils';
 import { readPastedTextDataUrl } from '../shared/pasted-text';
+import { splitPromptTextAttachments } from '../shared/prompt-text-attachments';
 import type { OpenCodeServer } from './server';
 import { LocalSessionTranscriptReader } from './local-session-transcript';
 import { usageDatabasePaths } from './usage-database-paths';
@@ -307,8 +308,17 @@ function readNativeMessage(message: UnknownRecord): TranscriptRecord | undefined
       (message.files !== undefined && !Array.isArray(message.files))
     )
       throw new Error('Malformed transcript prompt.');
-    const entry = readText(message, message.text);
-    entry.attachments = (Array.isArray(message.files) ? message.files : []).map(readAttachment);
+    const prompt = splitPromptTextAttachments(message.text);
+    const entry = readText(message, prompt.text);
+    entry.attachments = [
+      ...(Array.isArray(message.files) ? message.files : []).map(readAttachment),
+      ...prompt.attachments.map(({ name, text }) => ({
+        name,
+        mime: 'text/plain',
+        text,
+        omitted: false,
+      })),
+    ];
     return { type: 'user', entry };
   }
   if (message.type === 'assistant') {
