@@ -3967,6 +3967,55 @@ describe('RestProxy handleRequest', () => {
     );
   });
 
+  it.each([false, true])(
+    'deduplicates native config approvals without rewriting covered rules, append new: %s',
+    async (appendNew) => {
+      const raw =
+        '{\n  // Keep Git intent and formatting.\n  "permissions": [\n    { "action": "shell", "resource": "git *", "effect": "allow" },\n    { "action": "shell", "resource": "git push*", "effect": "deny" },\n    { "action": "shell", "resource": "git reset --hard*", "effect": "ask" }\n  ]\n}\n';
+      mocks.vscode.workspace.textDocuments = [];
+      mocks.vscode.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+        uri.fsPath === '/repo/opencode.jsonc'
+          ? Promise.resolve(new TextEncoder().encode(raw))
+          : Promise.reject({ code: 'FileNotFound' })
+      );
+      mocks.vscode.workspace.fs.stat.mockResolvedValue({ mtime: 1, size: raw.length });
+      mocks.vscode.workspace.fs.writeFile.mockClear();
+      const patterns = appendNew ? ['git fetch *', 'head *'] : ['git fetch *'];
+      const serverRequest = vi.fn(async (method: string, path: string) =>
+        method === 'GET' && path === '/permission'
+          ? [{ id: 'perm-native', sessionID: 'session-1', permission: 'bash', always: patterns }]
+          : undefined
+      );
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, apiVersion: 2, request: serverRequest } as never,
+      });
+      await proxy.handleRequest(
+        makePayload(8525, 'POST', '/varro/permission/project-allow?directory=%2Frepo', {
+          sessionId: 'session-1',
+          permissionId: 'perm-native',
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 8525,
+        data: { permission: 'bash', patterns },
+      });
+      if (appendNew) {
+        expect(mocks.vscode.workspace.fs.writeFile).toHaveBeenCalledOnce();
+        const [uri, encoded] = mocks.vscode.workspace.fs.writeFile.mock.calls[0]!;
+        const written = new TextDecoder().decode(encoded);
+        expect(uri.fsPath).toBe('/repo/opencode.jsonc');
+        expect(written).toContain('// Keep Git intent and formatting.');
+        expect(written).toContain('"resource": "head *"');
+        expect(written).not.toContain('"resource": "git fetch *"');
+        expect(written).toContain(
+          '{ "action": "shell", "resource": "git push*", "effect": "deny" }'
+        );
+      } else {
+        expect(mocks.vscode.workspace.fs.writeFile).not.toHaveBeenCalled();
+      }
+    }
+  );
+
   it('persists authoritative always patterns in project config', async () => {
     const existingConfig = JSON.stringify({
       permission: { bash: { '*': 'ask', 'git *': 'deny' } },

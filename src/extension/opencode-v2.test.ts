@@ -36,6 +36,37 @@ import { nativePdfFixture } from '../shared/native-pdf.test-support';
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 afterEach(() => vi.unstubAllGlobals());
 
+describe('configured permission ordering', () => {
+  it('preserves permissions from every document in priority order, including agent rules', async () => {
+    const globalRule = { action: 'shell', resource: 'git *', effect: 'allow' };
+    const projectRule = { action: 'shell', resource: 'git push*', effect: 'deny' };
+    const globalAgentRule = { action: 'shell', resource: 'git reset*', effect: 'ask' };
+    const projectAgentRule = { action: 'edit', resource: '*', effect: 'deny' };
+    const adapter = new OpenCodeV2Adapter(async () => [
+      {
+        info: {
+          permissions: [globalRule],
+          agents: { build: { permissions: [globalAgentRule] } },
+        },
+      },
+      {
+        info: {
+          permissions: [projectRule],
+          agents: { build: { permissions: [projectAgentRule] } },
+        },
+      },
+    ]);
+    expect(await adapter.request('GET', '/config', undefined)).toMatchObject({
+      permissions: [globalRule, projectRule],
+      permission: [
+        { permission: 'bash', pattern: 'git *', action: 'allow' },
+        { permission: 'bash', pattern: 'git push*', action: 'deny' },
+      ],
+      agents: { build: { permissions: [globalAgentRule, projectAgentRule] } },
+    });
+  });
+});
+
 describe('saved project worktree inventory', () => {
   it('reads the native bare worktree inventory without loading a destination location', async () => {
     const worktrees = [{ directory: '/worktrees/feature', strategy: 'git' }];

@@ -68,6 +68,146 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('AutoApproveJudge', () => {
+  describe('configured V2 shell permissions', () => {
+    const rules = [
+      { action: 'shell', resource: 'git *', effect: 'allow' },
+      { action: 'shell', resource: 'git push*', effect: 'deny' },
+      { action: 'shell', resource: 'git reset --hard*', effect: 'ask' },
+      { action: 'shell', resource: 'git status*', effect: 'ask' },
+      { action: 'shell', resource: 'head *', effect: 'allow' },
+    ];
+
+    it.each([
+      { resources: ['git fetch origin'], decision: 'allow' },
+      { resources: ['git fetch origin', 'head -n 5 README.md'], decision: 'allow' },
+      { resources: ['git reset --hard HEAD'], decision: 'ask' },
+      { resources: ['git status --short'], decision: 'ask' },
+      { resources: ['git fetch origin', 'git push origin main'], decision: 'reject' },
+    ])('respects configured rules for $resources', async ({ resources, decision }) => {
+      const request = vi.fn(async () => ({ permissions: rules }));
+      const judge = new AutoApproveJudge({ request, apiVersion: 2 }, new HiddenSessionManager());
+      await expect(
+        judge.judge(
+          {
+            permission: {
+              ...cargoBuildPermission('perm-config'),
+              type: 'shell',
+              patterns: resources,
+              always: ['*'],
+            },
+          },
+          '/owning-workspace'
+        )
+      ).resolves.toMatchObject({ decision });
+      expect(request.mock.calls).toHaveLength(1);
+      expect(request).toHaveBeenCalledWith('GET', '/config', undefined, {
+        directory: '/owning-workspace',
+      });
+    });
+
+    it('judges the whole request when only some resources are configured', async () => {
+      const original = createAskJudgeRequest();
+      const request = vi.fn((method: string, path: string) =>
+        path === '/config' ? Promise.resolve({ permissions: rules }) : original(method, path)
+      );
+      const judge = new AutoApproveJudge({ request, apiVersion: 2 }, new HiddenSessionManager());
+      await expect(
+        judge.judge({
+          permission: {
+            ...cargoBuildPermission('perm-mixed'),
+            patterns: ['git fetch origin', 'cargo build'],
+          },
+        })
+      ).resolves.toMatchObject({ decision: 'ask', reason: 'Needs user review.' });
+      expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    });
+
+    it('keeps ordinary ask-by-default shell policies eligible for Auto review', async () => {
+      const original = createAskJudgeRequest();
+      const request = vi.fn((method: string, path: string) =>
+        path === '/config'
+          ? Promise.resolve({
+              permissions: [{ action: 'shell', resource: '*', effect: 'ask' }],
+            })
+          : original(method, path)
+      );
+      const judge = new AutoApproveJudge({ request, apiVersion: 2 }, new HiddenSessionManager());
+      await expect(
+        judge.judge({
+          permission: { ...cargoBuildPermission('perm-default-ask'), patterns: ['cargo build'] },
+        })
+      ).resolves.toMatchObject({ decision: 'ask', reason: 'Needs user review.' });
+      expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    });
+
+    it('does not treat save suggestions or command metadata as checked resources', async () => {
+      const request = createAskJudgeRequest();
+      const judge = new AutoApproveJudge({ request, apiVersion: 2 }, new HiddenSessionManager());
+      await expect(
+        judge.judge({
+          permission: {
+            ...cargoBuildPermission('perm-no-resources'),
+            always: ['git *'],
+          },
+        })
+      ).resolves.toMatchObject({ decision: 'ask', reason: 'Needs user review.' });
+      expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+    });
+
+    it('asks without consulting a model if config verification fails', async () => {
+      const request = vi.fn().mockRejectedValue(new Error('Config unavailable'));
+      const judge = new AutoApproveJudge({ request, apiVersion: 2 }, new HiddenSessionManager());
+      await expect(
+        judge.judge({
+          permission: { ...cargoBuildPermission('perm-config-failed'), patterns: ['git fetch'] },
+        })
+      ).resolves.toMatchObject({
+        decision: 'ask',
+        reason: 'Cannot verify configured shell permissions.',
+      });
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+
+    it('rechecks changed configuration instead of caching configured grants', async () => {
+      const request = vi
+        .fn()
+        .mockResolvedValueOnce({ permissions: rules })
+        .mockResolvedValueOnce({
+          permissions: [...rules, { action: 'shell', resource: 'git *', effect: 'ask' }],
+        });
+      const judge = new AutoApproveJudge({ request, apiVersion: 2 }, new HiddenSessionManager());
+      const permission = {
+        ...cargoBuildPermission('perm-config-changed'),
+        patterns: ['git fetch'],
+      };
+      await expect(judge.judge({ permission })).resolves.toMatchObject({ decision: 'allow' });
+      await expect(judge.judge({ permission })).resolves.toMatchObject({ decision: 'ask' });
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+
+    it('reveals the request when the bounded config read times out', async () => {
+      vi.useFakeTimers();
+      try {
+        const config = deferred<unknown>();
+        const request = vi.fn(() => config.promise);
+        const judge = new AutoApproveJudge({ request, apiVersion: 2 }, new HiddenSessionManager());
+        const pending = judge.judge({
+          permission: { ...cargoBuildPermission('perm-config-timeout'), patterns: ['git fetch'] },
+        });
+        await vi.advanceTimersByTimeAsync(2_000);
+        await expect(pending).resolves.toMatchObject({
+          decision: 'ask',
+          reason: 'Cannot verify configured shell permissions.',
+        });
+        config.resolve({ permissions: rules });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(request).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('traces the permission owner rather than the temporary judge session', async () => {
     const trace = vi.spyOn(extensionConfig, 'readPromptTrace').mockReturnValue(true);
     configurePromptTrace(extensionConfig.readPromptTrace);

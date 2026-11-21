@@ -118,6 +118,9 @@ function mergeConfiguration(target: UnknownRecord, patch: UnknownRecord): void {
       const merged = { ...asRecord(target[key]) };
       mergeConfiguration(merged, record);
       target[key] = merged;
+    } else if (key === 'permissions' && Array.isArray(value)) {
+      const previous = target[key];
+      target[key] = [...(Array.isArray(previous) ? previous : []), ...value];
     } else target[key] = value;
   }
 }

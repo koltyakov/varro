@@ -23,6 +23,7 @@ import { logger } from './logger';
 import { readFollowupModel } from './extension-config';
 import { v1Action, v2Action } from './opencode-v2-projection';
 import { editNativePermissionConfig } from './opencode-permission-config';
+import { appendNativePermissionAllows } from './native-permission-rules';
 import { getOpenCodeApiCapabilities } from './opencode-api-capabilities';
 import type { OpenCodeServer } from './server';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
@@ -884,6 +885,17 @@ export class OpenCodeConfigService {
           );
         }
 
+        const native = this.usesNativePermissionConfig(target.config);
+        const existingNativeRules = Array.isArray(target.config.permissions)
+          ? target.config.permissions
+          : [];
+        const nativeRules = native
+          ? appendNativePermissionAllows(existingNativeRules, v2Action(permission), patterns)
+          : [];
+        if (native && nativeRules.length === existingNativeRules.length) {
+          return { kind: 'complete' as const };
+        }
+
         const initialStat = await this.readConfigStat(target.uri);
         let nextRaw = target.raw.trim() ? target.raw : '{}\n';
         if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
@@ -898,7 +910,6 @@ export class OpenCodeConfigService {
         const targetPermissionConfig = target.config.permission;
         const effectivePermissionConfig = currentSnapshot.config.permission;
         const scalarConfigPermission = isScalarConfigPermission(permission);
-        const native = this.usesNativePermissionConfig(target.config);
         if (!native && scalarConfigPermission && patterns.some((pattern) => pattern !== '*')) {
           throw new Error(
             `Project permission ${permission} only supports the wildcard pattern in OpenCode config`
@@ -910,14 +921,7 @@ export class OpenCodeConfigService {
             ? effectivePermissionConfig
             : null;
         if (native) {
-          nextRaw = editNativePermissionConfig(nextRaw, [
-            ...(Array.isArray(target.config.permissions) ? target.config.permissions : []),
-            ...patterns.map((resource) => ({
-              action: v2Action(permission),
-              resource,
-              effect: 'allow',
-            })),
-          ]);
+          nextRaw = editNativePermissionConfig(nextRaw, nativeRules);
         } else if (fallbackAction) {
           const permissionConfig: Record<string, unknown> = { '*': fallbackAction };
           permissionConfig[permission] = scalarConfigPermission

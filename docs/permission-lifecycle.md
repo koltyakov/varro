@@ -358,7 +358,22 @@ session ID, title, and metadata, so requests from different sessions are not gro
 
 ## Automatic Judging
 
-Auto mode applies local rules first, then opted-in decision providers, then the chat-model judge.
+Auto mode applies configured V2 shell rules first, then local rules, opted-in decision providers,
+and the chat-model judge.
+
+On V2, configured native shell rules are checked before local rules. Every concrete resource in
+the request must resolve to an explicit configured `allow` to bypass the judge; the request's save
+suggestions and command display metadata cannot supply that evidence. Last-match ordering preserves
+later `ask` exceptions to configured allowances and configured `deny` rules, which return manual review
+or rejection respectively. An unconfigured resource or an ordinary ask-by-default policy continues
+through normal Auto review. Configuration reads use the permission-owning workspace,
+have a bounded timeout, and are not verdict-cached. Failed reads reveal the request.
+JSONC comments are preserved as documentation, not interpreted as permission instructions.
+
+Native project and global standing approvals skip exact or provably narrower patterns already allowed
+in the target file, including covered parts of compound requests. A later potentially overlapping ask
+or deny prevents deduplication. Existing entries, ordering, and comments remain intact; a fully redundant
+save does not rewrite the file. Uncertain wildcard containment is kept rather than silently skipped.
 
 ### Local Rules
 
