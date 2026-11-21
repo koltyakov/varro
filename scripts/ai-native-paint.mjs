@@ -212,12 +212,12 @@ async function stopTrace() {
   const current = trace;
   trace = null;
   const captured = await current.stop();
-  await writeFile(path.join(output, traceName), captured.data, { mode: 0o600 });
-  const metadata = { file: traceName, dataLoss: captured.dataLoss, bytes: captured.data.length };
+  const { path: tracePath, ...details } = captured;
+  const metadata = { file: traceName, ...details };
   result.traces ??= [];
   result.traces.push(metadata);
   result.trace ??= metadata;
-  const summary = summarizeTrace(JSON.parse(captured.data).traceEvents);
+  const summary = summarizeTrace(JSON.parse(await readFile(tracePath, 'utf8')).traceEvents);
   await save(
     traceName === 'compositor-trace.json' ? 'trace-summary.json' : 'prepend-trace-summary.json',
     summary
@@ -311,7 +311,9 @@ try {
         .catch((error) => result.errors.push(`Screencast ack: ${error.message}`));
     }
   });
-  trace = await startPaintTrace(result.launch.remoteDebuggingPort);
+  trace = await startPaintTrace(result.launch.remoteDebuggingPort, {
+    outputPath: path.join(output, traceName),
+  });
   await workbench.call('Page.enable');
   await workbench.call('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
   recording = true;
@@ -358,7 +360,9 @@ try {
       result.retainedReferenceArm = { before: beforeArm, after: await snapshot() };
       // A separate bounded trace covers prepend if the first grab did not load it.
       traceName = 'compositor-prepend-trace.json';
-      trace = await startPaintTrace(result.launch.remoteDebuggingPort);
+      trace = await startPaintTrace(result.launch.remoteDebuggingPort, {
+        outputPath: path.join(output, traceName),
+      });
     }
     await drag('pagination-regrab');
     await workbench.call('Page.stopScreencast');

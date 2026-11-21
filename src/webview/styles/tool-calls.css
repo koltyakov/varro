@@ -3135,7 +3135,7 @@ kbd {
 
 .user-message-text > .inline-chip,
 .user-message-markdown .inline-chip {
-  vertical-align: -1px;
+  vertical-align: var(--varro-user-chip-vertical-align, -1px);
   margin: 0 1px;
   gap: 4px;
   padding: 1px 5px;
@@ -3502,6 +3502,10 @@ kbd {
 
 .message-file-attachments .message-attachment-chip {
   flex: 0 0 auto;
+}
+
+.message-file-attachments .message-attachment-chip .chip-label {
+  line-height: var(--varro-attachment-label-line-height, inherit);
 }
 
 .message-attachment-overflow-trigger {

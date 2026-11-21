@@ -818,6 +818,7 @@ export function MessageList() {
   let bottomFollowObservedStreaming = false;
   let bottomFollowPreservesNearBottomOffset = false;
   let bottomFollowResumePending = false;
+  let restoreLayoutObserver: MutationObserver | null = null;
   let lastBottomScrollFrameAt: number | null = null;
   const activeOlderHistoryLoads = new Map<
     string,
@@ -6171,7 +6172,42 @@ export function MessageList() {
     // Keep doing this through late restore measurements until the resumed follower settles.
     clearActivityExitReserve();
     releaseBottomReserveForViewportReset();
+    // A trailing row can commit after resize delivery but before the next follow tick.
+    // Keep the resumed follower at the physical bottom through that commit.
+    if (trackRef && !restoreLayoutObserver && globalThis.MutationObserver !== undefined) {
+      const sessionId = state.activeSessionId;
+      const inputEpoch = directScrollInputEpoch;
+      restoreLayoutObserver = new MutationObserver(() => {
+        if (
+          !bottomFollowResumePending ||
+          !autoScroll() ||
+          state.activeSessionId !== sessionId ||
+          directScrollInputEpoch !== inputEpoch ||
+          editingMessage() ||
+          diffFocusPauseActive ||
+          pointerScrollOwnershipActive ||
+          stickyNavigationOwnsScroll()
+        ) {
+          stopRestoreLayoutObserver();
+          return;
+        }
+        if (document.hidden || distanceFromBottom() <= 1) return;
+        performScroll({ force: true, immediate: true });
+        bottomFollowSettleFrames = 0;
+      });
+      restoreLayoutObserver.observe(trackRef, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributeFilter: ['class', 'style'],
+      });
+    }
     return true;
+  }
+
+  function stopRestoreLayoutObserver() {
+    restoreLayoutObserver?.disconnect();
+    restoreLayoutObserver = null;
   }
 
   function consumeBottomReserve(amount: number) {
@@ -6333,6 +6369,7 @@ export function MessageList() {
   }
 
   function cancelPendingScroll() {
+    stopRestoreLayoutObserver();
     lastBottomScrollFrameAt = null;
     if (stickyPreviewDebounceTimer) {
       clearTimeout(stickyPreviewDebounceTimer);
@@ -6601,7 +6638,12 @@ export function MessageList() {
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
         Math.abs(currentBottomScrollTop - lastAutoScrolledBottomScrollTop) <= 1 &&
         (distanceFromBottom() <= 1 || preservesNearBottomOffset);
-      if (stable && (!belowBottomTarget || preservesNearBottomOffset) && !trackGrew) {
+      if (
+        stable &&
+        !releasedSuspendedReserve &&
+        (!belowBottomTarget || preservesNearBottomOffset) &&
+        !trackGrew
+      ) {
         bottomFollowSettleFrames += 1;
       } else {
         bottomFollowSettleFrames = 0;
@@ -6630,6 +6672,7 @@ export function MessageList() {
           performScroll({ force: true, immediate: true });
         }
         bottomFollowResumePending = false;
+        stopRestoreLayoutObserver();
         const shouldFillInitialViewport =
           pendingInitialHistoryFillSessionId === sessionId &&
           isSessionHistoryTruncated(sessionId) &&
@@ -8493,6 +8536,7 @@ export function MessageList() {
       document.removeEventListener('pointercancel', releasePointerScrollOwnership);
       window.removeEventListener('resize', handleHostViewportResize);
       observer.disconnect();
+      stopRestoreLayoutObserver();
       firstVisibleMessageObserver?.disconnect();
       firstVisibleMessageObserver = null;
       measuredRowObserver?.disconnect();

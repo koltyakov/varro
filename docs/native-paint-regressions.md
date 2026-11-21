@@ -77,11 +77,16 @@ especially any reported failures, before assigning a visual verdict.
 
 `compositor-trace.json` is a browser-level Chrome trace spanning only the first drag and
 prepend, not image export or the optional re-grab. It includes input, timeline, `cc`, `viz`,
-raster tasks, and paint invalidation categories. `trace-summary.json` retains event counts,
+raster tasks, and timeline events. Verbose disabled-by-default invalidation categories are
+excluded from the default budget; targeted investigations can supply explicit categories
+to `startPaintTrace`. `trace-summary.json` retains event counts,
 process names, and relevant events. The probe emits epoch-labelled timeline timestamps
 to correlate trace clocks with frames and DOM samples.
 If prepend first occurs in the generated re-grab, `compositor-prepend-trace.json` records
-that interval separately. The trace buffer is capped at 512 MiB; `dataLoss` is reported,
+that interval separately. The trace buffer and exported file are capped at 512 MiB.
+Export streams directly to a private no-overwrite file. Completion has a separate 60-second
+deadline and stream export a 120-second deadline; stop is one-shot even after failure.
+Completion/export durations and peak buffer usage are retained. `dataLoss` is reported,
 and a lossy trace cannot support conclusions based on absent events.
 
 Check exposed range coverage before blaming raster:

@@ -420,6 +420,123 @@ test('native thumb targeting re-grabs once only after observed range growth with
   assert.equal(releases, 2);
 });
 
+test('native fractional grabs use distinct thumb endpoints and verify fractional arrival', async () => {
+  const endpoints = [];
+  for (const fraction of [0.25, 0.75, 0.5]) {
+    const controller = Object.create(CdpController.prototype);
+    const list = {
+      scrollHeight: 2000,
+      clientHeight: 400,
+      scrollTop: 0,
+      offsetWidth: 500,
+      clientWidth: 490,
+      getBoundingClientRect: () => ({ top: 100, bottom: 900, right: 500, height: 800 }),
+      hasAttribute: () => true,
+      querySelectorAll: () => [list],
+    };
+    controller.evaluate = async (expression) =>
+      vm.runInNewContext(expression, {
+        document: { querySelector: () => list },
+        innerHeight: 1100,
+      });
+    controller.call = async (_method, params) => {
+      if (params.type === 'mouseReleased') endpoints.push(params.y);
+    };
+    controller.captureActionState = async () => ({
+      transcript: {
+        scrollTop: fraction * 1600,
+        scrollHeight: 2000,
+        clientHeight: 400,
+        visibleRows: [{ messageId: 'visible', top: 0 }],
+      },
+    });
+    const result = await controller.dragTranscriptScrollbar(fraction);
+    assert.equal(result.dispatched, true);
+    assert.equal(result.held, true);
+    assert.equal(result.attempts.length, 1);
+    assert.equal(result.attempts[0].reached, true);
+  }
+  assert.deepEqual(endpoints, [340, 660, 500]);
+});
+
+test('invalid scrollbar fractions never dispatch native input', async () => {
+  const controller = Object.create(CdpController.prototype);
+  controller.evaluate = async () => {
+    throw new Error('Unexpected evaluation');
+  };
+  for (const fraction of [-1, 2, NaN, Infinity, undefined])
+    await assert.rejects(controller.dragTranscriptScrollbar(fraction), /fraction/);
+});
+
+test('fractional arrival allows only native pointer quantization, not a wrong destination', async () => {
+  for (const [offset, expected] of [
+    [12, true],
+    [60, false],
+  ]) {
+    const controller = Object.create(CdpController.prototype);
+    controller.evaluate = async (expression) =>
+      expression.includes('hasAttribute')
+        ? { held: true, visible: true, top: 7500 + offset, range: 30000 }
+        : { x: 490, start: 700, end: 200, range: 30000, travel: 600 };
+    controller.call = async () => {};
+    controller.captureActionState = async () => ({
+      transcript: {
+        scrollTop: 7500 + offset,
+        scrollHeight: 30600,
+        clientHeight: 600,
+        visibleRows: [{ messageId: 'visible', top: 0 }],
+      },
+    });
+    const result = await controller.dragTranscriptScrollbar(0.25);
+    assert.equal(result.attempts[0].targetTolerance, 51.5);
+    assert.equal(result.attempts[0].reached, expected);
+    assert.equal(result.attempts.length, 1);
+  }
+});
+
+test('fractional native targeting calibrates the held drag and preserves failed observations', async () => {
+  for (const failure of [null, 'blank', 'ownership']) {
+    const controller = Object.create(CdpController.prototype);
+    const range = 29824;
+    const start = 657.90625;
+    const travel = 610.90625;
+    const end = start - 0.75 * travel;
+    const events = [];
+    let top = range;
+    controller.call = async (_method, event) => {
+      events.push(event);
+      if (event.type === 'mouseMoved') {
+        // Different native travel from the controller's estimate; integer pointer coordinates.
+        top = Math.round(range + ((Math.round(event.y) - Math.round(start)) * range) / 614);
+      }
+    };
+    controller.evaluate = async (expression) =>
+      expression.includes('hasAttribute')
+        ? { held: failure !== 'ownership', visible: failure !== 'blank', top, range }
+        : { x: 481, start, end, range, travel };
+    controller.captureActionState = async () => ({
+      transcript: {
+        scrollTop: top,
+        scrollHeight: range + 631,
+        clientHeight: 631,
+        visibleRows: [{}],
+      },
+    });
+    const result = await controller.dragTranscriptScrollbar(0.25);
+    const [attempt] = result.attempts;
+    assert.equal(result.attempts.length, 1);
+    assert.equal(attempt.held, failure !== 'ownership');
+    assert.equal(attempt.reached, !failure);
+    assert.equal(events.at(-1).type, 'mouseReleased');
+    assert.equal(events.at(-1).y, events.at(-2).y);
+    assert.equal(attempt.samples.length, failure ? 1 : 3);
+    if (!failure) {
+      assert.ok(Math.abs(attempt.samples[1].top - range / 4) > attempt.targetTolerance);
+      assert.ok(Math.abs(top - range / 4) <= attempt.targetTolerance);
+    }
+  }
+});
+
 test('retries an exhausted live tool window without retrying a scrolling failure', () => {
   const execution = { executed: false, actions: [{ outcome: 'active-window-ended' }] };
   assert.equal(shouldRetryActivityWithFreshStream(execution, 1, 3), true);

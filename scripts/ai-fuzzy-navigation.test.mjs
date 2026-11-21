@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { goToLatest } from './ai-fuzzy-navigation.mjs';
+import { goToLatest, runAi01 } from './ai-fuzzy-navigation.mjs';
 
 function fixture(geometry, route = 'session') {
   let time = 0;
@@ -138,4 +138,30 @@ test('never dispatches an input into another route or an unpainted transcript', 
     await assert.rejects(goToLatest(f.cdp, f.options), /did not become visible/);
     assert.deepEqual(f.inputs, []);
   }
+});
+
+test('AI-01 retains structured drag evidence and rejects a dispatched but unowned grab', async () => {
+  const f = fixture(() => ({ top: 2400, height: 3000, client: 600, visibleIds: ['last'] }));
+  f.cdp.snapshot = async () => ({ routeSessionId: 'session', transcript: { scrollTop: 100 } });
+  f.cdp.wheel = async () => true;
+  f.cdp.evaluate = async (expression) =>
+    expression.includes('new Promise')
+      ? null
+      : {
+          painted: true,
+          top: 2400,
+          height: 3000,
+          client: 600,
+          visibleIds: ['last'],
+        };
+  const drag = { dispatched: true, held: false, attempts: [{ reached: false }] };
+  f.cdp.dragTranscriptScrollbar = async () => drag;
+  const result = await runAi01(f.cdp, {
+    sessionId: 'session',
+    messageId: 'last',
+    seed: 'ownership',
+  });
+  assert.equal(result.result, 'FAIL');
+  assert.match(result.error, /pointer ownership/);
+  assert.deepEqual(result.actions.at(-1).drag, drag);
 });

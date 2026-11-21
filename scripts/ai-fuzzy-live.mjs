@@ -1579,6 +1579,8 @@ export class CdpController {
   }
 
   async dragTranscriptScrollbar(fraction) {
+    if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1)
+      throw new Error('Scrollbar fraction must be between 0 and 1');
     const attempts = [];
     for (let attempt = 0; attempt < 2; attempt++) {
       const geometry = await this.evaluate(`(() => {
@@ -1589,11 +1591,14 @@ export class CdpController {
       const travel = rect.height - thumb;
       return {
         range: list.scrollHeight - list.clientHeight,
+        travel,
         x: rect.right - Math.max(3, (list.offsetWidth - list.clientWidth) / 2),
         start: rect.top + list.scrollTop / (list.scrollHeight - list.clientHeight) * travel + thumb / 2,
-        end: ${JSON.stringify(fraction)} === 0
-          ? Math.max(1, rect.top - 40)
-          : Math.min(innerHeight - 1, rect.bottom + 40),
+         end: ${JSON.stringify(fraction)} === 0
+           ? Math.max(1, rect.top - 40)
+           : ${JSON.stringify(fraction)} === 1
+             ? Math.min(innerHeight - 1, rect.bottom + 40)
+             : rect.top + ${JSON.stringify(fraction)} * travel + thumb / 2,
       };
     })()`);
       if (!geometry) return { dispatched: attempts.length > 0, held: false, attempts };
@@ -1606,27 +1611,78 @@ export class CdpController {
         clickCount: 1,
       });
       let held;
+      let y = geometry.start;
+      const samples = [];
+      const sample = async () => {
+        const state = await this.evaluate(`(() => {
+          const list = document.querySelector('.interactive-list');
+          if (!list) return { held: false, visible: false };
+          const viewport = list.getBoundingClientRect();
+          return {
+            held: list.hasAttribute('data-pointer-scroll-owned'),
+            visible: [...list.querySelectorAll('[data-msg-id]')].some(row => {
+              const rect = row.getBoundingClientRect();
+              return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
+            }),
+            top: list.scrollTop,
+            range: list.scrollHeight - list.clientHeight,
+          };
+        })()`);
+        samples.push({ y, ...state });
+        return state.held && state.visible;
+      };
+      const move = async (nextY) => {
+        y = nextY;
+        await this.call('Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x: geometry.x,
+          y,
+          button: 'left',
+          buttons: 1,
+        });
+      };
+      const fractional = fraction > 0 && fraction < 1;
       try {
         await new Promise((resolve) => setTimeout(resolve, 400));
         for (let step = 1; step <= 12; step++) {
-          await this.call('Input.dispatchMouseEvent', {
-            type: 'mouseMoved',
-            x: geometry.x,
-            y: geometry.start + ((geometry.end - geometry.start) * step) / 12,
-            button: 'left',
-            buttons: 1,
-          });
+          await move(geometry.start + ((geometry.end - geometry.start) * step) / 12);
           await new Promise((resolve) => setTimeout(resolve, 25));
+          if (fractional && step === 11 && !(await sample())) break;
         }
         await new Promise((resolve) => setTimeout(resolve, 650));
-        held = await this.evaluate(
-          `document.querySelector('.interactive-list')?.hasAttribute('data-pointer-scroll-owned') === true`
-        );
+        if (fractional) {
+          if (samples[0].held && samples[0].visible && (await sample())) {
+            // Native thumb minima and track insets vary. Measure the last segment of
+            // this grab, then correct at most one segment without releasing the thumb.
+            const [from, to] = samples;
+            const dy = to.y - from.y;
+            const slope = (to.top - from.top) / dy;
+            const error = fraction * to.range - to.top;
+            const correction = error / slope;
+            if (
+              from.range === geometry.range &&
+              to.range === geometry.range &&
+              Math.abs(dy) >= 1 &&
+              slope > 0 &&
+              Math.abs(error) > to.range / geometry.travel + 1.5 &&
+              Math.abs(correction) <= Math.abs(dy)
+            ) {
+              await move(y + correction);
+              await new Promise((resolve) => setTimeout(resolve, 650));
+              await sample();
+            }
+          }
+          held = samples.every((entry) => entry.held);
+        } else {
+          held = await this.evaluate(
+            `document.querySelector('.interactive-list')?.hasAttribute('data-pointer-scroll-owned') === true`
+          );
+        }
       } finally {
         await this.call('Input.dispatchMouseEvent', {
           type: 'mouseReleased',
           x: geometry.x,
-          y: geometry.end,
+          y,
           button: 'left',
           buttons: 0,
           clickCount: 1,
@@ -1636,24 +1692,24 @@ export class CdpController {
       const range = after.transcript
         ? after.transcript.scrollHeight - after.transcript.clientHeight
         : null;
+      // The initial grab and destination each round to native mouse pixels. Their
+      // difference can be one track pixel, or tens of scroll CSS pixels in long history.
+      const targetTolerance =
+        fraction === 0 || fraction === 1 ? 1.5 : range / geometry.travel + 1.5;
+      const visible =
+        samples.every((entry) => entry.visible) && after.transcript?.visibleRows?.length;
       const reached =
-        after.transcript &&
-        (fraction === 0
-          ? after.transcript.scrollTop <= 1.5
-          : range - after.transcript.scrollTop <= 1.5);
-      attempts.push({ geometry, held, after, reached: !!reached });
+        visible && Math.abs(after.transcript.scrollTop - fraction * range) <= targetTolerance;
+      attempts.push({ geometry, samples, held, after, targetTolerance, reached: !!reached });
       // First-time virtual measurements can grow the range after the grab. Only that observed
       // targeting miss gets one re-grab with fresh geometry; never replay a blank-content failure.
-      if (
-        reached ||
-        !held ||
-        !after.transcript?.visibleRows?.length ||
-        range === null ||
-        Math.abs(range - geometry.range) <= 1.5
-      )
-        break;
+      if (reached || !held || !visible || range === null || range - geometry.range <= 1.5) break;
     }
-    return { dispatched: true, held: attempts.every((entry) => entry.held), attempts };
+    return {
+      dispatched: attempts.length > 0,
+      held: attempts.length > 0 && attempts.every((entry) => entry.held),
+      attempts,
+    };
   }
 
   countScoped(selector, scope) {

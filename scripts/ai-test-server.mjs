@@ -3,11 +3,18 @@ import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { access, copyFile, chmod, mkdir, mkdtemp, open, writeFile } from 'node:fs/promises';
 import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { copyProviderCredentials, copyProviderSettings } from './ai-test-host-settings.mjs';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
+import { createWindowsProcessInspector } from './ai-streaming-selection.mjs';
+import {
+  isTestServerProcessAlive,
+  stopTestServerChild,
+  WindowsTestServerOwner,
+} from './ai-test-server-lifecycle.mjs';
 import { reserveLoopbackPort } from './vscode-launch-process.mjs';
 
 const testRoot = fileURLToPath(new URL('../artifacts/ai-test-data', import.meta.url));
@@ -86,17 +93,33 @@ export async function startAiTestServer(workspace) {
   const port = await reserveLoopbackPort();
   const url = `http://127.0.0.1:${port}`;
   let child;
-  let exited;
-  const stop = async () => {
-    if (!child || child.exitCode !== null || child.signalCode !== null) return;
-    child.kill('SIGTERM');
-    await Promise.race([exited, delay(3_000)]);
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGKILL');
-      await exited;
-    }
-  };
-  const start = async () => {
+  const inspector =
+    process.platform === 'win32' ? await createWindowsProcessInspector() : undefined;
+  let owner;
+  const verifiedLaunches = [];
+  let listenerPid;
+  let stopping;
+  const stop = () =>
+    (stopping ??= (async () => {
+      if (owner) return owner.stop();
+      if (!child?.pid) return;
+      await stopTestServerChild(child);
+      if (listenerPid && listenerPid !== child.pid && isTestServerProcessAlive(listenerPid))
+        throw new Error(`Test server listener PID ${listenerPid} survived launch exit`);
+      // A launcher exit alone does not prove that its endpoint closed.
+      const probe = net.createServer();
+      probe.listen(port, '127.0.0.1');
+      await once(probe, 'listening');
+      await new Promise((resolve, reject) =>
+        probe.close((error) => (error ? reject(error) : resolve()))
+      );
+    })());
+  const start = async (previous) => {
+    child = undefined;
+    owner = undefined;
+    listenerPid = undefined;
+    stopping = undefined;
+    await inspector?.prepare();
     const log = await open(path.join(root, 'server.log'), 'a', 0o600);
     try {
       child = spawn(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
@@ -106,14 +129,17 @@ export async function startAiTestServer(workspace) {
         stdio: ['ignore', log.fd, log.fd],
       });
       await once(child, 'spawn');
-      exited = once(child, 'exit');
+      if (inspector) owner = new WindowsTestServerOwner(inspector, port, child);
     } finally {
       await log.close();
     }
     const deadline = Date.now() + 30_000;
     while (true) {
+      const ready = !owner || (await owner.capture());
+      let isolation;
       try {
-        return await requireIsolatedTestServer(url, workspace, testRoot, data);
+        if (!ready) throw new Error('Waiting for native test server listener');
+        isolation = await requireIsolatedTestServer(url, workspace, testRoot, data);
       } catch (error) {
         if (Date.now() >= deadline || child.exitCode !== null || child.signalCode !== null) {
           throw new Error(`AI test server startup failed; see ${path.join(root, 'server.log')}`, {
@@ -121,22 +147,51 @@ export async function startAiTestServer(workspace) {
           });
         }
         await delay(200);
+        continue;
       }
+      listenerPid = isolation.serverPid;
+      if (owner) await owner.verify(isolation.serverPid, previous);
+      else if (previous?.pid === isolation.serverPid)
+        throw new Error('Test server restart did not establish a fresh listener PID');
+      verifiedLaunches.push({
+        launchPid: child.pid,
+        serverPid: listenerPid,
+        birthIdentity: owner?.identity.birthIdentity,
+      });
+      inspector?.dispose();
+      return isolation;
     }
   };
   try {
     let isolation = await start();
     if (major === 2 && (await exists(sourceDatabase))) {
       // Let this binary create its schema, then seed credentials while it is stopped.
+      const previous = owner?.identity ?? { pid: isolation.serverPid };
       await stop();
       copyProviderCredentials(sourceDatabase, database);
       await chmod(database, 0o600);
-      isolation = await start();
+      isolation = await start(previous);
     }
     child.unref();
-    return { url, isolation, stop, root, configHome: environment.XDG_CONFIG_HOME };
+    return {
+      url,
+      isolation,
+      stop,
+      root,
+      configHome: environment.XDG_CONFIG_HOME,
+      verifiedLaunches,
+    };
   } catch (error) {
-    await stop();
+    try {
+      if (!stopping) await stop();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `AI test server startup and cleanup failed: ${error.message}; ${cleanupError.message}`, { cause: cleanupError }
+      );
+    } finally {
+      inspector?.dispose();
+    }
     throw error;
   }
 }

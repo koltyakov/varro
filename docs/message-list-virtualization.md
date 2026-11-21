@@ -550,6 +550,11 @@ Direct input acquires ownership only when it can affect the transcript:
   final answer's visible bounds, not only bottom distance. `scroll-hidden-completion.spec.ts` completes
   a turn with suspended frames and checks short and virtualized histories, with and without visibility
   events, while retaining detached reading positions.
+- While that resumed follower is pending, a short-lived track mutation observer reconciles trailing
+  DOM growth that lands after resize delivery and before the next follow tick. Disconnect it on
+  settlement, cancellation, session/input ownership changes, or unmount. At-bottom mutations must not
+  reset settlement. The hidden-activity regression includes late 24 px chrome growth and a native
+  wheel handoff before that growth; the latter must preserve the reader's new position.
 - Activity-summary settling and bottom-follow share the pending-frame clock. Cancelling or replacing
   the follower must not reset a rendering gap while its summary owner still has a pending frame.
   Both owners detect resumed rendering and release obsolete reserves before restoring an old target.

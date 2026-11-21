@@ -11,6 +11,8 @@ describe('chat font config', () => {
     document.documentElement.style.removeProperty('--varro-chat-prose-font-size-offset');
     document.documentElement.style.removeProperty('--varro-chat-editor-font-size');
     document.documentElement.style.removeProperty('--varro-chat-font-family');
+    document.documentElement.style.removeProperty('--varro-user-chip-vertical-align');
+    document.documentElement.style.removeProperty('--varro-attachment-label-line-height');
     vi.restoreAllMocks();
   });
 
@@ -29,7 +31,26 @@ describe('chat font config', () => {
       expect(
         document.documentElement.style.getPropertyValue('--varro-chat-prose-font-size-offset')
       ).toBe(offset);
+      const windows = userAgent.includes('Windows');
+      expect(
+        document.documentElement.style.getPropertyValue('--varro-user-chip-vertical-align')
+      ).toBe(windows ? '0px' : '-1px');
+      expect(
+        document.documentElement.style.getPropertyValue('--varro-attachment-label-line-height')
+      ).toBe(windows ? 'normal' : 'inherit');
     }
+  });
+
+  it('clears the Segoe alignment adjustment when Windows switches to a custom family', () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0');
+    applyChatFontConfig({ chatFontSize: 13, chatEditorFontSize: 12, chatFontFamily: 'default' });
+    applyChatFontConfig({ chatFontSize: 13, chatEditorFontSize: 12, chatFontFamily: 'monospace' });
+    expect(
+      document.documentElement.style.getPropertyValue('--varro-user-chip-vertical-align')
+    ).toBe('-1px');
+    expect(
+      document.documentElement.style.getPropertyValue('--varro-attachment-label-line-height')
+    ).toBe('inherit');
   });
 
   it('notifies layout owners around a changed font application', () => {

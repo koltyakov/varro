@@ -9,7 +9,9 @@ declare global {
 }
 
 for (const width of [480, 1442]) {
-  for (const mode of ['busy', 'late-completion', 'detached'] as const) {
+  const modes = ['busy', 'late-completion', 'detached'];
+  if (width === 1442) modes.push('late-summary-layout', 'wheel-during-restore');
+  for (const mode of modes) {
     test(`retires unpainted activity reserve after suspended frames at ${width}px, ${mode}`, async ({
       page,
     }, testInfo) => {
@@ -155,7 +157,13 @@ for (const width of [480, 1442]) {
           ...el.querySelectorAll('.append-scroll-bottom-reserve, .activity-exit-bottom-reserve'),
         ].reduce((sum, reserve) => sum + reserve.getBoundingClientRect().height, 0),
       }));
-      if (mode === 'late-completion') {
+      const delaySummary = mode === 'late-summary-layout' || mode === 'wheel-during-restore';
+      if (mode === 'late-completion' || delaySummary) {
+        if (delaySummary) {
+          await page.addStyleTag({
+            content: '.trailing-assistant-summary-row:not(.layout-ready) { display: none; }',
+          });
+        }
         await page.evaluate(() => {
           // SAFETY: This completion affects only the isolated fixture's generated session.
           const harness = (
@@ -199,12 +207,56 @@ for (const width of [480, 1442]) {
           });
         });
         // A new follow loop cannot use its own creation time as the last painted frame.
-        await page.waitForTimeout(50);
+        if (delaySummary) {
+          await expect(list.locator('.trailing-assistant-summary-row')).toHaveCount(1);
+        } else await page.waitForTimeout(50);
       }
-      const frames = await list.evaluate(async (el) => {
+      let wheelDestination: number | undefined;
+      if (mode === 'wheel-during-restore') {
+        await list.hover();
+        // Run the reserve-release frame, then hold the next settle tick for native input.
+        const handoff = await list.evaluate(async (el) => {
+          window.hiddenActivityFrames.resume();
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => {
+              window.hiddenActivityFrames.paused = true;
+              resolve();
+            })
+          );
+          return {
+            top: el.scrollTop,
+            gap: el.scrollHeight - el.clientHeight - el.scrollTop,
+            reserve:
+              el
+                .querySelector('.append-scroll-bottom-reserve, .activity-exit-bottom-reserve')
+                ?.getBoundingClientRect().height ?? 0,
+          };
+        });
+        expect(beforeResume.reserve).toBeGreaterThan(1);
+        expect(handoff.reserve).toBe(0);
+        expect(handoff.gap).toBeLessThanOrEqual(1);
+        await page.mouse.wheel(0, -180);
+        await expect
+          .poll(() => list.evaluate((el) => el.scrollTop))
+          .toBeLessThan(handoff.top - 100);
+        wheelDestination = await list.evaluate((el) => el.scrollTop);
+      }
+      const frames = await list.evaluate(async (el, revealSummary) => {
         const result = [];
         window.hiddenActivityFrames.resume();
         for (let frame = 0; frame < 45; frame++) {
+          if (frame === 1 && revealSummary) {
+            // Publish 24px after the resize pass, before this frame's geometry sample.
+            requestAnimationFrame(() =>
+              setTimeout(
+                () =>
+                  el
+                    .querySelector('.trailing-assistant-summary-row')
+                    ?.classList.add('layout-ready'),
+                0
+              )
+            );
+          }
           await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
           const view = el.getBoundingClientRect();
           const latest =
@@ -213,6 +265,9 @@ for (const width of [480, 1442]) {
           const latestBox = latest?.getBoundingClientRect();
           result.push({
             top: el.scrollTop,
+            summaryHeight:
+              el.querySelector('.trailing-assistant-summary-row')?.getBoundingClientRect().height ??
+              0,
             hidden: document.hidden,
             reserve: [
               ...el.querySelectorAll(
@@ -225,12 +280,29 @@ for (const width of [480, 1442]) {
           });
         }
         return result;
-      });
+      }, delaySummary);
       await testInfo.attach('suspended-activity-geometry', {
         body: JSON.stringify({ before, beforeResume, frames }, null, 2),
         contentType: 'application/json',
       });
       await page.screenshot({ path: testInfo.outputPath('restored.png') });
+      if (delaySummary) {
+        expect(frames[0]?.summaryHeight).toBe(0);
+        expect(frames[1]?.summaryHeight).toBe(24);
+      }
+      if (mode === 'late-summary-layout') {
+        // After settling, another mutation must go through ordinary follow on the next frame.
+        const gapBeforeNextFrame = await list.evaluate(async (el) => {
+          const summary = el.querySelector<HTMLElement>('.trailing-assistant-summary-row')!;
+          summary.style.minHeight = `${summary.getBoundingClientRect().height + 24}px`;
+          await Promise.resolve(); // Deliver mutation observers before sampling.
+          return el.scrollHeight - el.clientHeight - el.scrollTop;
+        });
+        expect(gapBeforeNextFrame).toBe(24);
+        await expect
+          .poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+          .toBeLessThanOrEqual(1);
+      }
       expect(frames.every((frame) => !frame.hidden)).toBe(true);
       const requiredReserve = Math.max(
         0,
@@ -242,7 +314,10 @@ for (const width of [480, 1442]) {
         frames.every((frame) => frame.reserve < 1),
         JSON.stringify(frames)
       ).toBe(true);
-      if (mode === 'detached') {
+      if (wheelDestination !== undefined) {
+        const userTop = wheelDestination;
+        expect(frames.every((frame) => Math.abs(frame.top - userTop) <= 1)).toBe(true);
+      } else if (mode === 'detached') {
         expect(frames.every((frame) => Math.abs(frame.top - before.top) <= 1)).toBe(true);
       } else {
         expect(frames.every((frame) => frame.latestVisible && frame.gap <= 1)).toBe(true);

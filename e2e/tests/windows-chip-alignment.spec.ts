@@ -170,8 +170,7 @@ async function measureInlineChip(page: Page, id: string) {
 
 test.describe('native Windows chip alignment', () => {
   test.skip(process.platform !== 'win32', 'Requires Windows and its installed Segoe UI font');
-  // Keep the existing 0.5px acceptance threshold. These checks currently expose the
-  // native Windows offset rather than accepting 1px or hiding it as an expected failure.
+  // Keep the native 0.5px acceptance threshold across plain and Markdown chips.
 
   test('aligns standalone annotation labels and recovers capacity after widening', async ({
     page,
@@ -235,7 +234,7 @@ test.describe('native Windows chip alignment', () => {
             const measurement = await measureInlineChip(page, item.id);
             expect(measurement.fontFamily).toBe(WINDOWS_FONT);
             expect(measurement.fontSize).toBe('13.5px');
-            expect(measurement.verticalAlign).toBe('-1px');
+            expect(measurement.verticalAlign).toBe('0px');
             if (!annotation) expect(measurement.imageHeight).toBe(12);
             measurements.push({ width, ...measurement });
           }
@@ -254,4 +253,41 @@ test.describe('native Windows chip alignment', () => {
       }
     );
   }
+
+  test('keeps native chip alignment at fractional layout zoom', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await openWindowsChips(page);
+    const fonts = await nativeFontEvidence(
+      page,
+      '[data-msg-id="windows-file-0-false"] .user-message-text'
+    );
+    const measurements = [];
+    for (const zoom of [1, 1.25, 1.5]) {
+      await page.evaluate((value) => {
+        document.documentElement.style.zoom = String(value);
+      }, zoom);
+      for (const item of INLINE_CASES) {
+        const measurement = await measureInlineChip(page, item.id);
+        measurements.push({ zoom, ...measurement });
+        expect.soft(Math.abs(measurement.offset), `${zoom}x ${item.id}`).toBeLessThanOrEqual(0.5);
+      }
+      const chip = page
+        .locator('[data-msg-id="windows-standalone"] .message-attachment-visible .chip-label')
+        .first();
+      await chip.scrollIntoViewIfNeeded();
+      const offset = await chip.evaluate((label) => {
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        const text = range.getBoundingClientRect();
+        const box = label.closest('.message-attachment-chip')!.getBoundingClientRect();
+        return box.top + box.height / 2 - text.top - text.height / 2;
+      });
+      measurements.push({ zoom, id: 'standalone', offset });
+      expect.soft(Math.abs(offset), `${zoom}x standalone`).toBeLessThanOrEqual(0.5);
+    }
+    await testInfo.attach('native-zoom-alignment.json', {
+      body: JSON.stringify({ fonts, measurements }, null, 2),
+      contentType: 'application/json',
+    });
+  });
 });

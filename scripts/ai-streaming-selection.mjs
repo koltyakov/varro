@@ -28,7 +28,7 @@ const WEIGHTS = {
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 let windowsInspectorModule;
 
-async function readNativeWindowsListeners(port) {
+export async function createWindowsProcessInspector() {
   windowsInspectorModule ??= build({
     entryPoints: [
       fileURLToPath(new URL('../src/extension/windows-process-inspector.ts', import.meta.url)),
@@ -44,7 +44,11 @@ async function readNativeWindowsListeners(port) {
       )
   );
   const { WindowsProcessInspector } = await windowsInspectorModule;
-  const inspector = new WindowsProcessInspector();
+  return new WindowsProcessInspector();
+}
+
+async function readNativeWindowsListeners(port) {
+  const inspector = await createWindowsProcessInspector();
   try {
     await inspector.prepare();
     return await inspector.readListeners(port);

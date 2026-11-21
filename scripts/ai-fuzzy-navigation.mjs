@@ -104,32 +104,14 @@ export async function runAi01(cdp, { sessionId, messageId, seed }) {
     }
     for (const fraction of [0.25, 0.75, 0.5]) {
       const before = await cdp.snapshot();
-      const geometry = await cdp.evaluate(`(() => {
-        const list = document.querySelector('.interactive-list');
-        const rect = list.getBoundingClientRect(), range = list.scrollHeight - list.clientHeight;
-        const thumb = Math.max(20, rect.height * list.clientHeight / list.scrollHeight);
-        const track = Math.max(1, rect.height - thumb);
-        return { x: rect.right - Math.max(3, (list.offsetWidth - list.clientWidth) / 2),
-          start: rect.top + list.scrollTop / range * track + thumb / 2,
-          end: rect.top + ${fraction} * track + thumb / 2 };
-      })()`);
-      for (const [type, y, buttons] of [
-        ['mousePressed', geometry.start, 1],
-        ['mouseMoved', geometry.end, 1],
-        ['mouseReleased', geometry.end, 0],
-      ]) {
-        await cdp.call('Input.dispatchMouseEvent', {
-          type,
-          x: geometry.x,
-          y,
-          buttons,
-          button: 'left',
-          clickCount: 1,
-        });
-      }
+      const drag = await cdp.dragTranscriptScrollbar(fraction);
       await settle();
       const after = await cdp.snapshot();
-      evidence.actions.push({ fraction, before, after });
+      evidence.actions.push({ fraction, before, after, drag });
+      if (!drag.dispatched || !drag.held)
+        throw new Error('Native scrollbar drag did not acquire pointer ownership');
+      if (!drag.attempts.at(-1)?.reached)
+        throw new Error('Native scrollbar drag did not reach the requested fraction');
       if (Math.abs(after.transcript.scrollTop - before.transcript.scrollTop) < 2)
         throw new Error('Native scrollbar drag did not move');
     }
