@@ -2248,6 +2248,20 @@ function transcriptAtBoundary(action, state) {
 
 export function verifyActionEffect(action, before, after, details = {}) {
   if (!details.dispatched) return { verified: false, reason: 'input was not dispatched' };
+  if (action.action === 'click sticky or jump to latest' && details.navigationStart) {
+    const start = details.navigationStart;
+    const transcript = after?.transcript;
+    return transcriptMoved(before, start) &&
+      transcriptMoved(start, after) &&
+      before?.transcript?.sessionId &&
+      before?.transcript?.sessionId === start?.transcript?.sessionId &&
+      start?.transcript?.sessionId === transcript?.sessionId &&
+      transcript?.visibleRows?.length > 0 &&
+      Math.abs(transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop) <=
+        (details.streaming ? 64 : 1.5)
+      ? { verified: true }
+      : { verified: false, reason: 'detached jump start and return to latest were not verified' };
+  }
   if (action.action === 'show file diffs' || action.action === 'hide file diffs') {
     const enabled = action.action === 'show file diffs';
     return (
@@ -2477,7 +2491,29 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
         (await cdp.click('[data-sticky-msg-id]')) ||
         (await cdp.click('[aria-label="Scroll to latest message"]'));
       if (!dispatched && (await cdp.wheel('.interactive-list', -420, 'right'))) {
+        // The jump may return to the action's original pinned coordinate.
+        // Retain its actual detached start rather than judging that round trip as no movement.
+        const detachDeadline = Date.now() + 2_000;
+        do {
+          await new Promise((resolve) => setTimeout(resolve, 34));
+          details.navigationStart = await cdp.captureActionState(options.scope);
+        } while (!transcriptMoved(before, details.navigationStart) && Date.now() < detachDeadline);
         dispatched = await clickWithRetry(cdp, '[aria-label="Scroll to latest message"]');
+        if (dispatched) {
+          details.streaming = options.isActive ? await options.isActive() : false;
+          const arrivalDeadline = Date.now() + 2_000;
+          do {
+            await new Promise((resolve) => setTimeout(resolve, 34));
+            details.after = await cdp.captureActionState(options.scope);
+            const transcript = details.after?.transcript;
+            if (
+              transcript &&
+              Math.abs(transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop) <=
+                (details.streaming ? 64 : 1.5)
+            )
+              break;
+          } while (Date.now() < arrivalDeadline);
+        }
       }
     } else if (action.action === 'wheel transcript') {
       dispatched = await cdp.wheel('.interactive-list', action.delta, 'right');
@@ -2515,6 +2551,8 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
     if (details.targetingAttempts) result.targetingAttempts = details.targetingAttempts;
     if (details.held !== undefined) result.pointerHeld = details.held;
     if (details.nativeDrag) result.nativeDrag = details.nativeDrag;
+    if (details.navigationStart) result.navigationStart = details.navigationStart;
+    if (details.streaming !== undefined) result.streaming = details.streaming;
     if (effect.reason) result.reason = effect.reason;
     results.push(result);
     if (!effect.verified) break;

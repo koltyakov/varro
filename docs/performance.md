@@ -22,8 +22,13 @@ any saving described here.
   `scripts/ai-performance.mjs`. It reports frame-target counters and per-process CPU.
 - Confirm findings in a realistic state. Deltas appended to a completed message in an idle session
   produced trailing-summary churn that a busy stream (`multi-agent-large-streaming`) never shows.
-- A frame gap with no long task, while CDP evaluations keep answering, is a rendering pause in the
-  host, not main-thread work. Replay the same capture before attributing it to Varro.
+- A frame gap with no Long Tasks API entry does not rule out webview main-thread work. A retained
+  post-release trace caught a 97.2 ms V8 major GC that the API missed, while the workbench kept
+  rendering. Pair callback-entry age with renderer tasks, GC, compositor frame delivery, and
+  trace-clock markers before attributing a gap to the host or application. CDP responses outside
+  the gap do not establish responsiveness inside it.
+- Label frame gaps against actual native press/release timestamps, not a phase name that remains
+  active during later playback. A post-release streaming pause is not a held-drag stall.
 - Observer gaps record `heartbeats`, `server/event` `messages`, and `maxHeartbeatSpacingMs` from a
   50 ms timer running between observer start and stop. Spacing near 50 ms bounds any main-thread
   block inside that gap to about that length; it does not name the cause. Counts alone can hide a

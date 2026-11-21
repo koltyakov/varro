@@ -159,7 +159,11 @@ function shouldUseLocalStorage(key: string): boolean {
   ) {
     return false;
   }
-  if (contextRecord?.surface && WEBVIEW_INSTANCE_KEYS.has(key)) return false;
+  if (
+    contextRecord?.surface &&
+    (WEBVIEW_INSTANCE_KEYS.has(key) || key.startsWith('varro.inputDraft:'))
+  )
+    return false;
   return !(contextRecord?.surface === 'editor' && EDITOR_INSTANCE_KEYS.has(key));
 }
 

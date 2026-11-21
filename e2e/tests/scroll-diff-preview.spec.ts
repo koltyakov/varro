@@ -353,6 +353,7 @@ test.describe('diff preview anchoring', () => {
   for (const gesture of [
     'wheel',
     'wheel twice',
+    'wheel before late siblings',
     'wheel after partial response',
     'PageDown',
     'ArrowDown twice',
@@ -368,7 +369,8 @@ test.describe('diff preview anchoring', () => {
       );
       await expect(page.locator('.interactive-list')).toBeVisible();
       const stepCount = gesture === 'PageDown' || gesture === 'ArrowDown twice' ? 9 : 4;
-      await installPartialDiffTail(page, stepCount);
+      const lateSiblings = gesture === 'wheel before late siblings';
+      await installPartialDiffTail(page, stepCount, lateSiblings ? 5 : 1);
       const marker = page.locator('[data-msg-id="message-partial-diff-2"] p').first();
       const preceding = page.locator('[data-msg-id="message-partial-diff-1"]');
       await expect(
@@ -583,7 +585,10 @@ test.describe('diff preview anchoring', () => {
         (window as PartialDiffWindow).partialDiffProbe.record('after-input');
       });
       const samples = [afterInput];
-      for (let step = 0; step < 4; step++) {
+      // Let the detached settle loop sleep before the first preview commits. Growth below
+      // the selected prose doesn't move it; the three preceding siblings arrive separately.
+      if (lateSiblings) await page.clock.runFor(700);
+      for (const step of lateSiblings ? [3, 1, 0, 2] : [0, 1, 2, 3]) {
         for (let file = 0; file < 3; file++) {
           if (partialOlderResponse && step === 0 && file === 0) continue;
           await page.evaluate(
@@ -593,7 +598,9 @@ test.describe('diff preview anchoring', () => {
           await expect(
             page.locator(`[data-msg-id="message-partial-diff-${step}"] .file-change-inline-diffs`)
           ).toHaveCount(file + 1);
-          await page.clock.runFor(17);
+          if (lateSiblings) samples.push(await position());
+          // Two separate detail deliveries can precede the next follow/measurement frame.
+          if (!lateSiblings || step !== 1 || file !== 0) await page.clock.runFor(17);
           samples.push(await position());
         }
       }

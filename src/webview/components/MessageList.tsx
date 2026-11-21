@@ -2119,6 +2119,7 @@ export function MessageList() {
     null
   );
   let changedLayoutAnchorInputEpoch = -1;
+  let hydratedInputDestination: VisibleScrollAnchor | null = null;
   let nativeKeyScrollEpoch = -1;
   let resumeChangedLayoutAnchor: (() => void) | null = null;
   let deferredLayoutInputAnchor: {
@@ -2153,6 +2154,7 @@ export function MessageList() {
           : null;
     if (!anchor && !resumeChangedLayoutAnchor) return;
     changedLayoutAnchorInputEpoch = -1;
+    hydratedInputDestination = null;
     resumeChangedLayoutAnchor = null;
     setChangedLayoutAnchor(null);
   }
@@ -2192,9 +2194,10 @@ export function MessageList() {
         !diffFocusPauseActive &&
         !pendingExpansionScrollAnchor &&
         !pendingStructuralScrollAnchor &&
-        // A sibling preview can still be pending in this row. Its partial growth
-        // belongs to the existing anchor/input handoff until the row's last load.
-        !inlineDiffHeightHolds.get(mount.messageId)?.loads.size &&
+        // Partial growth before a gesture belongs to its native handoff. Once the
+        // gesture has established a destination, align it on every sibling commit.
+        (anchor === hydratedInputDestination ||
+          !inlineDiffHeightHolds.get(mount.messageId)?.loads.size) &&
         mountedMessageRows.get(mount.messageId)?.contains(mount.element)
       )
         restoreVisibleScrollAnchor(anchor, {
@@ -2300,14 +2303,17 @@ export function MessageList() {
     anchor: VisibleScrollAnchor,
     sessionId: string | null,
     ownershipEpoch: number,
-    inputEpoch: number
+    inputEpoch: number,
+    fromDirectMovement = false
   ) {
+    hydratedInputDestination = fromDirectMovement ? anchor : null;
     changedLayoutAnchorInputEpoch = inputEpoch;
     setChangedLayoutAnchor(anchor);
     let frameId = 0;
     let attempts = 0;
     let queued = false;
     const finish = () => {
+      if (hydratedInputDestination === anchor) hydratedInputDestination = null;
       if (resumeChangedLayoutAnchor === resume) resumeChangedLayoutAnchor = null;
       if (untrack(changedLayoutAnchor) === anchor) setChangedLayoutAnchor(null);
     };
@@ -7203,7 +7209,8 @@ export function MessageList() {
             anchor,
             state.activeSessionId,
             userScrollOwnershipEpoch,
-            directScrollInputEpoch
+            directScrollInputEpoch,
+            true
           );
         }
       }

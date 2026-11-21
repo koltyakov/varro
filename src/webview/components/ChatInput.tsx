@@ -62,6 +62,10 @@ import {
 import {
   state,
   inputText,
+  currentDraftKey,
+  draftSessionId,
+  onBeforeDraftSwitch,
+  writeOwnedDraft,
   inputTextMutationVersion,
   setState,
   setInputText,
@@ -920,7 +924,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let queuedStatusReconciliationTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let queueDispatchDisposed = false;
-  const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
+  const composerSessionId = () => (props.newSession ? null : draftSessionId());
   let pdfAttachmentSessionId = untrack(composerSessionId);
   const invalidatePendingPdfAttachments = () => {
     pdfAttachmentEpoch += 1;
@@ -3522,6 +3526,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function handleSend(mode?: 'queue' | 'queue-paused' | 'steer' | 'after-stop') {
     if (editReconciliationPending()) return;
+    const sendDraftKey = currentDraftKey();
     const savePaused = mode === 'queue-paused';
     if (savePaused) {
       if (!composerSessionId()) {
@@ -3847,6 +3852,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         queuedEdit?.sessionId === sessionId && replaceQueuedMessage(queuedEdit.id, message);
       holdComposerHeightUntilMessageAppend(sessionId);
       if (!replaced) enqueueMessage(message);
+      if (currentDraftKey() !== sendDraftKey) {
+        writeOwnedDraft(sendDraftKey, '');
+        releaseHeldComposerHeight(true);
+        return;
+      }
       setQueuedMessageEdit(null);
       setHistoryIndex(null);
       setHistoryDraft('');
@@ -3875,7 +3885,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     invalidatePendingPdfAttachments();
     animateSubmittedContent();
     hideSubmittedAttachments(sendSessionId);
-    setInputText('');
+    writeOwnedDraft(sendDraftKey, '');
     const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
     clearUsageLimitsForSessionTree(sendSessionId);
@@ -3884,7 +3894,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       // Slash-command detection is async. Keep the send attached to the composer
       // where Enter was pressed if navigation changes the active session meanwhile.
       const capturedTarget =
-        props.newSession || composerSessionId() !== sendSessionId ? sendSessionId : undefined;
+        props.newSession ||
+        state.activeSessionId !== sendSessionId ||
+        currentDraftKey() !== sendDraftKey
+          ? sendSessionId
+          : undefined;
       const sendOptions: NonNullable<Parameters<typeof sendMessage>[1]> =
         mode === 'steer'
           ? { delivery: 'steer' }
@@ -3915,6 +3929,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     releaseHeldComposerHeight(sent);
     const shouldRestoreFailedInput =
       !sent &&
+      (currentDraftKey() === sendDraftKey ||
+        (sendSessionId === null && composerSessionId() !== null)) &&
       sendingAttachments() !== null &&
       inputTextMutationVersion() === clearedInputVersion &&
       inputText() === '';
@@ -4461,8 +4477,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setComposerValue(stripClipboardImagePlaceholders(text, droppedImages));
   }
 
+  let queuedEditDraftKey: string | null =
+    state.queuedMessageEdit?.sessionId === composerSessionId() ? currentDraftKey() : null;
   function cancelQueuedMessageEdit() {
-    if (!queuedMessageEdit()) return;
+    const edit = queuedMessageEdit();
+    if (!edit) return;
+    if (
+      (queuedEditDraftKey && queuedEditDraftKey !== currentDraftKey()) ||
+      edit.sessionId !== composerSessionId()
+    ) {
+      if (queuedEditDraftKey) writeOwnedDraft(queuedEditDraftKey, '');
+      setQueuedMessageEdit(null);
+      queuedEditDraftKey = null;
+      return;
+    }
     (() => {
       setQueuedMessageEdit(null);
       setHistoryIndex(null);
@@ -4526,6 +4554,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           JSON.stringify(file.lineRanges ?? []) !== JSON.stringify(ranges)
         );
       });
+      queuedEditDraftKey = currentDraftKey();
       applyComposerEditState(
         {
           files,
@@ -5733,6 +5762,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   // Message editing reuses this composer: entering edit mode stashes the
   // current draft, loads the message text/context, and focuses the editor.
   let activeEditMessageId: string | null = null;
+  let inlineEditDraftKey: string | null = null;
 
   createEffect(
     () => {
@@ -5749,11 +5779,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         setEditSelectedModel(null);
         return;
       }
+      if (editing.sessionId !== composerSessionId()) return;
       if (editing.messageId === activeEditMessageId) return;
       if (activeEditMessageId === null && !getMessageEditDraftBackup()) {
         setMessageEditDraftBackup(untrack(captureEditDraftBackup));
       }
       activeEditMessageId = editing.messageId;
+      inlineEditDraftKey = currentDraftKey();
       setEditSelectedModel(editing.model ? { ...editing.model } : null);
       applyComposerEditState(editing.context, editing.text, files);
       queueMicrotask(() => {
@@ -5769,12 +5801,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (!untrack(editingMessage)) return;
     const draft = getMessageEditDraftBackup();
     resetMessageEditState();
+    if (inlineEditDraftKey && inlineEditDraftKey !== currentDraftKey()) {
+      writeOwnedDraft(inlineEditDraftKey, draft?.text ?? '');
+      return;
+    }
     if (draft) {
       applyComposerEditState(draft, draft.text);
     } else {
       setComposerValue('');
     }
   }
+  onCleanup(
+    onBeforeDraftSwitch(() => {
+      if (queuedMessageEdit()?.sessionId === composerSessionId()) cancelQueuedMessageEdit();
+      if (editingMessage()?.sessionId === composerSessionId()) cancelMessageEdit();
+    })
+  );
 
   createEffect(
     () => {

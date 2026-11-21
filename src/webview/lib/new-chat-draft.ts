@@ -3,6 +3,8 @@ import { createSignal } from 'solid-js';
 import { getDefaultPrimaryAgentName } from '../hooks/routing-state';
 import {
   clearMessages,
+  currentDraftKey,
+  finishNewChatDraft,
   getPersistedSelectedAgent,
   inputText,
   isSessionAwaitingInput,
@@ -10,7 +12,6 @@ import {
   requestComposerFocus,
   restoreSelectedModelForComposer,
   setError,
-  setInputText,
   setPersistentShowSessionPicker,
   setSelectedAgent,
   setShowModelPicker,
@@ -65,10 +66,10 @@ export function startNewChatDraft() {
   const blankSessionId = getDiscardableActiveBlankSessionId();
   const deferTranscriptClear = !blankSessionId && state.messages.length > 0;
   const craftedText = inputText();
+  const sourceKey = currentDraftKey();
   (() => {
     setNewChatDraftKey(draftGeneration);
     resetMessageEditState();
-    setInputText(craftedText);
     resetToolCallExpansionState();
     // Detach first so a live virtualized transcript can unmount before its
     // backing entries disappear. Clearing both in one reactive flush can leave
@@ -85,6 +86,7 @@ export function startNewChatDraft() {
     setShowModelPicker(false);
     stopLoading();
     setPersistentShowSessionPicker(false);
+    finishNewChatDraft(sourceKey, craftedText);
     restoreSelectedModelForComposer(null);
     setSelectedAgent(getDefaultPrimaryAgentName(state.agents, getPersistedSelectedAgent()), {
       sessionId: blankSessionId || null,

@@ -920,28 +920,33 @@ test('stops the AI-08 action plan when the model stream settles', async () => {
   ]);
 });
 
-test('exposes the jump control when AI-08 starts bottom-pinned', async () => {
+test('verifies a bottom-pinned jump against its detached starting point', async () => {
   const calls = [];
+  let top = 1000;
   const cdp = {
     click: async (selector) => {
       calls.push(['click', selector]);
-      return calls.length === 4;
+      if (calls.length !== 4) return false;
+      top = 1000;
+      return true;
     },
     wheel: async (selector, delta, side) => {
       calls.push(['wheel', selector, delta, side]);
+      top = 580;
       return true;
     },
-    captureActionState: async () => {
-      const moved = calls.some(([type]) => type === 'wheel');
-      return {
-        focusOwner: 'transcript',
-        transcript: {
-          scrollTop: moved ? 100 : 0,
-          firstVisibleMessageId: moved ? 'message-2' : 'message-1',
-          firstVisibleTop: 0,
-        },
-      };
-    },
+    captureActionState: async () => ({
+      focusOwner: 'transcript',
+      transcript: {
+        sessionId: 'session',
+        scrollTop: top,
+        scrollHeight: 1600,
+        clientHeight: 600,
+        firstVisibleMessageId: top === 1000 ? 'latest' : 'older',
+        firstVisibleTop: 0,
+        visibleRows: [{ messageId: top === 1000 ? 'latest' : 'older', top: 0 }],
+      },
+    }),
   };
 
   const results = await executeActionPlan(
@@ -958,6 +963,93 @@ test('exposes the jump control when AI-08 starts bottom-pinned', async () => {
     ['click', '[aria-label="Scroll to latest message"]'],
   ]);
   assert.equal(results[0].executed, true);
+  assert.equal(results[0].navigationStart.transcript.scrollTop, 580);
+  assert.equal(results[0].before.transcript.scrollTop, 1000);
+  assert.equal(results[0].after.transcript.scrollTop, 1000);
+});
+
+test('does not pass an unverified jump just because it started at bottom', () => {
+  const action = { action: 'click sticky or jump to latest' };
+  const pinned = {
+    transcript: {
+      sessionId: 'session',
+      scrollTop: 1000,
+      scrollHeight: 1600,
+      clientHeight: 600,
+      firstVisibleMessageId: 'latest',
+      firstVisibleTop: 0,
+      visibleRows: [{ messageId: 'latest', top: 0 }],
+    },
+  };
+  const detached = {
+    transcript: { ...pinned.transcript, scrollTop: 580, firstVisibleMessageId: 'older' },
+  };
+  assert.equal(verifyActionEffect(action, pinned, pinned, { dispatched: true }).verified, false);
+  assert.equal(
+    verifyActionEffect(action, pinned, pinned, {
+      dispatched: true,
+      navigationStart: pinned,
+    }).verified,
+    false
+  );
+  assert.equal(
+    verifyActionEffect(action, pinned, detached, {
+      dispatched: true,
+      navigationStart: detached,
+    }).verified,
+    false
+  );
+  assert.equal(
+    verifyActionEffect(
+      action,
+      pinned,
+      { transcript: { ...pinned.transcript, sessionId: 'other' } },
+      {
+        dispatched: true,
+        navigationStart: detached,
+      }
+    ).verified,
+    false
+  );
+});
+
+test('allows bounded follow lag only for a verified active-stream jump', () => {
+  const action = { action: 'click sticky or jump to latest' };
+  const before = {
+    transcript: {
+      sessionId: 'session',
+      scrollTop: 1000,
+      scrollHeight: 1600,
+      clientHeight: 600,
+      firstVisibleMessageId: 'latest',
+      firstVisibleTop: 0,
+      visibleRows: [{ messageId: 'latest', top: 0 }],
+    },
+  };
+  const start = {
+    transcript: {
+      ...before.transcript,
+      scrollTop: 580,
+      firstVisibleMessageId: 'older',
+      visibleRows: [{ messageId: 'older', top: 0 }],
+    },
+  };
+  const after = { transcript: { ...before.transcript, scrollTop: 960 } };
+  assert.equal(
+    verifyActionEffect(action, before, after, {
+      dispatched: true,
+      navigationStart: start,
+    }).verified,
+    false
+  );
+  assert.equal(
+    verifyActionEffect(action, before, after, {
+      dispatched: true,
+      navigationStart: start,
+      streaming: true,
+    }).verified,
+    true
+  );
 });
 
 test('waits for the expanded diff to mount before closing it', async () => {

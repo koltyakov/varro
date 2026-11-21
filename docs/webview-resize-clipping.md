@@ -39,6 +39,27 @@ resize delay restored. See
 `artifacts/ai-streaming/image-prompt-native-20261028/host-ledger.md` for the comparisons,
 remaining cropped frames, isolation, patch checks, and cleanup records.
 
+### November 21 retest on VS Code 1.146.0
+
+The Mac AI-02 and AI-04 widening clips reproduced in both the 110-turn chat and a
+plain HTML control in the same isolated host (Electron 43.8.6, Chromium
+150.0.7871.250). All six expansions per surface cropped: three 360→720 px and
+three 486→1100 px native sash drags. The chat root and transcript had already
+measured the new width when the cropped images were captured. With the app body
+replaced, the plain header painted exactly 360 or 486 px from the **new** left
+edge, and all four right-aligned color cards disappeared for one captured frame.
+The next paint restored the full header and all four cards. This matches the known
+host defect; it does not require a Varro root-width delay or a message-list bug.
+
+For this signature, use the upstream report [crbug.com/519655838](https://crbug.com/519655838)
+and test a **supported VS Code distribution** once it ships the compositor repair
+or an Electron backport. Check the embedded Chromium version rather than assuming
+a newer editor version contains it. Accept a candidate only after both the plain
+and real-chat expansion sequences paint continuously: the previous Chromium 152
+comparison cleared only the reduced reproduction. No supported real-chat fix is
+verified by this retest. Native frames, geometry and version details are in
+`artifacts/ai-fuzzy/issues-fix-20261121-resize/ledger.md`.
+
 ## Earlier application fixes and investigations
 
 Reproduced in VS Code 1.139.1 arm64 on macOS 15.7.7, at a 1440 x 900 workbench size

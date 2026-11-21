@@ -2456,6 +2456,8 @@ describe('ChatInput', () => {
   });
 
   it('sends to the composer session when navigation races slash-command detection', async () => {
+    setState(storePath('activeSessionId', 'session-2'));
+    setInputText('Keep the other draft');
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
     setInputText('Send to the original chat');
@@ -2476,6 +2478,9 @@ describe('ChatInput', () => {
       'Send to the original chat',
       expect.objectContaining({ targetSessionId: 'session-1' })
     );
+    expect(inputText()).toBe('Keep the other draft');
+    setState(storePath('activeSessionId', 'session-1'));
+    expect(inputText()).toBe('');
   });
 
   it('keeps a draft send separate when an existing session opens during detection', async () => {
@@ -5427,6 +5432,10 @@ describe('ChatInput', () => {
 
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
+    expect(inputText()).toBe('');
+    enterComposerText(editor, '@app');
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'p', bubbles: true }));
+    flushSolid();
 
     await vi.waitFor(() =>
       expect(messages.filter((message) => message.type === 'files/search')).toHaveLength(2)
@@ -7315,8 +7324,7 @@ describe('ChatInput', () => {
   it('queues busy composer attachments and clears them from the input', async () => {
     setupModelState();
     flushSolid();
-    setInputText('Follow up with context');
-    flushSolid();
+
     setIsLoading(true);
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
@@ -7338,6 +7346,8 @@ describe('ChatInput', () => {
     setState(storePath('terminalSelection', { text: 'npm test', terminalName: 'zsh' }));
     flushSolid();
 
+    setInputText('Follow up with context');
+    flushSolid();
     cleanup = render(() => ChatInput(), container!);
     flushSolid();
     await flushAsyncWork();
@@ -7391,8 +7401,6 @@ describe('ChatInput', () => {
   });
 
   it('keeps the active file selection visible on a queued message', async () => {
-    setInputText('Test');
-    flushSolid();
     setIsLoading(true);
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
@@ -7409,6 +7417,8 @@ describe('ChatInput', () => {
         diagnostics: [],
       })
     );
+    flushSolid();
+    setInputText('Test');
     flushSolid();
     cleanup = render(() => ChatInput(), container!);
     flushSolid();
@@ -7457,8 +7467,7 @@ describe('ChatInput', () => {
   it('does not generate a queued file attachment when active-file auto-attachment is disabled', async () => {
     setState(storePath('autoAttachActiveFile', false));
     flushSolid();
-    setInputText('Review');
-    flushSolid();
+
     setIsLoading(true);
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
@@ -7471,6 +7480,8 @@ describe('ChatInput', () => {
         diagnostics: [],
       })
     );
+    flushSolid();
+    setInputText('Review');
     flushSolid();
     cleanup = render(() => ChatInput(), container!);
     flushSolid();
@@ -10133,6 +10144,59 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('edit this follow-up');
   });
 
+  it.each(['queued', 'inline'] as const)(
+    'cancels a %s edit on its origin before revealing the child draft',
+    (kind) => {
+      setState(
+        storePath('sessions', [session('root', 2000), session('child', 2000, { parentID: 'root' })])
+      );
+      const existing = assistantMessageEntry({ input: 1, output: 1 });
+      setState(
+        storePath(
+          'messages',
+          ['root', 'child'].map((id) => ({
+            info: { ...existing.info, id: `${id}-answer`, sessionID: id },
+            parts: [
+              {
+                type: 'text' as const,
+                id: `${id}-text`,
+                sessionID: id,
+                messageID: `${id}-answer`,
+                text: 'Existing answer',
+              },
+            ],
+          }))
+        )
+      );
+      setState(storePath('activeSessionId', 'child'));
+      setInputText('child unsent');
+      setState(storePath('activeSessionId', 'root'));
+      setInputText(kind === 'inline' ? 'root unsent' : '');
+      setIsLoading(true);
+      setState(
+        storePath('queuedMessages', [
+          { id: 'q', sessionId: 'root', text: 'queued edit', paused: true },
+        ])
+      );
+      flushSolid();
+      cleanup = render(() => ChatInput(), container!);
+      flushSolid();
+      if (kind === 'queued')
+        container!.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click();
+      else startEditingMessage('root-message', 'root', 'inline edit');
+      flushSolid();
+      expect(inputText()).toBe(`${kind} edit`);
+      setState(storePath('activeSessionId', 'child'));
+      expect(inputText()).toBe('child unsent');
+      flushSolid();
+      expect(container!.querySelector('.rich-composer')?.textContent).toBe('child unsent');
+      expect(state.queuedMessageEdit).toBeNull();
+      expect(state.queuedMessages[0]?.text).toBe('queued edit');
+      setState(storePath('activeSessionId', 'root'));
+      expect(inputText()).toBe(kind === 'inline' ? 'root unsent' : '');
+    }
+  );
+
   it('clears an edited draft when ownership transfer removes its queued row', async () => {
     const sendToExtension = vi.fn(defaultBridgeSend);
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
@@ -12311,8 +12375,7 @@ describe('ChatInput', () => {
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
       message
     ) => messages.push(message);
-    setInputText('Keep this workspace');
-    flushSolid();
+
     setState(
       storePath('editorContext', {
         workspacePath: '/repo-a',
@@ -12328,6 +12391,8 @@ describe('ChatInput', () => {
     );
     flushSolid();
 
+    setInputText('Keep this workspace');
+    flushSolid();
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
     await flushAsyncWork();
@@ -14706,7 +14771,7 @@ describe('ChatInput', () => {
     expect(state.attachedDiagnostics).toBeNull();
   });
 
-  it('requests workspace problems again when the picker scope changes mid-request', async () => {
+  it('requests workspace problems again for a new draft in the changed picker scope', async () => {
     vi.mocked(client.varro.workspaceProblems).mockImplementationOnce(
       () => new Promise(() => undefined)
     );
@@ -14714,7 +14779,7 @@ describe('ChatInput', () => {
     flushSolid();
     cleanup = render(() => ChatInput(), container!);
     flushSolid();
-    const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
     editor.focus();
     flushSolid();
     await flushAsyncWork();
@@ -14726,6 +14791,10 @@ describe('ChatInput', () => {
     expect(client.varro.workspaceProblems).toHaveBeenCalledOnce();
 
     setState(storePath('editorContext', 'workspacePath', '/other-repo'));
+    flushSolid();
+    expect(inputText()).toBe('');
+    enterComposerText(editor, '/problems');
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     flushSolid();
     await flushAsyncWork();
     flushSolid();
@@ -18593,8 +18662,6 @@ describe('ChatInput', () => {
       ],
     });
     try {
-      setInputText('Explain this');
-      flushSolid();
       setIsLoading(true);
       flushSolid();
       setState(storePath('activeSessionId', 'session-1'));
@@ -18616,6 +18683,8 @@ describe('ChatInput', () => {
           ],
         })
       );
+      flushSolid();
+      setInputText('Explain this');
       flushSolid();
       cleanup = render(() => ChatInput(), container!);
       flushSolid();
