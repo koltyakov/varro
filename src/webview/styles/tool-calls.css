@@ -3495,6 +3495,11 @@ kbd {
   justify-content: flex-end;
 }
 
+/* Keep available capacity independent of the rail's currently visible chips. */
+.user-message-card:has(> .rendered-markdown > .message-attachments-standalone) {
+  width: 100%;
+}
+
 .message-file-attachments .message-attachment-chip {
   flex: 0 0 auto;
 }

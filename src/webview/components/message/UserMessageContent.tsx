@@ -2639,8 +2639,11 @@ function MessageAttachmentRail(props: {
   let menu: HTMLDivElement | undefined;
 
   const remainingAttachments = createMemo(() => props.attachments.slice(visibleCount()));
+  // Leading rails can extend beyond the text bubble; standalone rails use the parent's capacity.
+  const capacityElement = () => (props.leading ? root : root?.parentElement);
   const updateVisibleCount = () => {
-    if (!root || !measurement || root.clientWidth <= 0) return;
+    const capacityWidth = capacityElement()?.clientWidth ?? 0;
+    if (!measurement || capacityWidth <= 0) return;
     const attachmentCount = untrack(() => props.attachments.length);
 
     const itemWidths = Array.from(
@@ -2655,14 +2658,14 @@ function MessageAttachmentRail(props: {
       (total, width, index) => total + width + (index > 0 ? gap : 0),
       0
     );
-    if (totalWidth <= root.clientWidth) {
+    if (totalWidth <= capacityWidth) {
       setVisibleCount(attachmentCount);
       return;
     }
 
     const overflowControlWidth = 26;
     const overflowGap = 8;
-    const availableWidth = Math.max(0, root.clientWidth - overflowControlWidth - overflowGap);
+    const availableWidth = Math.max(0, capacityWidth - overflowControlWidth - overflowGap);
     let usedWidth = 0;
     let count = 0;
     for (const width of itemWidths) {
@@ -2675,8 +2678,8 @@ function MessageAttachmentRail(props: {
   };
 
   createEffect(
-    () => props.attachments.length,
-    (count) => {
+    () => [props.attachments.length, props.leading] as const,
+    ([count]) => {
       const cleanups: Array<() => void> = [];
 
       if (count === 0)
@@ -2684,11 +2687,12 @@ function MessageAttachmentRail(props: {
           for (const cleanup of cleanups.toReversed()) cleanup();
         };
       updateVisibleCount();
-      if (!root)
+      const element = capacityElement();
+      if (!element)
         return () => {
           for (const cleanup of cleanups.toReversed()) cleanup();
         };
-      const stopObservingResize = observeSettledResize(root, updateVisibleCount);
+      const stopObservingResize = observeSettledResize(element, updateVisibleCount);
       cleanups.push(stopObservingResize);
 
       return () => {
