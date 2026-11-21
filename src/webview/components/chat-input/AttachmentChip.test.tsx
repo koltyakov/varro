@@ -1,7 +1,7 @@
 import { flush as flushSolid, createSignal } from 'solid-js';
 import { render } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getFileTypeIcon } from '../FileTypeIcon';
+import { createFileTypeIconElement, getFileTypeIcon } from '../FileTypeIcon';
 import { AttachmentChip } from './AttachmentChip';
 import { dismissComposerOverlays } from './composer-overlay-dismiss';
 import { messageTextIcon } from '../../lib/ui-icons';
@@ -25,6 +25,19 @@ afterEach(() => {
 });
 
 describe('AttachmentChip', () => {
+  it('shares normalized artwork metrics with imperative icons and updates them with the path', () => {
+    const [path, setPath] = createSignal('main.go');
+    cleanup = render(() => <AttachmentChip label={path()} path={path()} />, container);
+    const icon = container.querySelector<HTMLImageElement>('.file-type-icon');
+    for (const nextPath of ['main.go', 'app.ts', 'index.php']) {
+      setPath(nextPath);
+      flushSolid();
+      const expected = createFileTypeIconElement(nextPath);
+      expect(icon?.style.cssText).toBe(expected.style.cssText);
+      expect(icon?.getAttribute('src')).toBe(expected.getAttribute('src'));
+    }
+  });
+
   it('uses the message-text icon for an annotation instead of a file icon', () => {
     cleanup = render(
       () => <AttachmentChip label="Please clarify" icon="message-text" />,

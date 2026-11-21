@@ -19,6 +19,98 @@ test('renders read, edit, and bash tool cards', async ({ page }) => {
   await expect(page.locator('.terminal-command-card')).toContainText('3 passed');
 });
 
+test('keeps wide and tall file artwork compact in read and edit cards', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 458, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
+  await expect(page.locator('.file-change-card')).toHaveCount(4);
+  await page.evaluate(() => {
+    const harness = (
+      window as typeof window & {
+        __varroE2E: {
+          getSessionMessages(sessionId: string): MessageEntry[];
+          replayServerEvent(event: ServerEvent): void;
+        };
+      }
+    ).__varroE2E;
+    const message = harness
+      .getSessionMessages('session-tool-cards')
+      .find((entry) => entry.info.role === 'assistant');
+    if (!message) throw new Error('Missing tool icon fixture');
+    for (const part of message.parts) {
+      if (
+        part.type !== 'tool' ||
+        part.state.status !== 'completed' ||
+        (part.tool !== 'edit' && part.tool !== 'read')
+      )
+        continue;
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            ...part,
+            state: {
+              ...part.state,
+              input: { ...part.state.input, file_path: '/workspace/varro/src/main.go' },
+              metadata:
+                part.tool === 'edit'
+                  ? {
+                      files: ['main.go', 'index.php', 'notes.md', 'app.c'].map((file) => ({
+                        type: 'update',
+                        relativePath: `src/${file}`,
+                        additions: 1,
+                        deletions: 1,
+                      })),
+                    }
+                  : {},
+            },
+          },
+        },
+      });
+    }
+  });
+  await expect(page.locator('.file-edit-path-link')).toHaveText([
+    'src/main.go',
+    'src/index.php',
+    'src/notes.md',
+    'src/app.c',
+  ]);
+  const labelOffsets = await page.locator('.file-edit-path-link').evaluateAll((links) =>
+    links.map((link) => {
+      const label = link.querySelector('.file-edit-path-text');
+      const icon = link.querySelector('.file-edit-file-icon');
+      if (!label || !icon) throw new Error('Missing file label or icon');
+      if (Math.abs(icon.getBoundingClientRect().left - link.getBoundingClientRect().left) > 0.1)
+        throw new Error('File artwork must align with the start of its column');
+      return label.getBoundingClientRect().left - link.getBoundingClientRect().left;
+    })
+  );
+  const toolOffset = await page
+    .locator('.tool-invocation-header')
+    .first()
+    .evaluate((header) => {
+      const icon = header.querySelector('.tool-call-icon');
+      const title = header.querySelector('.tool-invocation-title');
+      if (!icon || !title) throw new Error('Missing reference tool icon or title');
+      return title.getBoundingClientRect().left - icon.getBoundingClientRect().left;
+    });
+  expect(new Set(labelOffsets)).toEqual(new Set([toolOffset]));
+  const icons = page.locator('.file-edit-file-icon, .file-read-file-icon');
+  await expect(icons).toHaveCount(5);
+  const sizes = await icons.evaluateAll((elements) =>
+    elements.map((icon) => {
+      const box = icon.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    })
+  );
+  for (const size of sizes) {
+    expect(size.width).toBeLessThanOrEqual(12 * 1.25);
+    expect(size.height).toBeLessThanOrEqual(12 * 0.875);
+  }
+  await page.screenshot({ path: testInfo.outputPath('balanced-file-artwork-in-tools.png') });
+});
+
 test('keeps compact tool card headers on the same geometry contract', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 

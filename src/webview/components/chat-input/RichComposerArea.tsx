@@ -2,7 +2,7 @@ import { createEffect, For, Show, createMemo, createSignal, onSettled, onCleanup
 import { Portal } from '@solidjs/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { emptyPageIcon, folderIcon, gymIcon, messageTextIcon } from '../../lib/ui-icons';
-import { getFileTypeIcon } from '../FileTypeIcon';
+import { createFileTypeIconElement } from '../FileTypeIcon';
 import {
   createMaterialChipIconElement,
   getMaterialChipIcon,
@@ -353,13 +353,9 @@ export function RichComposerArea(props: {
         iconWrapper.contentEditable = 'false';
       }
       if (hasFormatIcon) {
-        const image = document.createElement('img');
-        image.className = 'file-type-icon inline-chip-icon';
-        image.src = getFileTypeIcon(chip.path || chip.label);
-        image.alt = '';
-        image.setAttribute('aria-hidden', 'true');
-        image.draggable = false;
-        iconWrapper.appendChild(image);
+        iconWrapper.appendChild(
+          createFileTypeIconElement(chip.path || chip.label, 'inline-chip-icon')
+        );
       } else if (materialIconKind) {
         iconWrapper.appendChild(
           createMaterialChipIconElement(

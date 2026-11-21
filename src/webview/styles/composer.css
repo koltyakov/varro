@@ -497,10 +497,12 @@
 }
 
 .composer-completion-icon {
+  --file-icon-size: 14px;
+
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
+  width: 18px;
   height: 15px;
   flex-shrink: 0;
   color: var(--color-vscode-muted);
@@ -510,7 +512,7 @@
   display: block;
 }
 
-.composer-completion-icon img {
+.composer-completion-icon img:not(.file-type-icon) {
   display: block;
   width: 14px;
   height: 14px;
@@ -2237,8 +2239,8 @@
 }
 
 .changed-files-file-icon {
-  width: 16px;
-  height: 16px;
+  --file-icon-size: 16px;
+
   flex-shrink: 0;
 }
 
@@ -3100,7 +3102,7 @@
   border-radius: calc(var(--chat-radius-popover) - 4px);
 }
 
-.chat-attachment-chip .chip-icon {
+.chat-attachment-chip .chip-icon:not(.file-type-icon) {
   width: 12px;
   height: 12px;
   font-size: 12px;

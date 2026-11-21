@@ -636,7 +636,150 @@ test('aligns visible link icons in tables and prose', async ({ page }, testInfo)
   }
 });
 
-test('paints screenshot icons close to the digits and at a consistent height', async ({
+test('balances file artwork area with bounded dimensions and preserved proportions', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 458, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter&theme=dark');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  const files = [
+    'main.go',
+    'go.mod',
+    'README.md',
+    'notes.md',
+    'index.php',
+    'Dockerfile',
+    'app.ts',
+    'package.json',
+    'App.tsx',
+    'index.css',
+    'app.c',
+    'image.png',
+    'unknown.custom',
+  ];
+  await completeResponse(
+    page,
+    files.map((file) => `[${file}](./${file}) after the icon.`).join('\n\n')
+  );
+  const icons = markdown.locator('img.file-path-icon');
+  await expect(icons).toHaveCount(files.length);
+  for (const fontSize of [13.5, 18]) {
+    await markdown.evaluate((element, size) => {
+      if (element instanceof HTMLElement) element.style.fontSize = `${size}px`;
+    }, fontSize);
+    const measurements = await icons.evaluateAll(async (elements: HTMLImageElement[]) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1024;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Missing icon measurement context');
+      const result = [];
+      for (const icon of elements) {
+        await icon.decode();
+        context.clearRect(0, 0, 1024, 1024);
+        context.drawImage(icon, 0, 0, 1024, 1024);
+        const { data } = context.getImageData(0, 0, 1024, 1024);
+        let left = 1024;
+        let top = 1024;
+        let right = 0;
+        let bottom = 0;
+        for (let y = 0; y < 1024; y++) {
+          for (let x = 0; x < 1024; x++) {
+            if ((data[(y * 1024 + x) * 4 + 3] ?? 0) < 16) continue;
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x + 1);
+            bottom = Math.max(bottom, y + 1);
+          }
+        }
+        const box = icon.getBoundingClientRect();
+        const label = icon.parentElement?.querySelector('.link-leading-label');
+        if (!label) throw new Error('Missing icon label');
+        const svg = decodeURIComponent(icon.src.slice('data:image/svg+xml,'.length));
+        const viewBox = svg
+          .match(/\bviewBox="([^"]+)"/)?.[1]
+          ?.split(/\s+/)
+          .map(Number);
+        if (!viewBox) throw new Error('Missing normalized SVG viewBox');
+        result.push({
+          label: label.textContent,
+          width: box.width,
+          height: box.height,
+          artworkAspect: (viewBox[2] ?? 1) / (viewBox[3] ?? 1),
+          inkFill: { left, top, right, bottom },
+          gap: label.getBoundingClientRect().left - box.right,
+        });
+      }
+      return result;
+    });
+    for (const sample of measurements) {
+      const size = fontSize * 0.875;
+      expect(sample.height, sample.label ?? '').toBeLessThanOrEqual(size * 0.875 + 0.02);
+      expect(sample.width, sample.label ?? '').toBeLessThanOrEqual(size * 1.25 + 0.02);
+      const expectedArea = Math.min(
+        (size * 0.8) ** 2,
+        (size * 0.875) ** 2 * sample.artworkAspect,
+        (size * 1.25) ** 2 / sample.artworkAspect
+      );
+      expect(sample.height * sample.width, sample.label ?? '').toBeCloseTo(expectedArea, 0);
+      // Layout rounds lengths to 1/64px independently; check aspect error in CSS pixels.
+      expect(
+        Math.abs(sample.width - sample.height * sample.artworkAspect),
+        sample.label ?? ''
+      ).toBeLessThanOrEqual(0.06);
+      expect(sample.gap, sample.label ?? '').toBeCloseTo(fontSize * 0.25, 1);
+      expect(sample.inkFill.left, sample.label ?? '').toBeLessThanOrEqual(2);
+      expect(sample.inkFill.top, sample.label ?? '').toBeLessThanOrEqual(2);
+      expect(sample.inkFill.right, sample.label ?? '').toBeGreaterThanOrEqual(1022);
+      expect(sample.inkFill.bottom, sample.label ?? '').toBeGreaterThanOrEqual(1022);
+    }
+    const screenshot = await markdown.screenshot({
+      path: testInfo.outputPath(`normalized-file-icons-${fontSize}.png`),
+    });
+    const painted = await markdown.evaluate(async (element, png) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${png}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Missing painted icon canvas');
+      context.drawImage(image, 0, 0);
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const origin = element.getBoundingClientRect();
+      return [...element.querySelectorAll('img.file-path-icon')].map((icon) => {
+        const box = icon.getBoundingClientRect();
+        let left = Infinity;
+        let top = Infinity;
+        let right = -Infinity;
+        let bottom = -Infinity;
+        for (let y = Math.floor(box.top - origin.top); y < box.bottom - origin.top; y++) {
+          for (let x = Math.floor(box.left - origin.left); x < box.right - origin.left; x++) {
+            const offset = (y * canvas.width + x) * 4;
+            if (Math.max(data[offset] ?? 0, data[offset + 1] ?? 0, data[offset + 2] ?? 0) < 100)
+              continue;
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x + 1);
+            bottom = Math.max(bottom, y + 1);
+          }
+        }
+        return {
+          widthError: Math.abs(right - left - box.width),
+          heightError: Math.abs(bottom - top - box.height),
+        };
+      });
+    }, screenshot.toString('base64'));
+    for (const paint of painted) {
+      // Check actual pixels, not just the image box. CSS cropping left tiny artwork in a wide box.
+      expect(paint.widthError).toBeLessThanOrEqual(2);
+      expect(paint.heightError).toBeLessThanOrEqual(2);
+    }
+  }
+});
+
+test('paints screenshot icons with a clear gap before digits and at a consistent height', async ({
   browser,
   baseURL,
 }, testInfo) => {
@@ -724,8 +867,8 @@ test('paints screenshot icons close to the digits and at a consistent height', a
   // Ink below the digits reads as a sunken icon.
   expect(offsets[0], JSON.stringify(samples)).toBeLessThanOrEqual(0);
   const gaps = samples.flatMap((sample) => sample.offsets.map((entry) => entry.gap));
-  expect(Math.min(...gaps), JSON.stringify(samples)).toBeGreaterThan(0);
-  expect(Math.max(...gaps), JSON.stringify(samples)).toBeLessThanOrEqual(3);
+  expect(Math.min(...gaps), JSON.stringify(samples)).toBeGreaterThanOrEqual(3);
+  expect(Math.max(...gaps), JSON.stringify(samples)).toBeLessThanOrEqual(5);
 });
 
 test('keeps filename links inside narrow table cells throughout streaming and completion', async ({
