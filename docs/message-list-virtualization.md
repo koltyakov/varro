@@ -78,6 +78,13 @@ the shared invariants below remain true.
 - A distant history anchor may extend the mounted range beyond ordinary overscan. Only the viewport,
   forced rows, and pinned anchor require full content; the intervening gap may use prefix-sized inert
   placeholders.
+- A native held thumb also outranks pending history restoration. When a prepend changes the captured
+  prefix, invalidate its history owner before range selection so the list does not mount an obsolete
+  content destination and then return to the native numeric destination. Do not revive that owner on
+  release. A gesture released before delivery still uses normal history anchoring. Continue measuring
+  the actual numeric viewport; neither guessed prefix correction nor skipped visible rows is valid.
+  `scroll-cold-prepend.spec.ts` checks viewport reconstruction, competing history writes, continued
+  native movement, a hold beyond the input timeout, and release.
 - Activity map membership alone must not hydrate that gap. Only groups connected to the real
   viewport/overscan or pinned row require their cross-message content; unrelated completed groups stay
   inert. Otherwise a prepend can temporarily mount thousands of historical tools while still reporting

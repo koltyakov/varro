@@ -6,7 +6,7 @@ import {
   currentDraftKey,
   finishNewChatDraft,
   getPersistedSelectedAgent,
-  inputText,
+  readLatestDraftText,
   isSessionAwaitingInput,
   persistActiveSessionId,
   requestComposerFocus,
@@ -65,7 +65,7 @@ export function startNewChatDraft() {
   const draftGeneration = newChatDraftGeneration;
   const blankSessionId = getDiscardableActiveBlankSessionId();
   const deferTranscriptClear = !blankSessionId && state.messages.length > 0;
-  const craftedText = inputText();
+  const craftedText = readLatestDraftText();
   const sourceKey = currentDraftKey();
   (() => {
     setNewChatDraftKey(draftGeneration);

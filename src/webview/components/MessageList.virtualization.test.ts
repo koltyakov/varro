@@ -1826,6 +1826,89 @@ describe('MessageList history pagination', () => {
     flushSolid();
   });
 
+  it.each([false, true])(
+    'keeps a cold prepend out of the held thumb destination, including immediate release %s',
+    async (releaseAtPrepend) => {
+      const harness = await mountDeferredHistory();
+      flushSolid();
+      await harness.startLoad(20);
+      harness.list.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
+      );
+      harness.setScrollTop(140);
+      harness.list.dispatchEvent(new Event('scroll'));
+      flushSolid();
+      await vi.advanceTimersByTimeAsync(1_100);
+      flushSolid();
+      const writes: number[] = [];
+      Object.defineProperty(harness.list, 'scrollTop', {
+        configurable: true,
+        get: harness.getScrollTop,
+        set(value: number) {
+          writes.push(value);
+          harness.setScrollTop(value);
+        },
+      });
+      const release = () => document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+      const observer = new MutationObserver(() => {
+        if (!releaseAtPrepend || !harness.list.querySelector('[data-msg-id="older-user"]')) return;
+        observer.disconnect();
+        release();
+        flushSolid();
+      });
+      observer.observe(harness.list, { childList: true, subtree: true });
+      try {
+        await harness.resolveLoad();
+        flushSolid();
+        expect(harness.getScrollTop()).toBe(140);
+        expect(writes).toEqual([]);
+        release();
+        for (let frame = 0; frame < 6; frame += 1) {
+          await Promise.resolve();
+          harness.animationFrames.flush();
+          flushSolid();
+        }
+        flushSolid();
+        expect(harness.getScrollTop()).toBe(140);
+        expect(writes).toEqual([]);
+      } finally {
+        observer.disconnect();
+        release();
+        harness.animationFrames.restore();
+      }
+    }
+  );
+
+  it('keeps late-page anchoring after a streamed append while held and release before delivery', async () => {
+    const harness = await mountDeferredHistory();
+    flushSolid();
+    await harness.startLoad(20);
+    harness.list.dispatchEvent(
+      new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
+    );
+    harness.setScrollTop(140);
+    harness.list.dispatchEvent(new Event('scroll'));
+    flushSolid();
+    setMessagesIncremental([
+      ...state.messages,
+      {
+        info: assistantMessage('new-tail'),
+        parts: [textPart('new-tail-text', 'Streaming tail')],
+      },
+    ]);
+    flushSolid();
+    expect(harness.getScrollTop()).toBe(140);
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    flushSolid();
+    await harness.resolveLoad();
+    flushSolid();
+    // Appending does not change the captured prefix. Release before the actual page arrives
+    // must still retain ordinary history anchoring instead of retiring that owner early.
+    expect(harness.getScrollTop()).toBe(340);
+    harness.animationFrames.restore();
+    flushSolid();
+  });
+
   it('transfers pending history ownership after an expansion correction', async () => {
     const observers: Array<{
       callback: ResizeObserverCallback;

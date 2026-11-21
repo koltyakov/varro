@@ -266,6 +266,7 @@ export interface AppStateInstance {
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
   inputText: Accessor<string>;
+  readLatestDraftText: () => string;
   setInputText: (value: string | ((current: string) => string)) => string;
   inputTextMutationVersion: Accessor<number>;
   currentDraftKey: () => string;
@@ -628,11 +629,13 @@ export function createAppState(): AppStateInstance {
     writeInputDraft('', inputDraftKey(workspace, storedQueuedMessageEdit.sessionId));
   }
   let text = restoreDraftText(key, state);
-  const [readTextVersion, setTextVersion] = createSignal(0);
-  const inputText = () => {
-    readTextVersion();
-    return text;
-  };
+  const [publishedText, setPublishedText] = createSignal(text);
+  let selection = 0;
+  let restoredText = text;
+  const [publishedSelection, setPublishedSelection] = createSignal(selection);
+  // Never show the previous owner's signal while a route change awaits flush.
+  // Within one selection, edits use Solid's normal publication boundary.
+  const inputText = () => (publishedSelection() === selection ? publishedText() : restoredText);
   const draftSessionId = () => {
     readDraftSession();
     return sessionId;
@@ -649,7 +652,7 @@ export function createAppState(): AppStateInstance {
     setInputTextMutationVersion(++currentInputTextMutationVersion);
     if (text !== next) {
       text = next;
-      setTextVersion((version) => version + 1);
+      setPublishedText(next);
     }
     return next;
   }
@@ -676,8 +679,9 @@ export function createAppState(): AppStateInstance {
     key = nextKey;
     sessionId = nextSession;
     publishDraftSession(nextSession);
-    const restored = restoreDraftText(key, tray);
-    if (text !== restored) publishText(restored);
+    restoredText = restoreDraftText(key, tray);
+    setPublishedSelection(++selection);
+    if (text !== restoredText) publishText(restoredText);
   }
   // Solid publishes store reads on flush. Switch the draft in the route-writing
   // transaction so input or Enter in this tick sees the destination composer.
@@ -807,6 +811,7 @@ export function createAppState(): AppStateInstance {
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
     inputText,
+    readLatestDraftText: () => text,
     setInputText,
     inputTextMutationVersion,
     currentDraftKey: () => key,
@@ -947,6 +952,7 @@ export const setShowEmptyStateHistogram = defaultAppState.setShowEmptyStateHisto
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
 export const inputText = defaultAppState.inputText;
+export const readLatestDraftText = defaultAppState.readLatestDraftText;
 export const setInputText = defaultAppState.setInputText;
 export const inputTextMutationVersion = defaultAppState.inputTextMutationVersion;
 export const currentDraftKey = defaultAppState.currentDraftKey;

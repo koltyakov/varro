@@ -66,6 +66,7 @@ describe('composer mutation ownership', () => {
     app.setInputText('');
     const cleared = app.inputTextMutationVersion();
     expect(cleared).toBe(before + 1);
+    expect(app.readLatestDraftText()).toBe('');
     expect(app.inputText()).toBe('draft');
     flush();
     expect(app.inputText()).toBe('');

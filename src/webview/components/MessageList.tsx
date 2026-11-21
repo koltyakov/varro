@@ -444,6 +444,8 @@ export function MessageList() {
   type HistoryLoadingOwner = { windowVersion: number };
   type PendingOlderHistoryAnchor = {
     anchor: VisibleScrollAnchor | null;
+    firstMessageId: string | undefined;
+    anchorIndex: number | undefined;
     generation: number;
     invalidated: boolean;
     owner: 'history' | 'edit';
@@ -3140,6 +3142,22 @@ export function MessageList() {
     () => {
       const msgs = messages();
       loadingOlderHistoryOwners();
+      const sessionId = state.activeSessionId;
+      const pendingAnchor = sessionId ? getCurrentPendingHistoryAnchor(sessionId) : undefined;
+      if (
+        nativeScrollbarActive &&
+        pendingAnchor?.owner === 'history' &&
+        !pendingAnchor.invalidated &&
+        (pendingAnchor.firstMessageId !== msgs[0]?.info.id ||
+          (pendingAnchor.anchor &&
+            pendingAnchor.anchorIndex !== messageIndexById().get(pendingAnchor.anchor.messageId)))
+      ) {
+        // A prepend must not restore an old content coordinate against Chromium's held thumb.
+        // Yield before pinning/mounting that obsolete viewport, and permanently invalidate this
+        // owner so a release in the same update cannot replay its correction afterward.
+        pendingAnchor.invalidated = true;
+        pendingAnchor.releaseAlignment?.();
+      }
       if (!shouldVirtualize() || msgs.length === 0) {
         return {
           start: 0,
@@ -3151,7 +3169,6 @@ export function MessageList() {
         };
       }
       const metrics = virtualMetrics();
-      const sessionId = state.activeSessionId;
       // Initial follow opens at the tail. Keep its range there as provisional heights become
       // exact; selecting against scrollTop=0 would mount the head before immediately discarding it.
       const positioningAtBottom =
@@ -3163,7 +3180,6 @@ export function MessageList() {
           : getVirtualScrollTop(scrollTop()),
         viewportHeight: viewportHeight(),
       });
-      const pendingAnchor = sessionId ? getCurrentPendingHistoryAnchor(sessionId) : undefined;
       const structuralAnchor =
         pendingStructuralScrollAnchor?.sessionId === sessionId &&
         pendingStructuralScrollAnchor.ownershipEpoch === userScrollOwnershipEpoch
@@ -4481,6 +4497,8 @@ export function MessageList() {
       : captureVisibleScrollAnchor();
     if (!anchor && preferredMessageId) return false;
     pendingAnchor.anchor = anchor;
+    pendingAnchor.firstMessageId = messageIds()[0];
+    pendingAnchor.anchorIndex = anchor ? messageIndexById().get(anchor.messageId) : undefined;
     pendingAnchor.previousScrollHeight = containerRef.scrollHeight;
     pendingAnchor.previousScrollTop = containerRef.scrollTop;
     pendingAnchor.ownershipEpoch = userScrollOwnershipEpoch;
@@ -4516,7 +4534,7 @@ export function MessageList() {
   }
 
   function restorePendingHistoryAnchorIfMounted() {
-    if (restoringPendingHistoryAnchor) return false;
+    if (restoringPendingHistoryAnchor || nativeScrollbarActive) return false;
     const sessionId = state.activeSessionId;
     if (!sessionId) return false;
     const pendingAnchor = getCurrentPendingHistoryAnchor(sessionId);
@@ -11074,6 +11092,8 @@ export function MessageList() {
     const anchor = captureVisibleScrollAnchor({ preferStableRenderItem: true });
     const pendingAnchor: PendingOlderHistoryAnchor = {
       anchor,
+      firstMessageId: messageIds()[0],
+      anchorIndex: anchor ? messageIndexById().get(anchor.messageId) : undefined,
       generation,
       invalidated: false,
       owner: 'history' as const,
@@ -11222,6 +11242,7 @@ export function MessageList() {
         isCurrentWindow() &&
         historyAnchorSettleOwner === settleOwner &&
         !!containerRef &&
+        !nativeScrollbarActive &&
         !stickyNavigationOwnsScroll() &&
         pendingOlderHistoryAnchors.get(sessionId) === pendingAnchor &&
         !pendingAnchor.invalidated &&

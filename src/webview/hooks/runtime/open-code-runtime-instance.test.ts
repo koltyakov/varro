@@ -250,6 +250,8 @@ describe('open code runtime synchronization', () => {
     flushSolid();
     setSelectedModel(globalModel);
     flushSolid();
+    setState(storePath('editorContext', 'workspacePath', oldSession.directory));
+    flushSolid();
     setSelectedAgent('session-agent', { sessionId: oldSession.id, persistGlobal: false });
     flushSolid();
     setSelectedModel(sessionModel, { sessionId: oldSession.id, persistGlobal: false });
@@ -347,6 +349,9 @@ describe('open code runtime synchronization', () => {
     setShowSessionPicker(true);
     flushSolid();
 
+    // The host publishes the new workspace context before resetting its catalogs.
+    setState(storePath('editorContext', 'workspacePath', '/repo-next'));
+    flushSolid();
     resetWorkspaceDerivedState();
     flushSolid();
 
@@ -389,7 +394,7 @@ describe('open code runtime synchronization', () => {
     expect(state.providerLimits).toEqual({ 'openai:session': null });
     expect(state.mcpStatus).toEqual({ docs: { status: 'connected' } });
     expect(showSessionPicker()).toBe(true);
-    expect(inputText()).toBe('old draft');
+    expect(inputText()).toBe('');
     expect(editingMessage()).toBeNull();
     expect(getSessionHistoryCursor(oldSession.id)).toBeUndefined();
     expect(isSessionHistoryTruncated(oldSession.id)).toBe(false);
@@ -411,5 +416,12 @@ describe('open code runtime synchronization', () => {
     expect(state.queuedMessageEdit).toBeNull();
     expect(state.lastSeenSessions[oldSession.id]).toBe(10);
     expect(state.hiddenProviders).toEqual(['hidden-provider']);
+    setShowSessionPicker(false);
+    setState(storePath('activeSessionId', oldSession.id));
+    flushSolid();
+    expect(inputText()).toBe('');
+    setState(storePath('editorContext', 'workspacePath', oldSession.directory));
+    flushSolid();
+    expect(inputText()).toBe('old draft');
   });
 });

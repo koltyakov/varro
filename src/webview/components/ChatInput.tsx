@@ -62,6 +62,7 @@ import {
 import {
   state,
   inputText,
+  readLatestDraftText,
   currentDraftKey,
   draftSessionId,
   onBeforeDraftSwitch,
@@ -3082,7 +3083,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      if (!canSend()) {
+      if (!canSend(readLatestDraftText())) {
         reportBlockedSend();
         return;
       }
@@ -3538,7 +3539,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         return;
       }
     }
-    const text = inputText();
+    const text = readLatestDraftText();
     const command = getLeadingSlashCommand(text);
     if (
       !savePaused &&
@@ -4477,8 +4478,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setComposerValue(stripClipboardImagePlaceholders(text, droppedImages));
   }
 
-  let queuedEditDraftKey: string | null =
-    state.queuedMessageEdit?.sessionId === composerSessionId() ? currentDraftKey() : null;
+  // Remount restores the owner once; editQueuedMessage records subsequent edits.
+  let queuedEditDraftKey: string | null = untrack(() =>
+    state.queuedMessageEdit?.sessionId === composerSessionId() ? currentDraftKey() : null
+  );
   function cancelQueuedMessageEdit() {
     const edit = queuedMessageEdit();
     if (!edit) return;
@@ -5967,13 +5970,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   createEffect(isSideQuestionDraft, (sideQuestion) => {
     if (sideQuestion) setShowBusyMenu(false);
   });
-  const canSend = () =>
+  const canSend = (draft = inputText()) =>
     connectionInitialized() &&
     !state.messagesLoading &&
-    (isSideQuestionDraft()
-      ? !sideQuestionSendUnavailableReason()
-      : isAbortSlashCommand(inputText()) ||
-        isPauseSlashCommand(inputText()) ||
+    (getSideQuestionText(draft) !== null
+      ? !sideQuestionSendUnavailableReason(draft)
+      : isAbortSlashCommand(draft) ||
+        isPauseSlashCommand(draft) ||
         (!state.workspaceCatalogReloadPending &&
           !pendingWorkspacePath() &&
           !pdfSendError() &&
@@ -5981,7 +5984,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           !pendingProblems() &&
           !hasPendingDelegatedImages() &&
           (!hasPendingApproval() || !composerEditingMessage()) &&
-          (getSendableInputText().trim().length > 0 ||
+          (getSendableInputText(draft).trim().length > 0 ||
             state.droppedFiles.length > 0 ||
             hasSendableClipboardImages() ||
             state.nativePdfs.length > 0 ||
