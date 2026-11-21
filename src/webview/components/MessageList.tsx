@@ -5892,6 +5892,7 @@ export function MessageList() {
     immediate?: boolean;
     elapsedMs?: number;
     visibilityRestore?: boolean;
+    reconcileReserve?: boolean;
   }) {
     const releasedOnReveal = releaseSuspendedBottomReserve() && options?.visibilityRestore;
     if (releasedOnReveal && trackRef) {
@@ -5963,7 +5964,7 @@ export function MessageList() {
       return;
     }
 
-    if (!releasedOnReveal) reconcileAppendBottomReserve();
+    if (!releasedOnReveal && options?.reconcileReserve !== false) reconcileAppendBottomReserve();
     const now = performance.now();
     const previousScrollTop = containerRef?.scrollTop ?? 0;
     suppressSyncScrollTop = true;
@@ -8449,10 +8450,16 @@ export function MessageList() {
         if ((trackChanged || localViewportShrinking) && shouldCorrectBottomAfterResize()) {
           // Composer growth removes viewport space, so keep the bottom aligned before paint.
           // Width reflow also bypasses easing in performScroll while measurements settle.
-          performScroll({
-            force: true,
-            immediate: localViewportShrinking,
-          });
+          // Follow after the queued reserve consumption, not to a temporary reserved bottom.
+          if (!trackChanged || untrack(appendBottomReserve) <= 0) {
+            performScroll({
+              force: true,
+              immediate: localViewportShrinking,
+              // The track observer already queued this layout mutation for the next frame.
+              // Consuming reserve here would resize the same track during observer delivery.
+              reconcileReserve: false,
+            });
+          }
           if (widthChanged && widthResizeActive) {
             pendingWidthFollowCorrection = true;
           } else {

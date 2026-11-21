@@ -56,8 +56,9 @@ the shared invariants below remain true.
   its painted destination. Reduced-motion following must not oscillate
   between virtual ranges while those writes settle. Cancel pending correction writes on disposal.
   Streamed entrance height updates also defer observer-triggered writes.
-  Consuming a trailing reserve also resizes the observed track, so observer-triggered reserve
-  reconciliation runs in the next animation frame. The latest painted follow destination is a
+   Consuming a trailing reserve also resizes the observed track, so observer-triggered reserve
+  reconciliation runs in the next animation frame. Immediate bottom-follow from that observer must
+  skip its usual synchronous reserve reconciliation too. The latest painted follow destination is a
   lower bound while the reserve is consumed. Measured entrances retain a fractional natural height
   rather than rounding it up, so animation cleanup does not shrink the range by a painted pixel.
   `scroll-resize-observer.spec.ts` and `scroll-streaming.spec.ts` check

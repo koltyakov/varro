@@ -1,6 +1,6 @@
 import { flush as flushSolid, reconcile, untrack } from 'solid-js';
 import { storePath } from '@solidjs/signals';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { render } from '@solidjs/web';
 
 import {
@@ -54,13 +54,27 @@ installMessageListTestEnvironment({
 
 describe('MessageList auto-scroll', () => {
   it.each([
-    { collapse: 0.125, reserve: 0 },
-    { collapse: 0.875, reserve: 1 },
-    { collapse: 2.25, reserve: 2 },
+    { collapse: 0.125, reserve: 0, reducedMotion: false },
+    { collapse: 0.875, reserve: 1, reducedMotion: false },
+    { collapse: 2.25, reserve: 2, reducedMotion: false },
+    { collapse: 2.25, reserve: 2, reducedMotion: true },
   ])(
-    'reserves only the rounded scrollport loss for a $collapse px composer collapse',
-    async ({ collapse, reserve }) => {
+    'reserves only the rounded scrollport loss for a $collapse px composer collapse, reduced motion: $reducedMotion',
+    async ({ collapse, reserve, reducedMotion }) => {
       const animationFrames = installQueuedAnimationFrameMocks();
+      if (reducedMotion) {
+        const originalMatchMedia = globalThis.matchMedia;
+        globalThis.matchMedia = () =>
+          fixture<MediaQueryList>({
+            matches: true,
+            addEventListener() {},
+            removeEventListener() {},
+          });
+        onTestFinished(() => {
+          if (originalMatchMedia) globalThis.matchMedia = originalMatchMedia;
+          else Reflect.deleteProperty(globalThis, 'matchMedia');
+        });
+      }
       let viewportHeight = 400.75;
       let contentHeight = 1200;
       const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = [];
@@ -112,6 +126,14 @@ describe('MessageList auto-scroll', () => {
         configurable: true,
         get: () => contentHeight + reserveHeight(),
       });
+      let scrollTop = 0;
+      Object.defineProperty(list, 'scrollTop', {
+        configurable: true,
+        get: () => Math.min(scrollTop, Math.max(0, list.scrollHeight - list.clientHeight)),
+        set: (next: number) => {
+          scrollTop = Math.max(0, next);
+        },
+      });
       const observer = observers.find((candidate) => candidate.targets.includes(list))!;
       const notifyResize = (targets: Element[]) =>
         observer.callback(
@@ -147,6 +169,12 @@ describe('MessageList auto-scroll', () => {
       // rounded extra pixel from the composer's last fractional slice.
       contentHeight += 100;
       notifyResize([track]);
+      flushSolid();
+      await Promise.resolve();
+      flushSolid();
+      // Even immediate reduced-motion following must leave the observed track's reserve
+      // unchanged during resize delivery and its microtasks, until the queued frame runs.
+      expect(reserveHeight()).toBe(reserve);
       const startedAt = performance.now();
       for (let frame = 1; frame <= 120; frame++) {
         animationFrames.flush(startedAt + frame * 16);

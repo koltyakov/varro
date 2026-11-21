@@ -17,11 +17,14 @@ for (const width of [360, 1100]) {
         version: '2',
         time: { created: 1, updated: 1 },
       };
-      const cases = [
+      const cases: Array<{ id: string; text: string; filePath?: string }> = [
         { id: 'goal', text: '/goal text message' },
         { id: 'skill', text: 'Use $[review] text message' },
         { id: 'image', text: 'See [Image 1] text message' },
-        { id: 'file', text: 'Read @README.md text message' },
+        { id: 'file', text: 'Read @README.md text message', filePath: 'README.md' },
+        { id: 'file-ts', text: 'Read @main.ts text message', filePath: 'main.ts' },
+        { id: 'file-wide', text: 'Read @main.go text message', filePath: 'main.go' },
+        { id: 'file-tall', text: 'Read @app.java text message', filePath: 'app.java' },
         { id: 'agent', text: 'Ask @build text message' },
       ];
       const initialMessages: MessageEntry[] = cases.map((item, index) => {
@@ -35,13 +38,15 @@ for (const width of [360, 1100]) {
             text: markdown ? item.text.replace('text message', 'text message **bold**') : item.text,
           },
         ];
-        if (item.id === 'skill' || item.id === 'file') {
+        if (item.id === 'skill' || item.filePath) {
           parts.push({
             ...base,
             id: `${messageID}_attachment`,
             type: 'text',
             text:
-              item.id === 'skill' ? formatSkillAttachment('review') : '[Attached file: README.md]',
+              item.id === 'skill'
+                ? formatSkillAttachment('review')
+                : `[Attached file: ${item.filePath}]`,
           });
         }
         if (item.id === 'image') {

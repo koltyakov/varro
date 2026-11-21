@@ -70,7 +70,8 @@ for (const width of [360, 1042]) {
       const chips = card.locator(
         '.inline-chip, .message-attachment-visible .message-attachment-chip'
       );
-      await expect(chips).toHaveCount(variant === 'standalone' ? 1 : 2);
+      const overflows = variant === 'standalone' && width === 360;
+      await expect(chips).toHaveCount(overflows ? 1 : 2);
       const label = chips.first().locator('.chip-label');
       await expect(label).toHaveCSS('text-overflow', 'ellipsis');
       expect(await label.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
@@ -101,12 +102,11 @@ for (const width of [360, 1042]) {
       }
       if (variant !== 'with-text') {
         const cardBox = await card.boundingBox();
-        const right =
-          variant === 'standalone'
-            ? await card
-                .locator('.message-attachment-overflow-trigger')
-                .evaluate((element) => element.getBoundingClientRect().right)
-            : last.right;
+        const right = overflows
+          ? await card
+              .locator('.message-attachment-overflow-trigger')
+              .evaluate((element) => element.getBoundingClientRect().right)
+          : last.right;
         expect(Math.abs(right - (cardBox!.x + cardBox!.width))).toBeLessThanOrEqual(2);
       } else {
         await expect(card.locator('.user-message-text')).toHaveCSS('text-align', 'start');

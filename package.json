@@ -120,7 +120,7 @@
     "oxfmt": "0.79.0",
     "oxlint": "1.94.0",
     "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#63dbb09",
-    "oxlint-tsgolint": "7.0.2007",
+    "oxlint-tsgolint": "7.0.2008",
     "tailwindcss": "4.3.5",
     "typescript": "7.0.2",
     "vite": "8.3.8",

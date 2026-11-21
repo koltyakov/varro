@@ -3121,6 +3121,7 @@
 
 .problems-icon,
 .chat-attachment-chip .problems-icon,
+.chat-attachment-chip .problems-icon[data-severity='warning'],
 .inline-chip .problems-icon[data-severity='warning'] {
   color: var(
     --vscode-problemsWarningIcon-foreground,
@@ -3129,11 +3130,13 @@
 }
 
 .problems-icon[data-severity='error'],
+.chat-attachment-chip .problems-icon[data-severity='error'],
 .inline-chip .problems-icon[data-severity='error'] {
   color: var(--vscode-problemsErrorIcon-foreground, var(--vscode-editorError-foreground, #f14c4c));
 }
 
 .problems-icon[data-severity='info'],
+.chat-attachment-chip .problems-icon[data-severity='info'],
 .inline-chip .problems-icon[data-severity='info'] {
   color: var(--vscode-problemsInfoIcon-foreground, var(--vscode-editorInfo-foreground, #3794ff));
 }

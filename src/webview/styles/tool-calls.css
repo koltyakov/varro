@@ -3156,6 +3156,9 @@ kbd {
 .user-message-text > .inline-chip .file-type-icon,
 .user-message-markdown .inline-chip .file-type-icon {
   --file-icon-size: 12px;
+
+  /* Keep the flex baseline fixed while object-fit preserves the normalized artwork size. */
+  height: 12px;
 }
 
 .user-message-text > .user-message-format-chip {
