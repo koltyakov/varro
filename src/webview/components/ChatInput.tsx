@@ -3006,18 +3006,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         );
         return;
       }
+    }
 
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setCompletionIndex(0);
-        if (activeCompletion()?.type === 'slash') {
-          if (activeCompletion()?.start === 0) setInputText('');
-          else setSuppressCompletion(true);
-        } else {
-          setSuppressCompletion(true);
-        }
-        return;
-      }
+    // Even an empty or loading completion menu owns Escape before session navigation.
+    if (
+      e.key === 'Escape' &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.isComposing &&
+      isFocused() &&
+      showCompletionMenu()
+    ) {
+      e.preventDefault();
+      setCompletionIndex(0);
+      const completion = activeCompletion();
+      if (completion?.type === 'slash' && completion.start === 0) setInputText('');
+      else setSuppressCompletion(true);
+      return;
     }
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {

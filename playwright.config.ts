@@ -44,7 +44,11 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Font metrics are native: do not enable Segoe offsets on macOS/Linux via a Windows UA.
+        userAgent: undefined,
+      },
     },
   ],
   webServer: {

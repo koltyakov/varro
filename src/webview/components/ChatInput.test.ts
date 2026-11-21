@@ -14741,6 +14741,51 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
+  it.each(['empty', 'loading'] as const)(
+    'dismisses an %s Problems menu on Escape without leaving the composer',
+    async (status) => {
+      if (status === 'empty') {
+        vi.mocked(client.varro.workspaceProblems).mockResolvedValue({ total: 0, diagnostics: [] });
+      } else {
+        vi.mocked(client.varro.workspaceProblems).mockImplementationOnce(
+          () => new Promise(() => undefined)
+        );
+      }
+      setInputText('Review /problems');
+      flushSolid();
+      cleanup = render(() => ChatInput(), container!);
+      flushSolid();
+      const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+      editor.focus();
+      flushSolid();
+      setCollapsedSelection(editor.firstChild!, 'Review /problems'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
+      flushSolid();
+      await flushAsyncWork();
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      flushSolid();
+      await flushAsyncWork();
+      flushSolid();
+      expect(inputText()).toBe('Review /problems ');
+      expect(container!.querySelector('.composer-completion-menu')).not.toBeNull();
+      expect(container!.querySelectorAll('.completion-problems')).toHaveLength(0);
+      const escape = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(escape);
+      flushSolid();
+      expect(escape.defaultPrevented).toBe(true);
+      expect(container!.querySelector('.composer-completion-menu')).toBeNull();
+      expect(document.activeElement).toBe(editor);
+      expect(inputText()).toBe('Review /problems ');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    }
+  );
+
   it('ignores a workspace problem response after switching sessions', async () => {
     let resolve!: (value: Awaited<ReturnType<typeof client.varro.workspaceProblems>>) => void;
     vi.mocked(client.varro.workspaceProblems).mockImplementationOnce(

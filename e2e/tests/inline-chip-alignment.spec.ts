@@ -85,12 +85,15 @@ for (const width of [360, 1100]) {
       );
       await page.goto('/e2e/harness/index.html?scenario=session-playback');
       await waitForHarnessStartup(page);
+      const expectedChipAlignment = await page.evaluate(() =>
+        /Windows/.test(navigator.userAgent) ? '0px' : '-1px'
+      );
       for (const item of cases) {
         const card = page.locator(`[data-msg-id="msg_${item.id}"] .user-message-card`);
         await card.scrollIntoViewIfNeeded();
         const chip = card.locator('.user-message-text .inline-chip');
         await expect(chip).toHaveCount(1);
-        await expect(chip).toHaveCSS('vertical-align', '-1px');
+        await expect(chip).toHaveCSS('vertical-align', expectedChipAlignment);
         const offset = await chip.evaluate((element) => {
           const paragraph = element.closest('p')!;
           const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);

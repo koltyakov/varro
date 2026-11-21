@@ -62,6 +62,9 @@ test('Problems picker hides added entries and restores them when their attachmen
   );
   await expect(attached.locator('.chip-detail')).toHaveText('1');
   await composer.press('Escape');
+  await expect(page.locator('.composer-completion-menu')).toHaveCount(0);
+  await expect(composer).toBeFocused();
+  await expect(composer).toContainText('/problems');
   await attached.locator('.chip-remove').click();
   await composer.press('End');
   await composer.pressSequentially(' ');
