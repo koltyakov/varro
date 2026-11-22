@@ -61,6 +61,31 @@ export function restoreDraftText(key: string, tray: DraftTray) {
   return text;
 }
 
+// Recover drafts saved by the session-scoped implementation without replacing
+// the current shared input. Conflicting drafts stay stored until it is empty.
+export function adoptSessionInputDraft(
+  workspace: string | null | undefined,
+  sessionId: string | null,
+  sharedKey: string,
+  text: string,
+  tray: DraftTray
+) {
+  const sessionKey = sessionId ? inputDraftKey(workspace, sessionId) : null;
+  const legacyKeys = sessionKey ? [sessionKey, `${sessionKey}:legacy`] : [];
+  legacyKeys.push(`${sharedKey}:legacy`);
+  for (const legacyKey of legacyKeys) {
+    const legacy = readInputDraft(legacyKey);
+    if (!legacy || (text && text !== legacy)) continue;
+    if (!text) {
+      text = restoreDraftText(legacyKey, tray);
+      writeInputDraft(text, sharedKey);
+    }
+    writeInputDraft('', legacyKey);
+    writeStored(`${legacyKey}:markers`, null);
+  }
+  return text;
+}
+
 export function readInputDraft(key: string = STORAGE_KEYS.inputDraft): string | null {
   installLifecycleListeners();
   if (pendingDraft !== NO_PENDING_DRAFT && pendingKey === key) return pendingDraft;

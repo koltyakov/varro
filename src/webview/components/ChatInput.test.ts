@@ -48,6 +48,7 @@ import {
   manualWorkspaceSelection,
   setManualWorkspaceSelection,
   setError,
+  errorRetry,
   error as sendError,
   setSessionUsageLimit,
 } from '../lib/state';
@@ -2456,8 +2457,6 @@ describe('ChatInput', () => {
   });
 
   it('sends to the composer session when navigation races slash-command detection', async () => {
-    setState(storePath('activeSessionId', 'session-2'));
-    setInputText('Keep the other draft');
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
     setInputText('Send to the original chat');
@@ -2478,7 +2477,7 @@ describe('ChatInput', () => {
       'Send to the original chat',
       expect.objectContaining({ targetSessionId: 'session-1' })
     );
-    expect(inputText()).toBe('Keep the other draft');
+    expect(inputText()).toBe('');
     setState(storePath('activeSessionId', 'session-1'));
     expect(inputText()).toBe('');
   });
@@ -4970,6 +4969,70 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('new draft while sending');
   });
 
+  it.each([false, true])(
+    'preserves shared input after navigating during a failed send, newer input: %s',
+    async (newerInput) => {
+      setState(storePath('activeSessionId', 'session-1'));
+      setInputText('original prompt');
+      flushSolid();
+      let resolveSend: ((sent: boolean) => void) | undefined;
+      sendMessageMock.mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveSend = resolve;
+          })
+      );
+      cleanup = render(() => ChatInput(), container!);
+      flushSolid();
+      container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
+      flushSolid();
+      await flushAsyncWork();
+      flushSolid();
+      expect(inputText()).toBe('');
+      setState(storePath('activeSessionId', 'session-2'));
+      if (newerInput) setInputText('next prompt');
+      flushSolid();
+      resolveSend?.(false);
+      await flushAsyncWork();
+      flushSolid();
+
+      expect(inputText()).toBe(newerInput ? 'next prompt' : 'original prompt');
+      expect(errorRetry()).toBeNull();
+      setState(storePath('activeSessionId', 'session-1'));
+      expect(inputText()).toBe(newerInput ? 'next prompt' : 'original prompt');
+    }
+  );
+
+  it('does not restore a failed new-chat send into another workspace', async () => {
+    setState(storePath('editorContext', 'workspacePath', '/repo-a'));
+    setInputText('Only for workspace A');
+    flushSolid();
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    cleanup = render(() => ChatInput(), container!);
+    flushSolid();
+    container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
+    await flushAsyncWork();
+    flushSolid();
+    expect(sendMessageMock).toHaveBeenCalledOnce();
+    expect(inputText()).toBe('');
+    setState((draft) => {
+      draft.editorContext.workspacePath = '/repo-b';
+      draft.activeSessionId = 'session-b';
+    });
+    flushSolid();
+    resolveSend?.(false);
+    await flushAsyncWork();
+    flushSolid();
+    expect(inputText()).toBe('');
+    expect(errorRetry()).toBeNull();
+  });
+
   it('does not restore a failed snapshot after the user edits the pending draft back to empty', async () => {
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
@@ -6237,6 +6300,43 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('New draft');
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
+
+  it.each(['session', 'workspace'] as const)(
+    'restores a failed slash command only in its shared draft after %s navigation',
+    async (navigation) => {
+      setState((draft) => {
+        draft.activeSessionId = 'session-1';
+        draft.editorContext.workspacePath = '/repo-a';
+        draft.commands = [{ name: 'goal', template: '', source: 'command' }];
+      });
+      setInputText('/goal check machines');
+      flushSolid();
+      let resolveCommand: ((sent: boolean) => void) | undefined;
+      runSlashCommandByNameMock.mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveCommand = resolve;
+          })
+      );
+      cleanup = render(() => ChatInput(), container!);
+      flushSolid();
+      container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
+      await flushAsyncWork();
+      flushSolid();
+      expect(runSlashCommandByNameMock).toHaveBeenCalledOnce();
+      expect(inputText()).toBe('');
+      setState((draft) => {
+        draft.activeSessionId = 'session-2';
+        if (navigation === 'workspace') draft.editorContext.workspacePath = '/repo-b';
+      });
+      flushSolid();
+      resolveCommand?.(false);
+      await flushAsyncWork();
+      flushSolid();
+      expect(inputText()).toBe(navigation === 'session' ? '/goal check machines' : '');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([
     ['Please use /docs test', 'skill'],
@@ -10145,7 +10245,7 @@ describe('ChatInput', () => {
   });
 
   it.each(['queued', 'inline'] as const)(
-    'cancels a %s edit on its origin before revealing the child draft',
+    'cancels a %s edit on its origin before carrying the shared draft to the child',
     (kind) => {
       setState(
         storePath('sessions', [session('root', 2000), session('child', 2000, { parentID: 'root' })])
@@ -10168,8 +10268,6 @@ describe('ChatInput', () => {
           }))
         )
       );
-      setState(storePath('activeSessionId', 'child'));
-      setInputText('child unsent');
       setState(storePath('activeSessionId', 'root'));
       setInputText(kind === 'inline' ? 'root unsent' : '');
       setIsLoading(true);
@@ -10187,9 +10285,10 @@ describe('ChatInput', () => {
       flushSolid();
       expect(inputText()).toBe(`${kind} edit`);
       setState(storePath('activeSessionId', 'child'));
-      expect(inputText()).toBe('child unsent');
+      const restoredDraft = kind === 'inline' ? 'root unsent' : '';
+      expect(inputText()).toBe(restoredDraft);
       flushSolid();
-      expect(container!.querySelector('.rich-composer')?.textContent).toBe('child unsent');
+      expect(container!.querySelector('.rich-composer')?.textContent).toBe(restoredDraft);
       expect(state.queuedMessageEdit).toBeNull();
       expect(state.queuedMessages[0]?.text).toBe('queued edit');
       setState(storePath('activeSessionId', 'root'));

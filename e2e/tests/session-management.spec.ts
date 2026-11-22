@@ -2,6 +2,42 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+for (const width of [800, 280]) {
+  test(`unsent input follows session navigation and clears after sending at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=session-search');
+    await page.locator('.session-item').filter({ hasText: 'Beta rollout notes' }).click();
+    const composer = page.getByRole('textbox', { name: 'Message composer' });
+    await composer.fill('Keep this unsent input');
+
+    await page.getByLabel('Back to sessions').first().click();
+    await page.locator('.session-item').filter({ hasText: 'Gamma cleanup pass' }).click();
+    await expect(composer).toHaveText('Keep this unsent input');
+    await composer.fill('Continue the same unsent input');
+
+    await page.getByLabel('Back to sessions').first().click();
+    await page.locator('.session-item').filter({ hasText: 'Beta rollout notes' }).click();
+    await expect(composer).toHaveText('Continue the same unsent input');
+    await page.getByRole('button', { name: 'New chat', exact: true }).first().click();
+    await expect(composer).toHaveText('Continue the same unsent input');
+
+    await page.getByLabel('Back to sessions').first().click();
+    await page.locator('.session-item').filter({ hasText: 'Gamma cleanup pass' }).click();
+    await expect(composer).toHaveText('Continue the same unsent input');
+    await page.getByLabel('Send (Enter)').click();
+    await expect(page.locator('.chat-turn-user').last()).toContainText(
+      'Continue the same unsent input'
+    );
+    await expect(composer).toHaveText('');
+
+    await page.getByLabel('Back to sessions').first().click();
+    await page.locator('.session-item').filter({ hasText: 'Beta rollout notes' }).click();
+    await expect(composer).toHaveText('');
+  });
+}
+
 for (const width of [800, 486, 280]) {
   test(`rename popup has roomy controls and fits a ${width}px sidebar`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });

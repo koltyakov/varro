@@ -3395,7 +3395,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const parsed = getLeadingSlashCommand(raw);
     if (!parsed) return false;
-    const commandSessionId = composerSessionId();
+    const commandDraftKey = currentDraftKey();
 
     const { name, args } = parsed;
     if (isPauseSlashCommand(raw)) {
@@ -3486,7 +3486,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       } finally {
         if (
           !sent &&
-          composerSessionId() === commandSessionId &&
+          currentDraftKey() === commandDraftKey &&
           inputTextMutationVersion() === clearedInputVersion &&
           inputText() === ''
         ) {
@@ -3936,9 +3936,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     releaseHeldComposerHeight(sent);
     const shouldRestoreFailedInput =
       !sent &&
-      (currentDraftKey() === sendDraftKey ||
-        (sendSessionId === null && composerSessionId() !== null)) &&
-      sendingAttachments() !== null &&
+      currentDraftKey() === sendDraftKey &&
       inputTextMutationVersion() === clearedInputVersion &&
       inputText() === '';
     (() => {
@@ -3947,7 +3945,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setSendingInlineAttachments(null);
       setWorkspaceSendPending(false);
     })();
-    if (shouldRestoreFailedInput) {
+    if (shouldRestoreFailedInput && composerSessionId() === sendSessionId) {
       setErrorRetry(() => {
         setErrorRetry(null);
         void handleSend();
@@ -4495,7 +4493,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (queuedEditDraftKey && queuedEditDraftKey !== currentDraftKey()) ||
       edit.sessionId !== composerSessionId()
     ) {
-      if (queuedEditDraftKey) writeOwnedDraft(queuedEditDraftKey, '');
+      if (queuedEditDraftKey && queuedEditDraftKey !== currentDraftKey()) {
+        writeOwnedDraft(queuedEditDraftKey, '');
+      }
       setQueuedMessageEdit(null);
       queuedEditDraftKey = null;
       return;

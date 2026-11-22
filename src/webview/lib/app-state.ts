@@ -70,6 +70,7 @@ import {
 } from './attachment-order';
 import { createMessageIndex } from './message-index';
 import {
+  adoptSessionInputDraft,
   inputDraftKey,
   parkDraftMarkers,
   readInputDraft,
@@ -337,10 +338,23 @@ export interface AppStateInstance {
 
 export function createAppState(): AppStateInstance {
   const initialWebviewState = readInitialWebviewState();
+  let workspace = initialWebviewState.editorContext?.workspacePath ?? null;
+  const context = initialWebviewState.webviewContext;
+  const persistedRoute = asRecord(
+    readStored<unknown>(
+      context?.surface === 'sidebar' && workspace
+        ? `${STORAGE_KEYS.lastOpenedView}:${normalizeWorkspaceIdentity(workspace)}`
+        : STORAGE_KEYS.lastOpenedView
+    )
+  );
+  // The sidebar's default New Chat route is not a restored user selection.
+  const route = context?.surface === 'editor' ? context.initialRoute : persistedRoute;
   const initialQueuedMessages = readStoredQueuedMessages(initialWebviewState.queuedMessages);
   const storedQueuedMessageEdit = readStoredQueuedMessageEdit();
   const initialQueuedMessageEdit =
     storedQueuedMessageEdit &&
+    (!route ||
+      (route.type === 'session' && route.sessionId === storedQueuedMessageEdit.sessionId)) &&
     initialQueuedMessages.some((message) => message.id === storedQueuedMessageEdit.id)
       ? storedQueuedMessageEdit
       : null;
@@ -585,23 +599,10 @@ export function createAppState(): AppStateInstance {
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
-  let workspace = state.editorContext.workspacePath;
   let activeId: string | null = null;
   let picker = false;
   let pendingFolder: string | null = null;
   let typedForFolder: string | null = null;
-  const context = initialWebviewState.webviewContext;
-  const persistedRoute = asRecord(
-    readStored<unknown>(
-      context?.surface === 'sidebar' && workspace
-        ? `${STORAGE_KEYS.lastOpenedView}:${normalizeWorkspaceIdentity(workspace)}`
-        : STORAGE_KEYS.lastOpenedView
-    )
-  );
-  const route =
-    context?.surface === 'editor'
-      ? context.initialRoute
-      : (persistedRoute ?? context?.initialRoute);
   let bootstrapId =
     route?.type === 'session' && isString(route.sessionId)
       ? route.sessionId
@@ -610,12 +611,10 @@ export function createAppState(): AppStateInstance {
         : (initialQueuedMessageEdit?.sessionId ?? null);
   const [readDraftSession, publishDraftSession] = createSignal<string | null>(bootstrapId);
   let sessionId = bootstrapId;
-  let key = inputDraftKey(workspace, sessionId);
+  let key = inputDraftKey(workspace, null);
   const legacy = readInputDraft();
   if (legacy) {
-    const legacyKey = initialQueuedMessageEdit
-      ? inputDraftKey(workspace, initialQueuedMessageEdit.sessionId)
-      : key;
+    const legacyKey = key;
     if (!readInputDraft(legacyKey)) {
       writeInputDraft(legacy, legacyKey);
     } else if (readInputDraft(legacyKey) !== legacy) {
@@ -626,9 +625,10 @@ export function createAppState(): AppStateInstance {
     writeInputDraft('');
   }
   if (discardQueuedEditDraft && storedQueuedMessageEdit) {
+    writeInputDraft('', key);
     writeInputDraft('', inputDraftKey(workspace, storedQueuedMessageEdit.sessionId));
   }
-  let text = restoreDraftText(key, state);
+  let text = adoptSessionInputDraft(workspace, sessionId, key, restoreDraftText(key, state), state);
   const [publishedText, setPublishedText] = createSignal(text);
   let selection = 0;
   let restoredText = text;
@@ -672,14 +672,21 @@ export function createAppState(): AppStateInstance {
     activeId = nextId;
     workspace = nextWorkspace;
     const nextSession = picker ? null : (activeId ?? bootstrapId);
-    const nextKey = inputDraftKey(workspace, nextSession);
-    if (key === nextKey) return;
+    const nextKey = inputDraftKey(workspace, null);
+    const workspaceChanged = key !== nextKey;
+    if (!workspaceChanged && sessionId === nextSession) return;
     for (const listener of draftSwitchListeners) untrack(listener);
-    parkDraftMarkers(key, text, tray);
+    if (workspaceChanged) parkDraftMarkers(key, text, tray);
     key = nextKey;
     sessionId = nextSession;
     publishDraftSession(nextSession);
-    restoredText = restoreDraftText(key, tray);
+    restoredText = adoptSessionInputDraft(
+      workspace,
+      nextSession,
+      key,
+      workspaceChanged ? restoreDraftText(key, tray) : text,
+      tray
+    );
     setPublishedSelection(++selection);
     if (text !== restoredText) publishText(restoredText);
   }
