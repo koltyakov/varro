@@ -425,6 +425,8 @@ the shared invariants below remain true.
   the browser moves the transcript. Later history, expansion, or resize compensation may account for
   content inserted above that destination but must not undo the native movement. Scrolling keys inside
   editable controls do not own the transcript.
+  Native movement may precede its scroll notification. Defer the old destination's restoration,
+  and translate it before measurement compensation advances the observed scroll coordinate.
 - A downward user movement during an append transition is a new lower bound. A later animation frame
   must never interpolate to a smaller `scrollTop` and visibly reverse the gesture.
 - Width-resize anchoring is established before applying the first resize measurement. Wheel,
@@ -490,6 +492,8 @@ the shared invariants below remain true.
   If a measurement correction leaves the entire held viewport below every message, shrink the held
   height to the content and let the browser clamp. There is no painted anchor to preserve there;
   range protection must not maintain a wholly blank viewport during or after the gesture.
+  When a bottom-pinned gesture releases ownership, refresh the follow target from its actual
+  destination. A pre-drag target can describe a longer cold range and must not become append reserve.
   Finish activity-entry height animations immediately while the pointer owns scrolling. Their
   incremental growth otherwise changes native thumb mapping even when no JavaScript scroll write
   occurs. Preserve animation-end cleanup and restore normal entry timing on release.

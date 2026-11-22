@@ -14,6 +14,9 @@ import {
 
 type PartialDiffProbe = {
   gate: boolean;
+  deferKeyScroll?: boolean;
+  holdScrollAfter?: number;
+  deliverHeldScroll?: () => void;
   pending: Map<string, () => void>;
   events: Array<{
     type: string;
@@ -356,19 +359,62 @@ test.describe('diff preview anchoring', () => {
     'wheel before late siblings',
     'wheel after partial response',
     'PageDown',
+    'PageDown with deferred scroll delivery',
+    'PageDown with final detail before scroll delivery',
     'ArrowDown twice',
+    'ArrowDown twice with deferred scroll delivery',
   ]) {
     const partialOlderResponse = gesture === 'wheel after partial response';
     test(`preserves the native prose destination for ${gesture} while details are pending`, async ({
       page,
     }) => {
       await page.setViewportSize({ width: 486, height: 794 });
-      await page.clock.install();
+      const keyboard = gesture.startsWith('PageDown') || gesture.startsWith('ArrowDown');
+      const repeatArrow = gesture.startsWith('ArrowDown');
+      const finalDetail = gesture.includes('final detail');
+      const deferredScroll = gesture.endsWith('scroll delivery');
+      if (!deferredScroll) await page.clock.install();
+      else
+        await page.addInitScript(() => {
+          // Deliver the native scroll event after already-queued frame callbacks.
+          // The browser still owns the animation and the actual scroll coordinate.
+          const add = EventTarget.prototype.addEventListener;
+          EventTarget.prototype.addEventListener = function (type, listener, options) {
+            if (
+              type !== 'scroll' ||
+              // oxlint-disable-next-line anti-slop/no-runtime-typeof -- EventTarget accepts function and object listeners; only defer its function overload.
+              typeof listener !== 'function' ||
+              !(this instanceof HTMLElement) ||
+              (window as PartialDiffWindow).partialDiffProbe
+            )
+              return add.call(this, type, listener, options);
+            return add.call(
+              this,
+              type,
+              (event) => {
+                const probe = (window as PartialDiffWindow).partialDiffProbe;
+                if (this.matches('.interactive-list') && probe?.deferKeyScroll) {
+                  const deliver = () => {
+                    probe.record('deferred-scroll', undefined, event.isTrusted);
+                    listener.call(this, event);
+                  };
+                  if (
+                    probe.holdScrollAfter !== undefined &&
+                    this.scrollTop >= probe.holdScrollAfter
+                  )
+                    probe.deliverHeldScroll = deliver;
+                  else requestAnimationFrame(deliver);
+                } else listener.call(this, event);
+              },
+              options
+            );
+          };
+        });
       await page.goto(
         '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1&diffPreviewCompleted=1'
       );
       await expect(page.locator('.interactive-list')).toBeVisible();
-      const stepCount = gesture === 'PageDown' || gesture === 'ArrowDown twice' ? 9 : 4;
+      const stepCount = keyboard ? 9 : 4;
       const lateSiblings = gesture === 'wheel before late siblings';
       await installPartialDiffTail(page, stepCount, lateSiblings ? 5 : 1);
       const marker = page.locator('[data-msg-id="message-partial-diff-2"] p').first();
@@ -450,16 +496,43 @@ test.describe('diff preview anchoring', () => {
         )
         .toBe(stepCount * 3);
       await expect(preceding.locator('.file-change-inline-diffs')).toHaveCount(0);
-      if (gesture === 'PageDown' || gesture === 'ArrowDown twice') {
+      if (finalDetail) {
+        await page.evaluate(() => {
+          const probe = (window as PartialDiffWindow).partialDiffProbe;
+          for (const [key, respond] of probe.pending) {
+            if (key === '1/2') continue;
+            probe.pending.delete(key);
+            respond();
+          }
+        });
+        await expect(
+          page.locator('[data-msg-id^="message-partial-diff-"] .file-change-inline-diffs')
+        ).toHaveCount(stepCount * 3 - 1);
+      }
+      if (keyboard) {
         await marker.evaluate((element: HTMLElement) => {
           element.tabIndex = -1;
           element.focus({ preventScroll: true });
         });
         await expect(marker).toBeFocused();
-        await page.evaluate(() => {
-          (window as PartialDiffWindow).partialDiffProbe.events.length = 0;
-        });
-        if (gesture === 'ArrowDown twice') {
+        await page.evaluate(
+          ({ defer, overlap }) => {
+            const probe = (window as PartialDiffWindow).partialDiffProbe;
+            probe.events.length = 0;
+            probe.deferKeyScroll = defer;
+            if (overlap) {
+              const scrollport = document.querySelector<HTMLElement>('.interactive-list')!;
+              // Coalesce the last few notifications until the single outstanding
+              // preview above the reader has replaced its summary.
+              probe.holdScrollAfter = scrollport.scrollTop + scrollport.clientHeight * 0.8;
+              scrollport.addEventListener('scrollend', () => probe.record('key-ended'), {
+                once: true,
+              });
+            }
+          },
+          { defer: deferredScroll, overlap: finalDetail }
+        );
+        if (repeatArrow) {
           await marker.evaluate((el) =>
             el.addEventListener('keydown', (event) => {
               if (event instanceof KeyboardEvent && event.key === 'ArrowDown')
@@ -484,15 +557,27 @@ test.describe('diff preview anchoring', () => {
         } else {
           await page.keyboard.press('PageDown');
         }
-        await waitForAnimationFrames(page, 30);
-        const tops = await page.evaluate(() =>
-          (window as PartialDiffWindow).partialDiffProbe.events
-            .filter((event) => event.type === 'scroll' && event.trusted)
-            .map((event) => event.markerTop)
+        if (finalDetail) {
+          await page.waitForFunction(() => {
+            const probe = (window as PartialDiffWindow).partialDiffProbe;
+            return (
+              probe.deliverHeldScroll && probe.events.some((event) => event.type === 'key-ended')
+            );
+          });
+        } else await waitForAnimationFrames(page, 30);
+        const events = await page.evaluate(
+          () => (window as PartialDiffWindow).partialDiffProbe.events
         );
+        if (deferredScroll)
+          expect(events.some((event) => event.type === 'deferred-scroll' && event.trusted)).toBe(
+            true
+          );
+        const tops = events
+          .filter((event) => event.type === 'scroll' && event.trusted)
+          .map((event) => event.markerTop);
         expect(tops.length).toBeGreaterThan(1);
         expect(before - (await position()), JSON.stringify(tops)).toBeGreaterThan(
-          gesture === 'ArrowDown twice' ? 25 : box.height / 2
+          repeatArrow ? 25 : box.height / 2
         );
         expect(tops.every((top, index) => !index || top <= tops[index - 1]! + 1)).toBe(true);
         const destination = await list.evaluate((element) => {
@@ -515,22 +600,43 @@ test.describe('diff preview anchoring', () => {
         const samples = await page
           .locator(`[data-msg-id="${destination.id}"] p`)
           .first()
-          .evaluate(async (paragraph, steps) => {
-            const probe = (window as PartialDiffWindow).partialDiffProbe;
-            for (let row = 0; row < steps; row++) {
-              for (let file = 0; file < 3; file++) probe.release(row, file);
-            }
-            const positions: number[] = [];
-            for (let frame = 0; frame < 24; frame++) {
-              await new Promise(requestAnimationFrame);
-              positions.push(paragraph.getBoundingClientRect().top);
-            }
-            return positions;
-          }, stepCount);
+          .evaluate(
+            async (paragraph, { steps, overlap }) => {
+              const probe = (window as PartialDiffWindow).partialDiffProbe;
+              if (overlap) {
+                probe.release(1, 2);
+                const pendingRow = document.querySelector<HTMLElement>(
+                  '[data-msg-id="message-partial-diff-1"]'
+                )!;
+                for (let frame = 0; frame < 24 && pendingRow.style.minHeight; frame++) {
+                  await new Promise(requestAnimationFrame);
+                }
+                if (
+                  pendingRow.querySelectorAll('.file-change-inline-diffs').length !== 3 ||
+                  pendingRow.style.minHeight
+                )
+                  throw new Error('Final preview has not committed before scroll delivery');
+                probe.deferKeyScroll = false;
+                probe.deliverHeldScroll!();
+              } else {
+                probe.deferKeyScroll = false;
+                for (let row = 0; row < steps; row++) {
+                  for (let file = 0; file < 3; file++) probe.release(row, file);
+                }
+              }
+              const positions: number[] = [];
+              for (let frame = 0; frame < 24; frame++) {
+                await new Promise(requestAnimationFrame);
+                positions.push(paragraph.getBoundingClientRect().top);
+              }
+              return positions;
+            },
+            { steps: stepCount, overlap: finalDetail }
+          );
         await expect(preceding.locator('.file-change-inline-diffs')).toHaveCount(3);
         expect(
           samples.every((top) => Math.abs(top - destination.top) <= 2),
-          JSON.stringify(samples)
+          JSON.stringify({ destination, samples })
         ).toBe(true);
         return;
       }

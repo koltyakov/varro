@@ -4638,6 +4638,16 @@ export function MessageList() {
     options?: { useMessageOffsetFallback?: boolean; reserveBottomOverflow?: boolean }
   ) {
     if (!containerRef) return false;
+    // Native key animation can advance before its scroll notification reaches us.
+    // Let onScroll translate that destination before treating its movement as reflow.
+    if (
+      anchor &&
+      anchor === hydratedInputDestination &&
+      nativeKeyScrollEpoch === directScrollInputEpoch &&
+      Math.abs(containerRef.scrollTop - lastObservedScrollTop) > 0.5
+    ) {
+      return false;
+    }
     let delta: number | null = null;
     if (anchor) {
       const element = getMountedScrollAnchorElement(anchor);
@@ -5239,6 +5249,16 @@ export function MessageList() {
 
   function setPreservedScrollTop(nextScrollTop: number) {
     if (!containerRef) return;
+    const inputDestination = hydratedInputDestination;
+    if (inputDestination && nativeKeyScrollEpoch === directScrollInputEpoch) {
+      // Measurement may compensate before the native key's scroll event arrives.
+      // Preserve that movement before this write advances lastObservedScrollTop.
+      const movement = lastObservedScrollTop - containerRef.scrollTop;
+      if (Math.abs(movement) > 0.5) {
+        inputDestination.top += movement;
+        if (inputDestination.messageTop !== undefined) inputDestination.messageTop += movement;
+      }
+    }
     suppressSyncScrollTop = true;
     containerRef.scrollTop = Math.max(0, nextScrollTop);
     suppressSyncScrollTop = false;
@@ -7848,6 +7868,12 @@ export function MessageList() {
     // offscreen reserve now: pointerup need not produce another scroll or resize event, and a
     // subsequent drag would otherwise grab that stale range and land below every message.
     if (ownedScroll) releaseOffscreenBottomReserve();
+    // Follow writes were blocked while the thumb owned a range that cold measurements
+    // may have shortened. A later append must not reserve the obsolete follow target.
+    if (ownedScroll && containerRef && autoScroll() && pinnedToBottom) {
+      lastAutoScrolledBottomScrollTop = containerRef.scrollTop;
+      lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
+    }
   }
 
   function handleFocusIn(event: FocusEvent) {
