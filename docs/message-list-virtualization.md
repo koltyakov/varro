@@ -114,8 +114,13 @@ the shared invariants below remain true.
   measurement publication must not queue a competing generic anchor after direct input becomes idle.
    Gesture-driven range updates collect mounted rows during the scroll handler's reactive batch, then
     measure them together before saving the destination anchor. Coalesce mounted sticky-preview checks
-    at the same boundary. Other gesture-driven mounts still measure synchronously. Never defer height
-    compensation above the viewport until after the handler has remembered an already-shifted destination.
+     at the same boundary. Other gesture-driven mounts still measure synchronously. Never defer height
+     compensation above the viewport until after the handler has remembered an already-shifted destination.
+    The actual prepend that retires a held native thumb's history anchor also uses that pre-paint
+    microtask and one sticky check per connected batch. Its marker belongs to the current history
+    transaction and session/window generation, not every invalidated anchor. Keep the retired anchor
+    invalid after release, measure the real numeric viewport, and leave wheel/touch compensation and
+    unrelated streaming mounts on their existing paths.
 
 ### Height Accounting
 

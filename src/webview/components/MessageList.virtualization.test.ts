@@ -1236,6 +1236,79 @@ describe('MessageList history pagination', () => {
     flushSolid();
   });
 
+  it.each([false, true])(
+    'batches a held-scrollbar cold prepend without moving its viewport, with immediate release %s',
+    async (releaseDuringMeasurement) => {
+      const buildMessages = (prefix: string, count: number) =>
+        Array.from({ length: count }, (_, index) => {
+          const messageId = `${prefix}-${index}`;
+          return {
+            info: index % 2 === 0 ? userMessage(messageId) : assistantMessage(messageId),
+            parts: [{ ...textPart(`${messageId}-text`, 'History row'), messageID: messageId }],
+          };
+        });
+      // SAFETY: Pagination consumes the same complete SDK records as this controlled fixture.
+      const olderPage = buildMessages('older', 29) as Awaited<
+        ReturnType<typeof client.session.messages>
+      >;
+      const harness = await mountDeferredHistory(
+        buildMessages('current', 202),
+        undefined,
+        olderPage
+      );
+      flushSolid();
+      await harness.startLoad(0);
+      harness.list.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
+      );
+      flushSolid();
+      const writes: number[] = [];
+      Object.defineProperty(harness.list, 'scrollTop', {
+        configurable: true,
+        get: harness.getScrollTop,
+        set(value: number) {
+          writes.push(value);
+          harness.setScrollTop(value);
+        },
+      });
+      const rects = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
+      const originalRect = rects.getMockImplementation()!;
+      let released = false;
+      rects.mockImplementation(function (this: HTMLElement) {
+        if (releaseDuringMeasurement && !released && this.dataset.msgId?.startsWith('older-')) {
+          released = true;
+          document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+        }
+        return originalRect.call(this);
+      });
+      rects.mockClear();
+      try {
+        await harness.resolveLoad();
+        flushSolid();
+        // A fixed-input work budget, not a host-dependent elapsed-time assertion.
+        // Singleton mount measurements used 139 reads for this bounded 29-row prepend.
+        if (!releaseDuringMeasurement) expect(rects.mock.calls.length).toBeLessThan(135);
+        else expect(released).toBe(true);
+        expect(harness.getScrollTop()).toBe(0);
+        expect(writes).toEqual([]);
+        expect(harness.list.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
+        expect(harness.list.querySelector('[data-msg-id="older-0"]')).not.toBeNull();
+        document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+        for (let frame = 0; frame < 6; frame += 1) {
+          await Promise.resolve();
+          harness.animationFrames.flush();
+          flushSolid();
+        }
+        expect(harness.getScrollTop()).toBe(0);
+        expect(writes).toEqual([]);
+      } finally {
+        document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+        harness.animationFrames.restore();
+        flushSolid();
+      }
+    }
+  );
+
   it.each(['wheel', 'touch', 'scrollbar'] as const)(
     'bounds native scroll remount geometry with %s ownership',
     async (owner) => {

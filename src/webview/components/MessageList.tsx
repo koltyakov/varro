@@ -448,6 +448,7 @@ export function MessageList() {
     anchorIndex: number | undefined;
     generation: number;
     invalidated: boolean;
+    batchNativePrependMounts?: true;
     owner: 'history' | 'edit';
     previousScrollHeight: number;
     previousScrollTop: number;
@@ -3156,6 +3157,7 @@ export function MessageList() {
         // Yield before pinning/mounting that obsolete viewport, and permanently invalidate this
         // owner so a release in the same update cannot replay its correction afterward.
         pendingAnchor.invalidated = true;
+        pendingAnchor.batchNativePrependMounts = true;
         pendingAnchor.releaseAlignment?.();
       }
       if (!shouldVirtualize() || msgs.length === 0) {
@@ -4712,6 +4714,8 @@ export function MessageList() {
   }
 
   function flushPendingMountedRowMeasurements() {
+    const checkStickyPreview = mountedStickyPreviewCheckPending;
+    mountedStickyPreviewCheckPending = false;
     if (disposed || !shouldMeasureRows()) {
       pendingMountedRowMeasurements.clear();
       return;
@@ -4725,6 +4729,14 @@ export function MessageList() {
     );
     pendingMountedRowMeasurements.clear();
     if (rows.length === 0) return;
+    if (
+      checkStickyPreview &&
+      rows.some(({ element }) => element.classList.contains('interactive-request'))
+    ) {
+      // Match the scroll-handler batch: read sticky geometry before row-height corrections,
+      // rather than forcing another layout immediately after those writes.
+      reconcileMountedStickyPreview();
+    }
     measureMountedRows(rows);
     restorePendingHistoryAnchorIfMounted();
   }
@@ -4743,8 +4755,19 @@ export function MessageList() {
     const inlineDiffHeight = inlineDiffHeightHolds.get(messageId)?.height ?? 0;
     if (inlineDiffHeight > 0) element.style.minHeight = `${inlineDiffHeight}px`;
     if (widthResizeActive) widthResizeNewlyMountedRows.add(element);
+    const historyOwner = state.activeSessionId
+      ? getCurrentPendingHistoryAnchor(state.activeSessionId)
+      : undefined;
+    // Only the exact prepend that retired its history anchor may batch held-thumb mounts.
+    // Other cancellations, streaming mounts, and wheel/touch compensation keep their timing.
+    const batchNativePrependMounts =
+      nativeScrollbarActive &&
+      shouldVirtualize() &&
+      historyOwner?.owner === 'history' &&
+      historyOwner.batchNativePrependMounts === true &&
+      historyOwner.invalidated;
     if (element.classList.contains('interactive-request')) {
-      if (batchingScrollMounts) mountedStickyPreviewCheckPending = true;
+      if (batchingScrollMounts || batchNativePrependMounts) mountedStickyPreviewCheckPending = true;
       else reconcileMountedStickyPreview();
     }
     if (!shouldMeasureRows() && element.classList.contains('interactive-request')) {
@@ -4752,7 +4775,12 @@ export function MessageList() {
     }
     if (!shouldMeasureRows()) return;
 
-    if (shouldVirtualize() && userScrollRecentlyActive() && !batchingScrollMounts) {
+    if (
+      shouldVirtualize() &&
+      userScrollRecentlyActive() &&
+      !batchingScrollMounts &&
+      !batchNativePrependMounts
+    ) {
       // A direct gesture's newly mounted overscan can correct height above its painted destination.
       // Apply that bounded correction before the scroll event remembers the destination anchor.
       measureMountedRows([{ element, messageId }]);
