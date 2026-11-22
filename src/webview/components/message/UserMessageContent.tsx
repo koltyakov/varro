@@ -2675,12 +2675,9 @@ function MessageAttachmentRail(props: {
   let menu: HTMLDivElement | undefined;
 
   const remainingAttachments = createMemo(() => props.attachments.slice(visibleCount()));
-  // Leading rails can extend beyond the text bubble; standalone rails use the parent's capacity.
-  const capacityElement = () => (props.leading ? root : root?.parentElement);
-  const updateVisibleCount = () => {
-    const capacityWidth = capacityElement()?.clientWidth ?? 0;
+  const updateVisibleCount = (element: HTMLElement, attachmentCount: number) => {
+    const capacityWidth = element.clientWidth;
     if (!measurement || capacityWidth <= 0) return;
-    const attachmentCount = untrack(() => props.attachments.length);
 
     const itemWidths = Array.from(
       measurement.querySelectorAll<HTMLElement>('.message-attachment-measure-item')
@@ -2715,25 +2712,13 @@ function MessageAttachmentRail(props: {
 
   createEffect(
     () => [props.attachments.length, props.leading] as const,
-    ([count]) => {
-      const cleanups: Array<() => void> = [];
-
-      if (count === 0)
-        return () => {
-          for (const cleanup of cleanups.toReversed()) cleanup();
-        };
-      updateVisibleCount();
-      const element = capacityElement();
-      if (!element)
-        return () => {
-          for (const cleanup of cleanups.toReversed()) cleanup();
-        };
-      const stopObservingResize = observeSettledResize(element, updateVisibleCount);
-      cleanups.push(stopObservingResize);
-
-      return () => {
-        for (const cleanup of cleanups.toReversed()) cleanup();
-      };
+    ([count, leading]) => {
+      // Leading rails can extend beyond the text bubble; standalone rails use the parent's capacity.
+      const element = leading ? root : root?.parentElement;
+      if (count === 0 || !element) return;
+      const update = () => updateVisibleCount(element, count);
+      update();
+      return observeSettledResize(element, update);
     }
   );
 

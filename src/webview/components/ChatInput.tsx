@@ -5779,16 +5779,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (!editing || editing.messageId === activeEditMessageId) return { editing };
       return {
         editing,
+        sessionId: composerSessionId(),
         files: normalizeEditFiles(editing.context.files, activeContextEnabled(editing.sessionId)),
       };
     },
-    ({ editing, files }) => {
+    ({ editing, sessionId, files }) => {
       if (!editing) {
         activeEditMessageId = null;
         setEditSelectedModel(null);
         return;
       }
-      if (editing.sessionId !== composerSessionId()) return;
+      if (editing.sessionId !== sessionId) return;
       if (editing.messageId === activeEditMessageId) return;
       if (activeEditMessageId === null && !getMessageEditDraftBackup()) {
         setMessageEditDraftBackup(untrack(captureEditDraftBackup));

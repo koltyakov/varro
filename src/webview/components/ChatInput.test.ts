@@ -7403,12 +7403,15 @@ describe('ChatInput', () => {
     });
 
     it('does not submit an inline message edit', () => {
+      const warn = vi.spyOn(console, 'warn');
+      onTestFinished(() => warn.mockRestore());
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
       startEditingMessage('user-1', 'session-1', 'Original prompt');
       flushSolid();
       cleanup = render(() => ChatInput(), container!);
       flushSolid();
+      expect(inputText()).toBe('Original prompt');
       setInputText('Edited prompt');
       flushSolid();
       pressSave();
@@ -7418,6 +7421,7 @@ describe('ChatInput', () => {
       expect(state.queuedMessages).toEqual([]);
       expect(editMessageMock).not.toHaveBeenCalled();
       expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('[STRICT_READ_UNTRACKED]'));
     });
   });
 

@@ -269,6 +269,7 @@ it('renders an All snapshot as one inline Problems count chip', () => {
 it.each(['separate', 'combined', 'combined-crlf'])(
   'renders %s problems as a count chip without leaking details into visible or editable prompt text',
   (layout) => {
+    const warn = vi.spyOn(console, 'warn');
     const send = installSendToExtension();
     flushSolid();
     const details =
@@ -307,6 +308,7 @@ it.each(['separate', 'combined', 'combined-crlf'])(
       },
     });
     expect(getUserMessagePreviewText([textPart('problems-only', details)])).toBe('Problems 1');
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('[STRICT_READ_UNTRACKED]'));
   }
 );
 
@@ -1093,6 +1095,27 @@ describe('UserMessageContent', () => {
     expect(attachments?.classList.contains('message-attachments-standalone')).toBe(true);
     expect(attachments?.textContent).toContain('extension-message.ts');
     expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+  });
+
+  it('observes the new attachment rail width when prompt text arrives', () => {
+    const observe = vi.spyOn(ResizeObserver.prototype, 'observe');
+    const unobserve = vi.spyOn(ResizeObserver.prototype, 'unobserve');
+    const [store, setStore] = createStore({
+      parts: [textPart('context', '[Active file: app.ts]')],
+    });
+    cleanup = render(() => <UserMessageContent parts={store.parts} />, container!);
+    flushSolid();
+
+    const rail = container!.querySelector('.message-attachments-standalone')!;
+    const parent = rail.parentElement;
+    expect(observe).toHaveBeenCalledWith(parent);
+
+    setStore(storePath('parts', (parts) => [...parts, textPart('prompt', 'Explain this')]));
+    flushSolid();
+
+    expect(container!.querySelector('.message-attachments-leading')).toBe(rail);
+    expect(unobserve).toHaveBeenCalledWith(parent);
+    expect(observe).toHaveBeenCalledWith(rail);
   });
 
   it('orders attachments above image tiles and keeps tile clicks out of the message card', () => {
