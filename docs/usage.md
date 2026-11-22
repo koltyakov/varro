@@ -374,7 +374,7 @@ Commands offered in slash-command completion include:
 - `/connect` opens the provider connection dialog
 - `/settings` opens VS Code Settings filtered to Varro
 - `/export` opens a JSON export of the current session in the editor
-- `/stats` opens a Markdown token and assistant-duration report for the last 30 days across all OpenCode projects; `/stats all` also includes retained all-time usage
+- `/stats` opens a Markdown token and assistant-duration report across all OpenCode projects, with sections for Today, Yesterday (local calendar day), and the last 7 and 30 rolling days; `/stats all` also includes retained all-time usage
 - Usage reports include local V1 and V2 sessions. For migrated sessions, including Varro imports, only the session with the latest update time contributes usage. Equal update times prefer V2.
 - `/thinking` or `/reasoning` toggles thinking block visibility
 - `/compact` or `/summarize` compacts conversation context

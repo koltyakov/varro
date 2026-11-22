@@ -276,6 +276,7 @@ type Aggregate = Tokens & {
 type ReportWindow = {
   title: string;
   start: number | null;
+  end?: number;
   undated?: boolean;
 };
 
@@ -1465,7 +1466,9 @@ const legacyInventory = (database) => {
 
         for (let index = 0; index < workerData.windows.length; index += 1) {
           const window = workerData.windows[index];
-          if (window.undated ? !undated : undated ? window.start !== null : window.start !== null && created < window.start) continue;
+          if (window.undated ? !undated : undated ? window.start !== null :
+            (window.start !== null && created < window.start) ||
+            (window.end !== undefined && created >= window.end)) continue;
           const windowAggregate = aggregates[index];
           const aggregate = windowAggregate.groups.get(route) || emptyAggregate();
           if (promptID) {
@@ -1797,8 +1800,10 @@ function createWindowAggregates(now: number, includeAllTime: boolean): WindowAgg
 function createReportWindows(now: number, includeAllTime: boolean): ReportWindow[] {
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
+  const yesterday = new Date(midnight.getFullYear(), midnight.getMonth(), midnight.getDate() - 1);
   return [
     { title: 'Today', start: midnight.getTime() },
+    { title: 'Yesterday', start: yesterday.getTime(), end: midnight.getTime() },
     { title: 'Last 7 rolling days', start: now - 7 * DAY_MS },
     { title: 'Last 30 rolling days', start: now - 30 * DAY_MS },
     ...(includeAllTime ? [{ title: 'All time', start: null }] : []),
@@ -1810,12 +1815,14 @@ function addUsageToWindowAggregates(aggregates: WindowAggregates[], usage: Usage
   for (const entry of usage) {
     if (entry.tokens.total <= 0) continue;
     for (const aggregate of aggregates) {
+      const { start, end, undated } = aggregate.window;
       if (
-        aggregate.window.undated
+        undated
           ? entry.created !== null
           : entry.created === null
-            ? aggregate.window.start !== null
-            : aggregate.window.start !== null && entry.created < aggregate.window.start
+            ? start !== null
+            : (start !== null && entry.created < start) ||
+              (end !== undefined && entry.created >= end)
       )
         continue;
       addUsageToAggregateGroup(aggregate.groups, entry);

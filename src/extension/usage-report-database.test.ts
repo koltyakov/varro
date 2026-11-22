@@ -222,6 +222,53 @@ async function fixture(versions: number[]) {
 }
 
 describe('local usage database versions', () => {
+  it('reports Yesterday between local midnights in both SQLite and API reports', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 10, 2, 12).getTime());
+    try {
+      const { database, report, now } = await fixture([1]);
+      const today = new Date(2026, 10, 2).getTime();
+      const yesterday = new Date(2026, 10, 1).getTime();
+      const messages = [
+        { model: 'before-yesterday', completed: yesterday - 1 },
+        { model: 'start-of-yesterday', completed: yesterday },
+        { model: 'end-of-yesterday', completed: today - 1 },
+        { model: 'start-of-today', completed: today },
+      ].map(({ model, completed }) => ({
+        id: model,
+        role: 'assistant',
+        parentID: `prompt-${model}`,
+        providerID: 'provider',
+        modelID: model,
+        time: { created: completed - 2000, completed },
+        tokens: { input: 10, output: 5 },
+      }));
+      database.prepare('INSERT INTO session VALUES (?, ?)').run('one', now);
+      const insert = database.prepare('INSERT INTO message VALUES (?, ?, ?)');
+      for (const message of messages) insert.run(message.id, 'one', JSON.stringify(message));
+      const localContent = await report();
+      const request = vi.fn(async (_method: string, path: string) =>
+        path.startsWith('/experimental/session')
+          ? [{ id: 'one', directory: '/project', time: { updated: now } }]
+          : messages.map((info) => ({ info }))
+      );
+      await new UsageReportService({ request, isAttachOnly: true }, vi.fn()).openReport();
+
+      expect(mocks.content).toEqual(localContent);
+      expect(localContent.match(/^## .+$/gm)).toEqual([
+        '## Today',
+        '## Yesterday',
+        '## Last 7 rolling days',
+        '## Last 30 rolling days',
+      ]);
+      const section = localContent.split('## Yesterday\n')[1]?.split('\n## ')[0];
+      expect(section).toContain('| provider | start-of-yesterday | 1 | 15 | 2s |');
+      expect(section).toContain('| provider | end-of-yesterday | 1 | 15 | 2s |');
+      expect(section).toContain('| **Total** |  | 2 | 30 | 4s |');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([false, true])(
     'includes generation usage for old idle sessions without adding prompts or duration, allTime=%s',
     async (allTime) => {

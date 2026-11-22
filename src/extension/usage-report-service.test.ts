@@ -586,10 +586,11 @@ describe('UsageReportService', () => {
     expect(worker.terminate).not.toHaveBeenCalled();
     worker.listeners.get('message')?.({
       sessionCount: 1,
-      windows: Array.from({ length: 5 }, () => ({ totalPromptCount: 0, groups: [] })),
+      windows: Array.from({ length: 6 }, () => ({ totalPromptCount: 0, groups: [] })),
     });
     await report;
     expect(reportContent()).toContain('## All time');
+    expect(reportSection(reportContent(), 'Yesterday')).toContain('_No token usage._');
     expect(worker.terminate).toHaveBeenCalledOnce();
     expect(request).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
@@ -692,7 +693,7 @@ describe('UsageReportService', () => {
     await Promise.resolve();
     workerMocks.instances.at(-1)?.listeners.get('message')?.({
       sessionCount: 2_209,
-      windows: Array.from({ length: 4 }, () => ({
+      windows: Array.from({ length: 5 }, () => ({
         totalPromptCount: 9,
         groups: [
           {
