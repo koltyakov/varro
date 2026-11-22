@@ -2,6 +2,30 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.36.x - November 2026
+
+- Added per-follow-up token and cost reporting on subagent task cards, distinguishing shared, pending, and partial usage from session totals. Unavailable usage stays hidden; header token counts use compact notation while details retain exact totals.
+- Isolated composer drafts by view, workspace, and session. Sends and canceled edits stay attached to their original drafts, and restored attachment markers no longer bind to unrelated attachments.
+- Kept editor chat webviews alive across tab switches, preserving settled content and background updates. Older restored tabs need to be closed and reopened to enable this behavior after saving unsent drafts and attachments.
+- Smoothed catch-up scrolling during streaming bursts and prevented backward jumps during streamed patches, failed patch retries, and late diff-preview loading.
+- Preserved scroll destinations through transcript restoration, keyboard navigation, resizing, and native scrollbar drags. Batched older-history measurements without taking control from a held scrollbar.
+- Fixed attachment rows so hidden items reappear when resizing provides enough space, and corrected inline chip alignment with the default Windows font.
+- Made Escape dismiss empty or loading completion menus without leaving the composer.
+- Hid incomplete nested and quoted Markdown markers during streaming to prevent temporary empty blocks, headings, and layout shifts.
+- Reduced repeated prompt parsing in long histories and made history-cache budgeting account for retained and streamed message content.
+- Made Auto mode honor configured OpenCode v2 shell permissions before local or model-based approval, preserving ask and deny exceptions and requiring review when configuration cannot be verified. Avoided saving redundant approvals.
+
+## 0.35.x - November 2026
+
+- Added native OpenCode session goals with status and pause, resume, and clear controls above the composer. Goal kickoffs appear as prompts, while internal continuation instructions stay hidden.
+- Added workspace-local Markdown images with thumbnails and full-resolution previews, restricted to open workspace folders.
+- Added quota reset countdowns and local reset times to status-bar tooltips, and clarified stale quota data after failed refreshes.
+- Dismissed a window's desktop notifications when focus returns without clearing other windows' notifications or pending chat attention.
+- Preserved pasted text and annotations through OpenCode v2 compaction and transcript archives.
+- Migrated the webview to SolidJS 2 and reduced repeated work in message and session updates. Fixed batched state changes, model isolation, pin synchronization, and transferred-session refreshes.
+- Stabilized native scrollbar dragging, scroll jumps, and the shared Thinking and tool-activity area. Reduced excess bottom spacing as activity or the composer collapses.
+- Fixed session-list server commands to start in new sessions and restore drafts after rejection. Improved command-help placement, fenced-code styling, and file and attachment icon alignment.
+
 ## 0.34.x - November 2026
 
 - Added a dedicated MCP management screen with global and project defaults, OpenCode config-file access, and JSON import that detects common nesting while preserving existing servers, comments, and unrelated settings.
