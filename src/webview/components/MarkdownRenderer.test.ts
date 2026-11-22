@@ -4112,6 +4112,249 @@ $$`,
     }
   );
 
+  // ses_dfde9136fffeaRG6Zgn3qN4oED: a stream paused at these exact boundaries turned the
+  // preceding nested item into a setext heading or painted an empty item or quotation.
+  const transientMarkerSamples = (root: HTMLElement) => {
+    const visible = (element: Element) =>
+      !element.closest('.streaming-markdown-pending-block, .streaming-markdown-pending-hidden');
+    const visibleText = (element: Element) => {
+      // SAFETY: cloneNode preserves the node type of the source Element.
+      const copy = element.cloneNode(true) as Element;
+      for (const hidden of copy.querySelectorAll(
+        '.streaming-markdown-pending-block, .streaming-markdown-pending-hidden'
+      ))
+        hidden.remove();
+      return copy.textContent?.trim() ?? '';
+    };
+    return [
+      ...Array.from(root.querySelectorAll('li :is(h1, h2, h3, h4, h5, h6)'))
+        .filter(visible)
+        .map((heading) => `heading in item: ${heading.outerHTML}`),
+      ...Array.from(root.querySelectorAll('blockquote :is(h1, h2, h3, h4, h5, h6)'))
+        .filter(visible)
+        .map((heading) => `heading in quotation: ${heading.outerHTML}`),
+      ...Array.from(root.querySelectorAll('li'))
+        .filter((item) => visible(item) && !visibleText(item))
+        .map((item) => `empty item: ${item.parentElement?.outerHTML}`),
+      ...Array.from(root.querySelectorAll('blockquote'))
+        .filter((quote) => visible(quote) && !visibleText(quote))
+        .map((quote) => `empty quotation: ${quote.outerHTML}`),
+      ...Array.from(root.querySelectorAll('p'))
+        .filter((paragraph) => visible(paragraph) && /^-{1,2}$/.test(visibleText(paragraph)))
+        .map((paragraph) => `partial rule: ${paragraph.outerHTML}`),
+    ];
+  };
+  const nestedListSample = [
+    '### Nested lists',
+    '',
+    '- Workspace',
+    '  - Source files',
+    '    - Components',
+    '      - Message list',
+    '      - Input field',
+    '    - Utilities',
+    '      - Parsing',
+  ].join('\n');
+  const quotedListSample = [
+    '> A short quotation can occupy one line.',
+    '',
+    '> A longer quotation may wrap across several lines depending on the available width.',
+    '>',
+    '> A second paragraph belongs to the same quotation.',
+    '>',
+    '> - A quoted list item.',
+    '> - Another quoted list item with **emphasis**.',
+    '',
+    '### Nested quotation',
+    '',
+    '> The outer quotation begins here.',
+    '>',
+    '> > The inner quotation adds another level.',
+    '> >',
+    '> > This paragraph remains inside the inner quotation.',
+  ].join('\n');
+  const ruleSample = [
+    'All names, measurements, and results below are fictional test data.',
+    '',
+    '---',
+    '',
+    '## 1. Basic text formatting',
+  ].join('\n');
+
+  it.each([
+    { name: 'a four-space nested bullet', sample: nestedListSample, boundary: '\n    -' },
+    { name: 'a six-space nested bullet', sample: nestedListSample, boundary: '\n      -' },
+    { name: 'a quoted bullet', sample: quotedListSample, boundary: '\n> -' },
+    { name: 'a new quotation', sample: quotedListSample, boundary: '\n\n>' },
+    { name: 'a nested quotation', sample: quotedListSample, boundary: '\n> >' },
+    { name: 'a thematic break', sample: ruleSample, boundary: '\n\n--' },
+  ])(
+    'does not paint transient structure when a stream pauses at $name',
+    async ({ sample, boundary }) => {
+      const prefixes: string[] = [];
+      for (let index = sample.indexOf(boundary); index >= 0;) {
+        const end = index + boundary.length;
+        prefixes.push(sample.slice(0, end), `${sample.slice(0, end)} `);
+        index = sample.indexOf(boundary, end);
+      }
+      expect(prefixes.length).toBeGreaterThan(0);
+      const [content, setContent] = createSignal('Starting...');
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container!
+      );
+      flushSolid();
+
+      const findings: string[] = [];
+      for (const prefix of [...prefixes, sample]) {
+        setContent(`Starting...\n\n${prefix}`);
+        flushSolid();
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        flushSolid();
+        findings.push(
+          ...transientMarkerSamples(container!).map(
+            (finding) => `${JSON.stringify(prefix)}: ${finding}`
+          )
+        );
+      }
+      expect(findings).toEqual([]);
+    }
+  );
+
+  it.each([
+    {
+      name: 'a genuine setext heading',
+      content: 'Starting...\n\nSettled title\n---',
+      selector: 'h2',
+      text: 'Settled title',
+    },
+    {
+      name: 'a complete thematic break',
+      content: 'Starting...\n\nAbove the rule.\n\n---',
+      selector: 'hr',
+      text: '',
+    },
+    {
+      name: 'a nested bullet inside an open code fence',
+      content: 'Starting...\n\n```md\n- Workspace\n  - Source files\n    -',
+      selector: 'pre code',
+      text: '- Workspace\n  - Source files\n    -',
+    },
+    {
+      name: 'a quotation marker inside an open code fence',
+      content: 'Starting...\n\n```md\n> The outer quotation begins here.\n>\n> >',
+      selector: 'pre code',
+      text: '> The outer quotation begins here.\n>\n> >',
+    },
+    {
+      // Indented code blocks are disabled, so deep indentation is prose once content arrives.
+      name: 'deeply indented marker text after a paragraph break',
+      content: 'Starting...\n\nIndented sample:\n\n    - literal',
+      selector: '[data-markdown-segment="tail"] p',
+      text: '- literal',
+    },
+    {
+      name: 'an escaped nested marker',
+      content: 'Starting...\n\n- Workspace\n  - Source files\n    \\-',
+      selector: 'li li',
+      text: 'Source files\n-',
+    },
+    {
+      name: 'a genuine nested setext heading',
+      content: 'Starting...\n\n- Workspace\n  - Source files\n    ---',
+      selector: 'li li h2',
+      text: 'Source files',
+    },
+    {
+      name: 'a genuine quoted setext heading',
+      content: 'Starting...\n\n> Quoted title\n> ---',
+      selector: 'blockquote h2',
+      text: 'Quoted title',
+    },
+    {
+      name: 'a quoted ordered item',
+      content: 'Starting...\n\n> 1. First quoted step',
+      selector: 'blockquote ol li',
+      text: 'First quoted step',
+    },
+    {
+      name: 'a quoted bullet item',
+      content: 'Starting...\n\n> - A quoted list item.',
+      selector: 'blockquote ul li',
+      text: 'A quoted list item.',
+    },
+    {
+      name: 'a quotation continued after a blank quoted line',
+      content: 'Starting...\n\n> First paragraph.\n>\n> Second paragraph.',
+      selector: 'blockquote p:last-child',
+      text: 'Second paragraph.',
+    },
+  ])('keeps $name visible while streaming', async ({ content, selector, text }) => {
+    cleanup = render(
+      () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
+      container!
+    );
+    flushSolid();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    flushSolid();
+    const element = container?.querySelector(selector);
+    expect(element, container?.innerHTML).not.toBeNull();
+    expect(element?.textContent?.trim()).toBe(text);
+  });
+
+  it('defers a deeply indented bare marker only while it is the streaming line', async () => {
+    // Indented code blocks are disabled: settled `    -` is prose, never literal code. Streaming
+    // defers that one trailing marker until its content or line break arrives.
+    const content = 'Starting...\n\nIndented sample:\n\n    -';
+    const [streaming, setStreaming] = createSignal(true);
+    const [text, setText] = createSignal(content);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return text();
+          },
+          get forceStreaming() {
+            return streaming();
+          },
+        }),
+      container!
+    );
+    const settle = async () => {
+      flushSolid();
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      flushSolid();
+    };
+    await settle();
+    expect(container?.querySelector('pre')).toBeNull();
+    expect(transientMarkerSamples(container!)).toEqual([]);
+    expect(
+      container?.querySelector('[data-markdown-segment="tail"] .streaming-markdown-pending-hidden')
+        ?.textContent
+    ).toBe('    -');
+
+    setText(`${content}\n`);
+    await settle();
+    expect(container?.querySelector('[data-markdown-segment="tail"] p')?.textContent?.trim()).toBe(
+      '-'
+    );
+
+    setText(content);
+    setStreaming(false);
+    await settle();
+    expect(container?.querySelector('pre')).toBeNull();
+    expect(
+      Array.from(container!.querySelectorAll('p')).at(-1)?.textContent?.trim(),
+      container?.innerHTML
+    ).toBe('-');
+  });
+
   it.each([
     { delimiter: '`', chunks: ['npm', ' run', ' test'] },
     { delimiter: '``', chunks: ['npm', ' `run`', ' test', '`'] },

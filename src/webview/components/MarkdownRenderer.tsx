@@ -1563,6 +1563,26 @@ function renderIncompleteStreamingMarkdown(
       trailingBulletMarker.index! + trailingBulletMarker[0].length - trailingBulletMarker[1]!.length
     );
   }
+  // Nested and quoted markers are equally empty until content arrives. Painted, `Item\n    -`
+  // becomes a setext heading, `> -` an empty item, and `>` an empty quotation. A rule is only
+  // `---`: `--` after a blank line would paint as a paragraph first. Fenced code stays literal.
+  const trailingContainerMarker =
+    openFence || openMath
+      ? null
+      : blockSafeContent.match(/(?:^|\r?\n)([ \t]*(?:(?:>[ \t]*)+(?:[-+*][ \t]*)?|[-+*][ \t]*))$/);
+  const trailingPartialRule =
+    openFence || openMath
+      ? null
+      : blockSafeContent.match(/(?:^|\r?\n[ \t]*\r?\n)([ \t]{0,3}--[ \t]*)$/);
+  for (const trailingMarker of [trailingContainerMarker, trailingPartialRule]) {
+    if (!trailingMarker) continue;
+    pendingStart = Math.min(
+      pendingStart,
+      trailingMarker.index! + trailingMarker[0].length - trailingMarker[1]!.length
+    );
+  }
+  const pendingBullet =
+    !!trailingBulletMarker || /[-+*][ \t]*$/.test(trailingContainerMarker?.[1] ?? '');
   const trailingPath = blockSafeContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
   if (trailingPath) {
     const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
@@ -1615,7 +1635,7 @@ function renderIncompleteStreamingMarkdown(
     marker,
     pendingText: content.slice(pendingStart),
     hidePendingText: pendingStart !== visiblePendingStart,
-    pendingBullet: !!trailingBulletMarker,
+    pendingBullet,
     showIndicator:
       mathStart !== null ||
       inlineStart !== null ||

@@ -977,6 +977,11 @@ Direct input acquires ownership only when it can affect the transcript:
   painting it gives the preceding paragraph list spacing that a following hidden token removes again.
   `markdown-streaming-append.spec.ts` checks the entering row every frame for whole and split
   deliveries and requires no painted orphan bullet.
+- Deeply nested and quoted marker-only suffixes follow the same pending-block rule. An unfinished
+  nested `-` must not temporarily turn the preceding item into a setext heading, and a quote-only
+  suffix must not paint an empty bordered block. Preserve literal code and completed Markdown syntax.
+  A boundary replay of the reported `ses_dfde9136fffeaRG6Zgn3qN4oED` response reproduced backward
+  movements of up to 20 px when these temporary blocks disappeared.
 - Incomplete HTML tag suffixes must not paint as temporary prose. Opening and closing tags such as
   `<details` and `</summary` otherwise lose a line when `>` arrives. Omit these suffixes before parsing;
   a hidden marker at the root of a raw HTML segment can itself change trailing-block spacing.

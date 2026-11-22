@@ -1012,6 +1012,111 @@ test('keeps preceding content stable while a streamed HTML disclosure forms', as
   expect(reversals).toEqual([]);
 });
 
+test('paints no transient structure while nested and quoted markers stream', async ({ page }) => {
+  // ses_dfde9136fffeaRG6Zgn3qN4oED: pausing at `    -` turned the preceding nested item into
+  // a setext heading; `> -`, `>`, and `--` painted empty items, quotations, or a paragraph.
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 486, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  const collector = await markdown.evaluateHandle((element) => {
+    const hiddenSelector = '.streaming-markdown-pending-block, .streaming-markdown-pending-hidden';
+    const visible = (node: Element) => !node.closest(hiddenSelector);
+    const visibleText = (node: Element) => {
+      // SAFETY: cloneNode preserves the node type of the source Element.
+      const copy = node.cloneNode(true) as Element;
+      for (const hidden of copy.querySelectorAll(hiddenSelector)) hidden.remove();
+      return copy.textContent?.trim() ?? '';
+    };
+    const state = {
+      running: true,
+      frames: 0,
+      findings: [] as string[],
+    };
+    const sample = () => {
+      state.frames += 1;
+      const findings = [
+        ...[...element.querySelectorAll(':is(li, blockquote) :is(h1, h2, h3, h4, h5, h6)')]
+          .filter(visible)
+          .map((heading) => `heading: ${heading.outerHTML}`),
+        ...[...element.querySelectorAll('li, blockquote')]
+          .filter((node) => visible(node) && !visibleText(node))
+          .map((node) => `empty ${node.tagName.toLowerCase()}: ${node.parentElement?.outerHTML}`),
+        ...[...element.querySelectorAll('p')]
+          .filter((node) => visible(node) && /^-{1,2}$/.test(visibleText(node)))
+          .map((node) => `partial rule: ${node.outerHTML}`),
+      ];
+      if (findings.length > 0)
+        state.findings.push(`frame ${state.frames}: ${findings.join(' | ')}`);
+      if (state.running) requestAnimationFrame(sample);
+    };
+    sample();
+    return state;
+  });
+  const body = [
+    '',
+    '',
+    '### Nested lists',
+    '',
+    '- Workspace',
+    '  - Source files',
+    '    - Components',
+    '      - Message list',
+    '      - Input field',
+    '    - Utilities',
+    '      - Parsing',
+    '  - Test files',
+    '    - Unit tests',
+    '',
+    '> A longer quotation may wrap across several lines depending on the available width.',
+    '>',
+    '> A second paragraph belongs to the same quotation.',
+    '>',
+    '> - A quoted list item.',
+    '> - Another quoted list item with **emphasis**.',
+    '',
+    '> The outer quotation begins here.',
+    '>',
+    '> > The inner quotation adds another level.',
+    '',
+    'All names below are fictional test data.',
+    '',
+    '---',
+    '',
+    'VFZ-MARKERS-END',
+  ].join('\n');
+  // Pause exactly after each bare marker and its following space, as streamed tokens can.
+  const cuts = new Set<number>([body.length]);
+  for (const match of body.matchAll(/\n[ \t]*(?:>[ \t]*)*(?:--|[-+*])?/g)) {
+    const end = match.index + match[0].length;
+    cuts.add(end);
+    if (body[end] === ' ') cuts.add(end + 1);
+  }
+  let start = 0;
+  for (const cut of [...cuts].toSorted((left, right) => left - right)) {
+    if (cut <= start) continue;
+    await appendDeltaToRapidStreaming(page, body.slice(start, cut));
+    await waitForAnimationFrames(page, 4);
+    start = cut;
+  }
+  const text = `Starting...${body}`;
+  await completeResponse(page, text);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await waitForAnimationFrames(page, 6);
+  const samples = await collector.evaluate((state) => {
+    state.running = false;
+    return { frames: state.frames, findings: state.findings };
+  });
+  await attachEvidence(test.info(), 'marker-boundary-frames.json', JSON.stringify(samples));
+  await expect(markdown).toContainText('VFZ-MARKERS-END');
+  await expect(markdown.locator('li li li')).toHaveCount(6);
+  await expect(markdown.locator('blockquote blockquote')).toHaveCount(1);
+  await expect(markdown.locator('hr')).toHaveCount(1);
+  expect(samples.frames).toBeGreaterThan(40);
+  expect(samples.findings).toEqual([]);
+});
+
 async function attachEvidence(testInfo: TestInfo, name: string, json: string) {
   const path = testInfo.outputPath(name);
   await writeFile(path, json);
