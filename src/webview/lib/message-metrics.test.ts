@@ -5,6 +5,7 @@ import {
   formatCost,
   formatTurnCost,
   formatNumber,
+  formatTokenCount,
   getAssistantDuration,
   getAssistantTotalTokens,
   getContextWindow,
@@ -88,6 +89,22 @@ describe('message metrics helpers', () => {
   it('formats numbers', () => {
     expect(formatNumber(undefined)).toBe('0');
     expect(formatNumber(1_234.4)).toBe('1,234');
+  });
+
+  it.each([
+    [0, '0'],
+    [56, '56'],
+    [999, '999'],
+    [1_000, '1K'],
+    [1_234, '1.2K'],
+    [2_468, '2.5K'],
+    [12_500, '12.5K'],
+    [999_999, '1M'],
+    [1_000_000, '1M'],
+    [1_234_567, '1.2M'],
+    [12_500_000, '12.5M'],
+  ])('formats %i tokens as %s', (value, expected) => {
+    expect(formatTokenCount(value)).toBe(expected);
   });
 
   it('formats cost values', () => {

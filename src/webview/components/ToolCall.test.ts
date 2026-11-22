@@ -2932,7 +2932,7 @@ describe('ToolCall', () => {
     flushSolid();
 
     const stats = container?.querySelector('.tool-invocation-token-stats');
-    expect(stats?.textContent).toBe('↑ 1,234 ↓ 56');
+    expect(stats?.textContent).toBe('↑ 1.2K ↓ 56');
     expect(container?.querySelector('.tool-invocation-token-label')?.textContent).toBe('Σ1');
     expect(stats?.querySelector('.diff-lines-added')).toBeNull();
     expect(container?.querySelector('.tool-invocation-cost')).toBeNull();
@@ -3158,7 +3158,7 @@ describe('ToolCall', () => {
     flushSolid();
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
-      '↑ 2,468 ↓ 135'
+      '↑ 2.5K ↓ 135'
     );
   });
 

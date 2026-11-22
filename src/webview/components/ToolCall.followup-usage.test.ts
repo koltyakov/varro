@@ -120,6 +120,30 @@ afterEach(() => {
 });
 
 describe('ToolCall follow-up usage', () => {
+  it('abbreviates prompt token counts while retaining exact session totals in details', async () => {
+    vi.spyOn(client.varro.session, 'followupUsage').mockResolvedValue(
+      summaryFor('p1', {
+        input: 1_200_000,
+        cacheWrite: 34_567,
+        output: 1_200,
+        reasoning: 34,
+      })
+    );
+
+    cleanup = render(
+      () => ToolCall({ part: launch('call-1', { childPromptID: 'p1' }) }),
+      container
+    );
+    await settle();
+
+    expect(header('.tool-invocation-token-stats')?.textContent).toBe('↑ 1.2M ↓ 1.2K');
+    container.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
+    expect(detailRow('session total')?.querySelector('.structured-tool-value')?.textContent).toBe(
+      '↑ 1,000 ↓ 99 · $2.00'
+    );
+  });
+
   it('shows the admitted prompt interval with interval cost and session totals in details', async () => {
     const summary: SessionFollowupUsage = {
       supported: true,
@@ -240,7 +264,7 @@ describe('ToolCall follow-up usage', () => {
     expect(label?.getAttribute('title')).toBe(
       'Session 1 total: all recorded usage in this subagent session, including work after later follow-ups. Session ID: child. Input includes cache writes; output includes reasoning.'
     );
-    expect(header('.tool-invocation-token-stats')?.textContent).toBe('↑ 1,000 ↓ 99');
+    expect(header('.tool-invocation-token-stats')?.textContent).toBe('↑ 1K ↓ 99');
     container.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     flushSolid();
     expect(detailRow('cost')?.querySelector('.structured-tool-value')?.textContent).toBe('$2.00');

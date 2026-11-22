@@ -36,7 +36,7 @@ import {
 import { formatDisplayPath, getLeafPathName, normalizePath } from '../lib/path-display';
 import { useSecondClock } from '../lib/clock';
 import { formatCommandDisplay } from '../lib/command-display';
-import { formatCost, formatDuration, formatNumber } from '../lib/message-metrics';
+import { formatCost, formatDuration, formatNumber, formatTokenCount } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import {
   notifyInlineDiffMount,
@@ -2186,7 +2186,7 @@ function GenericToolCall(props: {
                 <Show when={usage().tokens}>
                   {(tokens) => (
                     <span class="tool-invocation-token-stats" title={usage().title}>
-                      ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
+                      ↑ {formatTokenCount(tokens().input)} ↓ {formatTokenCount(tokens().output)}
                     </span>
                   )}
                 </Show>

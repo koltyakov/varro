@@ -45,10 +45,19 @@ export function isContinuationAssistantFinish(value: string | undefined) {
 }
 
 const numberFormatter = new Intl.NumberFormat('en-US');
+const compactNumberFormatter = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
 
 export function formatNumber(value: number | undefined): string {
   if (!value) return '0';
   return numberFormatter.format(Math.round(value));
+}
+
+export function formatTokenCount(value: number): string {
+  if (value < 1_000) return formatNumber(value);
+  return compactNumberFormatter.format(value);
 }
 
 export function formatCost(cost: number | undefined): string {
