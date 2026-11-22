@@ -755,12 +755,11 @@ function setSessionMessagesIncremental(
         mergeSessionMessages(current, sessionId, messages),
         options
       );
-      // Size the cache from the plain server copy: a snapshot of the store entries walks every
-      // field through store proxies on each sync.
+      // Size the rows actually cached: reconciliation can materialize queued streaming text or keep
+      // optimistic rows and extra parts that the incoming copy lacks.
       setCachedSessionMessages(
         sessionId,
-        draft.messages.filter((entry) => entry.info.sessionID === sessionId),
-        messages.filter((entry) => entry.info.sessionID === sessionId)
+        draft.messages.filter((entry) => entry.info.sessionID === sessionId)
       );
       if (
         preserveStreamingState &&

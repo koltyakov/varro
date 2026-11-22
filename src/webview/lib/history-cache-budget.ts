@@ -1,6 +1,7 @@
 import { $TARGET } from '@solidjs/signals';
 import { snapshot } from 'solid-js';
 import { isObject, isString } from './runtime-values';
+import type { UnknownRecord } from '../../shared/type-utils';
 import type { MessageEntry } from '../types';
 
 const MAX_HISTORY_CACHE_BYTES = 24 * 1024 * 1024;
@@ -8,21 +9,31 @@ const MAX_HISTORY_CACHE_BYTES = 24 * 1024 * 1024;
 // Conservative retained-size estimate, without serializing payloads or allocating string copies.
 // Count shared values separately across snapshots; live transcript ownership is outside this cache.
 function estimateBytes(value: readonly MessageEntry[]): number {
-  // A snapshot also deep-copies plain data, so copy only a store proxy.
-  const isStoreProxy = $TARGET in value;
-  const pending: unknown[] = [isStoreProxy ? snapshot(value) : value];
+  const pending: unknown[] = [value];
   const seen = new Set<object>();
   let bytes = 0;
   while (pending.length && bytes <= MAX_HISTORY_CACHE_BYTES) {
-    // A plain snapshot does not allocate reactive nodes for every historical field.
     const item = pending.pop();
     if (isString(item)) bytes += item.length * 2;
     else if (isObject(item) && !seen.has(item)) {
       seen.add(item);
+      // Cached rows are store records. Read each one through its current plain snapshot, including
+      // pending writes of the enclosing transaction, instead of walking every field through proxies.
+      const record: object = $TARGET in item ? snapshot(item) : item;
+      if (record !== item) {
+        if (seen.has(record)) {
+          bytes += 8;
+          continue;
+        }
+        seen.add(record);
+      }
       bytes += 64;
-      for (const [key, child] of Object.entries(item)) {
+      // SAFETY: Object.keys lists only own string keys of this plain object or array.
+      const fields = record as UnknownRecord;
+      // Avoid Object.entries' per-field pair arrays; each prepend walks every retained record.
+      for (const key of Object.keys(fields)) {
         bytes += key.length * 2 + 16;
-        pending.push(child);
+        pending.push(fields[key]);
       }
     } else bytes += 8;
   }
@@ -33,15 +44,9 @@ export class HistoryCacheBudget {
   private entries = new Map<string, { bytes: number; evict: () => void }>();
   private bytes = 0;
 
-  /** `sizeSource` is a plain copy of `value` that is cheaper to measure than store proxies. */
-  retain(
-    key: string,
-    value: readonly MessageEntry[],
-    evict: () => void,
-    sizeSource: readonly MessageEntry[] = value
-  ) {
+  retain(key: string, value: readonly MessageEntry[], evict: () => void) {
     this.delete(key);
-    const bytes = estimateBytes(sizeSource);
+    const bytes = estimateBytes(value);
     if (bytes > MAX_HISTORY_CACHE_BYTES) {
       evict();
       return;

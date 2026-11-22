@@ -211,6 +211,112 @@ describe('history window state', () => {
     expect(store.messages[0]!.parts[0]).toHaveProperty('text', 'x'.repeat(13 * 1024 * 1024));
   });
 
+  it('sizes retained store records in a merged older page like their plain values', () => {
+    const MiB = 1024 * 1024;
+    // Strings count two bytes per character; per-record overhead is far below the 64 KiB margin.
+    const underHalfBudget = (12 * MiB - 64 * 1024) / 2;
+    const textEntry = (id: string): MessageEntry => ({
+      ...entry(id),
+      parts: [
+        {
+          id: `${id}-text`,
+          sessionID: 'session-1',
+          messageID: id,
+          type: 'text',
+          text: 'x'.repeat(underHalfBudget),
+        },
+      ],
+    });
+    flushSolid();
+    const [store, setStore] = createStore({ messages: [textEntry('retained')] });
+    const retained = store.messages[0]!;
+    const page = textEntry('older');
+    const mergedHistories = () => [
+      [textEntry('older'), textEntry('retained')],
+      mergeOlderHistory([retained], [page]),
+      // A plain record can also hold a retained store part.
+      [page, { ...entry('nested'), parts: [retained.parts[0]!] }],
+    ];
+    for (const merged of mergedHistories()) {
+      setCachedSessionMessages('session-1', merged);
+      flushSolid();
+      expect(getCachedSessionMessages('session-1')).toHaveLength(2);
+    }
+
+    // A retained record that grows in place is sized from its current value on the next merge.
+    setStore((draft) => {
+      const part = draft.messages[0]!.parts[0]!;
+      if (part.type !== 'text') throw new Error('Expected text fixture');
+      part.text += 'x'.repeat(64 * 1024);
+    });
+    flushSolid();
+    for (const merged of mergedHistories().slice(1)) {
+      setCachedSessionMessages('session-1', merged);
+      flushSolid();
+      expect(getCachedSessionMessages('session-1')).toEqual([]);
+    }
+    expect(store.messages[0]!.parts[0]).toHaveProperty(
+      'text',
+      'x'.repeat(underHalfBudget + 64 * 1024)
+    );
+  });
+
+  it('sizes a mutated store record repeated within one cached entry once', () => {
+    const MiB = 1024 * 1024;
+    const message: MessageEntry = {
+      ...entry('repeated'),
+      parts: [
+        {
+          id: 'repeated-text',
+          sessionID: 'session-1',
+          messageID: 'repeated',
+          type: 'text',
+          text: '',
+        },
+      ],
+    };
+    flushSolid();
+    const [store, setStore] = createStore({ messages: [message] });
+    // Grow the record in place, as streamed text does: 14 MiB fits once but not twice.
+    setStore((draft) => {
+      const part = draft.messages[0]!.parts[0]!;
+      if (part.type !== 'text') throw new Error('Expected text fixture');
+      part.text = 'x'.repeat(7 * MiB);
+    });
+    flushSolid();
+    const retained = store.messages[0]!;
+    setCachedSessionMessages('session-1', [retained, retained]);
+    flushSolid();
+    expect(getCachedSessionMessages('session-1')).toHaveLength(2);
+  });
+
+  it('counts the same retained records separately in each cached entry', () => {
+    const MiB = 1024 * 1024;
+    const message: MessageEntry = {
+      ...entry('shared'),
+      parts: [
+        {
+          id: 'shared-text',
+          sessionID: 'session-1',
+          messageID: 'shared',
+          type: 'text',
+          text: 'x'.repeat(7 * MiB),
+        },
+      ],
+    };
+    flushSolid();
+    const [store] = createStore({ messages: [message] });
+    const retained = [...store.messages];
+    setCachedSessionMessages('session-1', retained);
+    flushSolid();
+    cacheSessionHistoryPage('session-1', 'older', retained);
+    flushSolid();
+
+    // Two 14 MiB estimates exceed the shared budget even though they reference one store record.
+    expect(getCachedSessionMessages('session-1')).toEqual([]);
+    expect(getPrefetchedSessionHistory('session-1')).toHaveLength(1);
+  });
+
   it('tracks opaque history cursors until reset', () => {
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     setSessionHistoryCursor('session-1', 'cursor-1');

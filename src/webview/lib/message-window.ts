@@ -136,11 +136,7 @@ export function getCachedSessionMessages(sessionId: string): MessageEntry[] {
   return messages;
 }
 
-export function setCachedSessionMessages(
-  sessionId: string,
-  messages: MessageEntry[],
-  sizeSource?: readonly MessageEntry[]
-) {
+export function setCachedSessionMessages(sessionId: string, messages: MessageEntry[]) {
   if (messages.length > 0) {
     loadedMessagesBySession.delete(sessionId);
     loadedMessagesBySession.set(sessionId, messages);
@@ -151,12 +147,7 @@ export function setCachedSessionMessages(
       historyCacheBudget.delete(oldestSessionId);
     }
     touchHistorySession(sessionId);
-    historyCacheBudget.retain(
-      sessionId,
-      messages,
-      () => loadedMessagesBySession.delete(sessionId),
-      sizeSource
-    );
+    historyCacheBudget.retain(sessionId, messages, () => loadedMessagesBySession.delete(sessionId));
   } else {
     loadedMessagesBySession.delete(sessionId);
     historyCacheBudget.delete(sessionId);

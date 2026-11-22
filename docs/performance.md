@@ -157,6 +157,15 @@ any saving described here.
   cap must accommodate a 200-message history page: the old 100-entry cap evicted a large rendered
   response during native scrolling even with most of the byte budget free, adding a parse/sanitize
   pass to its remount. Keep the history-page reuse and shared-byte-budget regressions together.
+- History-cache size accounting runs synchronously on every message sync, including each older-page
+  prepend, and walks the whole retained session. Size the rows actually cached, not the incoming
+  response: reconciliation can materialize queued streaming text and keep optimistic rows or extra
+  parts. Read each store record through its plain `snapshot()` rather than proxy traps, deduplicate
+  input proxies before snapshotting, and avoid per-field pair arrays. On the retained cold-prepend
+  capture this cut the in-task estimate from 4.4/4.1 ms to 1.3/1.6 ms with identical byte totals,
+  while later streaming syncs cost about 0.2 ms more each; evidence is under
+  `artifacts/ai-fuzzy/cold-cache-20261121/`. Keep the walk current: streamed text grows retained
+  records in place, so earlier recorded bytes plus the new page can undercount.
 - Streaming completion can cache its sanitized stable/tail HTML when the append validator proves
   the boundary independent. Never assemble a full-result cache entry across contextual HTML,
   reference definitions, or an unfinished code fence. Core/overscan changes only need a Markdown

@@ -973,6 +973,86 @@ describe('useOpenCode session state flows', () => {
     expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-1');
   });
 
+  it('sizes retained transcript records from their current values on each older page', async () => {
+    const textEntry = (id: string): MessageEntry => ({
+      info: userMessage(id),
+      parts: [{ id: `${id}-text`, sessionID: 'session-1', messageID: id, type: 'text', text: id }],
+    });
+    const pages = new Map<string | undefined, MessageEntry[] & { nextCursor?: string }>([
+      [undefined, Object.assign([textEntry('user-3')], { nextCursor: 'cursor-2' })],
+      ['cursor-2', Object.assign([textEntry('user-2')], { nextCursor: 'cursor-1' })],
+      ['cursor-1', [textEntry('user-1')]],
+    ]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) =>
+      structuredClone(pages.get(options?.before) ?? [])
+    );
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    const messageWindow = await import('../lib/message-window');
+    flushSolid();
+    await hookModule.selectSession('session-1');
+    flushSolid();
+    await hookModule.loadOlderSessionHistoryPage('session-1', { prefetchBoundaryPrompts: false });
+    flushSolid();
+    const cached = messageWindow.getCachedSessionMessages('session-1');
+    expect(cached.map((entry) => entry.info.id)).toEqual(['user-2', 'user-3']);
+    expect(cached[1]).toBe(stateModule.state.messages[1]);
+
+    // Grow the retained latest record in place, as streamed text does, past the 24 MiB budget.
+    stateModule.setState((draft) => {
+      const part = draft.messages.find((entry) => entry.info.id === 'user-3')!.parts[0]!;
+      if (part.type !== 'text') throw new Error('Expected text fixture');
+      part.text += 'x'.repeat(13 * 1024 * 1024);
+    });
+    flushSolid();
+    await hookModule.loadOlderSessionHistoryPage('session-1', { prefetchBoundaryPrompts: false });
+    flushSolid();
+
+    expect(messageWindow.getCachedSessionMessages('session-1')).toEqual([]);
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'user-2',
+      'user-3',
+    ]);
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
+  });
+
+  it('does not size a discarded duplicate in an older history page', async () => {
+    const textEntry = (id: string, text: string): MessageEntry => ({
+      info: userMessage(id),
+      parts: [{ id: `${id}-text`, sessionID: 'session-1', messageID: id, type: 'text', text }],
+    });
+    const older = Object.assign(
+      [textEntry('user-1', 'older'), textEntry('user-2', 'x'.repeat(13 * 1024 * 1024))],
+      { nextCursor: 'cursor-oldest' }
+    );
+    clientMocks.sessionMessages.mockResolvedValue(older);
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    const messageWindow = await import('../lib/message-window');
+    flushSolid();
+    stateModule.setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    stateModule.setState(storePath('messages', [textEntry('user-2', 'current')]));
+    flushSolid();
+    messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+    flushSolid();
+
+    await hookModule.loadOlderSessionHistoryPage('session-1', { prefetchBoundaryPrompts: false });
+    flushSolid();
+
+    // The overlapping record keeps its current value; the page's 26 MiB copy is never stored.
+    expect(stateModule.state.messages[1]!.parts[0]).toHaveProperty('text', 'current');
+    expect(
+      messageWindow.getCachedSessionMessages('session-1').map((entry) => entry.info.id)
+    ).toEqual(['user-1', 'user-2']);
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-oldest');
+  });
+
   it('retains a live append that arrives while an older history page is in flight', async () => {
     const olderPage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
@@ -1206,6 +1286,58 @@ describe('useOpenCode session state flows', () => {
     expect(stateModule.state.streamingText).toBe('');
   });
 
+  it.each([
+    ['caches', 'Small optimistic prompt', ['assistant-1', 'optimistic-user']],
+    ['rejects', 'x'.repeat(13 * 1024 * 1024), []],
+  ])(
+    '%s a preserved optimistic prompt by its stored size when a sync response omits it',
+    async (_label, text, cachedIds) => {
+      mockRuntimeBootstrap();
+      const info = assistantMessage('assistant-1', 'user-0');
+      info.time = { created: 1 };
+      const optimisticInfo = userMessage('optimistic-user');
+      optimisticInfo.time = { created: 2 };
+      const optimistic: MessageEntry = {
+        info: optimisticInfo,
+        parts: [
+          {
+            id: 'optimistic-user-part-1',
+            sessionID: 'session-1',
+            messageID: 'optimistic-user',
+            type: 'text',
+            text,
+          },
+        ],
+      };
+      clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
+      clientMocks.sessionMessages.mockResolvedValue([{ info, parts: [] }]);
+
+      const { stateModule, hookModule } = await loadModules();
+      flushSolid();
+      const messageWindow = await import('../lib/message-window');
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      stateModule.setState(storePath('messages', [{ info, parts: [] }, optimistic]));
+      flushSolid();
+
+      await hookModule.recheckSessionStatus('session-1');
+      flushSolid();
+
+      // The response lacks the optimistic prompt, so only the stored rows carry its size.
+      expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1);
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'assistant-1',
+        'optimistic-user',
+      ]);
+      expect(
+        messageWindow.getCachedSessionMessages('session-1').map((entry) => entry.info.id)
+      ).toEqual(cachedIds);
+    }
+  );
+
   it('preserves a queued active-session delta while prepending older history', async () => {
     const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     Object.defineProperty(globalThis, 'requestAnimationFrame', {
@@ -1257,6 +1389,76 @@ describe('useOpenCode session state flows', () => {
         streamingPartId: 'parent-text',
         streamingText: 'Parent response in progress',
       });
+    } finally {
+      if (originalRequestAnimationFrame) {
+        Object.defineProperty(globalThis, 'requestAnimationFrame', {
+          configurable: true,
+          writable: true,
+          value: originalRequestAnimationFrame,
+        });
+      } else {
+        // SAFETY: The fixture provides the Partial<typeof globalThis> fields read by this statement.
+        delete (globalThis as Partial<typeof globalThis>).requestAnimationFrame;
+      }
+    }
+  });
+
+  it('sizes a queued delta materialized by an older-history prepend from the stored rows', async () => {
+    const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => 1),
+    });
+
+    try {
+      const { stateModule, hookModule } = await loadModules();
+      flushSolid();
+      const messageWindow = await import('../lib/message-window');
+      flushSolid();
+      const currentInfo = assistantMessage('parent-assistant', 'parent-user');
+      currentInfo.time = { created: 1 };
+      const currentPart: Part = {
+        id: 'parent-text',
+        sessionID: 'session-1',
+        messageID: 'parent-assistant',
+        type: 'text',
+        text: '',
+      };
+      // SAFETY: The test installs the typed mock implementation before this statement.
+      const older = [userEntry('parent-old')] as Awaited<
+        ReturnType<typeof clientMocks.sessionMessages>
+      >;
+      older.nextCursor = 'cursor-oldest';
+      clientMocks.sessionMessages.mockResolvedValue(older);
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('messages', [{ info: currentInfo, parts: [currentPart] }]));
+      flushSolid();
+      stateModule.setState(storePath('streamingPartId', currentPart.id));
+      flushSolid();
+      stateModule.setState(storePath('streamingText', 'Parent response'));
+      flushSolid();
+      // The queued delta is flushed and materialized into the retained part inside the prepend's
+      // store transaction, so only the stored rows carry its 26 MiB estimate.
+      const delta = 'x'.repeat(13 * 1024 * 1024);
+      stateModule.applyMessagePartDelta(currentInfo.id, currentPart.id, delta, 'session-1');
+      flushSolid();
+      messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+      flushSolid();
+
+      await hookModule.loadOlderSessionHistoryPage('session-1', { prefetchBoundaryPrompts: false });
+      flushSolid();
+
+      const fullText = `Parent response${delta}`;
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'parent-old',
+        'parent-assistant',
+      ]);
+      expect(stateModule.state.messages[1]!.parts[0]).toHaveProperty('text', fullText);
+      expect(stateModule.state.streamingText).toBe(fullText);
+      expect(messageWindow.getCachedSessionMessages('session-1')).toEqual([]);
+      expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-oldest');
     } finally {
       if (originalRequestAnimationFrame) {
         Object.defineProperty(globalThis, 'requestAnimationFrame', {
