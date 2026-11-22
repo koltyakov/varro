@@ -12,6 +12,7 @@ import type {
   DroppedFile,
   EditorContext,
   QueuedMessageSnapshot,
+  ServerEvent,
   SiblingWorkspaceAlert,
 } from '../shared/protocol';
 import type { SessionStateManager } from './session-state-manager';
@@ -79,6 +80,7 @@ function createPanel() {
   const panel = {
     title: '',
     iconPath: undefined as unknown,
+    options: { retainContextWhenHidden: true },
     visible: true,
     viewColumn: 2,
     reveal: vi.fn(),
@@ -2299,7 +2301,7 @@ describe('SidebarProvider editor panels', () => {
     );
   });
 
-  it('lets VS Code release hidden editor content and broadcasts the editor-tab lifecycle', async () => {
+  it('retains editor content and readiness across tab switches without another handshake', async () => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);
     const editor = createPanel();
@@ -2311,7 +2313,7 @@ describe('SidebarProvider editor panels', () => {
       'varro.editor',
       'Varro: New Session',
       expect.anything(),
-      { enableScripts: true, retainContextWhenHidden: false }
+      { enableScripts: true, retainContextWhenHidden: true }
     );
     expect(posted).toContainEqual({
       type: 'editor-tabs/state',
@@ -2320,16 +2322,52 @@ describe('SidebarProvider editor panels', () => {
 
     await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
     const visibleHtml = editor.panel.webview.html;
-
-    editor.setVisible(false);
-    expect(editor.panel.webview.html).toBe(visibleHtml);
-
-    editor.setVisible(true);
-    expect(editor.panel.webview.html).toBe(visibleHtml);
-    expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
-
-    editor.panel.webview.postMessage.mockClear();
     editor.ready();
+    const internals = provider as unknown as {
+      editorPanels: Map<
+        string,
+        { ready: boolean; webviewSession: { isReady: boolean; getRequestGeneration(): number } }
+      >;
+    };
+    const endpoint = [...internals.editorPanels.values()][0]!;
+    await vi.waitFor(() => expect(endpoint.ready).toBe(true));
+    const generation = endpoint.webviewSession.getRequestGeneration();
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      editor.setVisible(false);
+      expect(endpoint.ready).toBe(false);
+      expect(endpoint.webviewSession.isReady).toBe(true);
+      expect(editor.panel.webview.html).toBe(visibleHtml);
+      expect(endpoint.webviewSession.getRequestGeneration()).toBe(generation);
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.objectContaining({ owner: false }),
+      });
+
+      editor.panel.webview.postMessage.mockClear();
+      const event: ServerEvent = {
+        type: 'session.status',
+        seq: cycle + 1,
+        workspaceDirectory: '/repo',
+        properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      };
+      provider.post({ type: 'server/event', payload: event });
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'server/event',
+        payload: event,
+      });
+
+      editor.setVisible(true);
+      expect(endpoint.ready).toBe(true);
+      expect(editor.panel.webview.html).toBe(visibleHtml);
+      expect(endpoint.webviewSession.getRequestGeneration()).toBe(generation);
+      expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledOnce();
+      expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
+        type: 'permission-automation/update',
+        payload: expect.objectContaining({ owner: true }),
+      });
+    }
+
     await vi.waitFor(() =>
       expect(editor.panel.webview.postMessage).toHaveBeenCalledWith({
         type: 'server/status',
@@ -2342,6 +2380,56 @@ describe('SidebarProvider editor panels', () => {
       type: 'editor-tabs/state',
       payload: { open: false, sessionIds: [], openSessionIds: [] },
     });
+  });
+
+  it('suspends restored non-retained editors until their replacement document is ready', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const editor = createPanel();
+    editor.panel.options.retainContextWhenHidden = false;
+    try {
+      await provider.deserializeWebviewPanel(editor.panel as never, {
+        'varro.editorViewId': 'legacy-editor',
+        'varro.lastOpenedView': { type: 'session', sessionId: 'session-1' },
+      });
+      await vi.waitFor(() => expect(editor.panel.webview.html).toContain('varro-editor-surface'));
+      editor.ready();
+      const internals = provider as unknown as {
+        editorPanels: Map<
+          string,
+          { ready: boolean; webviewSession: { isReady: boolean; getRequestGeneration(): number } }
+        >;
+      };
+      const endpoint = [...internals.editorPanels.values()][0]!;
+      await vi.waitFor(() => expect(endpoint.ready).toBe(true));
+      const generation = endpoint.webviewSession.getRequestGeneration();
+      editor.setVisible(false);
+      expect(endpoint.ready).toBe(false);
+      expect(endpoint.webviewSession.isReady).toBe(false);
+      expect(endpoint.webviewSession.getRequestGeneration()).toBe(generation + 1);
+
+      editor.panel.webview.postMessage.mockClear();
+      const event: ServerEvent = {
+        type: 'session.status',
+        seq: 1,
+        workspaceDirectory: '/repo',
+        properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      };
+      provider.post({ type: 'server/event', payload: event });
+      expect(editor.panel.webview.postMessage).not.toHaveBeenCalledWith({
+        type: 'server/event',
+        payload: event,
+      });
+
+      editor.setVisible(true);
+      expect(endpoint.ready).toBe(false);
+      expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
+      editor.ready();
+      await vi.waitFor(() => expect(endpoint.ready).toBe(true));
+      expect(getVscodeMock().window.createWebviewPanel).not.toHaveBeenCalled();
+      expect(editor.panel.dispose).not.toHaveBeenCalled();
+    } finally {
+      await provider.dispose();
+    }
   });
 
   it('broadcasts only visible editor sessions as read', async () => {
@@ -4163,31 +4251,35 @@ describe('SidebarProvider editor panels', () => {
     expect(restored.panel.webview.onDidReceiveMessage).not.toHaveBeenCalled();
   });
 
-  it('prepares a hidden restored editor panel for its first reveal', async () => {
-    const { provider } = await createSidebarProviderInstance();
-    const panel = createPanel();
-    panel.panel.visible = false;
+  it.each([true, false])(
+    'prepares a hidden restored editor with retention %s for its first reveal',
+    async (retainsContext) => {
+      const { provider } = await createSidebarProviderInstance();
+      const panel = createPanel();
+      panel.panel.options.retainContextWhenHidden = retainsContext;
+      panel.panel.visible = false;
 
-    await provider.deserializeWebviewPanel(panel.panel as never, {
-      'varro.lastOpenedView': { type: 'session', sessionId: 'session-1', timestamp: 1 },
-    });
+      await provider.deserializeWebviewPanel(panel.panel as never, {
+        'varro.lastOpenedView': { type: 'session', sessionId: 'session-1', timestamp: 1 },
+      });
 
-    expect(panel.panel.webview.html).toContain('--vscode-editor-background');
-    expect(panel.panel.webview.html).not.toContain('webview.mjs');
+      expect(panel.panel.webview.html).toContain('--vscode-editor-background');
+      expect(panel.panel.webview.html).not.toContain('webview.mjs');
 
-    panel.setVisible(true);
-    await vi.waitFor(() => expect(panel.panel.webview.html).toContain('type="module"'));
-    expect(panel.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2);
+      panel.setVisible(true);
+      await vi.waitFor(() => expect(panel.panel.webview.html).toContain('type="module"'));
+      expect(panel.panel.webview.onDidReceiveMessage).toHaveBeenCalledTimes(retainsContext ? 1 : 2);
 
-    panel.panel.webview.postMessage.mockClear();
-    panel.ready();
-    await vi.waitFor(() =>
-      expect(panel.panel.webview.postMessage).toHaveBeenCalledWith({
-        type: 'server/status',
-        payload: expect.anything(),
-      })
-    );
-  });
+      panel.panel.webview.postMessage.mockClear();
+      panel.ready();
+      await vi.waitFor(() =>
+        expect(panel.panel.webview.postMessage).toHaveBeenCalledWith({
+          type: 'server/status',
+          payload: expect.anything(),
+        })
+      );
+    }
+  );
 
   it('initializes a new editor whose panel starts hidden', async () => {
     const { provider } = await createSidebarProviderInstance();
@@ -4197,7 +4289,6 @@ describe('SidebarProvider editor panels', () => {
 
     await provider.openNewEditor();
     await vi.waitFor(() => expect(editor.panel.webview.html).toContain('type="module"'));
-    editor.setVisible(true);
     editor.panel.webview.postMessage.mockClear();
     editor.ready();
 
@@ -4207,5 +4298,14 @@ describe('SidebarProvider editor panels', () => {
         payload: expect.anything(),
       })
     );
+    const internals = provider as unknown as {
+      editorPanels: Map<string, { ready: boolean; webviewSession: { isReady: boolean } }>;
+    };
+    const endpoint = [...internals.editorPanels.values()][0]!;
+    expect(endpoint.webviewSession.isReady).toBe(true);
+    expect(endpoint.ready).toBe(false);
+    editor.setVisible(true);
+    expect(endpoint.ready).toBe(true);
+    expect(editor.panel.webview.onDidReceiveMessage).toHaveBeenCalledOnce();
   });
 });

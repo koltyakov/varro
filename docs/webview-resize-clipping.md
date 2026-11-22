@@ -99,12 +99,20 @@ transparent tail and found no probe pixels through the opaque replacement. The h
 still clipped some transition paints. See that evidence directory's `fix-ledger.md`
 for the separate application results and unresolved host defect.
 
-Editor startup and tab reveal have a separate 50 ms layout-settling hold that hides the root.
+Editor startup has a separate 50 ms layout-settling hold that hides the root.
 Continuous resize events may restart that debounce, but must not extend root hiding beyond
-250 ms from the visible startup/reveal. Hiding cancels the deadline; returning starts a fresh
-one. Once revealed, ordinary resizing must not hide the root again. This deadline does not
+250 ms from the first visible startup/reveal. Hiding during startup cancels the deadline;
+returning before the initial layout settles starts a fresh one. Once revealed, tab switching
+and ordinary resizing must not hide the root again. This deadline does not
 change transcript hydration, width tracking, or scroll ownership. Bootstrap unit tests cover
 continuous resizing, hidden-view cancellation, and disposal in `src/webview/index.test.tsx`.
+
+New editor chat panels retain their webview context while hidden. VS Code restores each panel's
+original, immutable `retainContextWhenHidden` option, so tabs created before this change still
+recreate their documents on reveal, even after a window reload. Keep their suspend/resume path
+until the user closes and reopens them. Do not automatically replace restored panels: that would
+lose panel-local unsent drafts and change tab order. Finish or save the draft and its attachments
+before closing an older tab; reopening the session keeps its sent conversation.
 
 The October 4 maximize/restore reproduction exposed an interaction with viewport media queries.
 At a 486px root cap, the 1400px desktop breakpoint displayed a 420px session sidebar, leaving only

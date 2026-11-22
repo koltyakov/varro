@@ -193,6 +193,10 @@ export class WebviewSession {
     return this.webviewLoadGeneration;
   }
 
+  get isReady() {
+    return this.webviewReady;
+  }
+
   setInitialRoute(route: WebviewInstanceContext['initialRoute']) {
     if (this.webviewContext?.surface === 'editor') this.webviewContext.initialRoute = route;
   }

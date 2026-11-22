@@ -402,11 +402,12 @@ describe('webview bootstrap', () => {
     }
   });
 
-  it.each(['startup', 'reveal'] as const)(
+  it.each(['startup', 'initial reveal'] as const)(
     'bounds editor layout hiding during continuous resizing on %s',
     (phase) => {
       vi.useFakeTimers();
-      let visibilityState: DocumentVisibilityState = 'visible';
+      let visibilityState: DocumentVisibilityState =
+        phase === 'initial reveal' ? 'hidden' : 'visible';
       let width = 486;
       const visibilitySpy = vi
         .spyOn(document, 'visibilityState', 'get')
@@ -419,11 +420,9 @@ describe('webview bootstrap', () => {
         document.documentElement.classList.contains('varro-editor-layout-pending');
       try {
         cleanup = bootstrap(root);
-        if (phase === 'reveal') {
-          vi.advanceTimersByTime(100);
-          expect(isPending()).toBe(false);
-          visibilityState = 'hidden';
-          document.dispatchEvent(new Event('visibilitychange'));
+        if (phase === 'initial reveal') {
+          vi.advanceTimersByTime(1000);
+          expect(isPending()).toBe(true);
           visibilityState = 'visible';
           document.dispatchEvent(new Event('visibilitychange'));
         }
@@ -454,7 +453,7 @@ describe('webview bootstrap', () => {
     }
   );
 
-  it('cancels the editor reveal deadline while hidden and starts a fresh deadline on return', () => {
+  it('pauses initial editor layout while hidden without rearming it after startup', () => {
     vi.useFakeTimers();
     let visibilityState: DocumentVisibilityState = 'visible';
     const visibilitySpy = vi
@@ -488,7 +487,7 @@ describe('webview bootstrap', () => {
       document.dispatchEvent(new Event('visibilitychange'));
       visibilityState = 'visible';
       document.dispatchEvent(new Event('visibilitychange'));
-      expect(isPending()).toBe(true);
+      expect(isPending()).toBe(false);
       cleanup();
       cleanup = undefined;
       const removeSpy = vi.spyOn(document.documentElement.classList, 'remove');
@@ -509,7 +508,7 @@ describe('webview bootstrap', () => {
     }
   });
 
-  it('hides editor content until a revealed tab finishes resizing', async () => {
+  it('keeps a settled editor visible through repeated tab returns and resizing', async () => {
     let visibilityState: DocumentVisibilityState = 'visible';
     const visibilityStateSpy = vi
       .spyOn(document, 'visibilityState', 'get')
@@ -530,18 +529,25 @@ describe('webview bootstrap', () => {
       );
     });
 
-    visibilityState = 'hidden';
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(document.documentElement.classList.contains('varro-editor-layout-pending')).toBe(true);
+    const transcript = document.createElement('div');
+    transcript.textContent = 'Retained conversation';
+    root.appendChild(transcript);
 
-    visibilityState = 'visible';
-    document.dispatchEvent(new Event('visibilitychange'));
-    window.dispatchEvent(new Event('resize'));
-    await vi.waitFor(() => {
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      visibilityState = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
       expect(document.documentElement.classList.contains('varro-editor-layout-pending')).toBe(
         false
       );
-    });
+      visibilityState = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('resize'));
+      expect(document.documentElement.classList.contains('varro-editor-layout-pending')).toBe(
+        false
+      );
+      expect(root.firstChild).toBe(transcript);
+      expect(mocks.render).toHaveBeenCalledOnce();
+    }
     visibilityStateSpy.mockRestore();
   });
 

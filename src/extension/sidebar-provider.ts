@@ -1207,7 +1207,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             const ready = await webviewSession.handleReady(documentId);
             if (!ready) return;
             if (endpointRef.endpoint) {
-              this.setEndpointReady(endpointRef.endpoint, true);
+              this.setEndpointReady(
+                endpointRef.endpoint,
+                endpointRef.endpoint.surface !== 'editor' || bridge.isVisible()
+              );
               if (endpointRef.endpoint.surface === 'editor') {
                 const editorEndpoint = endpointRef.endpoint as EditorEndpoint;
                 editorEndpoint.restoringSessionId = undefined;
@@ -1757,7 +1760,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       SidebarProvider.editorViewType,
       this.editorTitle(route),
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
-      { enableScripts: true, retainContextWhenHidden: false }
+      { enableScripts: true, retainContextWhenHidden: true }
     );
     await this.attachEditorPanel(panel, route, `editor-${Date.now()}-${++this.nextEditorId}`);
     return panel;
@@ -1809,12 +1812,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     this.editorPanels.set(key, editorEndpoint);
     this.postEditorTabsState();
+    const retainsContext = panel.options.retainContextWhenHidden === true;
     let wasVisible = panel.visible;
     const viewStateDisposable = panel.onDidChangeViewState(({ webviewPanel }) => {
       if (this.disposing) return;
       if (webviewPanel.visible === wasVisible) return;
       wasVisible = webviewPanel.visible;
-      if (webviewPanel.visible) {
+      if (retainsContext) {
+        // Hidden editors retain their document and requests, but hand off automation and queues.
+        this.setEndpointReady(endpoint, webviewPanel.visible && endpoint.webviewSession.isReady);
+      } else if (webviewPanel.visible) {
+        // VS Code restores older tabs with their original, immutable panel options.
         endpoint.webviewSession.resume();
       } else {
         this.setEndpointReady(endpoint, false);
@@ -1848,7 +1856,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     editorEndpoint.panelDisposables.push(viewStateDisposable, disposeDisposable);
     await endpoint.webviewSession.resolve(panel);
-    if (!panel.visible) endpoint.webviewSession.suspend();
+    if (!retainsContext && !panel.visible) endpoint.webviewSession.suspend();
   }
 
   private editorRouteChanged(viewId: string, route: WebviewRoute) {
@@ -2257,7 +2265,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       if (
         endpoint.surface === 'editor' &&
-        !endpoint.ready &&
+        !endpoint.webviewSession.isReady &&
         !endpoint.bridge.isVisible() &&
         (msg.type === 'server/event' || msg.type === 'context/update')
       ) {
@@ -2626,7 +2634,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.permissionAutomationOwnerWorkspaces.set(viewId, workspace);
     }
     for (const endpoint of this.endpoints) {
-      if (!endpoint.ready) continue;
+      if (!endpoint.webviewSession.isReady) continue;
       endpoint.bridge.post({
         type: 'permission-automation/update',
         payload: this.permissionAutomationFor(endpoint.viewId),
