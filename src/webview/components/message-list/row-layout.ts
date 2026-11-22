@@ -19,7 +19,7 @@ import type { MessageEntry, Part } from '../../types';
 import {
   hasUserMessageContent,
   parseUserMessageContent,
-  projectAutomaticActionMessage,
+  projectAutomaticActionMessageWithContent,
 } from '../message/UserMessageContent';
 import { getPresentationPartKey } from './streaming-presentation';
 import { isPlanImplementationMessage } from './plan-actions';
@@ -110,7 +110,8 @@ export function getMessageBlockBoundaryMap(
   const boundaries = new Map<string, MessageBlockBoundary>();
 
   for (const sourceMessage of messages) {
-    const message = projectAutomaticActionMessage(sourceMessage);
+    // A retained user message reuses the parse that decided its projection.
+    const { message, content } = projectAutomaticActionMessageWithContent(sourceMessage);
     const messageId = message.info.id;
     if (options.renderEmptyMessageIds.has(messageId)) {
       boundaries.set(messageId, {
@@ -122,7 +123,7 @@ export function getMessageBlockBoundaryMap(
     }
 
     if (message.info.role === 'user') {
-      const parsed = parseUserMessageContent(message.parts);
+      const parsed = content ?? parseUserMessageContent(message.parts);
       const hasContent =
         hasUserMessageContent(parsed) || message.info.summary?.diffsOmitted === true;
       const hasBorder =
@@ -434,9 +435,9 @@ export function getRenderEmptyMessageIds(
   }
 
   for (const sourceMessage of messages) {
-    const message = projectAutomaticActionMessage(sourceMessage);
+    const { message, content } = projectAutomaticActionMessageWithContent(sourceMessage);
     if (message.info.role === 'user') {
-      const parsed = parseUserMessageContent(message.parts);
+      const parsed = content ?? parseUserMessageContent(message.parts);
       if (
         !hasUserMessageContent(parsed) &&
         parsed.automaticActions.length === 0 &&

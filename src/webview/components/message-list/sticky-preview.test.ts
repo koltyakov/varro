@@ -16,6 +16,10 @@ vi.mock('../Message', () => ({
     if (!first || !first.text) return '(no content)';
     return first.text;
   }),
+  // Mirrors the mocked parse below: navigation previews derive text from that parse.
+  getUserMessagePreviewTextFromContent: vi.fn(
+    (parsed: { messageTexts: string[] }) => parsed.messageTexts[0] ?? '(no content)'
+  ),
   getUserMessageMarkupSuffix: vi.fn((text: string) => {
     const index = text.indexOf('<svg');
     if (index < 0) return null;

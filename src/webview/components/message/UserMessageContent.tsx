@@ -67,6 +67,7 @@ import type {
   Part,
   TextPart,
   ToolPart,
+  UserMessage,
 } from '../../types';
 import {
   formatContextLineRanges,
@@ -527,14 +528,45 @@ export function getAutomaticActionInfo(info: MessageEntry['info']): AssistantMes
 export function projectAutomaticActionMessage(message: MessageEntry): MessageEntry {
   if (message.info.role !== 'user') return message;
   const parsed = parseUserMessageContent(message.parts);
-  if (
+  return keepsUserMessage(message.info, message.parts, parsed)
+    ? message
+    : toAutomaticActionMessage(message.info, parsed);
+}
+
+type AutomaticActionProjection = {
+  message: MessageEntry;
+  content: ParsedUserMessageContent | null;
+};
+
+/**
+ * Projects like `projectAutomaticActionMessage` and also returns the parse that kept a user
+ * message unchanged, so one pass can reuse it instead of parsing the same parts again.
+ * `content` is null for assistant messages and for projected automatic actions.
+ */
+export function projectAutomaticActionMessageWithContent(
+  message: MessageEntry
+): AutomaticActionProjection {
+  if (message.info.role !== 'user') return { message, content: null };
+  const parsed = parseUserMessageContent(message.parts);
+  return keepsUserMessage(message.info, message.parts, parsed)
+    ? { message, content: parsed }
+    : { message: toAutomaticActionMessage(message.info, parsed), content: null };
+}
+
+function keepsUserMessage(info: UserMessage, parts: Part[], parsed: ParsedUserMessageContent) {
+  return (
     !parsed.automaticParts.length ||
     hasUserMessageContent(parsed) ||
-    message.info.summary?.diffsOmitted ||
-    message.parts.some((part) => part.type === 'compaction')
-  )
-    return message;
-  return { info: getAutomaticActionInfo(message.info), parts: parsed.automaticParts };
+    !!info.summary?.diffsOmitted ||
+    parts.some((part) => part.type === 'compaction')
+  );
+}
+
+function toAutomaticActionMessage(
+  info: UserMessage,
+  parsed: ParsedUserMessageContent
+): MessageEntry {
+  return { info: getAutomaticActionInfo(info), parts: parsed.automaticParts };
 }
 
 function getAutomaticAction(part: TextPart): string | null {
@@ -1039,7 +1071,11 @@ function getDisplayMessageTexts(parsed: ParsedUserMessageContent): string[] {
 }
 
 export function getUserMessagePreviewText(parts: Part[]): string {
-  const parsed = parseUserMessageContent(parts);
+  return getUserMessagePreviewTextFromContent(parseUserMessageContent(parts));
+}
+
+/** Preview text for content the caller already parsed from the same parts. */
+export function getUserMessagePreviewTextFromContent(parsed: ParsedUserMessageContent): string {
   const firstText = getDisplayMessageTexts(parsed)
     .map((text) =>
       parsed.attachments.reduce(

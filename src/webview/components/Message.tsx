@@ -85,6 +85,7 @@ export {
   getUserMessageMarkupFormat,
   getUserMessageMarkupSuffix,
   getUserMessagePreviewText,
+  getUserMessagePreviewTextFromContent,
   hasUserMessageEditableContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';

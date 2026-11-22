@@ -3,11 +3,12 @@ import { collectSteeringMessages } from '../../lib/message-steering';
 import {
   getUserMessageMarkupSuffix,
   getUserMessagePreviewText,
+  getUserMessagePreviewTextFromContent,
   parseUserMessageContent,
 } from '../Message';
 import { isPlanImplementationMessage } from './plan-actions';
 import { getFollowupActionTitle } from '../../../shared/followups';
-import type { UserMessageMarkupFormat } from '../Message';
+import type { ParsedUserMessageContent, UserMessageMarkupFormat } from '../Message';
 import type { Message, MessageEntry, Part } from '../../types';
 
 export type StickyUserMessagePreview = {
@@ -29,7 +30,12 @@ type StickyUserMessageCounts = {
 };
 
 function getStickyUserMessageCounts(parts: Part[]): StickyUserMessageCounts {
-  const parsed = parseUserMessageContent(parts);
+  return getStickyUserMessageCountsFromContent(parseUserMessageContent(parts));
+}
+
+function getStickyUserMessageCountsFromContent(
+  parsed: ParsedUserMessageContent
+): StickyUserMessageCounts {
   const imageCount = parsed.fileParts.filter((part) => part.mime.startsWith('image/')).length;
   const attachmentCount = parsed.attachments.length + (parsed.fileParts.length - imageCount);
   const firstText = parsed.messageTexts.find((text) => text.trim().length > 0);
@@ -115,14 +121,16 @@ export function getUserMessageNavigationPreviews(
     if (entry.info.role !== 'user' || subagentSessionIds.has(entry.info.sessionID)) continue;
     if (isSessionResumeMessage(entry.parts)) continue;
     if (getFollowupActionTitle(entry.info, entry.parts) !== null) continue;
-    const text = getUserMessagePreviewText(entry.parts);
+    // Preview text and counts read the same parts; one parse serves both.
+    const parsed = parseUserMessageContent(entry.parts);
+    const text = getUserMessagePreviewTextFromContent(parsed);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
     previews.push({
       id: entry.info.id,
       sentAt: entry.info.time.created,
       index,
       text,
-      ...getStickyUserMessageCounts(entry.parts),
+      ...getStickyUserMessageCountsFromContent(parsed),
     });
   }
   return previews;
