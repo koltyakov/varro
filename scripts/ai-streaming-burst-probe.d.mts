@@ -1,0 +1,81 @@
+export type BurstMarker = {
+  id: number;
+  top: number;
+  bottom?: number;
+  painted: boolean;
+  signature: string;
+  messageID?: string;
+};
+export type BurstFrame = {
+  at: number;
+  top: number;
+  height: number;
+  client: number;
+  hidden: boolean;
+  mounted: number;
+  textLength: number;
+  markers: BurstMarker[];
+  reserve?: number;
+  previews?: number;
+};
+export type BurstProbeData = {
+  startedAt: number;
+  stoppedAt: number;
+  frames: BurstFrame[];
+  commits: { at: number; length: number }[];
+  events: { at: number; type: string }[];
+  longtasks: { at: number; duration: number }[];
+  longtasksSupported: boolean;
+  droppedSamples: number;
+};
+type SharedMarker = {
+  id: number;
+  dy: number;
+  documentDelta: number;
+  before: BurstMarker;
+  after: BurstMarker;
+};
+type SpeedViolation = {
+  at: number;
+  delta: number;
+  interval: number;
+  budgetInterval: number;
+  speedPxPerSecond: number;
+  marker: SharedMarker | null;
+};
+export type BurstSummary = {
+  frames: number;
+  durationMs: number;
+  hiddenFrames: number;
+  droppedSamples: number;
+  maxMountedRows: number;
+  reversals: {
+    at: number;
+    delta: number;
+    marker: SharedMarker;
+    interval: number;
+    heightDelta: number;
+  }[];
+  excessiveSpeed: SpeedViolation[];
+  coordinateOnly: SpeedViolation[];
+  maxFrameGapMs: number;
+  gapsAbove50: number;
+  gaps: { at: number; interval: number }[];
+  longtasks: { at: number; duration: number }[];
+  longtasksSupported: boolean;
+  maxVerifiedFrameSpeedPxPerSecond: number | null;
+  p95VerifiedFrameSpeedPxPerSecond: number | null;
+  maxSustainedSpeedPxPerSecond: number | null;
+  p95VelocityChangePxPerSecond: number | null;
+  maxVelocityChangePxPerSecond: number | null;
+  abruptStarts: { at: number; fromPxPerSecond: number; toPxPerSecond: number; interval: number }[];
+  textCommits: number;
+  p95TextCommitGapMs: number | null;
+  maxTextCommitGapMs: number | null;
+  eventCount: number;
+  eventTypes: string[];
+  finalBottomGap: number | null;
+  timing: string;
+};
+export function installBurstProbe(): { installed: boolean };
+export function analyzeBurstProbe(data: BurstProbeData): BurstSummary;

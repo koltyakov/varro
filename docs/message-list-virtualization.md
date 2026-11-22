@@ -282,6 +282,12 @@ the shared invariants below remain true.
   a boundary row, replacing its cached diff height with its shorter summary on each pass.
   Coalesce completion/unmount wakeups with an executing settle pass or its scheduled animation frame.
   Replacing that frame with another microtask can starve paint indefinitely during range churn.
+- Before releasing a deferred diff row's temporary `min-height`, reserve the actual scroll-range
+  shortfall against its natural in-flow child geometry. A successful streamed patch can remove its
+  status card while the hold still supplies that height; consuming its first removal reserve before
+  the hold ends otherwise clamps the viewport backward when details arrive. Publish the replacement
+  reserve before removing the hold, without acquiring a collapse owner. Explicit diff-view bottom
+  replacement keeps its own physical-bottom policy; a held scrollbar keeps its range owner.
 - While diff-view bottom-follow owns replacement, departing summaries must not acquire an activity
   collapse target or append reserve. Those owners block immediate physical-bottom correction until a
   later frame. The individually delayed sibling-preview case in `scroll-diff-preview.spec.ts` releases
@@ -650,6 +656,12 @@ Direct input acquires ownership only when it can affect the transcript:
   Padding inside the measured item is already included; wrapper padding is not. Fractional wrapper
   padding must not leave the scroll range a pixel short when the wrapper is finally removed.
   `scroll-reasoning-exit.spec.ts` checks the pre-exit budget and a painted marker through the handoff.
+- Commit a newly recreated reserve spacer before applying a reducing row-rounding correction.
+  Solid's deferred signal publication can otherwise leave no spacer in the DOM during the style
+  write, even though the next rendered frame reports a sufficient reserve. That ordering produced
+  a one-pixel browser clamp during ordinary streamed text after tools.
+  `scroll-streaming-patch-failure.spec.ts` checks both this correction and delayed diff-height release
+  with previews enabled and disabled.
 - Automatic todo completion and removal announce their disappearing block, margins, and parent gap
   before changing the layout. A later ResizeObserver correction is insufficient: the September 11
   editor replay briefly clamped the transcript backward by 139 px when its todo panel disappeared.

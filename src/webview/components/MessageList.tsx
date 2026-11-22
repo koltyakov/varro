@@ -1877,6 +1877,14 @@ export function MessageList() {
       : null;
     // Account for pending rounding reductions before they shrink the physical scroll range.
     reconcileAppendBottomReserve();
+    for (const [element, correction] of pendingRowHeightCorrections) {
+      if (element.isConnected && correction < (appliedRowHeightCorrections.get(element) ?? 0)) {
+        // A consumed reserve has no mounted spacer to grow imperatively. Commit its
+        // replacement before a smaller correction can clamp the viewport backward.
+        flush();
+        break;
+      }
+    }
     let changed = false;
     for (const [element, correction] of pendingRowHeightCorrections) {
       if (!element.isConnected) continue;
@@ -2232,6 +2240,9 @@ export function MessageList() {
           inlineDiffHeightHolds.delete(messageId);
           const mountedRow = mountedMessageRows.get(messageId);
           if (mountedRow) {
+            reserveInlineDiffHeightRelease(mountedRow);
+            // Publishing reserve may admit another deferred load on this row.
+            if (inlineDiffHeightHolds.has(messageId)) return;
             mountedRow.style.removeProperty('min-height');
             // Publish loaded geometry before range reconciliation can unmount this row.
             // Waiting for ResizeObserver lets a remount overwrite it with the short summary.
@@ -2243,6 +2254,53 @@ export function MessageList() {
       };
     }, onInlineDiffMount)
   );
+  function reserveInlineDiffHeightRelease(row: HTMLElement) {
+    if (
+      !containerRef ||
+      (inlinePreviewBottomFollow?.sessionId === state.activeSessionId &&
+        inlinePreviewBottomFollow.inputEpoch === directScrollInputEpoch)
+    )
+      return;
+    const bounds = row.getBoundingClientRect();
+    if (bounds.bottom <= containerRef.getBoundingClientRect().top) return;
+    const styles = getComputedStyle(row);
+    let bottom =
+      bounds.top +
+      (Number.parseFloat(styles.borderTopWidth) || 0) +
+      (Number.parseFloat(styles.paddingTop) || 0);
+    for (const child of row.children) {
+      const childStyles = getComputedStyle(child);
+      if (
+        childStyles.display === 'none' ||
+        (childStyles.position !== 'static' && childStyles.position !== 'relative')
+      )
+        continue;
+      bottom = Math.max(
+        bottom,
+        child.getBoundingClientRect().bottom + (Number.parseFloat(childStyles.marginBottom) || 0)
+      );
+    }
+    const naturalHeight =
+      bottom -
+      bounds.top +
+      (Number.parseFloat(styles.paddingBottom) || 0) +
+      (Number.parseFloat(styles.borderBottomWidth) || 0) +
+      (appliedRowHeightCorrections.get(row) ?? 0);
+    const lost = bounds.height - naturalHeight;
+    if (lost <= 0.5) return;
+    if (pointerScrollOwnershipActive) {
+      reserveHeldScrollbarRange(lost);
+    } else {
+      const shortfall =
+        containerRef.scrollTop - (containerRef.scrollHeight - containerRef.clientHeight - lost);
+      if (shortfall <= 0.5) return;
+      appendBottomReserveTarget = containerRef.scrollTop;
+      setAppendBottomReserve((reserve) => reserve + Math.ceil(shortfall));
+    }
+    // Completion can remove the status card while this hold still supplies its height.
+    // Publish the replacement space before releasing the hold, not after a browser clamp.
+    flush();
+  }
   // Unmounted rows remain provisional. Measure the mounted range exactly before paint rather
   // than mounting the entire initial page just to establish its offscreen heights.
   const shouldMeasureRows = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
