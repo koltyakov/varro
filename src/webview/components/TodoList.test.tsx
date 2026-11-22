@@ -58,6 +58,31 @@ describe('TodoList', () => {
     writeStored(STORAGE_KEYS.todoListCollapsed, null);
   });
 
+  it('skips the entrance animation for todos restored while a session loads', () => {
+    setState(storePath('messagesLoading', true));
+    flushSolid();
+    cleanup = render(() => TodoList(), container!);
+    flushSolid();
+
+    const block = container?.querySelector('.todo-block');
+    expect(block?.classList.contains('animate-fade-in')).toBe(false);
+    expect(block?.classList.contains('is-hydrating')).toBe(true);
+
+    setState(storePath('messagesLoading', false));
+    flushSolid();
+    expect(block?.classList.contains('animate-fade-in')).toBe(false);
+    expect(block?.classList.contains('is-hydrating')).toBe(false);
+  });
+
+  it('animates todos that appear in an already loaded session', () => {
+    cleanup = render(() => TodoList(), container!);
+    flushSolid();
+
+    const block = container?.querySelector('.todo-block');
+    expect(block?.classList.contains('animate-fade-in')).toBe(true);
+    expect(block?.classList.contains('is-hydrating')).toBe(false);
+  });
+
   it('renders an empty todo list with accessible list semantics', () => {
     cleanup = render(() => TodoList(), container!);
     flushSolid();

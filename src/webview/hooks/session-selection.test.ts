@@ -593,6 +593,36 @@ describe('session-selection helpers', () => {
     expect(initialScrollCallOrder).toBeGreaterThan(loadingCompleteCallOrder);
   });
 
+  it('starts the native todo read after reset and before the transcript load settles', async () => {
+    const calls: string[] = [];
+    const load = deferred<ReturnType<typeof loadedSession>>();
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      resetTodoSync: () => {
+        calls.push('reset');
+      },
+      prefetchTodosForSession: (id, directory) => {
+        calls.push(`prefetch:${id}:${directory}`);
+      },
+      loadSession: () => {
+        calls.push('load');
+        return load.promise;
+      },
+      syncTodosForSession: async () => {
+        calls.push('sync');
+      },
+    });
+
+    const selection = selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1', {
+      directory: '/repo',
+    });
+    expect(calls).toEqual(['reset', 'prefetch:session-1:/repo', 'load']);
+
+    load.resolve(loadedSession('session-1'));
+    await selection;
+    expect(calls).toEqual(['reset', 'prefetch:session-1:/repo', 'load', 'sync']);
+  });
+
   it('clears the loading flag and reports an error when the session load fails', async () => {
     const setMessagesLoading = vi.fn();
     const setError = vi.fn();

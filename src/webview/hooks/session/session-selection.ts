@@ -41,6 +41,7 @@ type SessionSelectionDeps = {
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   syncSessionMcps(sessionId: string): Promise<void>;
   resetTodoSync(): void;
+  prefetchTodosForSession?(sessionId: string, directory?: string): void;
   clearMessages(): void;
   setMessagesLoading?(loading: boolean): void;
   loadSession(
@@ -134,6 +135,7 @@ export async function selectSessionWithDependencies(
     deps.setMessagesLoading?.(true);
   })();
 
+  deps.prefetchTodosForSession?.(id, options?.directory);
   const mcpSync = deps.syncSessionMcps(id).catch(() => {});
   const statusSnapshotStartedAt = captureSessionStatusSnapshotTime();
   const statusSync = deps.loadSessionStatuses().catch(() => null);

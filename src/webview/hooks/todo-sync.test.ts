@@ -341,6 +341,96 @@ describe('todo-sync', () => {
     }
   });
 
+  it('reuses a prefetched native read and bounds it only after messages arrive', async () => {
+    vi.useFakeTimers();
+    let finish!: (todos: NormalizedTodo[]) => void;
+    const loadSessionTodos = vi.fn(
+      (_sessionId: string, _signal: AbortSignal, _directory?: string) =>
+        new Promise<NormalizedTodo[]>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const operations = createTodoSyncOperations({
+      loadSessionTodos,
+      resolveSessionDirectory: () => '/workspace',
+    });
+    try {
+      operations.resetTodoSync();
+      operations.prefetchTodosForSession('session-1', '/workspace');
+      expect(loadSessionTodos).toHaveBeenCalledTimes(1);
+      expect(loadSessionTodos.mock.calls[0]?.[2]).toBe('/workspace');
+
+      // A slow transcript load must not spend the native read's deadline.
+      await vi.advanceTimersByTimeAsync(5_000);
+      const sync = operations.syncTodosForSession('session-1', []);
+      finish([{ id: 'native', content: 'native', status: 'pending', priority: 'high' }]);
+      await sync;
+      flushSolid();
+
+      expect(loadSessionTodos).toHaveBeenCalledTimes(1);
+      expect(loadSessionTodos.mock.calls[0]?.[1].aborted).toBe(false);
+      expect(state.todos).toEqual([
+        { id: 'native', content: 'native', status: 'pending', priority: 'high' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts a prefetched read when the deadline expires after messages arrive', async () => {
+    vi.useFakeTimers();
+    const loadSessionTodos = vi.fn(
+      (_sessionId: string, _signal: AbortSignal, _directory?: string) =>
+        new Promise<NormalizedTodo[]>(() => {})
+    );
+    const operations = createTodoSyncOperations({ loadSessionTodos });
+    try {
+      operations.prefetchTodosForSession('session-1');
+      const sync = operations.syncTodosForSession('session-1', []);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await sync;
+      expect(loadSessionTodos).toHaveBeenCalledTimes(1);
+      expect(loadSessionTodos.mock.calls[0]?.[1].aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    [
+      'todo state was reset',
+      (operations: ReturnType<typeof createTodoSyncOperations>) => operations.resetTodoSync(),
+    ],
+    [
+      'the session directory changed',
+      (_operations: ReturnType<typeof createTodoSyncOperations>, setDirectory: () => void) =>
+        setDirectory(),
+    ],
+  ])('discards a prefetched read when %s', async (_label, invalidate) => {
+    let directory = '/workspace';
+    const loadSessionTodos = vi
+      .fn<(_sessionId: string, _signal: AbortSignal, _directory?: string) => Promise<unknown[]>>()
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValue([{ content: 'fresh', status: 'pending', priority: 'high' }]);
+    const operations = createTodoSyncOperations({
+      loadSessionTodos,
+      resolveSessionDirectory: () => directory,
+    });
+
+    operations.prefetchTodosForSession('session-1');
+    invalidate(operations, () => {
+      directory = '/moved';
+    });
+    await operations.syncTodosForSession('session-1', []);
+    flushSolid();
+
+    expect(loadSessionTodos).toHaveBeenCalledTimes(2);
+    expect(loadSessionTodos.mock.calls[0]?.[1].aborted).toBe(true);
+    expect(state.todos).toEqual([
+      { id: 'fresh', content: 'fresh', status: 'pending', priority: 'high' },
+    ]);
+  });
+
   it('does not let a same-session reselection apply an older native response', async () => {
     let finish!: (todos: NormalizedTodo[]) => void;
     const pending = new Promise<NormalizedTodo[]>((resolve) => {

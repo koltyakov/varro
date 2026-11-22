@@ -7,7 +7,12 @@ import { isNumber, isString, type UnknownRecord, isObject } from '../lib/runtime
 import { STARTUP_TODO_TIMEOUT_MS, withStartupDeadline } from '../../shared/startup';
 
 type TodoSyncDependencies = {
-  loadSessionTodos?(sessionId: string, signal: AbortSignal): Promise<void | boolean | object>;
+  loadSessionTodos?(
+    sessionId: string,
+    signal: AbortSignal,
+    directory?: string
+  ): Promise<void | boolean | object>;
+  resolveSessionDirectory?(sessionId: string): string | undefined;
 };
 
 export function resetTodoSync() {
@@ -24,14 +29,56 @@ function setStateTodos(todos: NormalizedTodo[], options?: { preserveAdvancedStat
   });
 }
 
+type TodoPrefetch = {
+  sessionId: string;
+  directory: string | undefined;
+  generation: number;
+  controller: AbortController;
+  snapshot: Promise<void | boolean | object>;
+};
+
 export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   let nativeTodosEnabled = false;
   let todoLoadGeneration = 0;
+  let prefetch: TodoPrefetch | null = null;
+
+  const discardPrefetch = () => {
+    prefetch?.controller.abort();
+    prefetch = null;
+  };
 
   const reset = () => {
+    discardPrefetch();
     todoLoadGeneration += 1;
     nativeTodosEnabled = false;
     resetTodoSync();
+  };
+
+  // Selection starts the native read alongside the transcript load so its latency
+  // overlaps instead of stacking after messages, before the panel is revealed.
+  const prefetchTodosForSession = (
+    sessionId: string,
+    directory = deps.resolveSessionDirectory?.(sessionId)
+  ) => {
+    const load = deps.loadSessionTodos;
+    discardPrefetch();
+    if (!load) return;
+    const controller = new AbortController();
+    const snapshot = new Promise<void | boolean | object>((resolve) => {
+      resolve(load(sessionId, controller.signal, directory));
+    });
+    // The consuming sync owns error handling; an abandoned prefetch is best-effort.
+    snapshot.catch(() => {});
+    prefetch = { sessionId, directory, generation: todoLoadGeneration, controller, snapshot };
+  };
+
+  // A prefetch is reusable only when nothing invalidated todo state since it started.
+  const takePrefetch = (sessionId: string, generation: number) => {
+    const current = prefetch;
+    prefetch = null;
+    if (current?.sessionId === sessionId && current.generation === generation) return current;
+    current?.controller.abort();
+    return null;
   };
 
   const applyNativeTodos = <T>(raw: T, options?: { preserveAdvancedStatuses?: boolean }) => {
@@ -73,6 +120,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     messages: MessageEntry[] = appStore.state.messages
   ) => {
     const load = deps.loadSessionTodos;
+    const prefetched = takePrefetch(sessionId, todoLoadGeneration);
     const generation = ++todoLoadGeneration;
     const isCurrent = () =>
       generation === todoLoadGeneration && appStore.state.activeSessionId === sessionId;
@@ -87,7 +135,19 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
 
     try {
       const snapshot = await withStartupDeadline(
-        (signal) => load(sessionId, signal),
+        (signal) => {
+          // This runs after a microtask, so a session upserted with the loaded transcript
+          // is visible here. A read from a different directory is not reusable.
+          if (!prefetched) return load(sessionId, signal);
+          if (prefetched.directory !== deps.resolveSessionDirectory?.(sessionId)) {
+            prefetched.controller.abort();
+            return load(sessionId, signal);
+          }
+          signal.addEventListener('abort', () => prefetched.controller.abort(signal.reason), {
+            once: true,
+          });
+          return prefetched.snapshot;
+        },
         STARTUP_TODO_TIMEOUT_MS,
         'Session todo lookup'
       );
@@ -128,6 +188,7 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
 
   return {
     resetTodoSync: reset,
+    prefetchTodosForSession,
     syncTodosFromMessages: syncTodosFromMessagesWithState,
     syncTodosForSession: syncTodosForSessionWithState,
     handoffTodosToMessages: handoffTodosToMessagesWithState,

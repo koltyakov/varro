@@ -2078,6 +2078,11 @@
     background-color 0.2s ease;
 }
 
+/* Native todo hydration can replace message-derived progress before the session is shown. */
+.todo-block.is-hydrating :is(.todo-block-progress-fill, .todo-block-chevron) {
+  transition: none;
+}
+
 .todo-block-progress-fill.is-complete {
   background: var(--color-vscode-success);
 }

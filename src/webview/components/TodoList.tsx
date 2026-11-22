@@ -9,6 +9,7 @@ import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
 
 const todos = () => defaultAppState.state.todos;
+const hydratingSession = () => defaultAppState.state.messagesLoading;
 const TODO_LIST_CHAT_SHARE = 0.28;
 const MIN_TODO_LIST_HEIGHT = 52;
 // List padding plus five single-line todo rows and their gaps.
@@ -47,6 +48,9 @@ export function TodoList() {
   const [collapsed, setCollapsed] = createSignal(
     untrack(() => allDone() || readStored<boolean>(STORAGE_KEYS.todoListCollapsed) === true)
   );
+  // Todos restored while a session opens are existing state, not new progress, so they
+  // appear with the transcript instead of replaying the entrance animation.
+  const animateEntrance = !untrack(hydratingSession);
   const [listMaxHeight, setListMaxHeight] = createSignal(DEFAULT_TODO_LIST_HEIGHT);
   const [listScrollable, setListScrollable] = createSignal(false);
   let blockRef: HTMLDivElement | undefined;
@@ -232,7 +236,7 @@ export function TodoList() {
 
   return (
     <div
-      class="todo-block animate-fade-in"
+      class={`todo-block${animateEntrance ? ' animate-fade-in' : ''}${hydratingSession() ? ' is-hydrating' : ''}`}
       ref={(element) => {
         blockRef = element;
       }}
