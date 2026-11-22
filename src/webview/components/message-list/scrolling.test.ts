@@ -73,7 +73,7 @@ describe('bottom follow motion', () => {
     expect(motion.next(userTop, userTop - 10, 16)).toBe(userTop - 10);
   });
 
-  it('keeps paced text within the lag bound without snapping', () => {
+  it('recovers paced text lag gradually without snapping', () => {
     const motion = new BottomFollowMotion();
     let top = 0;
     let target = 0;
@@ -85,11 +85,112 @@ describe('bottom follow motion', () => {
       const next = motion.next(top, target, 8, 64);
       expect(next - top).toBeGreaterThanOrEqual(0);
       expect(next - top).toBeLessThanOrEqual(2.2 * 8 + 1e-9);
-      // A tick may land mid catch-up; the following frame is back within the bound.
-      expect(target - next).toBeLessThanOrEqual(tick ? 64 + 30 - 2.2 * 8 : 64);
       top = next;
     }
     expect(top).toBe(240);
+  });
+
+  it.each([1000 / 60, 1000 / 120])(
+    'bounds catch-up acceleration and speed at %s ms per frame',
+    (elapsed) => {
+      const motion = new BottomFollowMotion();
+      let top = 0;
+      let speed = 0;
+      for (let time = 0; time < 600; time += elapsed) {
+        const next = motion.next(top, 3000, elapsed, 64);
+        const nextSpeed = (next - top) / elapsed;
+        expect(nextSpeed).toBeGreaterThanOrEqual(0);
+        expect(nextSpeed).toBeLessThanOrEqual(2.2 + 1e-9);
+        expect(nextSpeed - speed).toBeLessThanOrEqual(0.006 * elapsed + 1e-9);
+        speed = nextSpeed;
+        top = next;
+      }
+      // The gentler entry must still reach the existing catch-up ceiling.
+      expect(speed).toBeCloseTo(2.2, 5);
+    }
+  );
+
+  it.each([8, 16])('bounds acceleration through mixed bursts at %s ms per frame', (elapsed) => {
+    const motion = new BottomFollowMotion();
+    const additions = new Map([
+      [0, 30],
+      [32, 30],
+      [64, 30],
+      [96, 30],
+      [128, 400],
+      [160, 24],
+      [192, 24],
+      [640, 700],
+      [672, 30],
+      [704, 30],
+      [2000, 500],
+      [2032, 24],
+    ]);
+    let top = 0;
+    let target = 0;
+    let speed = 0;
+    let peakLag = 0;
+    for (let time = 0; time < 4000; time += elapsed) {
+      target += additions.get(time) ?? 0;
+      const remaining = target - top;
+      const next = motion.next(top, target, elapsed, 64);
+      const nextSpeed = (next - top) / elapsed;
+      expect(next).toBeGreaterThanOrEqual(top);
+      expect(next).toBeLessThanOrEqual(target);
+      expect(nextSpeed).toBeLessThanOrEqual(2.2 + 1e-9);
+      // The existing <=2px final settlement is not an acceleration sample.
+      if (remaining > 2) expect(nextSpeed - speed).toBeLessThanOrEqual(0.006 * elapsed + 1e-9);
+      speed = remaining <= 2 ? 0 : nextSpeed;
+      peakLag = Math.max(peakLag, target - next);
+      top = next;
+    }
+    expect(peakLag).toBeGreaterThan(64);
+    expect(top).toBe(target);
+  });
+
+  it('retains frame speed when paced follow starts and the lag threshold is crossed repeatedly', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    let speed = 0;
+    const intervals = [8, 16, 32, 8];
+    for (let frame = 0; frame < 80; frame += 1) {
+      const elapsed = intervals[frame % intervals.length]!;
+      const target = top + (frame % 2 === 0 ? 63 : 100);
+      const next = motion.next(top, target, elapsed, frame < 10 ? undefined : 64);
+      const nextSpeed = (next - top) / elapsed;
+      if (frame >= 10) {
+        expect(nextSpeed - speed).toBeLessThanOrEqual(0.006 * elapsed + 1e-9);
+        expect(nextSpeed).toBeLessThanOrEqual(2.2 + 1e-9);
+      }
+      expect(next).toBeGreaterThanOrEqual(top);
+      speed = nextSpeed;
+      top = next;
+    }
+  });
+
+  it('keeps high-refresh rounded catch-up progressing and settles after a large burst', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    let first = 0;
+    for (let frame = 0; frame < 400; frame += 1) {
+      const next = motion.next(top, 800, 8, 64);
+      if (frame === 0) first = next;
+      if (Math.abs(next - top) >= 1) top = Math.round(next);
+    }
+    expect(first).toBeLessThan(1);
+    expect(top).toBe(800);
+  });
+
+  it('restarts catch-up gently after cancellation, another scroll owner, or suspension', () => {
+    const motion = new BottomFollowMotion();
+    let top = 0;
+    for (let frame = 0; frame < 40; frame += 1) top = motion.next(top, 3000, 16, 64);
+    const userTop = top + 100;
+    expect(motion.next(userTop, 3000, 16, 64) - userTop).toBeLessThanOrEqual(
+      0.006 * 16 ** 2 + 1e-9
+    );
+    motion.reset();
+    expect(motion.next(0, 3000, 10_000, 64)).toBeLessThanOrEqual(0.006 * 32 ** 2);
   });
 
   it('catches up a tall block continuously instead of jumping to the lag bound', () => {

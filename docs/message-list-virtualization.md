@@ -1032,10 +1032,12 @@ Direct input acquires ownership only when it can affect the transcript:
   preceding content upward. Initial positioning, browser clamp corrections, and reduced motion remain
   immediate. The final easing step reaches the destination before the one-pixel settle threshold.
   The viewport follower uses critically damped motion with a 220 ms smoothing time and a
-  1,100 px/s speed limit. While paced text is releasing, newly revealed lines may trail the viewport by
-  at most 64 px: beyond that the follower catches up continuously at up to 2,200 px/s, never by a jump,
-  so a large first chunk does not sit below the composer for a third of a second. A tick that lands
-  mid catch-up may exceed the bound for one frame. Preserve velocity across incoming blocks, retain fractional progress between
+  1,100 px/s speed limit. While paced text is releasing, the follower targets at most 64 px of lag,
+  catching up continuously at up to 2,200 px/s. Upward frame-speed changes are limited to
+  6,000 px/s² across ordinary follow and catch-up, including repeated threshold crossings.
+  A large burst may temporarily exceed the preferred lag while velocity builds; never enforce that
+  lag by snapping or bypassing acceleration. The final <=2 px settlement remains immediate.
+  Preserve velocity across incoming blocks, retain fractional progress between
   painted frames, and reset momentum after interruption. Use animation-frame timestamps so rendering
   work does not turn a late callback into a sudden speed change. Do not replay an ease-out curve at
   full initial speed for each arrival.

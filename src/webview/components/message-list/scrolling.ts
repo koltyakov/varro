@@ -65,22 +65,24 @@ export function performScrollToBottom(args: {
 export class BottomFollowMotion {
   private position: number | null = null;
   private velocity = 0;
+  private frameSpeed = 0;
 
   reset(): void {
     this.position = null;
     this.velocity = 0;
+    this.frameSpeed = 0;
   }
 
   /**
-   * `maxLagPx` bounds how far paced text may trail below the viewport. Beyond it the
-   * follower catches up continuously at a bounded speed instead of snapping.
+   * `maxLagPx` is the preferred lag for paced text. Catch-up bounds speed and upward
+   * acceleration, allowing temporary extra lag rather than snapping after a burst.
    */
   next(top: number, target: number, elapsedMs: number, maxLagPx?: number): number {
     // Keep fractional progress when Chromium rounds scrollTop, but discard momentum
     // when another scroll owner moves the viewport.
     if (this.position === null || Math.abs(top - this.position) > 1.5) {
+      this.reset();
       this.position = top;
-      this.velocity = 0;
     }
     const distance = target - this.position;
     if (distance <= 2) {
@@ -110,6 +112,21 @@ export class BottomFollowMotion {
         this.position = caughtUp;
       }
     }
+    if (maxLagPx !== undefined) {
+      // Limit the actual frame speed, not the spring's end velocity. Apply this across
+      // both branches so crossing the lag threshold cannot restart at catch-up speed.
+      const maxAccelerationPxPerMs2 = 0.006;
+      const speedLimit = Math.min(
+        maxCatchupSpeedPxPerMs,
+        this.frameSpeed + maxAccelerationPxPerMs2 * elapsed
+      );
+      const limited = start + speedLimit * elapsed;
+      if (this.position > limited) {
+        this.position = Math.max(top, limited);
+        this.velocity = (this.position - start) / elapsed;
+      }
+    }
+    this.frameSpeed = Math.max(0, (this.position - start) / elapsed);
     if (target - this.position <= 1) {
       this.reset();
       return target;

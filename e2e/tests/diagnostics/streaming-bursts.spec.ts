@@ -90,6 +90,9 @@ for (const width of [390, 1280]) {
       expect
         .soft(summary.maxSustainedSpeedPxPerSecond, '90-120ms window speed')
         .toBeLessThanOrEqual(2250);
+      expect
+        .soft(summary.abruptStarts, 'No near-stationary frame may jump to catch-up speed')
+        .toEqual([]);
       expect.soft(summary.finalBottomGap, 'Ten-second settlement').toBeLessThanOrEqual(2);
       const finalAssistant = capture.finalMessages.at(-1)!;
       for (const part of finalAssistant.parts) {

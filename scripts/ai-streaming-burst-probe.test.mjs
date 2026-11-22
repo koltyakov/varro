@@ -52,3 +52,20 @@ test('sustained speed windows retain an excessive movement', () => {
   assert.equal(result.maxSustainedSpeedPxPerSecond, 3000);
   assert.ok(result.excessiveSpeed.length > 0);
 });
+
+test('burst probe reports abrupt catch-up entry even below the speed ceiling', () => {
+  const result = analyze([frame(0, 0), frame(16, 0), frame(32, 32)]);
+  assert.equal(result.excessiveSpeed.length, 0);
+  assert.equal(result.abruptStarts.length, 1);
+  assert.equal(result.abruptStarts[0].toPxPerSecond, 2000);
+});
+
+test('gradual acceleration and stationary-marker compensation are not abrupt entries', () => {
+  let top = 0;
+  const frames = Array.from({ length: 25 }, (_, index) => {
+    if (index > 0) top += Math.min(2.2, index * 0.006 * 16) * 16;
+    return frame(index * 16, top);
+  });
+  assert.equal(analyze(frames).abruptStarts.length, 0);
+  assert.equal(analyze([frame(0, 0), frame(16, 1000, 300)]).abruptStarts.length, 0);
+});

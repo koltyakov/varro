@@ -1877,11 +1877,16 @@ export function MessageList() {
       : null;
     // Account for pending rounding reductions before they shrink the physical scroll range.
     reconcileAppendBottomReserve();
-    for (const [element, correction] of pendingRowHeightCorrections) {
-      if (element.isConnected && correction < (appliedRowHeightCorrections.get(element) ?? 0)) {
+    if (!trackRef?.querySelector('.append-scroll-bottom-reserve')) {
+      for (const [element, correction] of pendingRowHeightCorrections) {
+        if (!element.isConnected || correction >= (appliedRowHeightCorrections.get(element) ?? 0))
+          continue;
         // A consumed reserve has no mounted spacer to grow imperatively. Commit its
         // replacement before a smaller correction can clamp the viewport backward.
         flush();
+        // Effects committed above can enqueue more rounding. The mounted spacer can
+        // now absorb that additional reduction before any correction writes.
+        reconcileAppendBottomReserve();
         break;
       }
     }
