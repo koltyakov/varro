@@ -1725,7 +1725,32 @@ describe('v2 provider refresh', () => {
   });
 });
 
-describe('v2 agent icon options', () => {
+describe('v2 agent catalog', () => {
+  it.each([
+    ['omitted', {}, [{ permission: 'edit', pattern: '*', action: 'deny' }]],
+    ['explicitly empty', { permissions: [] }, []],
+  ])('uses the expected rules when config permissions are %s', async (_, config, expected) => {
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      if (path === '/api/agent')
+        return {
+          data: [
+            {
+              id: 'review',
+              mode: 'subagent',
+              permissions: [{ action: 'edit', resource: '*', effect: 'deny' }],
+              request: {},
+            },
+          ],
+        };
+      if (path === '/api/config') return [{ info: { agents: { review: config } } }];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    expect(await adapter.request('GET', '/agent', undefined)).toMatchObject([
+      { name: 'review', permission: expected },
+    ]);
+  });
+
   it('merges configured icons into resolved and config-only agents', async () => {
     const adapter = new OpenCodeV2Adapter(async (_method, path) => {
       if (path === '/api/agent')

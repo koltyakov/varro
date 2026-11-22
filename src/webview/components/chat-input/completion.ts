@@ -318,8 +318,10 @@ export function getCompletionSelection(
 }
 
 export function getAgentBadgeLine(agent: Agent) {
-  const badges: string[] = [];
-  badges.push(agent.mode === 'subagent' ? 'Subagent' : 'Primary');
+  const role = agent.mode === 'subagent' ? 'Subagent' : 'Primary';
+  if (agent.permission == null) return role;
+
+  const badges: string[] = [role];
   const editMode = getAgentPermissionMode(agent, 'edit', 'deny');
   if (editMode === 'allow') badges.push('Can edit');
   else if (editMode === 'ask') badges.push('Edits ask');

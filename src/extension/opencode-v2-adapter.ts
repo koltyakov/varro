@@ -545,15 +545,17 @@ export class OpenCodeV2Adapter {
           if (existing >= 0) agents.splice(existing, 1);
           continue;
         }
+        const resolvedAgent = agents[existing];
         const model = v2ModelRef(agent.model);
         const normalized = {
           mode: 'primary',
           hidden: false,
-          ...agents[existing],
+          ...resolvedAgent,
           ...agent,
           name,
+          permission: agent.permission ?? resolvedAgent?.permission,
           options: {
-            ...asRecord(agents[existing]?.options),
+            ...asRecord(resolvedAgent?.options),
             ...asRecord(asRecord(agent.request)?.body),
           },
           model: model
@@ -562,7 +564,7 @@ export class OpenCodeV2Adapter {
                 modelID: model.id,
                 variant: model.variant,
               }
-            : agents[existing]?.model,
+            : resolvedAgent?.model,
         };
         if (existing >= 0) agents[existing] = normalized;
         else agents.push(normalized);
