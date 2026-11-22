@@ -2952,7 +2952,7 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-header')?.textContent).not.toContain('$');
   });
 
-  it('reports usage unavailable until the subagent session total loads', () => {
+  it('hides usage until the subagent session total loads', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -2976,9 +2976,18 @@ describe('ToolCall', () => {
 
     // Missing totals are unknown, not zero.
     expect(container?.querySelector('.tool-invocation-token-stats')).toBeNull();
-    expect(container?.querySelector('.tool-invocation-token-label')?.textContent).toBe(
-      'Usage unavailable'
+    expect(container?.querySelector('.tool-invocation-token-label')).toBeNull();
+
+    setState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          tokens: { input: 12, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      ])
     );
+    flushSolid();
+    expect(container?.querySelector('.tool-invocation-token-label')?.textContent).toBe('Σ1');
+    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 12 ↓ 3');
   });
 
   it.each(['task', 'bash', 'apply_patch'])(
@@ -3074,9 +3083,7 @@ describe('ToolCall', () => {
     flushSolid();
     expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
     expect(container?.querySelector('.tool-invocation-token-stats')).toBeNull();
-    expect(container?.querySelector('.tool-invocation-token-label')?.textContent).toBe(
-      'Usage unavailable'
-    );
+    expect(container?.querySelector('.tool-invocation-token-label')).toBeNull();
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('11s');
   });
 
@@ -3229,9 +3236,7 @@ describe('ToolCall', () => {
 
     // The inferred child still links the card, but its totals are not authoritative usage.
     expect(container?.querySelector('.tool-invocation-token-stats')).toBeNull();
-    const label = container?.querySelector('.tool-invocation-token-label');
-    expect(label?.textContent).toBe('Usage unavailable');
-    expect(label?.getAttribute('title')).toContain('does not name its subagent session');
+    expect(container?.querySelector('.tool-invocation-token-label')).toBeNull();
   });
 
   it('shows an explicit empty task result when the tagged payload has no content', () => {

@@ -229,7 +229,7 @@ describe('ToolCall follow-up usage', () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
-  it('reports unavailable usage when the prompt is older than the bounded history', async () => {
+  it('hides usage when the prompt is older than the bounded history', async () => {
     vi.spyOn(client.varro.session, 'followupUsage').mockResolvedValue({
       supported: true,
       complete: false,
@@ -243,9 +243,7 @@ describe('ToolCall follow-up usage', () => {
     );
     await settle();
 
-    const label = header('.tool-invocation-token-label');
-    expect(label?.textContent).toBe('Usage unavailable');
-    expect(label?.getAttribute('title')).toContain('older than the subagent history');
+    expect(header('.tool-invocation-token-label')).toBeNull();
     expect(header('.tool-invocation-token-stats')).toBeNull();
     container.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     flushSolid();
@@ -366,7 +364,7 @@ describe('ToolCall follow-up usage', () => {
     expect(header('.tool-invocation-token-stats')?.textContent).toBe('↑ 6 ↓ 2');
   });
 
-  it('marks an open interval unavailable when its refresh fails', async () => {
+  it('hides an open interval when its refresh fails', async () => {
     const read = vi
       .spyOn(client.varro.session, 'followupUsage')
       .mockResolvedValueOnce(summaryFor('p1', { input: 6, output: 2, active: 1 }, false));
@@ -382,9 +380,7 @@ describe('ToolCall follow-up usage', () => {
     emit('session.next.step.ended', { sessionID: 'child' });
     await settle();
 
-    const label = header('.tool-invocation-token-label');
-    expect(label?.textContent).toBe('Usage unavailable');
-    expect(label?.getAttribute('title')).toContain('refresh failed');
+    expect(header('.tool-invocation-token-label')).toBeNull();
     expect(header('.tool-invocation-token-stats')).toBeNull();
   });
 
@@ -461,7 +457,7 @@ describe('ToolCall follow-up usage', () => {
     // The reverted prompt is gone from fresh history.
     resolvers[1]!({ supported: true, complete: true, pendingPromptIDs: [], intervals: [] });
     await settle();
-    expect(header('.tool-invocation-token-label')?.textContent).toBe('Usage unavailable');
+    expect(header('.tool-invocation-token-label')).toBeNull();
     expect(header('.tool-invocation-token-stats')).toBeNull();
   });
 
@@ -484,7 +480,7 @@ describe('ToolCall follow-up usage', () => {
     expect(header('.tool-invocation-token-stats')).toBeNull();
   });
 
-  it('reports a pending prompt unavailable once a refresh after its delivery fails', async () => {
+  it('hides pending usage once a refresh after its delivery fails', async () => {
     const read = vi.spyOn(client.varro.session, 'followupUsage').mockResolvedValueOnce({
       supported: true,
       complete: true,
@@ -502,7 +498,8 @@ describe('ToolCall follow-up usage', () => {
     read.mockRejectedValueOnce(new Error('offline'));
     emit('session.next.prompted', { sessionID: 'child' });
     await settle();
-    expect(header('.tool-invocation-token-label')?.textContent).toBe('Usage unavailable');
+    expect(header('.tool-invocation-token-label')).toBeNull();
+    expect(header('.tool-invocation-token-stats')).toBeNull();
   });
 
   it.each(['session.next.prompted', 'session.next.revert.committed'])(

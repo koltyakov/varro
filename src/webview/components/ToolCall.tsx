@@ -1855,13 +1855,7 @@ function GenericToolCall(props: {
     (): TaskUsageDisplay | null => {
       const view = followupUsageView();
       if (!view) {
-        if (!taskSessionId()) return null;
-        if (!explicitTaskSessionId())
-          return {
-            label: 'Usage unavailable',
-            title:
-              'Usage unavailable: this call does not name its subagent session, so no usage can be attributed to it.',
-          };
+        if (!explicitTaskSessionId()) return null;
         const tokens = taskTokenUsage();
         return tokens
           ? {
@@ -1869,10 +1863,7 @@ function GenericToolCall(props: {
               label: `Σ${taskSessionIndex() ?? ''}`,
               title: `Session ${taskSessionIndex()} total: all recorded usage in this subagent session, including work after later follow-ups. Session ID: ${explicitTaskSessionId()}. Input includes cache writes; output includes reasoning.`,
             }
-          : {
-              label: 'Usage unavailable',
-              title: 'Usage unavailable: the subagent session total has not been loaded.',
-            };
+          : null;
       }
       if (view.kind === 'loading')
         return { label: 'Loading usage', title: 'Loading usage for this subagent prompt.' };
@@ -1881,8 +1872,7 @@ function GenericToolCall(props: {
           label: 'Usage pending',
           title: 'This prompt has not been delivered to the subagent yet.',
         };
-      if (view.kind === 'unavailable')
-        return { label: 'Usage unavailable', title: `Usage unavailable: ${view.reason}` };
+      if (view.kind === 'unavailable') return null;
       const usage = view.interval.usage;
       // Without a recorded step the counters are unknown, so never show them as zero.
       if (!view.recorded) {
