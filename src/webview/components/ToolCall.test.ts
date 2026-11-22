@@ -2886,28 +2886,26 @@ describe('ToolCall', () => {
     );
   });
 
-  it('shows live subagent token counts for running tasks', () => {
+  it('shows only the session aggregate as the subagent session total', () => {
+    // Loaded rows can be a partial window, so they never stand in for the session total.
     setState(
       storePath('messages', [
         {
           info: assistantMessage('subagent-assistant-1', {
             sessionID: 'subagent-session-1',
-            tokens: {
-              input: 3,
-              output: 50,
-              reasoning: 6,
-              cache: { read: 1_000, write: 1_231 },
-            },
-          }),
-          parts: [],
-        },
-        {
-          info: assistantMessage('other-assistant', {
-            sessionID: 'other-session',
+            cost: 9,
             tokens: { input: 9_999, output: 9_999, reasoning: 0, cache: { read: 0, write: 0 } },
           }),
           parts: [],
         },
+      ])
+    );
+    setState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          cost: 0.009,
+          tokens: { input: 3, output: 50, reasoning: 6, cache: { read: 1_000, write: 1_231 } },
+        }),
       ])
     );
     flushSolid();
@@ -2935,8 +2933,8 @@ describe('ToolCall', () => {
 
     const stats = container?.querySelector('.tool-invocation-token-stats');
     expect(stats?.textContent).toBe('↑ 1,234 ↓ 56');
+    expect(container?.querySelector('.tool-invocation-token-label')?.textContent).toBe('Σ1');
     expect(stats?.querySelector('.diff-lines-added')).toBeNull();
-    expect(stats?.querySelector('.diff-lines-removed')).toBeNull();
     expect(container?.querySelector('.tool-invocation-cost')).toBeNull();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     flushSolid();
@@ -2944,26 +2942,17 @@ describe('ToolCall', () => {
       [...(container?.querySelectorAll('.structured-tool-row') ?? [])].find(
         (row) => row.querySelector('.structured-tool-label')?.textContent === 'cost'
       );
-    expect(costRow()).toBeUndefined();
-    setState(storePath('messages', 0, 'info', { cost: 0.009 }));
-    flushSolid();
     expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('<$0.01');
     expect(
       costRow()?.previousElementSibling?.querySelector('.structured-tool-label')?.textContent
     ).toBe('reasoning');
-    setState(storePath('messages', 0, 'info', { cost: 0.01 }));
-    flushSolid();
-    expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.01');
-    setState(storePath('sessions', [session('subagent-session-1', { cost: 0.07 })]));
+    setState(storePath('sessions', 0, 'cost', 0.07));
     flushSolid();
     expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.07');
-    setState(storePath('messages', 0, 'info', { cost: 0.08 }));
-    flushSolid();
-    expect(costRow()?.querySelector('.structured-tool-value')?.textContent).toBe('$0.08');
     expect(container?.querySelector('.tool-invocation-header')?.textContent).not.toContain('$');
   });
 
-  it('keeps subagent token counts visible while waiting for token data', () => {
+  it('reports usage unavailable until the subagent session total loads', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -2985,7 +2974,11 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
     flushSolid();
 
-    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
+    // Missing totals are unknown, not zero.
+    expect(container?.querySelector('.tool-invocation-token-stats')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-token-label')?.textContent).toBe(
+      'Usage unavailable'
+    );
   });
 
   it.each(['task', 'bash', 'apply_patch'])(
@@ -3080,7 +3073,10 @@ describe('ToolCall', () => {
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
     flushSolid();
     expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
-    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
+    expect(container?.querySelector('.tool-invocation-token-stats')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-token-label')?.textContent).toBe(
+      'Usage unavailable'
+    );
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('11s');
   });
 
@@ -3166,7 +3162,7 @@ describe('ToolCall', () => {
     );
   });
 
-  it('infers the subagent session when task metadata loses the session id', () => {
+  it('does not attribute session totals to a subagent session inferred from its title', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -3231,9 +3227,11 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
     flushSolid();
 
-    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
-      '↑ 321 ↓ 45'
-    );
+    // The inferred child still links the card, but its totals are not authoritative usage.
+    expect(container?.querySelector('.tool-invocation-token-stats')).toBeNull();
+    const label = container?.querySelector('.tool-invocation-token-label');
+    expect(label?.textContent).toBe('Usage unavailable');
+    expect(label?.getAttribute('title')).toContain('does not name its subagent session');
   });
 
   it('shows an explicit empty task result when the tagged payload has no content', () => {

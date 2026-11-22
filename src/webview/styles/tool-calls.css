@@ -1511,6 +1511,19 @@ kbd {
   white-space: nowrap;
 }
 
+.chat-tool-invocation-part .tool-invocation-token-label {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--color-vscode-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-tool-invocation-part .tool-invocation-search-count {
   display: inline-flex;
   align-items: center;

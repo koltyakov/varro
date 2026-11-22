@@ -52,6 +52,7 @@ import {
 } from '../shared/side-question';
 import type { SideQuestionTurn } from '../shared/side-question';
 import { tracePrompt } from './prompt-trace';
+import { readSessionFollowupUsage } from './followup-usage';
 import type {
   ProviderAuthMethod,
   ProviderAuthPromptCondition,
@@ -1197,6 +1198,22 @@ export class OpenCodeV2Adapter {
           `/api/session?parentID=${encodeURIComponent(sessionID)}&limit=1000`
         )) as SessionsResponse;
         return Promise.all(result.data.map((session) => this.session(session, options)));
+      }
+      if (action === 'followup-usage' && method === 'GET') {
+        if (body !== undefined) throw new Error('Follow-up usage does not accept a body');
+        return readSessionFollowupUsage(
+          {
+            readInbox: () => data<SessionInboxInfo[]>('GET', `${endpoint}/inbox`),
+            readPage: async (cursor, limit) =>
+              (await raw(
+                'GET',
+                cursor
+                  ? `${endpoint}/message?limit=${limit}&cursor=${encodeURIComponent(cursor)}`
+                  : `${endpoint}/message?limit=${limit}&order=desc`
+              )) as SessionMessagesResponse,
+          },
+          { maxBytes: options.maxResponseBytes }
+        );
       }
       if (action === 'message' && method === 'GET') {
         const target = new URL(`${endpoint}/message`, 'http://localhost');

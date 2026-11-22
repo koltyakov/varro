@@ -322,6 +322,10 @@ describe('webview message validation', () => {
       )
     ).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/followup-usage')).toBe(true);
+    expect(
+      isAllowedApiRequest('GET', '/varro/session/session-1/followup-usage?directory=%2Frepo')
+    ).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/pin')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/reorder-pin')).toBe(true);
@@ -432,6 +436,10 @@ describe('webview message validation', () => {
       false
     );
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary/extra')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/followup-usage')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/followup-usage?revision=1')).toBe(
+      false
+    );
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/rename-if-untitled')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/plan/open')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/delete')).toBe(false);

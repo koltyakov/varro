@@ -4,6 +4,7 @@ import { getToolFileChanges } from '../shared/tool-file-change';
 import { asRecord, type UnknownRecord } from '../shared/type-utils';
 import { projectV2Event } from './opencode-v2-events';
 import { StreamingToolContent } from './streaming-tool-content';
+import { projectV2Message } from './opencode-v2-projection';
 
 function event(type: string, properties: UnknownRecord): ServerEvent {
   // SAFETY: These fixtures provide the routing required by each native tool event.
@@ -165,5 +166,44 @@ describe('streaming tool content', () => {
       deferred: expect.any(String),
       error: expect.stringContaining('error'),
     });
+  });
+
+  it('keeps the child prompt identity of a failed subagent call equal to the reloaded call', () => {
+    const identity = { sessionID: 'ses_child', status: 'running', childPromptID: 'msg_prompt' };
+    const projection = new StreamingToolContent();
+    projection.project(event('input.started', { name: 'subagent' }));
+    projection.project(event('progress', { structured: identity }));
+    // Native failures carry the latest progress metadata.
+    const failed = projection.project(
+      event('failed', { structured: identity, error: { message: 'error '.repeat(10000) } })
+    );
+
+    const reloaded = projectV2Message(
+      {
+        id: 'm1',
+        type: 'assistant',
+        agent: 'build',
+        model: { providerID: 'openai', id: 'model' },
+        time: { created: 1, completed: 2 },
+        content: [
+          {
+            id: 'c1',
+            type: 'tool',
+            name: 'subagent',
+            time: { created: 1, completed: 2 },
+            state: {
+              status: 'error',
+              input: {},
+              error: { type: 'tool.execution', message: 'failed' },
+              metadata: identity,
+            },
+          },
+        ],
+      },
+      's1'
+    ).parts.find((part) => part.type === 'tool');
+
+    expect(failed.properties).toMatchObject({ deferred: expect.any(String), structured: identity });
+    expect(asRecord(reloaded?.state)?.metadata).toEqual(identity);
   });
 });

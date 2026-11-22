@@ -315,6 +315,84 @@ describe('cross-project session references', () => {
   });
 });
 
+describe('follow-up usage', () => {
+  const summary = { supported: true, complete: true, intervals: [], pendingPromptIDs: ['p'] };
+
+  it('reads the native summary for a session in the workspace', async () => {
+    const request = vi.fn(async () => summary);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request },
+    });
+
+    await proxy.handleRequest(makePayload(1, 'GET', '/varro/session/ses_child/followup-usage'));
+
+    expect(callbacks.sessionState.isSessionInWorkspace).toHaveBeenCalledWith('ses_child', '/repo');
+    expect(request).toHaveBeenCalledWith('GET', '/session/ses_child/followup-usage', undefined, {
+      directory: '/repo',
+      maxResponseBytes: 8 * 1024 * 1024,
+      signal: expect.any(AbortSignal),
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 1, data: summary });
+  });
+
+  it('authorizes hidden and out-of-workspace sessions before reading history', async () => {
+    const request = vi.fn<RestProxyCallbacks['server']['request']>(async () => summary);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request },
+    });
+    vi.mocked(callbacks.hiddenSessions.isHidden).mockReturnValueOnce(true);
+
+    await proxy.handleRequest(makePayload(1, 'GET', '/varro/session/ses_hidden/followup-usage'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      error: '404 Session not found',
+    });
+
+    vi.mocked(callbacks.sessionState.isSessionInWorkspace).mockReturnValue(false);
+    request.mockImplementation(async () => ({ id: 'ses_other', directory: '/other' }));
+    await proxy.handleRequest(makePayload(2, 'GET', '/varro/session/ses_other/followup-usage'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 2,
+      error: '404 Session not found',
+    });
+    expect(request.mock.calls.some(([, path]) => String(path).endsWith('/followup-usage'))).toBe(
+      false
+    );
+  });
+
+  it('reads in an explicitly requested open workspace directory', async () => {
+    const request = vi.fn(async () => summary);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request },
+    });
+
+    await proxy.handleRequest(
+      makePayload(1, 'GET', '/varro/session/ses_child/followup-usage?directory=%2Fother')
+    );
+
+    expect(callbacks.sessionState.isSessionInWorkspace).toHaveBeenCalledWith('ses_child', '/other');
+    expect(request).toHaveBeenCalledWith('GET', '/session/ses_child/followup-usage', undefined, {
+      directory: '/other',
+      maxResponseBytes: 8 * 1024 * 1024,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('reports unsupported usage on API V1 without reading history', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(makePayload(1, 'GET', '/varro/session/ses_child/followup-usage'));
+
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      data: { supported: false, complete: false, intervals: [], pendingPromptIDs: [] },
+    });
+  });
+});
+
 function makePayload(id: number, method: string, path: string, body?: unknown) {
   return { id, method, path, body };
 }

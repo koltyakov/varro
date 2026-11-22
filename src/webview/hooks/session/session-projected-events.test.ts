@@ -767,6 +767,22 @@ describe('projected tool execution', () => {
     expect(harness.syncTodosFromMessages).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the child session and prompt identity from a failure event', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.called', { name: 'task', timestamp: 1000 });
+    emit(harness, 'session.next.tool.failed', {
+      name: 'task',
+      structured: { sessionID: 'ses_child', status: 'running', childPromptID: 'msg_prompt' },
+      error: { message: 'cancelled' },
+      timestamp: 1800,
+    });
+
+    expect(currentToolPart(harness).state).toMatchObject({
+      status: 'error',
+      metadata: { sessionID: 'ses_child', status: 'running', childPromptID: 'msg_prompt' },
+    });
+  });
+
   it('uses a generic message when a failure carries no usable error', () => {
     const harness = createHarness();
     emit(harness, 'session.next.tool.called', { name: 'bash', timestamp: 1000 });

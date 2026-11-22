@@ -33,6 +33,14 @@ function getTaskSessionIdFromInput(input: UnknownRecord | undefined) {
   return isString(input?.task_id) ? input.task_id : null;
 }
 
+/** The child session named by the call itself, never one inferred from titles or position. */
+export function getExplicitTaskSessionId(tool: ToolPart) {
+  if (getToolKind(tool.tool) !== 'task' || tool.state.status === 'pending') return null;
+  return (
+    getTaskSessionIdFromMetadata(tool.state.metadata) ?? getTaskSessionIdFromInput(tool.state.input)
+  );
+}
+
 // A resumed child keeps its session ID. Only the newest call owns its live
 // status, and each call owns notices up to the next launch for that child.
 export function nextTaskLaunchStart(

@@ -174,7 +174,12 @@ export class StreamingToolContent {
             string(source.error) ||
             string(asRecord(source.error)?.message) ||
             'Tool execution failed',
-          metadata: { provider: source.provider, result: source.result },
+          // Failures carry the latest progress metadata, including child session and prompt links.
+          metadata: {
+            ...asRecord(source.structured),
+            provider: source.provider,
+            result: source.result,
+          },
         };
         const part = this.summarize(
           name,
@@ -185,8 +190,10 @@ export class StreamingToolContent {
           event.workspaceDirectory
         );
         properties.error = part.state.error;
-        properties.provider = part.state.metadata?.provider;
-        properties.result = part.state.metadata?.result;
+        const { provider, result, ...summary } = part.state.metadata ?? {};
+        properties.structured = Object.keys(summary).length > 0 ? summary : undefined;
+        properties.provider = provider;
+        properties.result = result;
         if (part.deferred) properties.deferred = reference;
         break;
       }

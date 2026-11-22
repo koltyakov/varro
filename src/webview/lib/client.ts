@@ -27,6 +27,7 @@ import type {
   ServerEvent,
   ServerEventName,
   SessionDiffSummary,
+  SessionFollowupUsage,
   SessionLocation,
   SessionLookup,
   SessionHistoryScope,
@@ -843,6 +844,17 @@ export const client = {
         const path = buildVarroSessionEndpoint(sessionID, 'diff-summary');
         const revisionPath = revision === undefined ? path : `${path}?revision=${revision}`;
         return apiCall('GET', withDirectory(revisionPath, options?.directory));
+      },
+      async followupUsage(
+        sessionID: string,
+        options?: { directory?: string; signal?: AbortSignal }
+      ): Promise<SessionFollowupUsage> {
+        return apiCall(
+          'GET',
+          withDirectory(buildVarroSessionEndpoint(sessionID, 'followup-usage'), options?.directory),
+          undefined,
+          { signal: options?.signal }
+        );
       },
       async setPinned(
         sessionID: string,

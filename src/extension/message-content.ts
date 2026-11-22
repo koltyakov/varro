@@ -156,20 +156,24 @@ export function projectDeferredPart<T extends UnknownRecord>(
         })
       );
       const count = getSearchResultCount(String(part.tool), summaryState);
+      const projectedState = {
+        input: { ...asRecord(input), ...pickIdentityFields(asRecord(state.input)) },
+        metadata: { ...asRecord(projectedMetadata), ...pickIdentityFields(metadata) },
+      };
       return {
         ...part,
         deferred: deferredPartPath(part, directory),
         metadata: partMetadata,
         state: {
           ...state,
-          input: asRecord(input) ?? {},
+          input: projectedState.input,
           output: output.slice(0, 512),
           error,
           raw,
           title,
           metadata: count
-            ? { ...asRecord(projectedMetadata), matches: count.count, truncated: count.truncated }
-            : (asRecord(projectedMetadata) ?? {}),
+            ? { ...projectedState.metadata, matches: count.count, truncated: count.truncated }
+            : projectedState.metadata,
           attachments,
           deferredFiles: files,
         },
@@ -178,6 +182,20 @@ export function projectDeferredPart<T extends UnknownRecord>(
     if (attachments !== state.attachments) return { ...part, state: { ...state, attachments } };
   }
   return part;
+}
+
+// Task cards resolve their child session and admitted prompt from these fields, so the shared
+// summary budget must never evict them.
+const IDENTITY_FIELDS = ['sessionID', 'sessionId', 'task_id', 'childPromptID', 'status'] as const;
+
+function pickIdentityFields(record: UnknownRecord | null | undefined): UnknownRecord {
+  const identity: UnknownRecord = {};
+  if (!record) return identity;
+  for (const field of IDENTITY_FIELDS) {
+    const item = record[field];
+    if (isString(item) && item.length <= 256) identity[field] = item;
+  }
+  return identity;
 }
 
 export function deferredPartPath(

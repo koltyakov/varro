@@ -26,6 +26,7 @@ import type {
   PermissionMode,
   ServerStatus,
   SessionDiffSummary,
+  SessionFollowupUsage,
   SessionLocation,
   SessionLookup,
   SessionHistoryScope,
@@ -51,6 +52,7 @@ import {
 } from '../shared/workspace-directory-error';
 import type { LocalSessionSummaryData } from './local-session-summary';
 import { sessionSummary } from './session-summary';
+import { FOLLOWUP_USAGE_MAX_BYTES } from './followup-usage';
 import { logger } from './logger';
 import { diagnosticTimeline } from './diagnostics';
 import { projectDeferredPart, projectPartAttachments } from './message-content';
@@ -1937,6 +1939,29 @@ export class RestProxy {
         return;
       }
 
+      const followupUsageSessionID = this.parseSessionFollowupUsageRequest(method, payload.path);
+      if (followupUsageSessionID) {
+        // Authorize every read before any history is requested.
+        if (this.isHiddenSession(followupUsageSessionID)) {
+          throw new Error('404 Session not found');
+        }
+        const directory = explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot();
+        await this.assertSessionInWorkspace(followupUsageSessionID, directory, directory);
+        const data: SessionFollowupUsage =
+          this.callbacks.server.apiVersion === 2
+            ? ((await this.requestWorkspaceDirectory.run(directory, () =>
+                this.requestServer(
+                  'GET',
+                  `/session/${encodeURIComponent(followupUsageSessionID)}/followup-usage`,
+                  undefined,
+                  { maxResponseBytes: FOLLOWUP_USAGE_MAX_BYTES, signal: requestSignal }
+                )
+              )) as SessionFollowupUsage)
+            : { supported: false, complete: false, intervals: [], pendingPromptIDs: [] };
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
       const permissionModeRequest = this.parsePermissionModeRequest(
         method,
         payload.path,
@@ -3525,6 +3550,17 @@ export class RestProxy {
       sessionID,
       cacheKey: revision ? `${sessionID}:${revision}` : null,
     };
+  }
+
+  private parseSessionFollowupUsageRequest(method: string, path: string) {
+    if (method !== 'GET') return null;
+    const url = new URL(path, 'http://localhost');
+    const prefix = `${VARRO_API_ENDPOINTS.session}/`;
+    if (!url.pathname.startsWith(prefix)) return null;
+    const match = url.pathname.slice(prefix.length).match(/^([^/]+)\/followup-usage$/);
+    if (!match?.[1]) return null;
+    if (Array.from(url.searchParams.keys()).some((key) => key !== 'directory')) return null;
+    return decodeURIComponent(match[1]);
   }
 
   private parsePinRequest(method: string, path: string, body: unknown) {

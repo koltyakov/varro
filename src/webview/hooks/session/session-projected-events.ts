@@ -395,7 +395,11 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
           deferredFiles,
           input,
           error: getToolErrorMessage(props.error),
-          metadata: { provider: props.provider, result: props.result },
+          metadata: {
+            ...asToolMetadata(props.structured),
+            provider: props.provider,
+            result: props.result,
+          },
           time: { start, end: timestamp },
         },
       });

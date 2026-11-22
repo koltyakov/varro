@@ -277,7 +277,7 @@ export function summarizeCanonicalDelivery(messages, marker, tokens) {
           completed: Number.isFinite(entry.info.time?.completed),
           error: entry.info.error ?? null,
           text: entry.parts
-            .filter((part) => part?.type === 'text' || part?.type === 'reasoning')
+            .filter((part) => part?.type === 'text')
             .map((part) => part.text ?? '')
             .join('\n'),
         }))

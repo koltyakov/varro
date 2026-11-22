@@ -1327,6 +1327,57 @@ test('summarizes the canonical assistant response for the marked user prompt', (
   assert.deepEqual(canonicalDeliveryFailures(summary), []);
 });
 
+for (const [name, textParts, tokenCounts, tokensInOrder] of [
+  ['ignores tokens echoed in reasoning', ['VFZ-DUP-01', 'VFZ-DUP-END'], [1, 1], true],
+  ['still rejects duplicate text output', ['VFZ-DUP-01\nVFZ-DUP-01\nVFZ-DUP-END'], [2, 1], true],
+  ['does not accept reasoning as missing output', [], [0, 0], false],
+]) {
+  test(`canonical duplicate delivery ${name}`, () => {
+    const summary = summarizeCanonicalDelivery(
+      [
+        {
+          info: { id: 'user', role: 'user' },
+          parts: [{ type: 'text', text: '[VFZ:reasoning:DUP]' }],
+        },
+        {
+          info: {
+            id: 'assistant',
+            role: 'assistant',
+            parentID: 'user',
+            finish: 'stop',
+            time: { completed: 1 },
+          },
+          parts: [
+            {
+              type: 'reasoning',
+              text: 'End with VFZ-DUP-END after VFZ-DUP-01, each exactly once.',
+            },
+            ...textParts.map((text) => ({ type: 'text', text })),
+          ],
+        },
+      ],
+      '[VFZ:reasoning:DUP]',
+      ['VFZ-DUP-01', 'VFZ-DUP-END']
+    );
+
+    assert.equal(summary.assistants[0]?.text, textParts.join('\n'));
+    assert.deepEqual(summary.tokenCounts, tokenCounts);
+    assert.equal(summary.tokensInOrder, tokensInOrder);
+    const failures = canonicalDeliveryFailures(summary);
+    if (tokenCounts.every((count) => count === 1)) {
+      assert.deepEqual(failures, []);
+    } else {
+      assert.ok(
+        failures.includes('canonical response did not contain every required token exactly once')
+      );
+      assert.equal(
+        failures.includes('canonical response tokens were not in the required order'),
+        !tokensInOrder
+      );
+    }
+  });
+}
+
 test('rejects duplicate canonical users, linked assistants, bad finishes, errors, and token order', () => {
   const summary = summarizeCanonicalDelivery(
     [

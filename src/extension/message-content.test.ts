@@ -188,6 +188,37 @@ describe('deferred history content', () => {
     expect(part.state.metadata.output.length).toBe(500000);
   });
 
+  it('keeps task identity when a large input exhausts the summary budget', () => {
+    const input = Object.fromEntries(
+      Array.from({ length: 40 }, (_, index) => [`field${index}`, 'x'.repeat(4096)])
+    );
+    const part = {
+      ...base,
+      type: 'tool',
+      tool: 'task',
+      callID: 'call-1',
+      state: {
+        status: 'completed',
+        input: { ...input, sessionID: 'ses_child' },
+        output: 'o'.repeat(4096),
+        title: 'review',
+        metadata: { sessionID: 'ses_child', status: 'running', childPromptID: 'msg_prompt' },
+        time: { start: 1, end: 2 },
+      },
+    };
+
+    const projected = projectDeferredPart(part, '/workspace');
+
+    expect(projected.deferred).toBeDefined();
+    expect(projected.state.metadata).toEqual({
+      sessionID: 'ses_child',
+      status: 'running',
+      childPromptID: 'msg_prompt',
+    });
+    expect(projected.state.input.sessionID).toBe('ses_child');
+    expect(JSON.stringify(projected).length).toBeLessThan(24 * 1024);
+  });
+
   it('preserves complete search counts and paths while omitting long tool bodies', () => {
     const part: ToolPart = {
       ...base,

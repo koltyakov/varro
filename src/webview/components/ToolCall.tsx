@@ -50,7 +50,17 @@ import {
   setToolCallExpanded,
 } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
-import { nextTaskLaunchStart, resolveTaskSessionId } from '../lib/task-session';
+import {
+  getExplicitTaskSessionId,
+  nextTaskLaunchStart,
+  resolveTaskSessionId,
+} from '../lib/task-session';
+import {
+  displayUsageTokens,
+  followupUsage,
+  resolveFollowupUsage,
+  type FollowupUsageView,
+} from '../lib/followup-usage';
 import { observeSubagentCard } from '../lib/subagent-visibility';
 import { getToolKind, isApplyPatchTool, normalizeToolName } from '../lib/tool-normalization';
 import type { ToolKind } from '../lib/tool-normalization';
@@ -1517,6 +1527,17 @@ type StructuredToolResult = {
   status?: 'error' | 'aborted';
 };
 
+type TaskUsageDisplay = {
+  tokens?: { input: number; output: number };
+  label?: string;
+  title: string;
+};
+
+// Usage views are small plain records rebuilt on every shared cache write.
+function sameJson<T extends FollowupUsageView | TaskUsageDisplay | null>(a: T, b: T) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function GenericToolCall(props: {
   detailLoading?: boolean;
   detailError?: string;
@@ -1710,40 +1731,225 @@ function GenericToolCall(props: {
       ['reasoning', reasoning || 'default'],
     ];
   });
-  const taskTokenUsage = createMemo(() => {
-    const sessionId = taskSessionId();
+  // Session totals need an explicit child link: a title- or position-inferred child is not
+  // authoritative enough to attribute usage to this call.
+  const explicitTaskSessionId = createMemo(() =>
+    isTask() && taskSessionId() ? getExplicitTaskSessionId(props.tool) : null
+  );
+  const taskSessionIndex = createMemo(() => {
+    const sessionId = explicitTaskSessionId();
+    const session = appState.sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) return null;
+    // Index child sessions, not calls: follow-ups keep their child's number regardless of
+    // transcript pagination, card mounting order, or session-list activity sorting.
+    let index = 1;
+    for (const sibling of appState.sessions) {
+      if (sibling.parentID !== session.parentID || sibling.id === session.id) continue;
+      if (
+        sibling.time.created < session.time.created ||
+        (sibling.time.created === session.time.created && sibling.id < session.id)
+      )
+        index += 1;
+    }
+    return index;
+  });
+  // Only the server's session aggregate is a session total. Loaded messages can be a partial
+  // window, and projected rows report missing usage as zero.
+  const taskSessionAggregate = createMemo(() => {
+    const sessionId = explicitTaskSessionId();
     if (!sessionId) return null;
-
-    const sessionTokens = appState.sessions.find((session) => session.id === sessionId)?.tokens;
-    if (sessionTokens) {
-      return {
-        input: (sessionTokens.input || 0) + (sessionTokens.cache.write || 0),
-        output: (sessionTokens.output || 0) + (sessionTokens.reasoning || 0),
-      };
-    }
-
-    let input = 0;
-    let output = 0;
-    for (const entry of getMessageLookup().bySessionId.get(sessionId) ?? []) {
-      const info = entry.info;
-      if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
-      input += (info.tokens.input || 0) + (info.tokens.cache?.write || 0);
-      output += (info.tokens.output || 0) + (info.tokens.reasoning || 0);
-    }
-
-    return { input, output };
+    const session = appState.sessions.find((candidate) => candidate.id === sessionId);
+    return session?.tokens ? { tokens: session.tokens, cost: session.cost } : null;
+  });
+  const taskTokenUsage = createMemo(() => {
+    const tokens = taskSessionAggregate()?.tokens;
+    if (!tokens) return null;
+    return {
+      input: (tokens.input || 0) + (tokens.cache.write || 0),
+      output: (tokens.output || 0) + (tokens.reasoning || 0),
+    };
   });
   const taskCost = createMemo(() => {
-    const sessionId = taskSessionId();
-    if (!sessionId) return '';
-    let messageCost = 0;
-    for (const entry of getMessageLookup().bySessionId.get(sessionId) ?? []) {
-      const info = entry.info;
-      if (info.role !== 'assistant' || info.sessionID !== sessionId) continue;
-      if (Number.isFinite(info.cost) && info.cost > 0) messageCost += info.cost;
+    const cost = taskSessionAggregate()?.cost;
+    return cost !== undefined && Number.isFinite(cost) ? formatCost(cost) : '';
+  });
+  // Native calls name the child prompt they admitted; its interval is this call's usage.
+  const taskChildPromptID = createMemo(() => {
+    if (!explicitTaskSessionId()) return null;
+    const state = props.state;
+    if (state.status === 'pending') return null;
+    const promptID = asRecord(state.metadata)?.childPromptID;
+    return isString(promptID) && promptID ? promptID : null;
+  });
+  // The child's own directory scopes the read; children share their parent's directory.
+  const followupUsageDirectory = createMemo(() => {
+    const sessionId = explicitTaskSessionId();
+    if (!sessionId) return undefined;
+    const sessions = appState.sessions;
+    return (
+      sessions.find((session) => session.id === sessionId)?.directory ??
+      sessions.find((session) => session.id === props.tool.sessionID)?.directory
+    );
+  });
+  const followupUsageKey = createMemo(() => {
+    const sessionId = explicitTaskSessionId();
+    if (!sessionId || !taskChildPromptID()) return null;
+    const server = appState.serverStatus;
+    return `${server.state === 'running' ? server.url : ''}\u0000${followupUsageDirectory() ?? ''}\u0000${sessionId}`;
+  });
+  createEffect(
+    () => ({ key: followupUsageKey(), sessionID: explicitTaskSessionId() }),
+    (next) => {
+      if (!next.key || !next.sessionID) return;
+      return followupUsage.subscribe(next.key, next.sessionID);
     }
-    const sessionCost = appState.sessions.find((session) => session.id === sessionId)?.cost ?? 0;
-    return formatCost(Math.max(messageCost, Number.isFinite(sessionCost) ? sessionCost : 0));
+  );
+  // Child delivery and step events, totals, and status changes can each move intervals.
+  // A reconnect advances the connection even when all of them look unchanged.
+  const followupUsageRevision = createMemo(() => {
+    const sessionId = explicitTaskSessionId();
+    if (!sessionId || !taskChildPromptID()) return '';
+    const session = appState.sessions.find((candidate) => candidate.id === sessionId);
+    const tokens = session?.tokens;
+    const status = appState.sessionStatus[sessionId];
+    return [
+      followupUsage.connection(),
+      followupUsage.eventRevision(sessionId),
+      tokens
+        ? [tokens.input, tokens.output, tokens.reasoning, tokens.cache.read, tokens.cache.write]
+        : '',
+      session?.cost ?? '',
+      status?.type ?? '',
+      status?.type === 'retry' ? status.attempt : '',
+    ].join(':');
+  });
+  createEffect(
+    () => ({
+      key: followupUsageKey(),
+      sessionID: explicitTaskSessionId(),
+      directory: followupUsageDirectory(),
+      promptID: taskChildPromptID(),
+      revision: followupUsageRevision(),
+    }),
+    (next) => {
+      if (!next.key || !next.sessionID || !next.promptID) return;
+      followupUsage.request({
+        key: next.key,
+        sessionID: next.sessionID,
+        directory: next.directory,
+        promptID: next.promptID,
+        revision: next.revision,
+      });
+    }
+  );
+  const followupUsageView = createMemo(
+    () => {
+      const key = followupUsageKey();
+      const promptID = taskChildPromptID();
+      if (!key || !promptID) return null;
+      return resolveFollowupUsage(followupUsage.cache()[key], promptID);
+    },
+    { equals: sameJson }
+  );
+  const taskUsageDisplay = createMemo(
+    (): TaskUsageDisplay | null => {
+      const view = followupUsageView();
+      if (!view) {
+        if (!taskSessionId()) return null;
+        if (!explicitTaskSessionId())
+          return {
+            label: 'Usage unavailable',
+            title:
+              'Usage unavailable: this call does not name its subagent session, so no usage can be attributed to it.',
+          };
+        const tokens = taskTokenUsage();
+        return tokens
+          ? {
+              tokens,
+              label: `Σ${taskSessionIndex() ?? ''}`,
+              title: `Session ${taskSessionIndex()} total: all recorded usage in this subagent session, including work after later follow-ups. Session ID: ${explicitTaskSessionId()}. Input includes cache writes; output includes reasoning.`,
+            }
+          : {
+              label: 'Usage unavailable',
+              title: 'Usage unavailable: the subagent session total has not been loaded.',
+            };
+      }
+      if (view.kind === 'loading')
+        return { label: 'Loading usage', title: 'Loading usage for this subagent prompt.' };
+      if (view.kind === 'pending')
+        return {
+          label: 'Usage pending',
+          title: 'This prompt has not been delivered to the subagent yet.',
+        };
+      if (view.kind === 'unavailable')
+        return { label: 'Usage unavailable', title: `Usage unavailable: ${view.reason}` };
+      const usage = view.interval.usage;
+      // Without a recorded step the counters are unknown, so never show them as zero.
+      if (!view.recorded) {
+        const missingOnly = usage.missing > 0 && usage.active === 0;
+        return {
+          label: missingOnly
+            ? view.shared
+              ? 'Shared, partial usage'
+              : 'Partial usage'
+            : 'Usage pending',
+          title: [
+            missingOnly
+              ? 'No model step after this prompt recorded usage.'
+              : 'No model step after this prompt has recorded usage yet.',
+            ...view.reasons,
+          ].join(' '),
+        };
+      }
+      const label =
+        view.shared && view.partial
+          ? 'Shared, partial usage'
+          : view.shared
+            ? 'Shared usage'
+            : view.partial
+              ? 'Partial usage'
+              : undefined;
+      return {
+        tokens: displayUsageTokens(usage),
+        label,
+        title: [
+          view.shared
+            ? `Shared response usage: ${view.interval.promptIDs.length} prompts were delivered before the same model step, so this usage is not split between them.`
+            : 'Usage after this prompt until the next prompt was delivered to the subagent.',
+          ...view.reasons,
+          view.running ? 'Still running; usage so far.' : '',
+          'Later steps continue earlier context, so this is not the cost of the instruction alone. Input includes cache writes; output includes reasoning.',
+          usage.cacheRead > 0 ? `Cache reads: ${formatNumber(usage.cacheRead)}.` : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      };
+    },
+    { equals: sameJson }
+  );
+  // Detail usage rows use the same scope as the header.
+  const taskUsageEntries = createMemo((): Array<[string, unknown]> => {
+    const view = followupUsageView();
+    if (!view) {
+      const cost = taskCost();
+      return cost ? [['cost', cost]] : [];
+    }
+    if (view.kind !== 'interval') return [];
+    const usage = view.interval.usage;
+    const entries: Array<[string, unknown]> = [];
+    const cost = view.recorded ? formatCost(usage.cost) : '';
+    if (cost) entries.push(['cost', cost]);
+    if (view.recorded && usage.cacheRead > 0)
+      entries.push(['cache read', formatNumber(usage.cacheRead)]);
+    const totals = taskTokenUsage();
+    if (totals) {
+      const sessionCost = taskCost();
+      entries.push([
+        'session total',
+        `↑ ${formatNumber(totals.input)} ↓ ${formatNumber(totals.output)}${sessionCost ? ` · ${sessionCost}` : ''}`,
+      ]);
+    }
+    return entries;
   });
   const detailInputEntries = createMemo(() => {
     if (!isTask()) return props.inputEntries;
@@ -1755,10 +1961,10 @@ function GenericToolCall(props: {
       ...visibleEntries,
       ...taskExecutionEntries().filter(([key]) => !keys.has(key)),
     ];
-    const cost = taskCost();
-    if (cost) {
+    const usageEntries = taskUsageEntries();
+    if (usageEntries.length) {
       const reasoningIndex = entries.findIndex(([key]) => key === 'reasoning');
-      entries.splice(reasoningIndex < 0 ? entries.length : reasoningIndex + 1, 0, ['cost', cost]);
+      entries.splice(reasoningIndex < 0 ? entries.length : reasoningIndex + 1, 0, ...usageEntries);
     }
     return entries;
   });
@@ -1882,7 +2088,7 @@ function GenericToolCall(props: {
     if (updated === undefined) return null;
     return formatDuration(Math.max(0, now() - updated)) || '0ms';
   };
-  const visibleTaskTokenUsage = () => (taskActivityAgeDuration() ? null : taskTokenUsage());
+  const visibleTaskUsage = () => (taskActivityAgeDuration() ? null : taskUsageDisplay());
   const visibleRunningDurationLabel = () =>
     taskActivityAgeDuration() ? null : runningDurationLabel();
   const commandMatchesTitle = () =>
@@ -1967,11 +2173,24 @@ function GenericToolCall(props: {
               Waiting for permission
             </span>
           </Show>
-          <Show when={visibleTaskTokenUsage()}>
-            {(tokens) => (
-              <span class="tool-invocation-token-stats" title="Subagent tokens">
-                ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
-              </span>
+          <Show when={visibleTaskUsage()}>
+            {(usage) => (
+              <>
+                <Show when={usage().label}>
+                  {(label) => (
+                    <span class="tool-invocation-token-label" title={usage().title}>
+                      {label()}
+                    </span>
+                  )}
+                </Show>
+                <Show when={usage().tokens}>
+                  {(tokens) => (
+                    <span class="tool-invocation-token-stats" title={usage().title}>
+                      ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
+                    </span>
+                  )}
+                </Show>
+              </>
             )}
           </Show>
           <Show when={searchResultCount()}>

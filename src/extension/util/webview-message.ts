@@ -1987,6 +1987,10 @@ const API_ROUTES: ApiRoute[] = [
     `${VARRO_API_ENDPOINTS.session}/:id/diff-summary`,
     ({ method, url }) => method === 'GET' && queryWithOptionalDirectory(url, 'revision')
   ),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/followup-usage`,
+    ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)
+  ),
   route(`${VARRO_API_ENDPOINTS.session}/:id/activate`, methodsNoQuery('POST')),
   route(
     `${VARRO_API_ENDPOINTS.session}/:id/reference`,

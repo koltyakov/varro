@@ -321,6 +321,45 @@ export type SessionDiffSummary = {
   activeStartedAt: number | null;
 };
 
+/** Recorded usage of native assistant steps, not a provider bill. */
+export type SessionUsageTotals = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  /** Records whose usage was counted. */
+  steps: number;
+  /** Settled records without recorded usage. Their usage is unknown, not zero. */
+  missing: number;
+  /** Records that have not settled yet. */
+  active: number;
+};
+
+/**
+ * Child usage from one group of delivered user prompts until the next delivered group.
+ * Prompts delivered before the same model step share the whole interval.
+ */
+export type SessionFollowupUsageInterval = {
+  promptIDs: string[];
+  usage: SessionUsageTotals;
+  /** A later delivered prompt closed this interval, so later work cannot change it. */
+  final: boolean;
+  /** Earlier prompts outside the bounded history read may share this interval's first step. */
+  boundaryUnknown?: boolean;
+};
+
+export type SessionFollowupUsage = {
+  /** False when the server cannot report native child prompt usage. */
+  supported: boolean;
+  /** True when the history read reached the start of the session. */
+  complete: boolean;
+  intervals: SessionFollowupUsageInterval[];
+  /** Admitted prompts that have not been delivered to the child yet. */
+  pendingPromptIDs: string[];
+};
+
 export type ProviderLimitUnit = 'requests' | 'tokens' | 'messages' | 'credits' | 'usd' | 'unknown';
 
 export type ProviderLimitWindow = {
@@ -547,6 +586,7 @@ export type VarroSessionEndpointAction =
   | 'activate'
   | 'delete'
   | 'diff-summary'
+  | 'followup-usage'
   | 'permission-mode'
   | 'pin'
   | 'reorder-pin'
