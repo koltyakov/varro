@@ -62,7 +62,11 @@ import {
   requestPlanImplementationDraft,
 } from '../lib/plan-implementation-draft';
 import { client } from '../lib/client';
-import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
+import {
+  editingMessage,
+  resetMessageEditState,
+  startEditingMessage,
+} from '../lib/message-edit-state';
 import { setCachedSessionMessages, setSessionHistoryPrompts } from '../lib/message-window';
 import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
@@ -15894,6 +15898,91 @@ describe('ChatInput agent model selection', () => {
     expect(option).toBeDefined();
     clickAndFlush(option);
   }
+
+  it.each(['plan', 'custom'])(
+    'keeps the edited prompt agent %s through cancel and resend',
+    async (agent) => {
+      setupAgentModels();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('agents', [
+        ...state.agents,
+        { name: 'custom', mode: 'primary', permission: [] },
+      ]);
+      const model = { ...GPT_4O };
+      const message = userMessageEntry(model);
+      setStateAndFlush('messages', [{ ...message, info: { ...message.info, agent } }]);
+      renderChatInput();
+
+      startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, model, agent);
+      await settle();
+      expect(container?.querySelector('[aria-label="Select agent"]')?.textContent).toContain(
+        agent === 'plan' ? 'Plan' : 'Custom'
+      );
+      expect(state.selectedAgent).toBe('build');
+      expect(state.selectedModel).toEqual(GPT_4O);
+
+      clickSelectorAndFlush('[title="Cancel editing (Esc)"]');
+      expect(container?.querySelector('[aria-label="Select agent"]')?.textContent).toContain(
+        'Build'
+      );
+      expect(state.selectedAgent).toBe('build');
+
+      startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, model, agent);
+      await settle();
+      pressKey(container?.querySelector('.rich-composer'), { key: 'Enter' });
+      await settle();
+
+      expect(editMessageMock).toHaveBeenCalledWith(
+        'message-1',
+        'edited prompt',
+        expect.objectContaining({ selectedAgent: agent, selectedModel: model })
+      );
+      expect(state.selectedAgent).toBe(agent);
+    }
+  );
+
+  it('allows explicitly changing the agent of an edited Plan prompt', async () => {
+    setupAgentModels();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('selectedAgent', 'plan');
+    setStateAndFlush('messages', [userMessageEntry(GPT_4O)]);
+    renderChatInput();
+    startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, GPT_4O, 'plan');
+    await settle();
+
+    pickAgent('Build');
+    expect(container?.querySelector('[aria-label="Select agent"]')?.textContent).toContain('Build');
+    expect(state.selectedAgent).toBe('plan');
+    pressKey(container?.querySelector('.rich-composer'), { key: 'Enter' });
+    await settle();
+
+    expect(editMessageMock).toHaveBeenCalledWith(
+      'message-1',
+      'edited prompt',
+      expect.objectContaining({ selectedAgent: 'build' })
+    );
+    expect(state.selectedAgent).toBe('build');
+  });
+
+  it('restores the edited agent when a published replacement fails to send', async () => {
+    setupAgentModels();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [userMessageEntry(GPT_4O)]);
+    editMessageMock.mockImplementationOnce(async (_id, _text, options) => {
+      options?.onOptimisticPublish?.();
+      flushSolid();
+      return false;
+    });
+    renderChatInput();
+    startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, GPT_4O, 'plan');
+    await settle();
+    pressKey(container?.querySelector('.rich-composer'), { key: 'Enter' });
+    await settle();
+
+    expect(editingMessage()?.agent).toBe('plan');
+    expect(container?.querySelector('[aria-label="Select agent"]')?.textContent).toContain('Plan');
+    expect(state.selectedAgent).toBe('build');
+  });
 
   it('applies the agent model in a new chat without changing the remembered model', () => {
     setupAgentModels();

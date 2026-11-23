@@ -1984,12 +1984,12 @@ describe('getUserMessageEditContext', () => {
 });
 
 describe('Message user editing', () => {
-  function renderEditableUserMessage(messageId = 'message-edit') {
+  function renderEditableUserMessage(messageId = 'message-edit', agent = 'chat') {
     setAppState(storePath('activeSessionId', 'session-1'));
     cleanup = render(
       () =>
         Message({
-          info: userMessage(messageId),
+          info: { ...userMessage(messageId), agent },
           parts: [
             {
               id: 'text-edit',
@@ -2192,29 +2192,33 @@ describe('Message user editing', () => {
     expect(container?.querySelector('.user-message-card-editable')).not.toBeNull();
   });
 
-  it('starts a composer edit with the message text on click and highlights the target', () => {
-    renderEditableUserMessage();
-    flushSolid();
+  it.each(['chat', 'plan'])(
+    'starts a composer edit with the original %s agent and text',
+    (agent) => {
+      renderEditableUserMessage('message-edit', agent);
+      flushSolid();
 
-    window.getSelection()?.removeAllRanges();
-    flushSolid();
-    const card = container?.querySelector<HTMLElement>('.user-message-card');
-    expect(card?.classList.contains('user-message-card-editable')).toBe(true);
-    expect(card?.hasAttribute('title')).toBe(false);
+      window.getSelection()?.removeAllRanges();
+      flushSolid();
+      const card = container?.querySelector<HTMLElement>('.user-message-card');
+      expect(card?.classList.contains('user-message-card-editable')).toBe(true);
+      expect(card?.hasAttribute('title')).toBe(false);
 
-    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+      card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      flushSolid();
 
-    expect(editingMessage()).toEqual({
-      messageId: 'message-edit',
-      sessionId: 'session-1',
-      text: 'original prompt',
-      context: { files: [], images: [], terminalSelection: null },
-      model: { providerID: 'provider-1', modelID: 'model-1' },
-    });
-    expect(card?.classList.contains('user-message-card-editable')).toBe(false);
-    expect(container?.textContent).toContain('original prompt');
-  });
+      expect(editingMessage()).toEqual({
+        messageId: 'message-edit',
+        sessionId: 'session-1',
+        text: 'original prompt',
+        context: { files: [], images: [], terminalSelection: null },
+        model: { providerID: 'provider-1', modelID: 'model-1' },
+        agent,
+      });
+      expect(card?.classList.contains('user-message-card-editable')).toBe(false);
+      expect(container?.textContent).toContain('original prompt');
+    }
+  );
 
   it.each([false, true])(
     'renders delivered steering as read-only with attachments=%s',
@@ -2360,6 +2364,7 @@ describe('Message user editing', () => {
         terminalSelection: null,
       },
       model: { providerID: 'provider-1', modelID: 'model-1' },
+      agent: 'chat',
     });
   });
 

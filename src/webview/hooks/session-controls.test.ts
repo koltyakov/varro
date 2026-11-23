@@ -1014,7 +1014,8 @@ describe('session-controls helpers', () => {
       'updated prompt',
       'session-1',
       undefined,
-      { providerID: 'openai', modelID: 'gpt-4o' }
+      { providerID: 'openai', modelID: 'gpt-4o' },
+      'build'
     );
     expect(pruneMessagesFrom).toHaveBeenCalledWith('session-1', 'user-1');
     expect(restorePrunedMessages).not.toHaveBeenCalled();

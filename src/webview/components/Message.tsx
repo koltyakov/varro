@@ -694,7 +694,8 @@ export function Message(props: {
         info.sessionID,
         getUserMessageEditText(parts),
         getUserMessageEditContext(parts),
-        info.model
+        info.model,
+        info.agent
       );
     const parts = normalizedParts();
     if (!parts.some((part) => part.type === 'file' && deferredFilePath(part.url))) {

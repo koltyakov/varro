@@ -275,6 +275,39 @@ describe('sendMessage', () => {
     expect(stateModule.isLoading()).toBe(false);
   });
 
+  it.each([undefined, 'custom'])(
+    'resends edits with agent %s or the original agent',
+    async (selectedAgent) => {
+      const { stateModule, hookModule } = await loadModules();
+      flushSolid();
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      stateModule.setState(storePath('providers', [gpt4oProvider()]));
+      flushSolid();
+      stateModule.setSelectedAgent('build', { sessionId: 'session-1' });
+      flushSolid();
+      const original = userMessage('user-1');
+      if (original.role !== 'user') throw new Error('Expected a user message');
+      original.agent = 'plan';
+      stateModule.replaceMessages([{ info: original, parts: [] }]);
+      flushSolid();
+      clientMocks.sessionDeleteMessage.mockResolvedValue(undefined);
+      clientMocks.sessionGet.mockResolvedValue(session());
+      clientMocks.sessionMessages.mockResolvedValue([]);
+      clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+
+      expect(await hookModule.editMessage('user-1', 'Revised prompt', { selectedAgent })).toBe(
+        true
+      );
+      flushSolid();
+      expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+        'session-1',
+        expect.objectContaining({ agent: selectedAgent ?? 'plan' })
+      );
+      expect(stateModule.state.messages.at(-1)?.info.agent).toBe(selectedAgent ?? 'plan');
+    }
+  );
+
   it('requests bottom follow when an edited replacement is published before send completes', async () => {
     const { stateModule, hookModule } = await loadModules();
     flushSolid();

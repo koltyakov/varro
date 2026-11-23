@@ -190,7 +190,8 @@ export async function editMessageWithDependencies(
       text: string,
       sessionId: string,
       queuedAttachments?: QueuedAttachmentSnapshot,
-      selectedModel?: ResolvedModel
+      selectedModel?: ResolvedModel,
+      selectedAgent?: string
     ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
     stopLoading(): void;
     setError(message: string): void;
@@ -201,6 +202,7 @@ export async function editMessageWithDependencies(
     allowEmptyText?: boolean;
     queuedAttachments?: QueuedAttachmentSnapshot;
     selectedModel?: ResolvedModel;
+    selectedAgent?: string;
     onOptimisticPublish?: () => void;
   }
 ) {
@@ -240,10 +242,17 @@ export async function editMessageWithDependencies(
     deps.getSessionTreeIds
   );
   const selectedModel = options?.selectedModel ?? target.info.model;
+  const selectedAgent = options?.selectedAgent ?? target.info.agent;
   let sendEditedMessage: (beforeOptimisticPublish?: () => void) => Promise<boolean>;
   try {
     sendEditedMessage = deps.prepareEditedMessageSend
-      ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments, selectedModel)
+      ? deps.prepareEditedMessageSend(
+          text,
+          sessionId,
+          options?.queuedAttachments,
+          selectedModel,
+          selectedAgent
+        )
       : (beforeOptimisticPublish?: () => void) => {
           beforeOptimisticPublish?.();
           return deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
@@ -571,7 +580,8 @@ type SessionControlDependencies = {
     text: string,
     sessionId: string,
     queuedAttachments?: QueuedAttachmentSnapshot,
-    selectedModel?: ResolvedModel
+    selectedModel?: ResolvedModel,
+    selectedAgent?: string
   ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
   invalidateMessageSync(sessionId: string): void;
   deferMessageRemovals(sessionId: string, messageIds: string[]): () => void;
@@ -641,6 +651,7 @@ export class SessionControlOperations {
       allowEmptyText?: boolean;
       queuedAttachments?: QueuedAttachmentSnapshot;
       selectedModel?: ResolvedModel;
+      selectedAgent?: string;
       onOptimisticPublish?: () => void;
     }
   ) => {

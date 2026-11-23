@@ -30,6 +30,7 @@ describe('message-edit-state', () => {
       text: 'prompt',
       context: { files: [], images: [], terminalSelection: null },
       model: null,
+      agent: null,
     });
     expect(editingMessageId()).toBe('message-1');
   });

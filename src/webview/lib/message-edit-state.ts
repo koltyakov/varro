@@ -27,6 +27,7 @@ export type MessageEditRequest = {
   text: string;
   context: MessageEditContext;
   model: ChatModelSelection | null;
+  agent: string | null;
 };
 
 const [editingMessage, setEditingMessage] = createSignal<MessageEditRequest | null>(null);
@@ -56,10 +57,11 @@ export function startEditingMessage(
   sessionId: string,
   text: string,
   context: MessageEditContext = { files: [], images: [], terminalSelection: null },
-  model: ChatModelSelection | null = null
+  model: ChatModelSelection | null = null,
+  agent: string | null = null
 ) {
   if (!editingMessage()) clearMessageEditDraftBackup();
-  setEditingMessage({ messageId, sessionId, text, context, model });
+  setEditingMessage({ messageId, sessionId, text, context, model, agent });
 }
 
 export function stopEditingMessage(messageId: string) {
