@@ -34,6 +34,8 @@ import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 
+const CHAT_FOCUSED_CONTEXT = 'varro:chatFocused';
+const FOCUSED_CHAT_SURFACE_CONTEXT = 'varro:focusedChatSurface';
 const WORKSPACE_CATALOG_EVENT_TYPES = new Set<ServerEvent['type']>([
   'session.created',
   'session.updated',
@@ -299,6 +301,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly serverMemoryPermissions: ServerMemoryPermissionStore;
   private readonly editorPanels = new Map<string, EditorEndpoint>();
   private lastFocusedContextViewId: string | null = null;
+  private focusedChatSurface: WebviewInstanceContext['surface'] | null = null;
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
   private readonly sessionSelectionUpdatedAt = new Map<string, number>();
   private readonly sessionTransfers = new Map<
@@ -1137,6 +1140,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               if (endpoint !== endpointRef.endpoint) endpoint.focused = false;
             }
           }
+          this.syncChatFocusContext();
           this.attentionNotifications.update();
         },
         revealPermission: (permissionId) => this.revealPermission(permissionId),
@@ -1495,6 +1499,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  // Webview focus never reaches VS Code's focusedView or auxiliaryBarFocus keys, so keybindings
+  // need Varro's own keys to tell whether a chat has focus.
+  private syncChatFocusContext() {
+    const surface = [...this.endpoints].find((endpoint) => endpoint.focused)?.surface ?? null;
+    if (surface === this.focusedChatSurface) return;
+    this.focusedChatSurface = surface;
+    void vscode.commands.executeCommand('setContext', CHAT_FOCUSED_CONTEXT, surface !== null);
+    void vscode.commands.executeCommand(
+      'setContext',
+      FOCUSED_CHAT_SURFACE_CONTEXT,
+      surface ?? undefined
+    );
+  }
+
   private async notificationWindowUrl(sessionID: string): Promise<string> {
     const directory = this.contextProvider.context.workspacePath ?? undefined;
     if (
@@ -1835,6 +1853,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       if (removed) this.postEditorTabsState();
       this.endpoints.delete(endpoint);
+      this.syncChatFocusContext();
       this.updateProviderLimitExclusions();
       this.setEndpointReady(endpoint, false);
       endpoint.contextFilesState.clearContextFiles();
@@ -3504,7 +3523,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     this.sessionState.dispose();
     this.providerFileRefresh.beginDispose();
-    for (const endpoint of this.endpoints) this.setEndpointReady(endpoint, false);
+    for (const endpoint of this.endpoints) {
+      this.setEndpointReady(endpoint, false);
+      endpoint.focused = false;
+    }
+    this.syncChatFocusContext();
     for (const endpoint of this.editorPanels.values()) {
       this.setEndpointReady(endpoint, false);
       for (const disposable of endpoint.panelDisposables) disposable.dispose();

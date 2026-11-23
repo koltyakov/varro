@@ -764,6 +764,56 @@ describe('SidebarProvider editor panels', () => {
     expect(editor.panel.webview.html).toContain('"sessionReadState":{"project-chat":200}');
   });
 
+  it('sets chat focus context keys for the focused sidebar or editor chat', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    attachTestView(provider);
+    const editor = await openNewEditorPanel(provider);
+    const executeCommand = getVscodeMock().commands.executeCommand;
+    const focusContext = () =>
+      (executeCommand.mock.calls as unknown[][])
+        .filter(
+          ([command, key]) =>
+            command === 'setContext' &&
+            (key === 'varro:chatFocused' || key === 'varro:focusedChatSurface')
+        )
+        .map(([, key, value]) => [key, value]);
+    executeCommand.mockClear();
+
+    await provider.handleMessage({ type: 'webview/focus', payload: { focused: true } });
+    expect(focusContext()).toEqual([
+      ['varro:chatFocused', true],
+      ['varro:focusedChatSurface', 'sidebar'],
+    ]);
+
+    executeCommand.mockClear();
+    editor.receive({ type: 'webview/focus', payload: { focused: true } });
+    await vi.waitFor(() =>
+      expect(focusContext()).toEqual([
+        ['varro:chatFocused', true],
+        ['varro:focusedChatSurface', 'editor'],
+      ])
+    );
+
+    executeCommand.mockClear();
+    editor.receive({ type: 'webview/focus', payload: { focused: false } });
+    await vi.waitFor(() =>
+      expect(focusContext()).toEqual([
+        ['varro:chatFocused', false],
+        ['varro:focusedChatSurface', undefined],
+      ])
+    );
+
+    editor.receive({ type: 'webview/focus', payload: { focused: true } });
+    await vi.waitFor(() => expect(focusContext()).toHaveLength(4));
+    executeCommand.mockClear();
+    editor.panel.dispose();
+    expect(focusContext()).toEqual([
+      ['varro:chatFocused', false],
+      ['varro:focusedChatSurface', undefined],
+    ]);
+    await provider.dispose();
+  });
+
   it('routes external context to the last focused chat and clears only that workspace draft', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/repo-a';

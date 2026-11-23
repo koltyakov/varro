@@ -980,6 +980,28 @@ Editable user messages expose an edit action. Sending the replacement removes th
 - `Varro: Add to Context` from the editor selection context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` with an editor selection. Without a selection the key keeps its VS Code default (`Delete Line`)
 - `Varro: Add to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused
 
+VS Code's `focusedView` and `auxiliaryBarFocus` keys do not change while focus is inside a webview, so Varro sets its own context keys for keybinding `when` clauses:
+
+- `varro:chatFocused` - `true` while any Varro chat, in the sidebar or a chat editor, has focus
+- `varro:focusedChatSurface` - `sidebar` or `editor` for the focused chat; unset otherwise
+
+For example, one key can focus the chat on the first press and maximize the secondary sidebar on the second:
+
+```json
+[
+  {
+    "key": "ctrl+alt+v",
+    "command": "varro.chat.focusInput",
+    "when": "varro:focusedChatSurface != 'sidebar'"
+  },
+  {
+    "key": "ctrl+alt+v",
+    "command": "workbench.action.toggleMaximizedAuxiliaryBar",
+    "when": "varro:focusedChatSurface == 'sidebar'"
+  }
+]
+```
+
 ## Settings
 
 Server:
