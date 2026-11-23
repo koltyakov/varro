@@ -15,7 +15,8 @@ import {
 import { resetMessageEditState, startEditingMessage } from '../../lib/message-edit-state';
 import { registerMessageBlockRemovalHandler } from '../../lib/message-list-layout';
 import * as bridge from '../../lib/bridge';
-import { copyIcon, gitForkIcon, xmarkCircleIcon } from '../../lib/ui-icons';
+import { copyIcon, gitForkIcon, triangleFlagIcon, xmarkCircleIcon } from '../../lib/ui-icons';
+import { isPlanHandedOff, recordPlanHandoff } from '../../lib/plan-handoff';
 import { planImplementationDraftRequest } from '../../lib/plan-implementation-draft';
 import { assistantMessage, session, textPart, userMessage } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
@@ -338,6 +339,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     await vi.waitFor(() => expect(planImplementationDraftRequest()).not.toBeNull());
 
     expect(isSkippedPlanSession('session-1', 200)).toBe(true);
+    expect(isPlanHandedOff('plan-1')).toBe(true);
     expect(state.activeSessionId).toBeNull();
     expect(planImplementationDraftRequest()).toMatchObject({
       sessionId: null,
@@ -346,6 +348,144 @@ describe('AssistantDialogSummaryForMessage', () => {
     });
     expect(buildLinkedPlanImplementationPrompt('session-1')).toMatch(/^session:session-1 /);
     expect(implementPlanMock).not.toHaveBeenCalled();
+  });
+
+  it('labels a plan moved to a new chat with a flag and offers only Open plan', () => {
+    setState(
+      storePath('sessions', [
+        session('plan-handoff', { title: 'Plan', time: { created: 100, updated: 200 } }),
+      ])
+    );
+    flushSolid();
+    skipPlanSession('plan-handoff');
+    recordPlanHandoff('plan-handed-off');
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-handed-off', { sessionID: 'plan-handoff', agent: 'plan' }),
+            parts: [],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-handed-off"
+        />
+      ),
+      container
+    );
+    flushSolid();
+
+    const label = container.querySelector('.assistant-dialog-summary-plan-skipped-label');
+    expect(label?.textContent).toBe('Side implementation');
+    expect(
+      label?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(triangleFlagIcon));
+    expect(
+      [
+        ...container.querySelectorAll(
+          '.assistant-dialog-summary-plan-skipped-actions button:not(.assistant-dialog-summary-action-more)'
+        ),
+      ].map((button) => button.textContent)
+    ).toEqual(['Open plan']);
+  });
+
+  it('shows a later plan skipped in a handed-off chat as skipped', async () => {
+    setState(
+      storePath('sessions', [
+        session('session-later', { title: 'Plan', time: { created: 100, updated: 200 } }),
+      ])
+    );
+    setState(storePath('activeSessionId', 'session-later'));
+    flushSolid();
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-earlier', { sessionID: 'session-later', agent: 'plan' }),
+            parts: [textPart('plan-earlier-text', '1. Change the file')],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-earlier"
+        />
+      ),
+      container
+    );
+    flushSolid();
+    clickPlanMenuItem('More ways to implement the plan', 'Implement in new chat');
+    await vi.waitFor(() => expect(planImplementationDraftRequest()).not.toBeNull());
+    cleanup();
+
+    // A newer plan in the same chat is skipped here instead of handed off.
+    setState(
+      storePath('sessions', [
+        session('session-later', { title: 'Plan', time: { created: 100, updated: 300 } }),
+      ])
+    );
+    flushSolid();
+    skipPlanSession('session-later');
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-later', { sessionID: 'session-later', agent: 'plan' }),
+            parts: [],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-later"
+        />
+      ),
+      container
+    );
+    flushSolid();
+
+    const label = container.querySelector('.assistant-dialog-summary-plan-skipped-label');
+    expect(label?.textContent).toBe('Plan skipped');
+    expect(
+      label?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(xmarkCircleIcon));
+    expect(
+      [
+        ...container.querySelectorAll(
+          '.assistant-dialog-summary-plan-skipped-actions button:not(.assistant-dialog-summary-action-more)'
+        ),
+      ].map((button) => button.textContent)
+    ).toEqual(['Open plan', 'Implement the plan']);
+  });
+
+  it('keeps skipped plan actions visible while their menu is open', () => {
+    setState(
+      storePath('sessions', [
+        session('session-menu', { title: 'Plan', time: { created: 100, updated: 200 } }),
+      ])
+    );
+    flushSolid();
+    skipPlanSession('session-menu');
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-menu', { sessionID: 'session-menu', agent: 'plan' }),
+            parts: [],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-menu"
+        />
+      ),
+      container
+    );
+    flushSolid();
+
+    const split = () =>
+      container.querySelectorAll<HTMLElement>(
+        '.assistant-dialog-summary-plan-skipped .assistant-dialog-summary-split'
+      )[1];
+    expect(split()?.dataset.menuOpen).toBeUndefined();
+    split()?.querySelector<HTMLButtonElement>('.assistant-dialog-summary-action-more')?.click();
+    flushSolid();
+    expect(split()?.dataset.menuOpen).toBe('true');
   });
 
   it('offers a summarized plan only after more than one planning turn', async () => {
@@ -425,7 +565,7 @@ describe('AssistantDialogSummaryForMessage', () => {
       ),
     ];
     expect(option.map((item) => item.textContent)).toEqual([
-      'Edit prompt in Build',
+      'Edit before implementing',
       'Implement in new chat',
     ]);
     option[0]?.click();

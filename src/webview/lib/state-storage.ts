@@ -4,6 +4,7 @@ export const STORAGE_KEYS = {
   selectedAgent: 'varro.selectedAgent',
   sessionSelectedAgents: 'varro.sessionSelectedAgents',
   skippedPlanSessions: 'varro.skippedPlanSessions',
+  planHandoffs: 'varro.planHandoffs',
   selectedModel: 'varro.selectedModel',
   lastSelectedModel: 'varro.lastSelectedModel',
   sessionSelectedModels: 'varro.sessionSelectedModels',

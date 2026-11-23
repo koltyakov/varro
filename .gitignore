@@ -12,3 +12,4 @@ research_notes/
 reports/
 logs/
 .vitest/
+*.ts.swp

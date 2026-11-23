@@ -86,5 +86,7 @@ function toFilename(title: string, language?: string) {
   const base = title.replace(/[\\/\r\n\t]+/g, ' ').trim() || 'tool output';
   const extension = language ? EXTENSION_BY_LANGUAGE[language] : undefined;
   const suffix = extension ? `.${extension}` : '.txt';
+  // Attachment names such as plan-1234.md already carry their extension.
+  if (base.length <= 80 && base.toLowerCase().endsWith(suffix)) return base;
   return `${base.slice(0, 80)}${suffix}`;
 }

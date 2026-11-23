@@ -1572,10 +1572,10 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   width: 100%;
 }
 
+/* One line at every width: wrapping the hover actions would change the row height. */
 .assistant-dialog-summary-plan-skipped {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px;
   min-height: 26px;
   margin-top: 8px;
@@ -1589,11 +1589,23 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  min-height: 26px;
+  white-space: nowrap;
+}
+
+.assistant-dialog-summary-plan-skipped-label > .assistant-dialog-summary-plan-skipped-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.assistant-dialog-summary-plan-skipped-label > :not(.assistant-dialog-summary-plan-skipped-text) {
+  flex-shrink: 0;
 }
 
 .assistant-dialog-summary-plan-skipped-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-shrink: 0;
   justify-content: flex-end;
   gap: 6px;
   margin-left: auto;
@@ -1601,7 +1613,13 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 }
 
 .assistant-dialog-summary-plan-skipped:hover .assistant-dialog-summary-plan-skipped-actions,
-.assistant-dialog-summary-plan-skipped:focus-within .assistant-dialog-summary-plan-skipped-actions {
+.assistant-dialog-summary-plan-skipped:focus-within .assistant-dialog-summary-plan-skipped-actions,
+/* The options menu renders outside the row, so an open menu or a running summary keeps actions. */
+.assistant-dialog-summary-plan-skipped:has(
+    .assistant-dialog-summary-split[data-menu-open],
+    .assistant-dialog-summary-action[aria-busy='true']
+  )
+  .assistant-dialog-summary-plan-skipped-actions {
   visibility: visible;
 }
 

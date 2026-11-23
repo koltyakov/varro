@@ -1039,50 +1039,54 @@ export function MessageList() {
       state.messages.filter((_entry, index) => visibleSnapshots.has(snapshots[index]!))
     );
     const currentIds = untrack(() => visibleMessages.map((entry) => entry.info.id));
-    const previousIds = previousVisibleStructureMessageIds;
-    const structureChanged =
-      previousIds !== null &&
-      (previousIds.length !== currentIds.length ||
-        previousIds.some((id, index) => id !== currentIds[index]));
-    const pureAppend =
-      previousIds !== null &&
-      currentIds.length >= previousIds.length &&
-      previousIds.every((id, index) => currentIds[index] === id);
-    const nonAppendStructuralChange = structureChanged && !pureAppend;
-    const canCaptureAnchor =
-      nonAppendStructuralChange &&
-      previousVisibleStructureMessageIds !== null &&
-      previousVisibleStructureSessionId === sessionId &&
-      untrack(() => genericStructuralAnchorCanOwnScroll(sessionId));
-    // Capture before rendering publishes the changed rows, while the old geometry is still mounted.
-    const visibleAnchor = canCaptureAnchor ? captureMountedVisibleScrollAnchor() : null;
-    previousVisibleStructureSessionId = sessionId;
-    previousVisibleStructureMessageIds = currentIds;
+    // Anchor capture reads layout state such as visibleRange(), which derives from these
+    // messages. Tracking it here forms a dependency cycle that Solid re-ranks forever.
+    untrack(() => {
+      const previousIds = previousVisibleStructureMessageIds;
+      const structureChanged =
+        previousIds !== null &&
+        (previousIds.length !== currentIds.length ||
+          previousIds.some((id, index) => id !== currentIds[index]));
+      const pureAppend =
+        previousIds !== null &&
+        currentIds.length >= previousIds.length &&
+        previousIds.every((id, index) => currentIds[index] === id);
+      const nonAppendStructuralChange = structureChanged && !pureAppend;
+      const canCaptureAnchor =
+        nonAppendStructuralChange &&
+        previousVisibleStructureMessageIds !== null &&
+        previousVisibleStructureSessionId === sessionId &&
+        untrack(() => genericStructuralAnchorCanOwnScroll(sessionId));
+      // Capture before rendering publishes the changed rows, while the old geometry is still mounted.
+      const visibleAnchor = canCaptureAnchor ? captureMountedVisibleScrollAnchor() : null;
+      previousVisibleStructureSessionId = sessionId;
+      previousVisibleStructureMessageIds = currentIds;
 
-    const structuralAnchor = nonAppendStructuralChange
-      ? (captureLastRetainedVisibleScrollAnchor(previousIds, currentIds) ?? visibleAnchor)
-      : null;
-    if (structuralAnchor && !pendingStructuralScrollAnchor) {
-      const preserveBottom = !!containerRef && getDistanceFromBottom(containerRef) <= 2;
-      scheduleStructuralScrollAnchorRestore(structuralAnchor, sessionId, preserveBottom);
-    }
-    const pendingStructure = pendingStructuralScrollAnchor;
-    if (structureChanged && pendingStructure) {
-      queueMicrotask(() => {
-        if (
-          pendingStructuralScrollAnchor !== pendingStructure ||
-          state.activeSessionId !== pendingStructure.sessionId ||
-          userScrollOwnershipEpoch !== pendingStructure.ownershipEpoch ||
-          !genericStructuralAnchorCanOwnScroll(pendingStructure.sessionId)
-        ) {
-          return;
-        }
-        restoreVisibleScrollAnchor(pendingStructure.anchor, {
-          useMessageOffsetFallback: true,
-          reserveBottomOverflow: pendingStructure.preserveBottom,
+      const structuralAnchor = nonAppendStructuralChange
+        ? (captureLastRetainedVisibleScrollAnchor(previousIds, currentIds) ?? visibleAnchor)
+        : null;
+      if (structuralAnchor && !pendingStructuralScrollAnchor) {
+        const preserveBottom = !!containerRef && getDistanceFromBottom(containerRef) <= 2;
+        scheduleStructuralScrollAnchorRestore(structuralAnchor, sessionId, preserveBottom);
+      }
+      const pendingStructure = pendingStructuralScrollAnchor;
+      if (structureChanged && pendingStructure) {
+        queueMicrotask(() => {
+          if (
+            pendingStructuralScrollAnchor !== pendingStructure ||
+            state.activeSessionId !== pendingStructure.sessionId ||
+            userScrollOwnershipEpoch !== pendingStructure.ownershipEpoch ||
+            !genericStructuralAnchorCanOwnScroll(pendingStructure.sessionId)
+          ) {
+            return;
+          }
+          restoreVisibleScrollAnchor(pendingStructure.anchor, {
+            useMessageOffsetFallback: true,
+            reserveBottomOverflow: pendingStructure.preserveBottom,
+          });
         });
-      });
-    }
+      }
+    });
     return visibleMessages;
   });
   // Both derive from the same visible thread instead of refiltering the whole transcript.

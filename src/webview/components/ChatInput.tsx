@@ -22,6 +22,7 @@ import {
 } from '../lib/plan-implementation-draft';
 import { getBuildAgentName } from '../hooks/routing-state';
 import {
+  getPastedTextLanguage,
   createPastedText,
   isLargeTextPaste,
   pastedTextBytes,
@@ -548,7 +549,11 @@ function openContextFileInEditor(file: DroppedFile) {
   if (file.pastedText !== undefined) {
     postMessage({
       type: 'vscode/open-text',
-      payload: { content: file.pastedText, title: file.relativePath, language: 'plaintext' },
+      payload: {
+        content: file.pastedText,
+        title: file.relativePath,
+        language: getPastedTextLanguage(file.relativePath),
+      },
     });
     return;
   }

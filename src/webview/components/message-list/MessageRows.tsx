@@ -36,10 +36,12 @@ import {
   dashboardDotsIcon,
   dollarCircleIcon,
   navArrowDownIcon,
+  triangleFlagIcon,
   xmarkCircleIcon,
 } from '../../lib/ui-icons';
 import { ariaBoolean } from '../../lib/aria';
 import { startNewChatDraft } from '../../lib/new-chat-draft';
+import { isPlanHandedOff, recordPlanHandoff } from '../../lib/plan-handoff';
 import { requestPlanImplementationDraft } from '../../lib/plan-implementation-draft';
 import {
   canSummarizePlan,
@@ -471,6 +473,7 @@ export function AssistantDialogSummaryForMessage(
         const plan = await resolvePlanContent(sessionId, buildPlanDocumentContent(props.msg.parts));
         skipPlanSession(sessionId);
         startNewChatDraft();
+        recordPlanHandoff(props.msg.info.id);
         requestPlanImplementationDraft(
           null,
           buildLinkedPlanImplementationPrompt(sessionId),
@@ -489,6 +492,7 @@ export function AssistantDialogSummaryForMessage(
           : undefined
       }
       onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
+      planHandedOff={isPlanHandedOff(props.msg.info.id)}
       copyText={props.msg.parts
         .flatMap((part) =>
           part.type === 'text' && !part.synthetic && !part.ignored ? [part.text.trim()] : []
@@ -524,7 +528,7 @@ export function getForkBoundaryMessageId(
     ?.info.id;
 }
 
-type PlanMenuItem = { label: string; title: string; onSelect: () => void };
+type PlanMenuItem = { label: string; onSelect: () => void };
 
 /** A plan action button, joined to a chevron menu when it has alternatives. */
 function SplitPlanAction(props: {
@@ -541,7 +545,7 @@ function SplitPlanAction(props: {
   const buttonClass = () =>
     `assistant-dialog-summary-action assistant-dialog-summary-action-${props.variant} question-btn`;
   return (
-    <span class="assistant-dialog-summary-split">
+    <span class="assistant-dialog-summary-split" data-menu-open={menu() ? 'true' : undefined}>
       <button
         type="button"
         class={buttonClass()}
@@ -579,7 +583,6 @@ function SplitPlanAction(props: {
               onClose={() => setMenu(null)}
               items={props.items.map((item) => ({
                 label: item.label,
-                title: item.title,
                 onSelect: () => {
                   setMenu(null);
                   item.onSelect();
@@ -594,6 +597,8 @@ function SplitPlanAction(props: {
 }
 
 function OpenAndImplementPlanButtons(props: {
+  /** False once the plan's implementation moved to another chat. */
+  showImplement?: boolean;
   onOpenPlan?: () => void;
   onOpenSummarizedPlan?: () => Promise<void>;
   onImplementPlan?: () => void;
@@ -623,7 +628,6 @@ function OpenAndImplementPlanButtons(props: {
       ? [
           {
             label: 'Open summarized',
-            title: 'Summarize every planning turn into one plan document',
             onSelect: () => void run('open', summarize),
           },
         ]
@@ -634,8 +638,7 @@ function OpenAndImplementPlanButtons(props: {
     const draft = props.onDraftImplementPlan;
     if (draft) {
       items.push({
-        label: 'Edit prompt in Build',
-        title: 'Switch to Build and put the implementation prompt in the message box',
+        label: 'Edit before implementing',
         onSelect: draft,
       });
     }
@@ -643,7 +646,6 @@ function OpenAndImplementPlanButtons(props: {
     if (newChat) {
       items.push({
         label: 'Implement in new chat',
-        title: 'Skip this plan here and start a Build chat with the plan attached',
         onSelect: () => void run('implement', newChat),
       });
     }
@@ -661,16 +663,18 @@ function OpenAndImplementPlanButtons(props: {
         items={openItems()}
         onClick={() => props.onOpenPlan?.()}
       />
-      <SplitPlanAction
-        variant="implement"
-        label="Implement the plan"
-        busy={busy() === 'implement'}
-        disabled={disabled()}
-        menuLabel="Implement the plan options"
-        moreLabel="More ways to implement the plan"
-        items={implementItems()}
-        onClick={() => props.onImplementPlan?.()}
-      />
+      <Show when={props.showImplement !== false}>
+        <SplitPlanAction
+          variant="implement"
+          label="Implement the plan"
+          busy={busy() === 'implement'}
+          disabled={disabled()}
+          menuLabel="Implement the plan options"
+          moreLabel="More ways to implement the plan"
+          items={implementItems()}
+          onClick={() => props.onImplementPlan?.()}
+        />
+      </Show>
     </>
   );
 }
@@ -687,6 +691,7 @@ function AssistantDialogSummary(props: {
   onDraftImplementPlan?: () => void;
   onImplementPlanInNewChat?: () => Promise<void>;
   onOpenSummarizedPlan?: () => Promise<void>;
+  planHandedOff?: boolean;
   onSkipPlan?: () => void;
   copyText: string;
   onFork: () => void;
@@ -970,12 +975,19 @@ function AssistantDialogSummary(props: {
           tabindex={props.hasBuildAgent ? 0 : undefined}
         >
           <span class="assistant-dialog-summary-plan-skipped-label" role="status">
-            <UiIcon source={xmarkCircleIcon} width={14} height={14} />
-            Plan skipped
+            <UiIcon
+              source={props.planHandedOff ? triangleFlagIcon : xmarkCircleIcon}
+              width={14}
+              height={14}
+            />
+            <span class="assistant-dialog-summary-plan-skipped-text">
+              {props.planHandedOff ? 'Side implementation' : 'Plan skipped'}
+            </span>
           </span>
           <Show when={props.hasBuildAgent}>
             <div class="assistant-dialog-summary-plan-skipped-actions">
               <OpenAndImplementPlanButtons
+                showImplement={!props.planHandedOff}
                 onOpenPlan={props.onOpenPlan}
                 onImplementPlan={props.onImplementPlan}
                 onDraftImplementPlan={props.onDraftImplementPlan}

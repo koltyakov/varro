@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getPastedTextLanguage,
   createPastedText,
   isLargeTextPaste,
   pastedTextDataUrl,
@@ -35,5 +36,14 @@ describe('pasted text snapshots', () => {
   });
   it('applies the byte limit without clipping a multibyte paste', () => {
     expect(() => createPastedText('雪'.repeat(MAX_PASTED_TEXT_BYTES / 3 + 1))).toThrow('64 KB');
+  });
+});
+
+describe('getPastedTextLanguage', () => {
+  it('opens markdown attachments as markdown and others as plain text', () => {
+    expect(getPastedTextLanguage('plan-1234.md')).toBe('markdown');
+    expect(getPastedTextLanguage('NOTES.MARKDOWN')).toBe('markdown');
+    expect(getPastedTextLanguage('pasted-text-1234.txt')).toBe('plaintext');
+    expect(getPastedTextLanguage('plan.md.txt')).toBe('plaintext');
   });
 });

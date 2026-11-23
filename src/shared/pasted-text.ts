@@ -8,6 +8,11 @@ export function isLargeTextPaste(text: string): boolean {
   return text.length >= 2000 || text.split(/\r\n|\r|\n/).length >= 25;
 }
 
+/** Opens text attachments such as plan-1234.md with the language their name implies. */
+export function getPastedTextLanguage(name: string): 'markdown' | 'plaintext' {
+  return /\.(?:md|markdown)$/i.test(name) ? 'markdown' : 'plaintext';
+}
+
 export function pastedTextBytes(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }

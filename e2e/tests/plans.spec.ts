@@ -11,7 +11,7 @@ for (const theme of ['dark', 'light', 'high-contrast', 'high-contrast-light']) {
 
     const actions = page.locator('.assistant-dialog-summary-actions');
     const open = page.getByRole('button', { name: 'Open plan' });
-    const implement = page.getByRole('button', { name: 'Implement the plan' });
+    const implement = page.getByRole('button', { name: 'Implement the plan', exact: true });
     const skip = page.getByRole('button', { name: 'Skip for now' });
     await expect(implement).toHaveClass(/assistant-dialog-summary-action-implement/);
     // Chromium can serialize flex-end as flow-end; verify the rendered alignment below too.
@@ -89,7 +89,7 @@ test('planning mode ends up with a plan using realistic provider models', async 
     page.getByLabel('Back to sessions').locator('..').getByText('Plan migration rollout')
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open plan' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Implement the plan' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Implement the plan', exact: true })).toBeVisible();
   await expect(page.locator('.assistant-turn-content').last()).toContainText('Migration Plan');
   await expect(page.getByRole('heading', { name: 'Migration Plan' })).toHaveCSS(
     'margin-top',
@@ -133,7 +133,7 @@ test('planning mode ends up with a plan using realistic provider models', async 
 test('implementing a plan sends the build prompt', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
 
-  await page.getByRole('button', { name: 'Implement the plan' }).click();
+  await page.getByRole('button', { name: 'Implement the plan', exact: true }).click();
 
   const action = page.locator('.plan-implementation-action');
   await expect(action).toHaveText('Implement the plan');
@@ -176,7 +176,7 @@ test('skipping a plan replaces the plan actions with a confirmation', async ({ p
 
   await page.mouse.move(0, 0);
   await expect(page.getByRole('button', { name: 'Open plan' })).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Implement the plan' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Implement the plan', exact: true })).toBeHidden();
   await expect(page.locator('.assistant-dialog-summary-plan-skipped-label')).toHaveText(
     'Plan skipped'
   );
@@ -197,7 +197,30 @@ test('keeps skipped plan actions hidden after reload', async ({ page }) => {
     'Plan skipped'
   );
   await expect(page.getByRole('button', { name: 'Open plan' })).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Implement the plan' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Implement the plan', exact: true })).toBeHidden();
+});
+
+test('skipped plan row keeps one line and its label offset at narrow widths', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=plan-ready');
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+  await page.mouse.move(0, 0);
+
+  const row = page.locator('.assistant-dialog-summary-plan-skipped');
+  const label = row.locator('.assistant-dialog-summary-plan-skipped-label');
+  const offset = async (): Promise<number> => {
+    const [rowBox, labelBox] = await Promise.all([row.boundingBox(), label.boundingBox()]);
+    if (!rowBox || !labelBox) throw new Error('Skipped plan row is not rendered');
+    return labelBox.y - rowBox.y;
+  };
+
+  await page.setViewportSize({ width: 900, height: 800 });
+  const wide = await offset();
+  expect((await row.boundingBox())?.height).toBe(26);
+  await page.setViewportSize({ width: 280, height: 800 });
+  await row.hover();
+  await expect(row.getByRole('button', { name: 'Implement the plan', exact: true })).toBeVisible();
+  expect((await row.boundingBox())?.height).toBe(26);
+  expect(await offset()).toBe(wide);
 });
 
 test('skipped plan actions appear on hover and keyboard focus without moving the row', async ({
@@ -209,7 +232,7 @@ test('skipped plan actions appear on hover and keyboard focus without moving the
 
   const row = page.locator('.assistant-dialog-summary-plan-skipped');
   const open = row.getByRole('button', { name: 'Open plan' });
-  const implement = row.getByRole('button', { name: 'Implement the plan' });
+  const implement = row.getByRole('button', { name: 'Implement the plan', exact: true });
   await expect(open).toBeHidden();
   const before = await row.boundingBox();
   await row.hover();

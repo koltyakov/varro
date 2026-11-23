@@ -20,7 +20,11 @@ import type { ExtensionContext } from '../../../shared/extension-context';
 import { readLegacyExtensionContext, showAttachmentDetails } from '../../host/extensions';
 import { Portal } from '@solidjs/web';
 import { ariaBoolean } from '../../lib/aria';
-import { createPastedText, readPastedTextDataUrl } from '../../../shared/pasted-text';
+import {
+  createPastedText,
+  getPastedTextLanguage,
+  readPastedTextDataUrl,
+} from '../../../shared/pasted-text';
 import {
   getChatAnnotationLabel,
   readChatAnnotationFilePart,
@@ -2959,7 +2963,7 @@ function MessageFileAttachment(props: { part: FilePart; inline?: boolean; marker
       if (content === null) throw new Error('Attachment is not a text document');
       postMessage({
         type: 'vscode/open-text',
-        payload: { content, title: label(), language: 'plaintext' },
+        payload: { content, title: label(), language: getPastedTextLanguage(label()) },
       });
     } catch (reason) {
       if (!controller.signal.aborted)

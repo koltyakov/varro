@@ -174,6 +174,22 @@ describe('ToolOutputDocumentProvider', () => {
     }
   });
 
+  it.each([
+    { title: 'plan-1234.md', language: 'markdown', path: '/plan-1234.md' },
+    { title: 'pasted-text-1234.txt', language: 'plaintext', path: '/pasted-text-1234.txt' },
+  ])('keeps the extension an attachment name already has: $title', async (input) => {
+    const provider = new ToolOutputDocumentProvider();
+
+    try {
+      await provider.open({ content: '# Plan', title: input.title, language: input.language });
+
+      const path = vscodeMock.Uri.from.mock.calls.at(-1)?.[0]?.path ?? '';
+      expect(path.endsWith(input.path)).toBe(true);
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('can keep a named document out of preview mode', async () => {
     const provider = new ToolOutputDocumentProvider();
 
