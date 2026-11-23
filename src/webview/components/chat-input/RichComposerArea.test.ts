@@ -66,6 +66,7 @@ function expectChipUiIcon(element: Element | null | undefined, source: string) {
 
 function renderComposer(props: {
   value: string;
+  slashCommandNames?: ReadonlySet<string>;
   cursorOffset: number;
   chips: RichComposerChip[];
   centerCaret?: boolean;
@@ -85,6 +86,9 @@ function renderComposer(props: {
         centerCaret: props.centerCaret,
         get value() {
           return props.value;
+        },
+        get slashCommandNames() {
+          return props.slashCommandNames;
         },
         get cursorOffset() {
           return props.cursorOffset;
@@ -161,6 +165,86 @@ function dispatchBeforeInput(target: EventTarget, init: InputEventInit) {
 }
 
 describe('RichComposerArea', () => {
+  it('does not read reactive highlight inputs in effect callbacks when the CSS API is absent', () => {
+    vi.stubGlobal('CSS', undefined);
+    const warn = vi.spyOn(console, 'warn');
+    const [value] = createSignal('/audit details');
+    const [names] = createSignal<ReadonlySet<string>>(new Set(['audit']));
+    try {
+      renderComposer({
+        get value() {
+          return value();
+        },
+        get slashCommandNames() {
+          return names();
+        },
+        cursorOffset: 14,
+        chips: [],
+      });
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('[STRICT_READ_UNTRACKED]'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('updates command highlights for catalog changes without replacing the editor DOM or selection', () => {
+    const highlights = new Map<string, Set<Range>>();
+    vi.stubGlobal('CSS', { highlights });
+    vi.stubGlobal(
+      'Highlight',
+      class extends Set<Range> {
+        constructor(...ranges: Range[]) {
+          super(ranges);
+        }
+      }
+    );
+    const [value, setValue] = createSignal('  /audit details');
+    const [names, setNames] = createSignal<ReadonlySet<string>>(new Set());
+    renderComposer({
+      get value() {
+        return value();
+      },
+      get slashCommandNames() {
+        return names();
+      },
+      cursorOffset: 16,
+      chips: [],
+    });
+    const editor = container!.querySelector<HTMLElement>('[contenteditable="true"]')!;
+    const originalText = editor.firstChild!;
+    setCollapsedSelection(originalText, 5);
+    expect(highlights.size).toBe(0);
+    setNames(new Set(['audit']));
+    flushSolid();
+    expect([...highlights.get('composer-slash-command')!].map((range) => range.toString())).toEqual(
+      ['/audit']
+    );
+    expect(editor.firstChild).toBe(originalText);
+    expect(window.getSelection()?.anchorNode).toBe(originalText);
+    expect(window.getSelection()?.anchorOffset).toBe(5);
+    setNames(new Set<string>());
+    flushSolid();
+    expect(highlights.size).toBe(0);
+    setNames(new Set(['audit']));
+    setValue('/AUDIT updated');
+    flushSolid();
+    expect([...highlights.get('composer-slash-command')!].map((range) => range.toString())).toEqual(
+      ['/AUDIT']
+    );
+    setValue('/unknown');
+    flushSolid();
+    expect(highlights.size).toBe(0);
+    editor.textContent = '/audit native';
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
+    expect([...highlights.get('composer-slash-command')!].map((range) => range.toString())).toEqual(
+      ['/audit']
+    );
+    cleanup?.();
+    cleanup = undefined;
+    expect(highlights.size).toBe(0);
+  });
+
   it('preserves a native selection on unrelated updates but applies a changed controlled cursor', () => {
     const [chips, setChips] = createSignal<RichComposerChip[]>([]);
     const [cursor, setCursor] = createSignal(12);

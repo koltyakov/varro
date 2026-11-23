@@ -111,6 +111,8 @@ export function RichComposerArea(props: {
 }) {
   let editorEl: HTMLDivElement | undefined;
   let commandRange: Range | undefined;
+  // Catalog-only changes must not rerun DOM synchronization and move the caret.
+  let commandNames: ReadonlySet<string> | undefined;
   function clearCommandHighlight() {
     if (!commandRange) return;
     const highlight = CSS.highlights.get(COMMAND_HIGHLIGHT);
@@ -120,11 +122,11 @@ export function RichComposerArea(props: {
   }
   onCleanup(clearCommandHighlight);
 
-  function updateCommandHighlight(text: string) {
+  function updateCommandHighlight(text: string, names: ReadonlySet<string> | undefined) {
     clearCommandHighlight();
-    if (!props.slashCommandNames || !editorEl || !globalThis.CSS?.highlights) return;
+    if (!names || !editorEl || !globalThis.CSS?.highlights) return;
     const match = /^(\s*)\/(\S+)/.exec(text);
-    if (!match || !props.slashCommandNames.has(match[2]!.toLowerCase())) return;
+    if (!match || !names.has(match[2]!.toLowerCase())) return;
     const start = findNodeAtOffset(editorEl, match[1]!.length);
     const end = findNodeAtOffset(editorEl, match[0].length);
     if (!start || !end) return;
@@ -137,7 +139,10 @@ export function RichComposerArea(props: {
   }
   createEffect(
     () => props.slashCommandNames,
-    () => updateCommandHighlight(props.value)
+    (names) => {
+      commandNames = names;
+      if (editorEl) updateCommandHighlight(extractText(editorEl), names);
+    }
   );
   const [isComposing, setIsComposing] = createSignal(false);
   let composing = false;
@@ -1048,7 +1053,7 @@ export function RichComposerArea(props: {
       const frag = buildDom(text, chipMap, pendingPaste);
       editorEl.textContent = '';
       editorEl.appendChild(frag);
-      updateCommandHighlight(text);
+      updateCommandHighlight(text, commandNames);
       syncEmptyState();
       if (isFocused) {
         setCursorOffset(Math.min(cursorOff, text.length));
@@ -1083,7 +1088,7 @@ export function RichComposerArea(props: {
       const frag = buildDom(props.value, getChipMap(), props.pendingPaste);
       editorEl.textContent = '';
       editorEl.appendChild(frag);
-      updateCommandHighlight(props.value);
+      updateCommandHighlight(props.value, props.slashCommandNames);
       lastSyncedValue = props.value;
       syncEmptyState();
       setCursorOffset(Math.min(props.cursorOffset ?? props.value.length, props.value.length));
@@ -1093,7 +1098,7 @@ export function RichComposerArea(props: {
     if (normalizeEditableExternalLinks(editorEl)) setCursorOffset(offset);
     else stabilizeCaretBeforeExternalLink();
     const text = extractText(editorEl);
-    updateCommandHighlight(text);
+    updateCommandHighlight(text, props.slashCommandNames);
     editorEl.dataset.empty = text.length === 0 ? 'true' : 'false';
     const previousValue = props.value;
     const previousChips = props.chips.slice();
@@ -1161,7 +1166,7 @@ export function RichComposerArea(props: {
     // selection placeholder before returning control to the browser.
     if (editorEl) {
       editorEl.replaceChildren(buildDom(nextValue, getChipMap(), pending ?? undefined));
-      updateCommandHighlight(nextValue);
+      updateCommandHighlight(nextValue, props.slashCommandNames);
       lastSyncedValue = nextValue;
       syncEmptyState();
       setCursorOffset(end);
