@@ -23,6 +23,7 @@ type ComposerClipboardEvent = ClipboardEvent & {
 };
 
 const CARET_SPACER = '\u200B';
+const COMMAND_HIGHLIGHT = 'composer-slash-command';
 
 export type RichComposerChip = {
   id: string;
@@ -73,6 +74,7 @@ export function RichComposerArea(props: {
   editorRef: (el: HTMLDivElement) => void;
   placeholder: string;
   ariaLabel?: string;
+  slashCommandNames?: ReadonlySet<string>;
   centerCaret?: boolean;
   value: string;
   promptSuggestion?: string;
@@ -108,6 +110,35 @@ export function RichComposerArea(props: {
   onCompressImage?: (chipId: string, event: MouseEvent) => void;
 }) {
   let editorEl: HTMLDivElement | undefined;
+  let commandRange: Range | undefined;
+  function clearCommandHighlight() {
+    if (!commandRange) return;
+    const highlight = CSS.highlights.get(COMMAND_HIGHLIGHT);
+    highlight?.delete(commandRange);
+    if (highlight?.size === 0) CSS.highlights.delete(COMMAND_HIGHLIGHT);
+    commandRange = undefined;
+  }
+  onCleanup(clearCommandHighlight);
+
+  function updateCommandHighlight(text: string) {
+    clearCommandHighlight();
+    if (!props.slashCommandNames || !editorEl || !globalThis.CSS?.highlights) return;
+    const match = /^(\s*)\/(\S+)/.exec(text);
+    if (!match || !props.slashCommandNames.has(match[2]!.toLowerCase())) return;
+    const start = findNodeAtOffset(editorEl, match[1]!.length);
+    const end = findNodeAtOffset(editorEl, match[0].length);
+    if (!start || !end) return;
+    commandRange = document.createRange();
+    commandRange.setStart(start.node, start.offset);
+    commandRange.setEnd(end.node, end.offset);
+    const highlight = CSS.highlights.get(COMMAND_HIGHLIGHT);
+    if (highlight) highlight.add(commandRange);
+    else CSS.highlights.set(COMMAND_HIGHLIGHT, new Highlight(commandRange));
+  }
+  createEffect(
+    () => props.slashCommandNames,
+    () => updateCommandHighlight(props.value)
+  );
   const [isComposing, setIsComposing] = createSignal(false);
   let composing = false;
   function setComposing(value: boolean) {
@@ -1017,6 +1048,7 @@ export function RichComposerArea(props: {
       const frag = buildDom(text, chipMap, pendingPaste);
       editorEl.textContent = '';
       editorEl.appendChild(frag);
+      updateCommandHighlight(text);
       syncEmptyState();
       if (isFocused) {
         setCursorOffset(Math.min(cursorOff, text.length));
@@ -1051,6 +1083,7 @@ export function RichComposerArea(props: {
       const frag = buildDom(props.value, getChipMap(), props.pendingPaste);
       editorEl.textContent = '';
       editorEl.appendChild(frag);
+      updateCommandHighlight(props.value);
       lastSyncedValue = props.value;
       syncEmptyState();
       setCursorOffset(Math.min(props.cursorOffset ?? props.value.length, props.value.length));
@@ -1060,6 +1093,7 @@ export function RichComposerArea(props: {
     if (normalizeEditableExternalLinks(editorEl)) setCursorOffset(offset);
     else stabilizeCaretBeforeExternalLink();
     const text = extractText(editorEl);
+    updateCommandHighlight(text);
     editorEl.dataset.empty = text.length === 0 ? 'true' : 'false';
     const previousValue = props.value;
     const previousChips = props.chips.slice();
@@ -1127,6 +1161,7 @@ export function RichComposerArea(props: {
     // selection placeholder before returning control to the browser.
     if (editorEl) {
       editorEl.replaceChildren(buildDom(nextValue, getChipMap(), pending ?? undefined));
+      updateCommandHighlight(nextValue);
       lastSyncedValue = nextValue;
       syncEmptyState();
       setCursorOffset(end);

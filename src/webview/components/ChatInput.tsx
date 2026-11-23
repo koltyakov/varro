@@ -2567,6 +2567,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       hints: (command.hints || []).map((hint) => hint.toLowerCase()),
     }))
   );
+  const recognizedSlashCommandNames = createMemo(
+    () =>
+      new Set([
+        // These commands also support direct submission without a completion entry.
+        'abort',
+        'stop',
+        'undo',
+        'revert',
+        'redo',
+        'fork',
+        'diagnostics',
+        'init',
+        ...slashCommands().flatMap((command) => [command.name, ...command.aliases]),
+        ...skillSlashCompletionEntries().map((entry) => entry.name),
+      ])
+  );
   const slashCompletionEntries = createMemo(() =>
     slashCommands()
       .filter((command) => command.source !== 'skill')
@@ -7210,6 +7226,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           </Show>
 
           <RichComposerArea
+            slashCommandNames={recognizedSlashCommandNames()}
             editorRef={(el) => {
               richEditorRef = el;
             }}

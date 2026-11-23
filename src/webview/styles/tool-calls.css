@@ -29,6 +29,10 @@
   --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 16%, transparent);
 }
 
+.rich-composer::highlight(composer-slash-command) {
+  color: color-mix(in srgb, var(--vscode-charts-yellow, #cca700) 75%, var(--color-vscode-fg));
+}
+
 .rich-composer[data-prompt-completion-pending='true'] {
   caret-color: var(--color-vscode-accent);
 }
