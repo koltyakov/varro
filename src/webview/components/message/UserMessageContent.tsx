@@ -447,14 +447,17 @@ function parseUserMessageParts(parts: Part[]): ParsedUserMessageContent {
   };
 }
 
-const SHELL_HEADER_RE = /^<shell\s+((?:"[^"]*"|'[^']*'|[^'">])*)>/;
+const SHELL_HEADER_RE =
+  /^<(?:shell|background-result kind="shell")\s+((?:"[^"]*"|'[^']*'|[^'">])*)>/;
 
 function automaticActionPart(part: TextPart, title: string): ToolPart {
   const text = part.text.trim();
   const result = part.subagentResult;
   if (result) {
     // Native metadata owns attribution. The wrapper is stripped only for display.
-    const output = text.replace(/^<subagent\s[^\n]*>\r?\n/, '').replace(/\r?\n<\/subagent>$/, '');
+    const output = text
+      .replace(/^<(?:subagent|background-result kind="subagent")(?:\s[^\n]*)?>\r?\n/, '')
+      .replace(/\r?\n<\/(?:subagent|background-result)>$/, '');
     const input = { description: title, subagent_type: result.agent };
     const metadata = { sessionID: result.sessionID };
     const time = { start: part.time?.start ?? 0, end: part.time?.end ?? part.time?.start ?? 0 };
@@ -478,7 +481,7 @@ function automaticActionPart(part: TextPart, title: string): ToolPart {
             },
     };
   }
-  const shell = text.startsWith('<shell ') ? SHELL_HEADER_RE.exec(text) : null;
+  const shell = SHELL_HEADER_RE.exec(text);
   const input: Record<string, string> = {};
   if (shell) {
     for (const match of shell[1]!.matchAll(/([\w-]+)=(?:"([^"]*)"|'([^']*)')/g)) {
@@ -488,7 +491,7 @@ function automaticActionPart(part: TextPart, title: string): ToolPart {
   const output = shell
     ? text
         .slice(shell[0].length)
-        .replace(/<\/shell>\s*$/, '')
+        .replace(/<\/(?:shell|background-result)>\s*$/, '')
         .trim()
     : part.text;
   const time = { start: part.time?.start ?? 0, end: part.time?.end ?? part.time?.start ?? 0 };
@@ -596,8 +599,9 @@ function getAutomaticAction(part: TextPart): string | null {
     return 'Resumed after interruption';
   }
   if (text.startsWith('Instructions from:')) return 'Loaded agent instructions';
-  if (text.startsWith('<shell ')) {
-    const header = SHELL_HEADER_RE.exec(text)?.[1] ?? '';
+  const shell = SHELL_HEADER_RE.exec(text);
+  if (shell) {
+    const header = shell[1] ?? '';
     if (/\bstate=(?:"cancelled"|'cancelled')/.test(header)) return 'Background command cancelled';
     if (/\bstate=(?:"(?:failed|error)"|'(?:failed|error)')/.test(header))
       return 'Background command failed';

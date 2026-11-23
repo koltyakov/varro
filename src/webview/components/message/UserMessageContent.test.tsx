@@ -170,13 +170,79 @@ describe('native subagent results', () => {
     }
   );
 
-  it('does not treat user-written subagent markup as a native result', () => {
-    const parsed = parseUserMessageContent([
-      textPart('user-text', '<subagent sessionID="fake">Result</subagent>'),
-    ]);
+  it.each([
+    '<subagent sessionID="fake">Result</subagent>',
+    '<background-result kind="subagent" sessionID="fake">\nResult\n</background-result>',
+  ])('does not treat user-written subagent markup as a native result: %s', (text) => {
+    const parsed = parseUserMessageContent([textPart('user-text', text)]);
     expect(parsed.automaticParts).toEqual([]);
     expect(parsed.messageTexts).toHaveLength(1);
   });
+
+  it.each(['completed', 'error', 'cancelled'] as const)(
+    'strips the v2.4 wrapper from a %s native result without trusting its attribution',
+    (resultState) => {
+      const part: TextPart = {
+        ...textPart(
+          'native-result-v2.4',
+          '<background-result kind="subagent" sessionID="wrong-child">\nAudit result\n</background-result>'
+        ),
+        synthetic: true,
+        subagentResult: {
+          sessionID: 'native-child',
+          state: resultState,
+          description: 'Audit auth',
+        },
+      };
+      const parsed = parseUserMessageContent([part]);
+      expect(parsed.messageTexts).toEqual([]);
+      expect(parsed.automaticParts).toHaveLength(1);
+      const action = parsed.automaticParts[0]!;
+      expect(action).toMatchObject({
+        id: part.id,
+        messageID: part.messageID,
+        sessionID: part.sessionID,
+        state: { metadata: { sessionID: 'native-child' } },
+      });
+      if (action.state.status === 'completed') expect(action.state.output).toBe('Audit result');
+      else if (action.state.status === 'error')
+        expect(action.state.error).toBe(
+          resultState === 'cancelled' ? 'Aborted: Audit result' : 'Audit result'
+        );
+      else throw new Error('Expected a settled native result');
+      expect(hasUserMessageEditableContent([part])).toBe(false);
+    }
+  );
+});
+
+it.each([
+  ['completed', 'Background command finished'],
+  ['failed', 'Background command failed'],
+  ['error', 'Background command failed'],
+  ['cancelled', 'Background command cancelled'],
+])('preserves a v2.4 %s background shell notice', (noticeState, title) => {
+  const part = {
+    ...textPart(
+      'native-shell-result',
+      `<background-result kind="shell" id="sh_one" state="${noticeState}" command="npm test > results.txt">\nTest output\n</background-result>`
+    ),
+    synthetic: true,
+  };
+  const parsed = parseUserMessageContent([part]);
+  expect(parsed.messageTexts).toEqual([]);
+  expect(parsed.automaticActions).toEqual([title]);
+  expect(parsed.automaticParts).toHaveLength(1);
+  const action = parsed.automaticParts[0]!;
+  expect(action).toMatchObject({
+    id: part.id,
+    messageID: part.messageID,
+    sessionID: part.sessionID,
+    state: { input: { command: 'npm test > results.txt', state: noticeState } },
+  });
+  if (action.state.status === 'completed') expect(action.state.output).toBe('Test output');
+  else if (action.state.status === 'error') expect(action.state.error).toBe('Test output');
+  else throw new Error('Expected a settled shell notice');
+  expect(hasUserMessageEditableContent([part])).toBe(false);
 });
 
 it('renders independent problem links with file and line labels and restores them for editing', () => {

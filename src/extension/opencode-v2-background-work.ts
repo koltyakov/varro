@@ -275,7 +275,7 @@ export class OpenCodeV2BackgroundWork {
                 : (job.title ??
                     (job.kind === 'subagent'
                       ? job.description
-                      : job.kind === 'image'
+                      : job.kind === 'image' || job.kind === 'video'
                         ? job.path
                         : 'Code Mode script'))
             ),

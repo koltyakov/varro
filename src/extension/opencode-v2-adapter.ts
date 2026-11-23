@@ -301,7 +301,9 @@ function parseBackgroundJobs(value: unknown): JobInfo[] {
           ? isString(job.childSessionID) && isString(job.agent) && isString(job.description)
           : job.kind === 'image'
             ? isString(job.path) && isString(job.model)
-            : job.kind === 'codemode')
+            : job.kind === 'video'
+              ? isString(job.path)
+              : job.kind === 'codemode')
     )
       throw new Error('Invalid OpenCode v2 background job');
   }
@@ -1598,9 +1600,11 @@ export class OpenCodeV2Adapter {
       }
       if (action === 'abort') {
         if (this.backgroundWork.isWaiting(sessionID)) {
+          const cancelledShells = await this.cancelBackgroundJobs(sessionID, raw);
           await Promise.all(
             this.backgroundWork
               .shellIDs(sessionID)
+              .filter((id) => !cancelledShells.has(id))
               .map((id) => raw('DELETE', query(`/api/shell/${encodeURIComponent(id)}`, true)))
           );
           this.backgroundWork.clearSession(sessionID);
@@ -1870,6 +1874,61 @@ export class OpenCodeV2Adapter {
       }
     }
     return grouped;
+  }
+
+  /** Cancels running native jobs for a waiting session and returns the shells they owned. */
+  private async cancelBackgroundJobs(
+    sessionID: string,
+    raw: (verb: string, path: string, payload?: unknown) => Promise<unknown>
+  ): Promise<ReadonlySet<string>> {
+    // Native cancellation first shipped in 2.4.0. Older servers keep shell-only Stop.
+    if (
+      !this.serverVersion ||
+      compareVersions(this.serverVersion, '2.4.0') < 0 ||
+      this.backgroundJobsAvailable === false
+    )
+      return new Set();
+    const target = new URL('/api/experimental/job', 'http://localhost');
+    target.searchParams.set('sessionID', sessionID);
+    target.searchParams.set('descendants', 'true');
+    target.searchParams.set('status', 'running');
+    let jobs: JobInfo[];
+    try {
+      const response = asRecord(await raw('GET', target.pathname + target.search));
+      jobs = parseBackgroundJobs(response?.data).filter((job) => job.status === 'running');
+    } catch (error: unknown) {
+      // A deleted session or unavailable route leaves the shell-only fallback.
+      if (isNotFoundError(error)) return new Set();
+      throw error;
+    }
+    const choices = new Map<string, Promise<UnknownRecord>>();
+    const isService = (job: JobInfo) => {
+      if (job.kind !== 'shell') return Promise.resolve(false);
+      let saved = choices.get(job.sessionID);
+      if (!saved) {
+        saved = this.backgroundServices.read(job.sessionID);
+        choices.set(job.sessionID, saved);
+      }
+      return saved.then((value) => value[job.shellID] === true);
+    };
+    const services = await Promise.all(jobs.map(isService));
+    const cancelled = new Set<string>();
+    // Cancelled jobs settle without a completion notice, so Stop does not wake the
+    // session again. Services keep running, as they do with shell-only Stop.
+    const results = await Promise.allSettled(
+      jobs
+        .filter((_, index) => !services[index])
+        .map(async (job) => {
+          await raw('POST', `/api/experimental/job/${encodeURIComponent(job.id)}/cancel`, {});
+          if (job.kind === 'shell') cancelled.add(job.shellID);
+        })
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult =>
+        result.status === 'rejected' && !isNotFoundError(result.reason)
+    );
+    if (failure) throw failure.reason;
+    return cancelled;
   }
 
   private scheduleBackgroundJudgment(

@@ -758,6 +758,30 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     expect(
       JSON.stringify(await transport.request('GET', '/api/config', undefined, { unscoped: true }))
     ).toContain('fixture');
+    const supportsConfiguredGeneration =
+      compareVersions((await transport.readHealthInfo()).version ?? '', '2.0.27') >= 0;
+    if (supportsConfiguredGeneration) {
+      // V2.4 no longer waits for plugin activation in the generation handler.
+      // Config visibility alone does not establish that the base model is ready.
+      await vi.waitFor(
+        async () => {
+          const catalog = asRecord(
+            await transport.request(
+              'GET',
+              `/api/model?types=chat&location[directory]=${encodeURIComponent(join(root, 'config/opencode'))}`,
+              undefined,
+              { unscoped: true }
+            )
+          );
+          expect(catalog?.data).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ providerID: 'fixture', id: 'fixture' }),
+            ])
+          );
+        },
+        { timeout: 5000 }
+      );
+    }
     const before = await transport.request('GET', '/session');
     const requestCount = modelRequests.length;
     const result = await tryGenerateOneShot(
@@ -769,10 +793,7 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         signal: AbortSignal.timeout(20000),
       }
     );
-    // 2.0.27 waits for location plugins before resolving configured providers.
     // Earlier releases need the helper-session fallback without a provider call.
-    const supportsConfiguredGeneration =
-      compareVersions((await transport.readHealthInfo()).version ?? '', '2.0.27') >= 0;
     expect(result).toEqual(
       supportsConfiguredGeneration ? { text: 'Adapter stream verified.' } : null
     );

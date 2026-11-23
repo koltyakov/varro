@@ -506,9 +506,10 @@ export function projectV2Message(
     if (subagentResult) {
       // The native metadata describes this execution period, while its envelope
       // can say that the child still has background work after the period ends.
-      const pendingChild = /^<subagent sessionID="([^"\r\n]+)" state="running"(?=\s|>)/.exec(
-        message.text
-      )?.[1];
+      const pendingChild =
+        /^<(?:subagent|background-result kind="subagent") sessionID="([^"\r\n]+)" state="running"(?=\s|>)/.exec(
+          message.text
+        )?.[1];
       fields.subagentResult =
         subagentResult.state === 'completed' && pendingChild === subagentResult.sessionID
           ? { ...subagentResult, backgroundPending: true }

@@ -53,6 +53,14 @@ const codeModeJob: JobInfo = {
   status: 'running',
   time: { started: 40 },
 };
+const videoJob: JobInfo = {
+  kind: 'video',
+  id: 'job_video',
+  sessionID: 'ses_root',
+  path: '/repo/video.mp4',
+  status: 'running',
+  time: { started: 50 },
+};
 
 type FixtureSession = { id: string; parentID?: string; location: { directory: string } };
 type FixtureResponse = { data: unknown };
@@ -61,6 +69,7 @@ type FixtureState = {
   shells: ShellInfo[];
   active: Record<string, SessionActive>;
   jobError?: Error;
+  cancelError?: Error;
   sessions: Map<string, FixtureSession>;
 };
 
@@ -82,10 +91,15 @@ function fixture(jobs: JobInfo[] = []) {
   const wire = vi.fn(async (_method: string, path: string): Promise<FixtureResponse> => {
     const url = new URL(path, 'http://localhost');
     if (path === '/api/session/active') return { data: state.active };
-    if (path === '/api/experimental/job') {
+    if (url.pathname === '/api/experimental/job') {
       if (state.jobError) throw state.jobError;
       return { data: state.jobs };
     }
+    if (/^\/api\/experimental\/job\/[^/]+\/cancel$/.test(url.pathname)) {
+      if (state.cancelError) throw state.cancelError;
+      return { data: null };
+    }
+    if (/^\/api\/session\/[^/]+\/interrupt$/.test(url.pathname)) return { data: true };
     if (url.pathname === '/api/shell') return { data: state.shells };
     if (url.pathname.startsWith('/api/shell/')) return { data: shell };
     const id = decodeURIComponent(url.pathname.slice('/api/session/'.length));
@@ -111,7 +125,7 @@ afterEach(async () => {
 });
 
 describe('native v2 background jobs', () => {
-  it.each([shellJob, subagentJob, { ...imageJob, sessionID: 'ses_root' }, codeModeJob])(
+  it.each([shellJob, subagentJob, { ...imageJob, sessionID: 'ses_root' }, codeModeJob, videoJob])(
     'restores a $kind job without a live shell',
     async (job) => {
       const { state, wire, adapter, status } = fixture([job]);
@@ -124,7 +138,7 @@ describe('native v2 background jobs', () => {
           ? job.command
           : job.kind === 'subagent'
             ? job.description
-            : job.kind === 'image'
+            : job.kind === 'image' || job.kind === 'video'
               ? job.path
               : 'Code Mode script'
       );
@@ -178,7 +192,7 @@ describe('native v2 background jobs', () => {
     expect(await status()).toEqual({});
   });
 
-  it.each([shellJob, subagentJob, imageJob, codeModeJob])(
+  it.each([shellJob, subagentJob, imageJob, codeModeJob, videoJob])(
     'keeps ancestors waiting for a descendant $kind job after the parent task settles',
     async (job) => {
       const { state, status } = fixture([{ ...job, sessionID: 'ses_grandchild' }]);
@@ -196,6 +210,31 @@ describe('native v2 background jobs', () => {
       ses_root: { background: true, backgroundCommand: 'Check the build' },
     });
   });
+
+  it('uses the native video title when available', async () => {
+    const { status } = fixture([{ ...videoJob, title: 'Render the demo' }]);
+    expect(await status()).toMatchObject({
+      ses_root: { background: true, backgroundCommand: 'Render the demo' },
+    });
+  });
+
+  it.each(['completed', 'error', 'cancelled'] as const)(
+    'reconciles a %s video job and its notification handoff',
+    async (outcome) => {
+      vi.useFakeTimers();
+      const { state, status } = fixture([{ ...videoJob, status: outcome }]);
+      state.shells = [];
+      if (outcome === 'cancelled') {
+        expect(await status()).toEqual({});
+        return;
+      }
+      expect(await status()).toMatchObject({ ses_root: { background: true } });
+      state.jobs = [];
+      expect(await status()).toMatchObject({ ses_root: { background: true } });
+      vi.advanceTimersByTime(2_000);
+      expect(await status()).toEqual({});
+    }
+  );
 
   it.each(['completed', 'error', 'cancelled'] as const)(
     'reconciles a %s Code Mode job and its notification handoff',
@@ -327,16 +366,19 @@ describe('native v2 background jobs', () => {
     }
   );
 
-  it.each([{}, [{ kind: 'image' }]])('rejects malformed native snapshots: %j', async (response) => {
-    const { wire, status } = fixture();
-    const original = wire.getMockImplementation()!;
-    wire.mockImplementation((method, path) =>
-      path === '/api/experimental/job'
-        ? Promise.resolve({ data: response })
-        : original(method, path)
-    );
-    await expect(status()).rejects.toThrow('Invalid OpenCode v2 background');
-  });
+  it.each([{}, [{ kind: 'image' }], [{ ...videoJob, path: undefined }]])(
+    'rejects malformed native snapshots: %j',
+    async (response) => {
+      const { wire, status } = fixture();
+      const original = wire.getMockImplementation()!;
+      wire.mockImplementation((method, path) =>
+        path === '/api/experimental/job'
+          ? Promise.resolve({ data: response })
+          : original(method, path)
+      );
+      await expect(status()).rejects.toThrow('Invalid OpenCode v2 background');
+    }
+  );
 
   it('preserves waiting when ancestry cannot be loaded instead of guessing ownership', async () => {
     const { adapter, wire, status } = fixture([imageJob]);
@@ -454,5 +496,108 @@ describe('native v2 background jobs', () => {
       ses_child: { background: true },
     });
     expect(wire.mock.calls.filter(([, path]) => path === '/api/session/ses_root')).toHaveLength(1);
+  });
+});
+
+describe('native v2 background job cancellation', () => {
+  const nestedVideo: JobInfo = { ...videoJob, id: 'job_nested_video', sessionID: 'ses_child' };
+  const stopCalls = (wire: ReturnType<typeof fixture>['wire'], from: number) =>
+    wire.mock.calls.slice(from).map(([method, path]) => [method, path]);
+  const stop = (adapter: OpenCodeV2Adapter) =>
+    adapter.request('POST', '/session/ses_root/abort', {}, { directory: '/repo' });
+
+  it('cancels running jobs, including descendants, instead of deleting their shells on 2.4', async () => {
+    const { wire, adapter, status } = fixture([
+      shellJob,
+      codeModeJob,
+      nestedVideo,
+      { ...imageJob, id: 'job_done', sessionID: 'ses_root', status: 'completed' },
+    ]);
+    adapter.setServerVersion('2.4.0');
+    expect(await status()).toMatchObject({ ses_root: { background: true } });
+    const from = wire.mock.calls.length;
+    await expect(stop(adapter)).resolves.toBe(true);
+    expect(stopCalls(wire, from)).toEqual([
+      ['GET', '/api/experimental/job?sessionID=ses_root&descendants=true&status=running'],
+      ['POST', '/api/experimental/job/job_shell/cancel'],
+      ['POST', '/api/experimental/job/job_codemode/cancel'],
+      ['POST', '/api/experimental/job/job_nested_video/cancel'],
+      ['POST', '/api/session/ses_root/interrupt?resume=false'],
+    ]);
+    expect(adapter.eventContext('ses_root')?.backgroundPending).toBe(false);
+  });
+
+  it('keeps a service shell job running when Stop cancels other work', async () => {
+    const { wire, adapter, status } = fixture([shellJob, videoJob]);
+    adapter.setServerVersion('2.4.0');
+    await adapter.request(
+      'PATCH',
+      '/session/ses_root/background-process/sh_one',
+      { service: true },
+      { directory: '/repo' }
+    );
+    expect(await status()).toMatchObject({ ses_root: { background: true, backgroundServices: 1 } });
+    const from = wire.mock.calls.length;
+    await stop(adapter);
+    const calls = stopCalls(wire, from);
+    expect(calls).toContainEqual(['POST', '/api/experimental/job/job_video/cancel']);
+    expect(calls).not.toContainEqual(['POST', '/api/experimental/job/job_shell/cancel']);
+    expect(calls.some(([method]) => method === 'DELETE')).toBe(false);
+    expect(adapter.eventContext('ses_root')?.backgroundServices).toBe(1);
+  });
+
+  it.each(['2.2.6', '2.3.2'])(
+    'keeps shell-only Stop on %s without probing the cancellation route',
+    async (version) => {
+      const { wire, adapter, status } = fixture([shellJob, videoJob]);
+      adapter.setServerVersion(version);
+      expect(await status()).toMatchObject({ ses_root: { background: true } });
+      const from = wire.mock.calls.length;
+      await stop(adapter);
+      expect(stopCalls(wire, from)).toEqual([
+        ['DELETE', '/api/shell/sh_one?location%5Bdirectory%5D=%2Frepo'],
+        ['POST', '/api/session/ses_root/interrupt?resume=false'],
+      ]);
+    }
+  );
+
+  it('falls back to deleting shells when the cancellation route is unavailable', async () => {
+    const { state, wire, adapter, status } = fixture([shellJob]);
+    adapter.setServerVersion('2.4.0');
+    expect(await status()).toMatchObject({ ses_root: { background: true } });
+    state.cancelError = new Error('404 Not Found');
+    const from = wire.mock.calls.length;
+    await stop(adapter);
+    expect(stopCalls(wire, from)).toEqual([
+      ['GET', '/api/experimental/job?sessionID=ses_root&descendants=true&status=running'],
+      ['POST', '/api/experimental/job/job_shell/cancel'],
+      ['DELETE', '/api/shell/sh_one?location%5Bdirectory%5D=%2Frepo'],
+      ['POST', '/api/session/ses_root/interrupt?resume=false'],
+    ]);
+  });
+
+  it('reports a failed cancellation instead of claiming Stop succeeded', async () => {
+    const { state, wire, adapter, status } = fixture([videoJob]);
+    adapter.setServerVersion('2.4.0');
+    expect(await status()).toMatchObject({ ses_root: { background: true } });
+    state.cancelError = new Error('500 Storage is read-only');
+    const from = wire.mock.calls.length;
+    await expect(stop(adapter)).rejects.toThrow('500 Storage is read-only');
+    expect(stopCalls(wire, from)).not.toContainEqual([
+      'POST',
+      '/api/session/ses_root/interrupt?resume=false',
+    ]);
+  });
+
+  it('only interrupts a running session without listing its background jobs', async () => {
+    const { state, wire, adapter, status } = fixture([videoJob]);
+    adapter.setServerVersion('2.4.0');
+    state.active = { ses_root: { type: 'running' } };
+    expect(await status()).toMatchObject({ ses_root: { type: 'busy' } });
+    const from = wire.mock.calls.length;
+    await stop(adapter);
+    expect(stopCalls(wire, from)).toEqual([
+      ['POST', '/api/session/ses_root/interrupt?resume=false'],
+    ]);
   });
 });
