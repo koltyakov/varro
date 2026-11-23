@@ -657,6 +657,41 @@ describe('optimistic image parts carried onto the server message', () => {
   });
 });
 
+describe('optimistic file part de-duplication', () => {
+  it.each(['snapshot only', 'part then snapshot'])(
+    'does not duplicate a native PDF projected to deferred content with %s',
+    (timing) => {
+      const info = userMessage('msg-1');
+      const localPdf = imagePart('msg-1-part-1', 'msg-1', {
+        mime: 'application/pdf',
+        filename: 'design.pdf',
+        url: 'data:application/pdf;base64,JVBERi0x',
+      });
+      const canonicalText = textPart('server-text', 'msg-1', 'Review this');
+      const canonicalPdf = {
+        ...localPdf,
+        id: 'server-pdf',
+        url: 'varro-content:/session/session-1/message/msg-1/part/server-pdf',
+      };
+      upsertMessage({ info, parts: [textPart('msg-1-part-0', 'msg-1', 'Review this'), localPdf] });
+      flushSolid();
+      upsertMessageInfo(info);
+      flushSolid();
+
+      if (timing === 'part then snapshot') {
+        upsertPart(canonicalPdf);
+        flushSolid();
+      }
+      setMessagesIncremental([{ info, parts: [canonicalText, canonicalPdf] }], {
+        preserveExtraParts: true,
+      });
+      flushSolid();
+
+      expect(partIds()).toEqual([['server-text', 'server-pdf']]);
+    }
+  );
+});
+
 describe('optimistic image part de-duplication', () => {
   it('reserves filename matches before acknowledging a renamed image by order', () => {
     upsertMessage({

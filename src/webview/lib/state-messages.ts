@@ -247,10 +247,7 @@ function areMatchingOptimisticParts(left: Part, right: Part) {
       left.text.replace(/\r\n?/g, '\n').trimEnd() === right.text.replace(/\r\n?/g, '\n').trimEnd()
     );
   }
-  if (left.type !== 'file' || right.type !== 'file') return false;
-  if (isImageFilePart(left) && isImageFilePart(right))
-    return areMatchingImageFileParts(left, right);
-  return left.url === right.url && left.mime === right.mime && left.filename === right.filename;
+  return areMatchingFileParts(left, right);
 }
 
 function getCombinedOptimisticTextPartIds(entry: MessageEntry, incoming: Part[]) {
@@ -1009,7 +1006,12 @@ function getOptimisticImagePartId(messageId: string, index: number) {
 }
 
 function areMatchingImageFileParts(left: Part, right: Part) {
-  if (!isImageFilePart(left) || !isImageFilePart(right)) return false;
+  return isImageFilePart(left) && isImageFilePart(right) && areMatchingFileParts(left, right);
+}
+
+// The extension projects canonical file URLs to deferred content, so named files match by name.
+function areMatchingFileParts(left: Part, right: Part) {
+  if (left.type !== 'file' || right.type !== 'file') return false;
   if (left.mime !== right.mime || left.filename !== right.filename) return false;
   return (
     left.url === right.url ||
