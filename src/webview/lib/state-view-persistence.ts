@@ -9,6 +9,7 @@ import {
   showSessionPicker,
   state,
 } from './app-state';
+import { resolveNewChatAgentModel } from './agent-model-selection';
 import { getSelectedModelForSession, setSelectedModel } from './state-model-selection';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import {
@@ -55,8 +56,17 @@ export function getEffectiveComposerSessionId(): string | null {
 
 export function restoreSelectedModelForComposer(sessionId: string | null) {
   const model =
-    (sessionId ? getSelectedModelForSession(sessionId) : null) ?? getPersistedSelectedModel();
+    (sessionId
+      ? getSelectedModelForSession(sessionId)
+      : resolveNewChatAgentModel(state.selectedAgent)) ?? getPersistedSelectedModel();
   setSelectedModel(model, { persistGlobal: false, composerSessionId: sessionId });
+}
+
+/** Applies the new-chat agent's model once agents or providers finish loading. */
+export function syncNewChatComposerAgentModel() {
+  if (getEffectiveComposerSessionId()) return;
+  const model = resolveNewChatAgentModel(state.selectedAgent);
+  if (model) setSelectedModel(model, { persistGlobal: false, composerSessionId: null });
 }
 
 export function persistActiveSessionId(id: string | null) {

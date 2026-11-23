@@ -84,11 +84,12 @@ export function startNewChatDraft() {
   stopLoading();
   setPersistentShowSessionPicker(false);
   finishNewChatDraft(sourceKey, craftedText);
-  restoreSelectedModelForComposer(null);
   setSelectedAgent(getDefaultPrimaryAgentName(state.agents, getPersistedSelectedAgent()), {
     sessionId: blankSessionId || null,
     persistGlobal: false,
   });
+  // The new chat model follows the default agent, as in OpenCode.
+  restoreSelectedModelForComposer(null);
   requestComposerFocus();
 
   if (deferTranscriptClear) {

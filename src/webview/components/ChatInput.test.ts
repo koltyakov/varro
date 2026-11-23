@@ -57,6 +57,10 @@ import {
 import type { AppState } from '../lib/app-state';
 import { handleWorkspaceSelectionFailure } from '../lib/workspace-selection';
 import { startNewChatDraft } from '../lib/new-chat-draft';
+import {
+  planImplementationDraftRequest,
+  requestPlanImplementationDraft,
+} from '../lib/plan-implementation-draft';
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { setCachedSessionMessages, setSessionHistoryPrompts } from '../lib/message-window';
@@ -15854,5 +15858,164 @@ describe('ChatInput composer history hotkeys', () => {
     await settle();
 
     expect(abortSessionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatInput agent model selection', () => {
+  const GPT_4O = { providerID: 'openai', modelID: 'gpt-4o' };
+  const LUNA = { providerID: 'openai', modelID: 'gpt-6-luna-fast' };
+
+  function setupAgentModels() {
+    setupModelState();
+    setState(
+      storePath('providers', 0, 'models', LUNA.modelID, toolModel(LUNA.modelID, 'GPT-6 Luna Fast'))
+    );
+    // Path writes merge objects; replace so a variant from an earlier test cannot leak in.
+    setState((draft) => {
+      draft.lastSelectedModel = { ...GPT_4O };
+    });
+    setState(storePath('modelVariantSelections', {}));
+    setState(
+      storePath('agents', [
+        { name: 'build', mode: 'primary', builtIn: true, permission: [] },
+        { name: 'plan', mode: 'primary', builtIn: true, permission: [], model: { ...LUNA } },
+      ])
+    );
+    setState(storePath('selectedAgent', 'build'));
+    flushSolid();
+  }
+
+  function pickAgent(label: string) {
+    clickAndFlush(container?.querySelector('[aria-label="Select agent"]'));
+    const option = [
+      ...(container?.querySelectorAll<HTMLButtonElement>('.agent-popover .toolbar-popover-item') ??
+        []),
+    ].find((item) => item.querySelector('.agent-picker-option-label')?.textContent === label);
+    expect(option).toBeDefined();
+    clickAndFlush(option);
+  }
+
+  it('applies the agent model in a new chat without changing the remembered model', () => {
+    setupAgentModels();
+    renderChatInput();
+
+    pickAgent('Plan');
+    expect(state.selectedAgent).toBe('plan');
+    expect(state.selectedModel).toEqual(LUNA);
+    expect(state.lastSelectedModel).toEqual(GPT_4O);
+
+    pickAgent('Build');
+    expect(state.selectedAgent).toBe('build');
+    expect(state.selectedModel).toEqual(GPT_4O);
+  });
+
+  it('applies the agent model to the session and restores the previous agent model', () => {
+    setupAgentModels();
+    setStateAndFlush('activeSessionId', 'agent-model-session');
+    setSelectedModel({ ...GPT_4O }, { sessionId: 'agent-model-session', persistGlobal: false });
+    flushSolid();
+    const sendToExtension = vi.fn(defaultBridgeSend);
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+      sendToExtension;
+    renderChatInput();
+
+    pickAgent('Plan');
+    expect(state.sessionSelectedModels['agent-model-session']).toEqual(LUNA);
+    expect(
+      sendToExtension.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === 'session-model/update')?.payload.model
+    ).toEqual(LUNA);
+    expect(state.lastSelectedModel).toEqual(GPT_4O);
+
+    pickAgent('Build');
+    expect(state.sessionSelectedModels['agent-model-session']).toEqual(GPT_4O);
+  });
+
+  it('switches to Build with its model and inserts the prompt for a plan draft request', () => {
+    setupAgentModels();
+    setState(storePath('agents', 0, 'model', { ...GPT_4O }));
+    setState(storePath('selectedAgent', 'plan'));
+    setStateAndFlush('activeSessionId', 'plan-draft-session');
+    setSelectedModel({ ...LUNA }, { sessionId: 'plan-draft-session', persistGlobal: false });
+    flushSolid();
+    renderChatInput();
+    setInputText('Keep this note');
+    flushSolid();
+
+    requestPlanImplementationDraft('other-session', 'Wrong session');
+    flushSolid();
+    expect(state.selectedAgent).toBe('plan');
+
+    requestPlanImplementationDraft('plan-draft-session', 'Implement the plan now.');
+    flushSolid();
+    expect(state.selectedAgent).toBe('build');
+    expect(state.sessionSelectedModels['plan-draft-session']).toEqual(GPT_4O);
+    expect(inputText()).toBe('Keep this note\n\nImplement the plan now.');
+    expect(planImplementationDraftRequest()).toBeNull();
+
+    pickAgent('Plan');
+    expect(state.sessionSelectedModels['plan-draft-session']).toEqual(LUNA);
+  });
+
+  it('applies a new chat plan request on Build with its model', () => {
+    setupAgentModels();
+    setState(storePath('agents', 0, 'model', { ...GPT_4O }));
+    setState(storePath('selectedAgent', 'plan'));
+    setState(storePath('selectedModel', { ...LUNA }));
+    flushSolid();
+    renderChatInput();
+
+    requestPlanImplementationDraft(null, 'session:ses_plan Implement it.');
+    flushSolid();
+    expect(state.selectedAgent).toBe('build');
+    expect(state.selectedModel).toEqual(GPT_4O);
+    expect(inputText()).toBe('session:ses_plan Implement it.');
+    expect(planImplementationDraftRequest()).toBeNull();
+  });
+
+  it('attaches the plan text ahead of a new chat implementation prompt', () => {
+    setupAgentModels();
+    setState(storePath('droppedFiles', []));
+    flushSolid();
+    renderChatInput();
+
+    requestPlanImplementationDraft(null, 'session:ses_plan Implement it.', {
+      name: 'plan-1234.md',
+      text: '# Plan\n1. Change it',
+    });
+    flushSolid();
+
+    expect(inputText()).toBe('@plan-1234.md session:ses_plan Implement it.');
+    expect(state.droppedFiles).toEqual([
+      expect.objectContaining({ relativePath: 'plan-1234.md', pastedText: '# Plan\n1. Change it' }),
+    ]);
+  });
+
+  it('ignores a plan request that outlived its composer switch', () => {
+    vi.useFakeTimers();
+    setupAgentModels();
+    setState(storePath('selectedAgent', 'plan'));
+    setStateAndFlush('activeSessionId', 'stale-plan-session');
+    requestPlanImplementationDraft(null, 'Stale prompt');
+    vi.advanceTimersByTime(10_000);
+    renderChatInput();
+    setStateAndFlush('activeSessionId', null);
+    flushSolid();
+
+    expect(state.selectedAgent).toBe('plan');
+    expect(inputText()).not.toContain('Stale prompt');
+    vi.useRealTimers();
+  });
+
+  it('keeps the model when switching between agents without models', () => {
+    setupAgentModels();
+    setState(storePath('agents', 1, 'model', undefined));
+    flushSolid();
+    renderChatInput();
+
+    pickAgent('Plan');
+    expect(state.selectedAgent).toBe('plan');
+    expect(state.selectedModel).toEqual(GPT_4O);
   });
 });

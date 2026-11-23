@@ -7,7 +7,10 @@ import { routingStore } from '../lib/stores/routing-store';
 import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
 import { clearQueuedMessagesForSession } from '../lib/state-queued-messages';
-import { getEffectiveComposerSessionId } from '../lib/state-view-persistence';
+import {
+  getEffectiveComposerSessionId,
+  syncNewChatComposerAgentModel,
+} from '../lib/state-view-persistence';
 import type {
   McpDefaults,
   McpStatus,
@@ -92,6 +95,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     setMcpStatus: routingStore.setMcpStatus,
     getActiveSessionId: () => appStore.state.activeSessionId,
     getComposerSessionId: getEffectiveComposerSessionId,
+    syncNewChatAgentModel: syncNewChatComposerAgentModel,
     getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
     listQuestions: () => client.question.list(),
@@ -150,6 +154,8 @@ export function createDataLoaderOperations(deps: {
   setMcpStatus(status: Record<string, McpStatus>): void;
   getActiveSessionId(): string | null;
   getComposerSessionId(): string | null;
+  /** Lets a new chat follow its agent's configured model once the catalog can resolve it. */
+  syncNewChatAgentModel?(): void;
   getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   listQuestions(): Promise<QuestionRequest[]>;
@@ -330,7 +336,10 @@ export function createDataLoaderOperations(deps: {
     const generation = ++agentLoadGeneration;
     const isLatest = () => workspace === workspaceGeneration && generation === agentLoadGeneration;
     const request = inheritSupersededLoad(
-      loadAgentsWithDependencies(deps, deps.logError, isLatest),
+      loadAgentsWithDependencies(deps, deps.logError, isLatest).then((loaded) => {
+        if (loaded && isLatest()) deps.syncNewChatAgentModel?.();
+        return loaded;
+      }),
       workspace,
       isLatest,
       () => latestAgentLoad
@@ -404,7 +413,12 @@ export function createDataLoaderOperations(deps: {
           deps.logError(context, error);
         },
         isCurrent
-      ).finally(() => controller.abort()),
+      )
+        .then((loaded) => {
+          if (loaded && isCurrent()) deps.syncNewChatAgentModel?.();
+          return loaded;
+        })
+        .finally(() => controller.abort()),
       workspace,
       isLatest,
       () => latestProviderLoad

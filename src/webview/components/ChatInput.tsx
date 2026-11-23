@@ -9,7 +9,18 @@ import {
   untrack,
 } from 'solid-js';
 import { storePath } from '@solidjs/signals';
+import {
+  getAgentConfiguredModel,
+  rememberAgentModel,
+  resolveAgentSwitchModel,
+} from '../lib/agent-model-selection';
 import { ariaBoolean } from '../lib/aria';
+import {
+  consumePlanImplementationDraft,
+  isPlanImplementationDraftRequestCurrent,
+  planImplementationDraftRequest,
+} from '../lib/plan-implementation-draft';
+import { getBuildAgentName } from '../hooks/routing-state';
 import {
   createPastedText,
   isLargeTextPaste,
@@ -78,6 +89,7 @@ import {
   hasActiveQuestion,
   hasActivePermission,
   setSelectedAgent,
+  requestComposerFocus,
   setSelectedModel,
   resolveSelectedModel,
   addClipboardImages,
@@ -1439,6 +1451,26 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       ? pending.insertion
       : undefined;
   };
+
+  /** Attaches generated text, such as a plan, within the same limits as a paste. */
+  function attachPlanText(name: string, text: string) {
+    const size = pastedTextBytes(text);
+    if (
+      size > MAX_PASTED_TEXT_BYTES ||
+      size +
+        composerFiles().reduce((sum, file) => sum + pastedTextBytes(file.pastedText ?? ''), 0) >
+        MAX_PASTED_TEXT_TOTAL_BYTES
+    ) {
+      showSessionActionFeedback(
+        'The plan is too large to attach. The linked session still holds it.',
+        'warning'
+      );
+      return null;
+    }
+    const file = { ...createPastedText(text), relativePath: name };
+    addContextFile(file);
+    return file;
+  }
 
   function attachLargePaste(text: string, insertion: RichComposerPasteInsertion) {
     if (!isLargeTextPaste(text)) return;
@@ -3003,7 +3035,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         e.preventDefault();
         const agent = agents[agentFocusIndex()];
         if (agent) {
-          setSelectedAgent(agent.name, { sessionId: composerSessionId() });
+          selectComposerAgent(agent.name);
           setShowAgentPicker(false);
         }
         return;
@@ -5783,6 +5815,32 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   );
 
+  // Plan menu actions: switch like the agent picker, then hold the prompt. A new-chat
+  // request targets the composer that appears after the switch to the draft.
+  createEffect(
+    () => [planImplementationDraftRequest(), composerSessionId()] as const,
+    ([request, sessionId]) => {
+      if (!request) return;
+      untrack(() => {
+        if (request.sessionId !== sessionId || composerEditingMessage()) return;
+        consumePlanImplementationDraft(request.id);
+        if (!isPlanImplementationDraftRequestCurrent(request)) return;
+        const buildAgent = getBuildAgentName(state.agents);
+        if (buildAgent && buildAgent !== state.selectedAgent) selectComposerAgent(buildAgent);
+        let prompt = request.prompt;
+        if (request.attachment) {
+          const attached = attachPlanText(request.attachment.name, request.attachment.text);
+          if (attached) prompt = `@${attached.relativePath} ${prompt}`;
+        }
+        const current = inputText().trimEnd();
+        const next = current ? `${current}\n\n${prompt}` : prompt;
+        setInputText(next);
+        setCaretPosition(next.length);
+        requestComposerFocus();
+      });
+    }
+  );
+
   createEffect(composerFocusKey, (focusKey) => {
     if (focusKey === 0) return;
 
@@ -6548,9 +6606,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     ralphStore.updateRunModel(managerSessionId, nextModel);
   }
 
+  function selectComposerAgent(agentName: string) {
+    const sessionId = composerSessionId();
+    const previousAgent = state.selectedAgent;
+    const model = currentModel();
+    let current: RalphSelectedModel | null = null;
+    if (model.providerID && model.modelID) {
+      current = { providerID: model.providerID, modelID: model.modelID };
+      if (model.variant) current.variant = model.variant;
+    }
+    const nextModel = resolveAgentSwitchModel({
+      sessionId,
+      previousAgent,
+      nextAgent: agentName,
+      currentModel: current,
+    });
+    setSelectedAgent(agentName, { sessionId });
+    // Like OpenCode, picking an agent also picks its model without making it the folder default.
+    if (nextModel) void handleSelectedModelChange(nextModel, undefined, { fromAgent: true });
+  }
+
   async function handleSelectedModelChange(
     nextModel: RalphSelectedModel,
-    rememberVariant?: string | null
+    rememberVariant?: string | null,
+    options?: { fromAgent?: boolean }
   ) {
     void refreshProviderLimit(nextModel.providerID, nextModel.modelID);
     if (composerEditingMessage()) {
@@ -6571,10 +6650,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const selectionId = selectedSessionId ? crypto.randomUUID() : undefined;
     setSelectedModel(nextModel, {
       sessionId: selectedSessionId,
-      persistGlobal: true,
+      persistGlobal: !options?.fromAgent,
       rememberVariant,
       selectionId,
     });
+    if (!options?.fromAgent) rememberAgentModel(selectedSessionId, state.selectedAgent, nextModel);
     if (selectedSessionId) postSessionModelSelection(selectedSessionId, nextModel, selectionId);
     syncActiveRalphModel(nextModel);
 
@@ -6819,11 +6899,24 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     },
     getAgentLabel: (agent) => formatAgentLabel(agent.name),
     getAgentDetail: (agent) => agent.description || getAgentBadgeLine(agent),
+    getAgentModelLabel: (agent) => {
+      const configured = agent.model;
+      if (!configured?.providerID || !configured.modelID) return null;
+      const model = getAgentConfiguredModel(agent.name);
+      const info = model
+        ? state.providers.find((provider) => provider.id === model.providerID)?.models[
+            model.modelID
+          ]
+        : undefined;
+      return info
+        ? getModelDisplayName(configured.providerID, configured.modelID, info.name)
+        : `${configured.providerID}/${configured.modelID} (unavailable)`;
+    },
     onToggleAgentPicker: () => {
       if (togglePopup('agent', showAgentPicker, setShowAgentPicker)) setAgentFocusIndex(0);
     },
     onSelectAgent: (agent) => {
-      setSelectedAgent(agent.name, { sessionId: composerSessionId() });
+      selectComposerAgent(agent.name);
       setShowAgentPicker(false);
     },
     onAgentFocusIndex: setAgentFocusIndex,

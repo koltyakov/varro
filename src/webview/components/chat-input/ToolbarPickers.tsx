@@ -586,6 +586,7 @@ export function AgentPicker(props: {
   showPicker: boolean;
   getLabel: (agent: Agent) => string;
   getDetail: (agent: Agent) => string;
+  getModelLabel?: (agent: Agent) => string | null;
   onToggle: () => void;
   onSelect: (agent: Agent) => void;
   onFocusIndex: (index: number) => void;
@@ -604,6 +605,9 @@ export function AgentPicker(props: {
       <span class="agent-picker-tooltip">
         <span class="agent-picker-tooltip-title">{props.selectedLabel}</span>
         <span class="agent-picker-tooltip-detail">{props.getDetail(agent)}</span>
+        <Show when={props.getModelLabel?.(agent)}>
+          {(model) => <span class="agent-picker-tooltip-detail">Model: {model()}</span>}
+        </Show>
         <Show when={props.queueOnly}>
           <QueueOnlyTooltipNote class="agent-picker-tooltip-detail" />
         </Show>

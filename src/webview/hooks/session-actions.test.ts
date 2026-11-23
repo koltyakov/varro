@@ -51,6 +51,59 @@ describe('session-actions helpers', () => {
     });
   });
 
+  it('implements with the build agent model resolved before the agent switch', async () => {
+    const calls: string[] = [];
+    const sendMessage = vi.fn(async () => {});
+
+    await implementPlanWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getBuildAgent: () => 'build',
+        setError: vi.fn(),
+        clearSkippedPlanSession: vi.fn(),
+        resolveAgentModel: (agent, sessionId) => {
+          calls.push(`resolve:${agent}:${sessionId}`);
+          return { providerID: 'openai', modelID: 'gpt-6-sol' };
+        },
+        applySelectedAgent: (agent) => calls.push(`apply:${agent}`),
+        sendMessage,
+      },
+      'Implement it',
+      'session-1'
+    );
+
+    expect(calls).toEqual(['resolve:build:session-1', 'apply:build']);
+    expect(sendMessage).toHaveBeenCalledWith(
+      'Implement it',
+      expect.objectContaining({
+        agent: 'build',
+        selectedModel: { providerID: 'openai', modelID: 'gpt-6-sol' },
+      })
+    );
+  });
+
+  it('keeps the current model when the build agent has none', async () => {
+    const sendMessage = vi.fn(
+      async (_prompt: string, _options?: { selectedModel?: unknown }) => {}
+    );
+
+    await implementPlanWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getBuildAgent: () => 'build',
+        setError: vi.fn(),
+        clearSkippedPlanSession: vi.fn(),
+        resolveAgentModel: () => null,
+        applySelectedAgent: vi.fn(),
+        sendMessage,
+      },
+      'Implement it',
+      'session-1'
+    );
+
+    expect(sendMessage.mock.calls[0]?.[1]).not.toHaveProperty('selectedModel');
+  });
+
   it('rejects empty plan content before opening the plan', async () => {
     const setError = vi.fn();
     const openPlan = vi.fn(async () => {});

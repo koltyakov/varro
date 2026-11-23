@@ -81,6 +81,7 @@ export type ToolbarSharedProps = {
   agentPopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   getAgentLabel: (agent: Agent) => string;
   getAgentDetail: (agent: Agent) => string;
+  getAgentModelLabel?: (agent: Agent) => string | null;
   onToggleAgentPicker: () => void;
   onSelectAgent: (agent: Agent) => void;
   onAgentFocusIndex: (index: number) => void;
@@ -284,6 +285,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
             showPicker={props.showAgentPicker}
             getLabel={props.getAgentLabel}
             getDetail={props.getAgentDetail}
+            getModelLabel={props.getAgentModelLabel}
             onToggle={props.onToggleAgentPicker}
             onSelect={props.onSelectAgent}
             onFocusIndex={props.onAgentFocusIndex}

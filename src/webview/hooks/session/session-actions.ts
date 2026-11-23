@@ -1,9 +1,10 @@
 import type { Message, MessageEntry, Part } from '../../types';
 import type { QueuedAttachmentSnapshot } from './session-send';
-import type { SessionWorkspaceTarget } from '../../../shared/protocol';
+import type { ChatModelSelection, SessionWorkspaceTarget } from '../../../shared/protocol';
 
 type PlanImplementationSendOptions = {
   agent: string;
+  selectedModel?: ChatModelSelection;
   queuedAttachments: QueuedAttachmentSnapshot;
   preserveComposer: true;
 };
@@ -32,6 +33,8 @@ export async function implementPlanWithDependencies(
     setError(message: string): void;
     clearSkippedPlanSession(sessionId: string): void;
     applySelectedAgent(agent: string, sessionId: string): void;
+    /** The model picking this agent would select, or null to keep the current one. */
+    resolveAgentModel?(agent: string, sessionId: string): ChatModelSelection | null;
     sendMessage(
       prompt: string,
       options?: PlanImplementationSendOptions
@@ -49,8 +52,10 @@ export async function implementPlanWithDependencies(
   }
 
   deps.clearSkippedPlanSession(sessionId);
+  // Resolve before the agent changes so the planning model is remembered for Plan.
+  const selectedModel = deps.resolveAgentModel?.(buildAgent, sessionId) ?? null;
   deps.applySelectedAgent(buildAgent, sessionId);
-  await deps.sendMessage(prompt, {
+  const options: PlanImplementationSendOptions = {
     agent: buildAgent,
     queuedAttachments: {
       droppedFiles: [],
@@ -60,7 +65,9 @@ export async function implementPlanWithDependencies(
       attachedDiagnostics: null,
     },
     preserveComposer: true,
-  });
+  };
+  if (selectedModel) options.selectedModel = selectedModel;
+  await deps.sendMessage(prompt, options);
 }
 
 export async function openPlanWithDependencies(
@@ -194,6 +201,7 @@ type SessionActionDependencies = {
   setError(message: string | null): void;
   clearSkippedPlanSession(sessionId: string): void;
   applySelectedAgent(agent: string, sessionId: string): void;
+  resolveAgentModel?(agent: string, sessionId: string): ChatModelSelection | null;
   sendMessage(
     prompt: string,
     options?: PlanImplementationSendOptions | InitSendOptions

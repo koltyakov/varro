@@ -1,5 +1,7 @@
-import { onSettled } from 'solid-js';
+import { For, onSettled } from 'solid-js';
 import { observePopupViewport } from '../../lib/popup-position';
+
+export type ActionsMenuItem = { label: string; title?: string; onSelect: () => void };
 
 export function FollowupActionsMenu(props: {
   x: number;
@@ -8,6 +10,29 @@ export function FollowupActionsMenu(props: {
   onCopy: () => void;
   onQueue: () => void;
   onRunInNewSession: () => void;
+}) {
+  return (
+    <ActionsMenu
+      x={props.x}
+      y={props.y}
+      label="Follow-up actions"
+      onClose={props.onClose}
+      items={[
+        { label: 'Copy description', onSelect: props.onCopy },
+        { label: 'Add to queue (paused)', onSelect: props.onQueue },
+        { label: 'Run in new session', onSelect: props.onRunInNewSession },
+      ]}
+    />
+  );
+}
+
+/** A floating menu that takes focus, supports arrow keys, and closes on outside interaction. */
+export function ActionsMenu(props: {
+  x: number;
+  y: number;
+  label: string;
+  items: ActionsMenuItem[];
+  onClose: () => void;
 }) {
   let menu!: HTMLDivElement;
   const previousFocus = document.activeElement;
@@ -57,7 +82,7 @@ export function FollowupActionsMenu(props: {
       }}
       class="session-item-actions-menu"
       role="menu"
-      aria-label="Follow-up actions"
+      aria-label={props.label}
       data-popup-position-pending
       style={{ left: `${props.x}px`, top: `${props.y}px` }}
       onPointerDown={(event) => event.stopPropagation()}
@@ -82,36 +107,21 @@ export function FollowupActionsMenu(props: {
         }
       }}
     >
-      <button
-        type="button"
-        role="menuitem"
-        onClick={(event) => {
-          event.stopPropagation();
-          props.onCopy();
-        }}
-      >
-        Copy description
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={(event) => {
-          event.stopPropagation();
-          props.onQueue();
-        }}
-      >
-        Add to queue (paused)
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={(event) => {
-          event.stopPropagation();
-          props.onRunInNewSession();
-        }}
-      >
-        Run in new session
-      </button>
+      <For each={props.items}>
+        {(item) => (
+          <button
+            type="button"
+            role="menuitem"
+            title={item.title}
+            onClick={(event) => {
+              event.stopPropagation();
+              item.onSelect();
+            }}
+          >
+            {item.label}
+          </button>
+        )}
+      </For>
     </div>
   );
 }

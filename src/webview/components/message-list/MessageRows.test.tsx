@@ -4,10 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@solidjs/web';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
 import { formatClockTime } from '../../lib/message-time';
-import { setState, skipPlanSession, startLoading, stopLoading } from '../../lib/state';
+import {
+  isSkippedPlanSession,
+  setState,
+  skipPlanSession,
+  startLoading,
+  state,
+  stopLoading,
+} from '../../lib/state';
 import { resetMessageEditState, startEditingMessage } from '../../lib/message-edit-state';
 import { registerMessageBlockRemovalHandler } from '../../lib/message-list-layout';
+import * as bridge from '../../lib/bridge';
 import { copyIcon, gitForkIcon, xmarkCircleIcon } from '../../lib/ui-icons';
+import { planImplementationDraftRequest } from '../../lib/plan-implementation-draft';
 import { assistantMessage, session, textPart, userMessage } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
 import {
@@ -16,23 +25,46 @@ import {
   getForkBoundaryMessageId,
   getUserMessageSeriesEndId,
 } from './MessageRows';
+import type { MessageEntry } from '../../types';
 import type { AssistantDialogSummaryInfo } from './assistant-dialog';
+import { buildLinkedPlanImplementationPrompt, buildPlanImplementationPrompt } from './plan-actions';
 
 const forkSessionMock = vi.hoisted(() => vi.fn(async () => 'forked-session'));
+const implementPlanMock = vi.hoisted(() => vi.fn(async () => {}));
+const openPlanMock = vi.hoisted(() => vi.fn(async (_markdown: string, _sessionId?: string) => {}));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise MessageRows integration with useOpenCode actions. */
 vi.mock('../../hooks/useOpenCode', async () => {
   const actual = await vi.importActual<typeof UseOpenCodeModule>('../../hooks/useOpenCode');
-  return { ...actual, forkSession: forkSessionMock };
+  return {
+    ...actual,
+    forkSession: forkSessionMock,
+    implementPlan: implementPlanMock,
+    openPlan: openPlanMock,
+  };
 });
 
 let container: HTMLDivElement;
+
+function clickPlanMenuItem(moreLabel: string, item: string) {
+  container.querySelector<HTMLButtonElement>(`[aria-label="${moreLabel}"]`)?.click();
+  flushSolid();
+  const option = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+    (candidate) => candidate.textContent === item
+  );
+  expect(option).toBeDefined();
+  option?.click();
+  flushSolid();
+}
+
 let cleanup: (() => void) | undefined;
 
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   forkSessionMock.mockClear();
+  implementPlanMock.mockClear();
+  openPlanMock.mockClear();
 });
 
 afterEach(() => {
@@ -179,9 +211,11 @@ describe('AssistantDialogSummaryForMessage', () => {
     expect(container.querySelector('.assistant-dialog-summary-actions')).toBeNull();
     expect(container.querySelector('[role="status"]')?.textContent).toBe('Plan skipped');
     expect(
-      [...container.querySelectorAll('.assistant-dialog-summary-plan-skipped-actions button')].map(
-        (button) => button.textContent
-      )
+      [
+        ...container.querySelectorAll(
+          '.assistant-dialog-summary-plan-skipped-actions button:not(.assistant-dialog-summary-action-more)'
+        ),
+      ].map((button) => button.textContent)
     ).toEqual(['Open plan', 'Implement the plan']);
     const skippedIcon = container.querySelector<HTMLElement>(
       '.assistant-dialog-summary-plan-skipped .ui-icon'
@@ -245,8 +279,12 @@ describe('AssistantDialogSummaryForMessage', () => {
     flushSolid();
 
     const actions = container.querySelectorAll<HTMLButtonElement>(
-      '.assistant-dialog-summary-actions button'
+      '.assistant-dialog-summary-actions button:not(.assistant-dialog-summary-action-more)'
     );
+    const more = container.querySelector<HTMLButtonElement>(
+      '.assistant-dialog-summary-action-more'
+    );
+    expect(more?.getAttribute('aria-label')).toBe('More ways to implement the plan');
     expect([...actions].map((button) => button.textContent)).toEqual([
       'Open plan',
       'Implement the plan',
@@ -265,9 +303,140 @@ describe('AssistantDialogSummaryForMessage', () => {
     startLoading();
     flushSolid();
     expect([...actions].map((button) => button.disabled)).toEqual([true, true, false]);
+    expect(more?.disabled).toBe(true);
     stopLoading();
     flushSolid();
     expect([...actions].map((button) => button.disabled)).toEqual([false, false, false]);
+    expect(more?.disabled).toBe(false);
+  });
+
+  it('implements in a new chat with the plan attached and skips it here', async () => {
+    setState(
+      storePath('sessions', [
+        session('session-1', { title: 'Plan', time: { created: 100, updated: 200 } }),
+      ])
+    );
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-1', { sessionID: 'session-1', agent: 'plan' }),
+            parts: [textPart('plan-text', '1. Change the file')],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-1"
+        />
+      ),
+      container
+    );
+    flushSolid();
+
+    clickPlanMenuItem('More ways to implement the plan', 'Implement in new chat');
+    await vi.waitFor(() => expect(planImplementationDraftRequest()).not.toBeNull());
+
+    expect(isSkippedPlanSession('session-1', 200)).toBe(true);
+    expect(state.activeSessionId).toBeNull();
+    expect(planImplementationDraftRequest()).toMatchObject({
+      sessionId: null,
+      prompt: buildLinkedPlanImplementationPrompt('session-1'),
+      attachment: { name: expect.stringMatching(/^plan-[\w-]+\.md$/), text: '1. Change the file' },
+    });
+    expect(buildLinkedPlanImplementationPrompt('session-1')).toMatch(/^session:session-1 /);
+    expect(implementPlanMock).not.toHaveBeenCalled();
+  });
+
+  it('offers a summarized plan only after more than one planning turn', async () => {
+    setState(storePath('sessions', [session('session-1', { title: 'Plan', directory: '/repo' })]));
+    setState(
+      storePath('serverStatus', { state: 'running', apiVersion: 2, url: 'http://localhost:4096' })
+    );
+    const turn = (id: string): MessageEntry => ({
+      info: { ...userMessage(id), sessionID: 'session-1' },
+      parts: [textPart(`${id}-text`, `Prompt ${id}`)],
+    });
+    setState(storePath('messages', [turn('user-1')]));
+    flushSolid();
+    const apiCall = vi.spyOn(bridge, 'apiCall').mockResolvedValue({ text: '# Summary' });
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-1', { sessionID: 'session-1', agent: 'plan' }),
+            parts: [textPart('plan-text', 'Final response')],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-1"
+        />
+      ),
+      container
+    );
+    flushSolid();
+    expect(container.querySelector('[aria-label="More ways to open the plan"]')).toBeNull();
+
+    setState(storePath('messages', [turn('user-1'), turn('user-2')]));
+    flushSolid();
+    clickPlanMenuItem('More ways to open the plan', 'Open summarized');
+    expect(container.querySelector('.assistant-dialog-summary-action-open')?.textContent).toBe(
+      'Summarizing…'
+    );
+    await vi.waitFor(() => expect(openPlanMock).toHaveBeenCalledWith('# Summary', 'session-1'));
+    expect(apiCall.mock.calls[0]?.[1]).toBe('/session/session-1/side-question?directory=%2Frepo');
+    await vi.waitFor(() =>
+      expect(container.querySelector('.assistant-dialog-summary-action-open')?.textContent).toBe(
+        'Open plan'
+      )
+    );
+
+    container.querySelector<HTMLButtonElement>('.assistant-dialog-summary-action-open')?.click();
+    expect(openPlanMock).toHaveBeenLastCalledWith('Final response', 'session-1');
+    apiCall.mockRestore();
+  });
+
+  it('offers to edit the implementation prompt in Build from the implement menu', () => {
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 10, outputTokens: 5, agentCount: 0 }}
+          msg={{
+            info: assistantMessage('plan-1', { sessionID: 'session-1', agent: 'plan' }),
+            parts: [],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-1"
+        />
+      ),
+      container
+    );
+    flushSolid();
+
+    const more = container.querySelector<HTMLButtonElement>(
+      '.assistant-dialog-summary-action-more'
+    );
+    more?.click();
+    flushSolid();
+    expect(more?.getAttribute('aria-expanded')).toBe('true');
+    const option = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Implement the plan options"] [role="menuitem"]'
+      ),
+    ];
+    expect(option.map((item) => item.textContent)).toEqual([
+      'Edit prompt in Build',
+      'Implement in new chat',
+    ]);
+    option[0]?.click();
+    flushSolid();
+
+    expect(planImplementationDraftRequest()).toMatchObject({
+      sessionId: 'session-1',
+      prompt: buildPlanImplementationPrompt([]),
+    });
+    expect(document.querySelector('[aria-label="Implement the plan options"]')).toBeNull();
+    expect(implementPlanMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -448,6 +617,51 @@ describe('AssistantDialogSummaryForMessage', () => {
     summary?.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     flushSolid();
     expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', false);
+  });
+
+  it('does not treat hovering plan actions as hovering the turn', () => {
+    vi.useFakeTimers();
+    const onWorkedSummaryHoverChange = vi.fn();
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{
+            durationMs: 1_000,
+            completedAt: Date.now(),
+            promptMessageId: 'user-1',
+            inputTokens: 10,
+            outputTokens: 5,
+            agentCount: 0,
+          }}
+          msg={{
+            info: assistantMessage('plan-1', { sessionID: 'session-1', agent: 'plan' }),
+            parts: [],
+          }}
+          hasBuildAgent={true}
+          latestPlanImplementationMessageId="plan-1"
+          onWorkedSummaryHoverChange={onWorkedSummaryHoverChange}
+        />
+      ),
+      container
+    );
+    flushSolid();
+
+    const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
+    for (const button of container.querySelectorAll('.assistant-dialog-summary-actions button')) {
+      button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      vi.advanceTimersByTime(400);
+      flushSolid();
+      button.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    }
+    expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(false);
+
+    summary
+      ?.querySelector('.assistant-dialog-summary-metric')
+      ?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    vi.advanceTimersByTime(400);
+    flushSolid();
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
   });
 
   it('shows the relative completion age for older interrupted summaries', () => {

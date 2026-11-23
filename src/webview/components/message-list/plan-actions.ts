@@ -26,6 +26,11 @@ export function buildPlanImplementationPrompt(parts: Part[]) {
   return PLAN_IMPLEMENTATION_PROMPT;
 }
 
+/** The prompt for a new chat that links the planning session instead of continuing it. */
+export function buildLinkedPlanImplementationPrompt(sessionId: string) {
+  return `session:${sessionId} Implement this plan from the linked planning session in the current workspace. Make the code changes instead of revising the plan.`;
+}
+
 export function buildPlanDocumentContent(parts: Part[]) {
   return parts
     .filter(

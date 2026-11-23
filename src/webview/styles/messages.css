@@ -1555,7 +1555,9 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
     repeat-x center / 16px 7px;
 }
 
-.assistant-dialog-summary:hover {
+.assistant-dialog-summary:hover:not(
+    :has(.assistant-dialog-summary-actions:hover, .assistant-dialog-summary-plan-skipped:hover)
+  ) {
   --assistant-summary-line-color: var(--assistant-summary-fork-border);
 }
 
@@ -1633,6 +1635,29 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 
 .assistant-dialog-summary-action-skip {
   --plan-action-color: var(--color-vscode-error);
+}
+
+/* Implement and its options menu read as one control with a structural divider. */
+.assistant-dialog-summary-split {
+  display: inline-flex;
+}
+
+.assistant-dialog-summary-split > .question-btn.assistant-dialog-summary-action:not(:last-child) {
+  padding-right: 11px;
+  border-right-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.question-btn.assistant-dialog-summary-action-more {
+  padding: 0 7px;
+  border-left-color: color-mix(
+    in srgb,
+    var(--plan-action-color) 60%,
+    var(--assistant-summary-fork-border)
+  );
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .question-btn.assistant-dialog-summary-action:hover:not(:disabled) {
