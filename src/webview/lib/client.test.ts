@@ -509,6 +509,7 @@ describe('client', () => {
     await client.mcp.authenticate('browser server');
     await client.mcp.startAuth('browser server');
     await client.mcp.completeAuth('browser server', 'oauth-code');
+    await client.mcp.completeAuth('browser server', 'oauth-code', 'attempt-1');
     await client.mcp.removeAuth('browser server');
     await client.agent.list();
     await client.question.list();
@@ -607,6 +608,11 @@ describe('client', () => {
       ['POST', '/mcp/browser%20server/auth/authenticate'],
       ['POST', '/mcp/browser%20server/auth'],
       ['POST', '/mcp/browser%20server/auth/callback', { code: 'oauth-code' }],
+      [
+        'POST',
+        '/mcp/browser%20server/auth/callback',
+        { code: 'oauth-code', attemptID: 'attempt-1' },
+      ],
       ['DELETE', '/mcp/browser%20server/auth'],
       ['GET', '/agent'],
       ['GET', '/question'],

@@ -252,7 +252,7 @@ for (const [width, command] of [
     await server.getByRole('button', { name: 'Sign in to atlassian', exact: true }).click();
     await dialog.locator('summary').click();
     await code.fill('test-oauth-code');
-    await dialog.getByRole('button', { name: 'Complete authorization', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(dialog).toContainText('Authorization successful');
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);

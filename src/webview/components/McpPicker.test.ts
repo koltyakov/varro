@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   completeAuth: vi.fn(),
   removeAuth: vi.fn(),
   disconnect: vi.fn(),
+  connect: vi.fn(),
   status: vi.fn(),
   setDefault: vi.fn(),
 }));
@@ -26,6 +27,7 @@ vi.mock('../lib/client', () => ({
       completeAuth: mocks.completeAuth,
       removeAuth: mocks.removeAuth,
       disconnect: mocks.disconnect,
+      connect: mocks.connect,
       status: mocks.status,
     },
   },
@@ -66,6 +68,7 @@ beforeEach(() => {
   mocks.completeAuth.mockReset();
   mocks.removeAuth.mockReset();
   mocks.disconnect.mockReset().mockResolvedValue(true);
+  mocks.connect.mockReset().mockResolvedValue(true);
   mocks.status.mockReset();
   mocks.setDefault.mockReset();
   mocks.postMessage.mockReset();
@@ -208,11 +211,16 @@ describe('McpPicker', () => {
     });
     accountButton('Switch account for oauth').click();
     flushSolid();
-    await flushMicrotasks(8);
+    await flushMicrotasks(16);
     flushSolid();
     expect(mocks.removeAuth).toHaveBeenCalledExactlyOnceWith('oauth');
     expect(mocks.startAuth).toHaveBeenCalledExactlyOnceWith('oauth');
     expect(mocks.removeAuth.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.startAuth.mock.invocationCallOrder[0]!
+    );
+    // OpenCode reconnects after sign-in only for servers that are not disabled.
+    expect(mocks.connect).toHaveBeenCalledExactlyOnceWith('oauth');
+    expect(mocks.connect.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.startAuth.mock.invocationCallOrder[0]!
     );
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
@@ -749,7 +757,9 @@ describe('McpPicker', () => {
     flushSolid();
     document.querySelector<HTMLFormElement>('.provider-connect-form')?.requestSubmit();
 
-    await vi.waitFor(() => expect(mocks.completeAuth).toHaveBeenCalledWith('oauth', 'oauth-code'));
+    await vi.waitFor(() =>
+      expect(mocks.completeAuth).toHaveBeenCalledWith('oauth', 'oauth-code', 'state-1')
+    );
     flushSolid();
     expect(mocks.status).toHaveBeenCalled();
   });
@@ -787,7 +797,7 @@ describe('McpPicker', () => {
       dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
       await flushMicrotasks(6);
       flushSolid();
-      expect(mocks.completeAuth).toHaveBeenCalledExactlyOnceWith('oauth', value);
+      expect(mocks.completeAuth).toHaveBeenCalledExactlyOnceWith('oauth', value, 'state-1');
     }
   );
 

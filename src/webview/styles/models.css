@@ -915,6 +915,75 @@
   opacity: 0.55;
 }
 
+.provider-connect-secondary:not(:disabled):hover {
+  background: var(--color-vscode-toolbar-hover);
+}
+
+.provider-connect-danger-text {
+  color: var(--color-vscode-error);
+}
+
+.provider-connect-disclosure {
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-control);
+}
+
+.provider-connect-disclosure > summary {
+  padding: 8px 10px;
+  color: var(--color-vscode-muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius-control);
+}
+
+.provider-connect-disclosure > summary:hover,
+.provider-connect-disclosure[open] > summary {
+  color: var(--color-vscode-fg);
+}
+
+.provider-connect-disclosure > summary:focus-visible {
+  outline: 1px solid var(--color-vscode-focus-border);
+  outline-offset: -2px;
+}
+
+.provider-connect-disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 10px 10px;
+}
+
+.provider-connect-inline {
+  display: flex;
+  gap: 8px;
+}
+
+.provider-connect-inline .provider-connect-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.provider-connect-inline > button {
+  flex: none;
+}
+
+.provider-connect-status-row {
+  flex-wrap: wrap;
+}
+
+.provider-connect-status {
+  margin-right: auto;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.provider-connect-button-group {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .provider-disconnect-confirmation {
   padding: 12px;
   color: var(--color-vscode-fg);
@@ -973,6 +1042,11 @@
     height: min(440px, calc(100vh - 16px));
     max-height: calc(100vh - 16px);
   }
+}
+
+/* MCP authorization content is short; size to it instead of scrolling a fixed frame. */
+.provider-connect-dialog.mcp-auth-dialog {
+  height: auto;
 }
 
 .models-provider {

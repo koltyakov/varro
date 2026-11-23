@@ -1213,8 +1213,13 @@ export const client = {
       };
       return response.paste === true ? { ...authorization, paste: true } : authorization;
     },
-    async completeAuth(name: string, code: string): Promise<McpStatus> {
-      return apiCall('POST', `/mcp/${encodeURIComponent(name)}/auth/callback`, { code });
+    async completeAuth(name: string, code: string, attemptID?: string): Promise<McpStatus> {
+      // Several views may hold OAuth attempts for one server; the attempt ID selects this one.
+      return apiCall(
+        'POST',
+        `/mcp/${encodeURIComponent(name)}/auth/callback`,
+        attemptID ? { code, attemptID } : { code }
+      );
     },
     async removeAuth(name: string): Promise<{ success: true }> {
       return apiCall('DELETE', `/mcp/${encodeURIComponent(name)}/auth`);

@@ -6016,7 +6016,13 @@ async function handleApiRequest(
       loggedOutMcpNames.delete(name);
       return state.mcpStatus[name];
     }
-    return { authorizationUrl: 'https://mcp.example.com/authorize', oauthState: 'test-state' };
+    const started = {
+      authorizationUrl: 'https://mcp.example.com/authorize',
+      oauthState: 'test-state',
+    };
+    return new URLSearchParams(window.location.search).has('mcpPaste')
+      ? { ...started, paste: true }
+      : started;
   }
 
   if (path === VARRO_API_ENDPOINTS.mcpConfigOpen && method === 'POST') return true;

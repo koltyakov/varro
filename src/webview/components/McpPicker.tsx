@@ -445,6 +445,7 @@ function McpAuthDialog(props: {
 }) {
   const needsConfiguration = () => currentStatus().status === 'needs_client_registration';
   const [authorizationUrl, setAuthorizationUrl] = createSignal('');
+  const [attemptID, setAttemptID] = createSignal('');
   const [canPasteRedirect, setCanPasteRedirect] = createSignal(false);
   const [authorizationCode, setAuthorizationCode] = createSignal('');
   // Initial state only: the effect below follows live status updates for this server.
@@ -460,6 +461,7 @@ function McpAuthDialog(props: {
   const [errorMessage, setErrorMessage] = createSignal('');
   const [statusError, setStatusError] = createSignal('');
   const isConnected = () => currentStatus().status === 'connected';
+  const authError = () => (isConnected() ? '' : errorMessage() || statusError());
   const waitingForAuthorization = createMemo(
     () => !!authorizationUrl() && !isSubmitting() && !needsConfiguration() && !isConnected()
   );
@@ -551,6 +553,14 @@ function McpAuthDialog(props: {
     setErrorMessage('');
     setStatusError('');
     try {
+      // OpenCode reconnects a server after sign-in only when it is not disabled, and a
+      // connect without credentials ends in needs_auth without starting a login.
+      if (currentStatus().status === 'disabled') {
+        await client.mcp.connect(props.server.name).catch(() => undefined);
+        if (disposed) return;
+        await refreshStatus().catch(() => undefined);
+        if (disposed || isConnected()) return;
+      }
       const authorization = await client.mcp.startAuth(props.server.name);
       if (disposed) return;
       const url = new URL(authorization.authorizationUrl);
@@ -560,6 +570,7 @@ function McpAuthDialog(props: {
         );
       }
       setAuthorizationUrl(url.href);
+      setAttemptID(authorization.oauthState);
       setCanPasteRedirect(authorization.paste === true);
       postMessage({ type: 'vscode/open-external', payload: { url: url.href } });
     } catch (error) {
@@ -575,7 +586,7 @@ function McpAuthDialog(props: {
     setIsSubmitting(true);
     setErrorMessage('');
     try {
-      const status = await client.mcp.completeAuth(props.server.name, code);
+      const status = await client.mcp.completeAuth(props.server.name, code, attemptID());
       if (disposed) return;
       setCurrentStatus(status);
       await refreshStatus();
@@ -607,6 +618,7 @@ function McpAuthDialog(props: {
       if (disposed) return;
       setAuthorizationCode('');
       setAuthorizationUrl('');
+      setAttemptID('');
       await refreshStatus();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -643,7 +655,7 @@ function McpAuthDialog(props: {
       >
         <div
           ref={modalFocus()}
-          class="provider-connect-dialog"
+          class="provider-connect-dialog mcp-auth-dialog"
           role="dialog"
           aria-modal="true"
           aria-labelledby="mcp-auth-title"
@@ -668,6 +680,11 @@ function McpAuthDialog(props: {
                   </div>
                   <Show when={props.server.status.error}>
                     <div class="provider-connect-instructions">{props.server.status.error}</div>
+                  </Show>
+                  <Show when={authError()}>
+                    <div class="provider-connect-error" role="alert">
+                      {authError()}
+                    </div>
                   </Show>
                   <div class="provider-connect-actions">
                     <button
@@ -740,72 +757,80 @@ function McpAuthDialog(props: {
                       changes the MCP login for all sessions using this connection.
                     </div>
                   </Show>
-                  <details open={canPasteRedirect()}>
+                  <details class="provider-connect-disclosure" open={canPasteRedirect()}>
                     <summary>
                       {canPasteRedirect()
                         ? 'Paste the browser redirect URL instead'
                         : 'Use an authorization code instead'}
                     </summary>
-                    <Show when={canPasteRedirect()}>
-                      <div id="mcp-auth-redirect-help" class="provider-connect-intro">
-                        If your browser cannot reach this machine, paste the full URL it redirected
-                        to.
-                      </div>
-                    </Show>
-                    <label class="provider-connect-field">
-                      <span>
-                        {canPasteRedirect() ? 'Browser redirect URL' : 'Authorization code'}
-                      </span>
-                      <input
-                        class="provider-connect-input"
-                        value={authorizationCode()}
-                        onInput={(event) => setAuthorizationCode(event.currentTarget.value)}
-                        autocomplete="off"
-                        spellcheck={false}
-                        placeholder={canPasteRedirect() ? 'Paste the full redirect URL' : undefined}
-                        aria-describedby={canPasteRedirect() ? 'mcp-auth-redirect-help' : undefined}
-                      />
-                    </label>
-                    <button
-                      type="submit"
-                      class="provider-connect-primary"
-                      disabled={isSubmitting() || !authorizationCode().trim()}
-                    >
-                      {isSubmitting()
-                        ? 'Working...'
-                        : canPasteRedirect()
-                          ? 'Submit redirect URL'
-                          : 'Complete authorization'}
-                    </button>
+                    <div class="provider-connect-disclosure-body">
+                      <Show when={canPasteRedirect()}>
+                        <div id="mcp-auth-redirect-help" class="provider-connect-intro">
+                          If your browser cannot reach this machine, paste the full URL it
+                          redirected to.
+                        </div>
+                      </Show>
+                      <label class="provider-connect-field">
+                        <span class="sr-only">
+                          {canPasteRedirect() ? 'Browser redirect URL' : 'Authorization code'}
+                        </span>
+                        <div class="provider-connect-inline">
+                          <input
+                            class="provider-connect-input"
+                            value={authorizationCode()}
+                            onInput={(event) => setAuthorizationCode(event.currentTarget.value)}
+                            autocomplete="off"
+                            spellcheck={false}
+                            placeholder={
+                              canPasteRedirect()
+                                ? 'http://127.0.0.1:.../callback?code=...'
+                                : 'Authorization code'
+                            }
+                            aria-describedby={
+                              canPasteRedirect() ? 'mcp-auth-redirect-help' : undefined
+                            }
+                          />
+                          <button
+                            type="submit"
+                            class="provider-connect-primary"
+                            disabled={isSubmitting() || !authorizationCode().trim()}
+                          >
+                            {isSubmitting() ? 'Working...' : 'Submit'}
+                          </button>
+                        </div>
+                      </label>
+                    </div>
                   </details>
-                  <div class="provider-connect-intro" aria-live="polite">
-                    Status: {currentStatus().status.replaceAll('_', ' ')}
-                  </div>
-                  <div class="provider-connect-actions">
-                    <button
-                      type="button"
-                      class="provider-connect-danger"
-                      disabled={isSubmitting()}
-                      onClick={() => void removeAndRestart()}
-                    >
-                      Remove credentials and restart
-                    </button>
-                    <button
-                      type="button"
-                      class="provider-connect-primary"
-                      disabled={isSubmitting()}
-                      onClick={() => void checkAuthorizationStatus()}
-                    >
-                      {isSubmitting() ? 'Refreshing...' : 'Refresh status'}
-                    </button>
+                  <Show when={authError()}>
+                    <div class="provider-connect-error" role="alert">
+                      {authError()}
+                    </div>
+                  </Show>
+                  <div class="provider-connect-actions provider-connect-status-row">
+                    <span class="provider-connect-status" aria-live="polite">
+                      Status: {currentStatus().status.replaceAll('_', ' ')}
+                    </span>
+                    <div class="provider-connect-button-group">
+                      <button
+                        type="button"
+                        class="provider-connect-secondary provider-connect-danger-text"
+                        disabled={isSubmitting()}
+                        onClick={() => void removeAndRestart()}
+                      >
+                        Remove credentials and restart
+                      </button>
+                      <button
+                        type="button"
+                        class="provider-connect-secondary"
+                        disabled={isSubmitting()}
+                        onClick={() => void checkAuthorizationStatus()}
+                      >
+                        {isSubmitting() ? 'Refreshing...' : 'Refresh status'}
+                      </button>
+                    </div>
                   </div>
                 </form>
               </Show>
-            </Show>
-            <Show when={!isConnected() && (errorMessage() || statusError())}>
-              <div class="provider-connect-error" role="alert">
-                {errorMessage() || statusError()}
-              </div>
             </Show>
           </div>
         </div>
