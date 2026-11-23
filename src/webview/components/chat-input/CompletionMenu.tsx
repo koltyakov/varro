@@ -58,6 +58,7 @@ export type SlashCommand = {
   description: string;
   help?: string;
   acceptsArguments?: boolean;
+  argumentHint?: string;
   source?: 'command' | 'mcp' | 'skill';
   serverCommand?: string;
   action: (args: string) => void | Promise<void>;

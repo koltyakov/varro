@@ -40,6 +40,14 @@
 /* Generated text stays outside the editable DOM, clipboard, and draft history. */
 .rich-composer[data-prompt-suggestion]::after {
   content: attr(data-prompt-suggestion);
+}
+
+.rich-composer[data-command-argument-hint]::after {
+  content: attr(data-command-argument-hint);
+}
+
+.rich-composer[data-prompt-suggestion]::after,
+.rich-composer[data-command-argument-hint]::after {
   color: var(--vscode-editorGhostText-foreground, var(--color-vscode-input-placeholder));
   pointer-events: none;
   user-select: none;

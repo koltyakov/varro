@@ -2640,6 +2640,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }))
   );
 
+  const commandArgumentHint = createMemo(() => {
+    const match = /^[ \t]*\/(\S+)([ \t]*)$/.exec(inputText());
+    if (!match) return '';
+    const name = match[1]!.toLowerCase();
+    const selectedCommand = slashCommands().find(
+      (command) => command.name.toLowerCase() === name || command.aliases.includes(name)
+    );
+    const hint = selectedCommand?.argumentHint;
+    return hint ? `${match[2] ? '' : ' '}${hint}` : '';
+  });
+
   const activeCompletion = createMemo(() => {
     const fallbackCursor = caretPosition();
     const text = inputText();
@@ -7338,6 +7349,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
           <RichComposerArea
             slashCommandNames={recognizedSlashCommandNames()}
+            commandArgumentHint={commandArgumentHint()}
             editorRef={(el) => {
               richEditorRef = el;
             }}

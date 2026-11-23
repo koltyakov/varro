@@ -82,6 +82,7 @@ import {
   syncQueuedMessages,
 } from '../lib/state-queued-messages';
 import { sendQueuedAsSteer } from './chat-input/queued-steer';
+import { extractText } from './chat-input/RichComposerArea';
 import { databaseBackupIcon, databaseScriptPlusIcon, runningIcon } from '../lib/ui-icons';
 import { registerHostExtension } from '../host/extensions';
 import { toCssUrl } from './UiIcon';
@@ -11479,6 +11480,66 @@ describe('ChatInput', () => {
     expect(sideQuestionView()).toBeNull();
     expect(inputText()).toBe('/btw Why?');
     expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['/btw', ' [question]'],
+    ['/BTW ', '[question]'],
+    ['/mcps', ' [server]'],
+    ['/stats ', '[all]'],
+    ['/deploy ', '[environment] [version]'],
+    ['/test ', '[arguments]'],
+    ['/settings', undefined],
+    ['/unknown ', undefined],
+    ['/bt', undefined],
+    ['/btw Why?', undefined],
+    ['/btw\n', undefined],
+    ['Explain /btw ', undefined],
+  ])('shows an argument placeholder for %j without changing the draft', (draft, hint) => {
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('commands', [
+      { name: 'deploy', source: 'command', template: '', hints: ['environment', 'version'] },
+      { name: 'test', source: 'command', template: '' },
+    ]);
+    setInputTextAndFlush(draft);
+    renderChatInput();
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    expect(editor.dataset.commandArgumentHint).toBe(hint);
+    expect(extractText(editor)).toBe(draft);
+    expect(inputText()).toBe(draft);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+  });
+
+  it('hides argument hints while typing and restores them when arguments are cleared', async () => {
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setInputTextAndFlush('/bt');
+    renderChatInput();
+    const editor = focusPopulatedComposer();
+    setCollapsedSelection(editor.firstChild, 3);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 't', bubbles: true }));
+    await settle();
+    const suggestion = [
+      ...container!.querySelectorAll<HTMLElement>('.composer-completion-item'),
+    ].find((option) => option.textContent?.includes('/btw'));
+    expect(suggestion).toBeDefined();
+    suggestion!.click();
+    await settle();
+    expect(editor.dataset.commandArgumentHint).toBe(' [question]');
+    expect(editor.getAttribute('aria-description')).toBe('Command arguments: [question]');
+    enterComposerText(editor, '/btw Why?');
+    flushSolid();
+    expect(editor.dataset.commandArgumentHint).toBeUndefined();
+    enterComposerText(editor, '/btw ');
+    flushSolid();
+    expect(editor.dataset.commandArgumentHint).toBe('[question]');
+    pressKey(editor, { key: 'Enter' });
+    await settle();
+    expect(sideQuestionView()?.question).toBe('');
+    expect(inputText()).toBe('');
   });
 
   it('runs a typed slash command with args on Enter', async () => {

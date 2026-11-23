@@ -67,6 +67,8 @@ function expectChipUiIcon(element: Element | null | undefined, source: string) {
 function renderComposer(props: {
   value: string;
   slashCommandNames?: ReadonlySet<string>;
+  commandArgumentHint?: string;
+  promptSuggestion?: string;
   cursorOffset: number;
   chips: RichComposerChip[];
   centerCaret?: boolean;
@@ -89,6 +91,12 @@ function renderComposer(props: {
         },
         get slashCommandNames() {
           return props.slashCommandNames;
+        },
+        get commandArgumentHint() {
+          return props.commandArgumentHint;
+        },
+        get promptSuggestion() {
+          return props.promptSuggestion;
         },
         get cursorOffset() {
           return props.cursorOffset;
@@ -165,6 +173,44 @@ function dispatchBeforeInput(target: EventTarget, init: InputEventInit) {
 }
 
 describe('RichComposerArea', () => {
+  it('keeps argument hints outside editor text and clipboard and hides them during composition', () => {
+    const [hint, setHint] = createSignal(' [question]');
+    renderComposer({
+      value: '/btw',
+      cursorOffset: 4,
+      chips: [],
+      get commandArgumentHint() {
+        return hint();
+      },
+      promptSuggestion: ' unrelated suggestion',
+    });
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    const originalText = editor.firstChild!;
+    setCollapsedSelection(originalText, 2);
+    setHint(' [updated question]');
+    flushSolid();
+    expect(editor.firstChild).toBe(originalText);
+    expect(window.getSelection()?.anchorNode).toBe(originalText);
+    expect(window.getSelection()?.anchorOffset).toBe(2);
+    expect(editor.dataset.commandArgumentHint).toBe(' [updated question]');
+    expect(editor.dataset.promptSuggestion).toBeUndefined();
+    expect(editor.getAttribute('aria-autocomplete')).toBe('none');
+    expect(extractText(editor)).toBe('/btw');
+
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    const setData = vi.fn();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { setData } });
+    editor.dispatchEvent(event);
+    expect(setData).toHaveBeenCalledWith('text/plain', '/btw');
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    flushSolid();
+    expect(editor.dataset.commandArgumentHint).toBeUndefined();
+  });
+
   it('does not read reactive highlight inputs in effect callbacks when the CSS API is absent', () => {
     vi.stubGlobal('CSS', undefined);
     const warn = vi.spyOn(console, 'warn');

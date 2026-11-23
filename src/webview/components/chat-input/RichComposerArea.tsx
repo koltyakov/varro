@@ -75,6 +75,7 @@ export function RichComposerArea(props: {
   placeholder: string;
   ariaLabel?: string;
   slashCommandNames?: ReadonlySet<string>;
+  commandArgumentHint?: string;
   centerCaret?: boolean;
   value: string;
   promptSuggestion?: string;
@@ -153,8 +154,9 @@ export function RichComposerArea(props: {
   createEffect(isComposing, (active) => {
     props.onCompositionChange?.(active);
   });
+  const commandArgumentHint = () => (!isComposing() ? (props.commandArgumentHint ?? '') : '');
   const promptSuggestion = () =>
-    props.isFocused && !isComposing() && !props.showCompletionMenu
+    props.isFocused && !isComposing() && !props.showCompletionMenu && !commandArgumentHint()
       ? (props.promptSuggestion ?? '')
       : '';
   let historyHandledByKeydown = false;
@@ -1303,9 +1305,12 @@ export function RichComposerArea(props: {
         aria-description={
           promptSuggestion()
             ? `Suggestion: ${promptSuggestion()}. Press Tab to accept or Escape to dismiss.`
-            : undefined
+            : commandArgumentHint()
+              ? `Command arguments: ${commandArgumentHint().trim()}`
+              : undefined
         }
         data-prompt-suggestion={promptSuggestion() || undefined}
+        data-command-argument-hint={commandArgumentHint() || undefined}
         data-prompt-completion-pending={props.promptCompletionPending ? 'true' : undefined}
         data-placeholder={props.placeholder}
         onInput={handleInput}

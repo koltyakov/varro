@@ -51,6 +51,34 @@ test('supports keyboard navigation and tab completion for slash command suggesti
   await expect(composer).toHaveText(selectedText?.trim() || '');
 });
 
+test('renders inline argument hints without inserting them into command text', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 500, height: 700 });
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands&nativeCommand=1');
+  const composer = page.getByRole('textbox', { name: 'Message composer' }).first();
+  await composer.fill('/mc');
+  await composer.press('Tab');
+  await expect(composer).toHaveText('/mcp');
+  await expect(composer).toHaveAttribute('data-command-argument-hint', ' [server]');
+  expect(await composer.evaluate((element) => getComputedStyle(element, '::after').content)).toBe(
+    '" [server]"'
+  );
+  await composer.press('Space');
+  await expect(composer).toHaveAttribute('data-command-argument-hint', '[server]');
+  await composer.pressSequentially('browser');
+  await expect(composer).not.toHaveAttribute('data-command-argument-hint');
+  await expect(composer).toHaveText('/mcp browser');
+  await composer.fill('/mcps ');
+  await expect(composer).toHaveAttribute('data-command-argument-hint', '[server]');
+  await composer.fill('/audit ');
+  await expect(composer).toHaveAttribute('data-command-argument-hint', '[arguments]');
+  expect(await composer.textContent()).toBe('/audit ');
+  await page.screenshot({ path: testInfo.outputPath('command-argument-hint.png') });
+  await composer.fill('/settings');
+  await expect(composer).not.toHaveAttribute('data-command-argument-hint');
+});
+
 test('closes slash command suggestions with escape', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=slash-commands');
 

@@ -75,6 +75,7 @@ export function getSlashCommands(props: {
             aliases: ['promlems'],
             description: 'Attach all workspace problems or choose individual problems',
             acceptsArguments: true,
+            argumentHint: '[filter]',
             action: () => {},
           },
         ]
@@ -84,6 +85,7 @@ export function getSlashCommands(props: {
       aliases: [],
       description: 'Browse available skills',
       acceptsArguments: true,
+      argumentHint: '[skill]',
       action: () => {},
     },
     /*
@@ -121,6 +123,7 @@ export function getSlashCommands(props: {
       aliases: ['mcps'],
       description: 'Select MCP servers or sign in',
       acceptsArguments: true,
+      argumentHint: '[server]',
       action: (args) => props.onOpenMcps(args.trim()),
     },
     {
@@ -160,6 +163,7 @@ export function getSlashCommands(props: {
       name: 'stats',
       aliases: [],
       description: 'Generate a usage report; add all for all time',
+      argumentHint: '[all]',
       action: (args) => {
         props.onGenerateStats(args.trim().toLowerCase() === 'all');
       },
@@ -189,6 +193,7 @@ export function getSlashCommands(props: {
         aliases: [],
         description: 'Ask without interrupting the task',
         acceptsArguments: true,
+        argumentHint: '[question]',
         action: (args) => props.onSideQuestion?.(args),
       });
       commands.push({
@@ -296,6 +301,15 @@ export function getSlashCommands(props: {
           ? 'OpenCode decides whether this command runs here or in a background child. Follow children in the session list; their results return to the parent. Agent and model overrides follow the command definition.'
           : undefined,
       acceptsArguments: command.source === 'command' || (command.hints?.length ?? 0) > 0,
+      argumentHint: command.hints?.length
+        ? command.hints
+            .map((hint) => hint.trim())
+            .filter(Boolean)
+            .map((hint) => (/^(?:\[.*\]|<.*>)$/.test(hint) ? hint : `[${hint}]`))
+            .join(' ')
+        : command.source === 'command'
+          ? '[arguments]'
+          : undefined,
       source: command.source,
       serverCommand: command.name,
       action: (args) => {

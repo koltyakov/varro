@@ -36,6 +36,7 @@ describe('getSlashCommands', () => {
     const mcp = commands.find((command) => command.name === 'mcp');
     expect(mcp?.aliases).toEqual(['mcps']);
     expect(mcp?.acceptsArguments).toBe(true);
+    expect(mcp?.argumentHint).toBe('[server]');
     expect(commands.filter((command) => ['mcp', 'mcps'].includes(command.name))).toHaveLength(1);
     void mcp?.action(' at ');
     expect(onOpenMcps).toHaveBeenCalledWith('at');
@@ -67,6 +68,7 @@ describe('getSlashCommands', () => {
         void aside[0]!.action('Why?');
         expect(onSideQuestion).toHaveBeenCalledWith('Why?');
         expect(aside[0]!.acceptsArguments).toBe(true);
+        expect(aside[0]!.argumentHint).toBe('[question]');
       }
     }
   );
@@ -186,6 +188,35 @@ describe('getSlashCommands', () => {
       'Review code'
     );
     expect(JSON.stringify(commands)).not.toContain('Private prompt');
+  });
+
+  it('preserves custom argument labels and provides a fallback for command definitions', () => {
+    const commands = getSlashCommands({
+      hasCurrentSession: false,
+      canInit: false,
+      onConnectProvider: () => {},
+      onOpenMcps: () => {},
+      onOpenSettings: () => {},
+      onExportSession: () => {},
+      onPauseSession: vi.fn(async () => {}),
+      onGenerateStats: () => {},
+      customCommands: [
+        {
+          name: 'deploy',
+          source: 'command',
+          template: '',
+          hints: [' environment ', '[version]', '<region>', ''],
+        },
+        { name: 'test', source: 'command', template: '' },
+        { name: 'no-args', source: 'mcp', template: '' },
+      ],
+    });
+    expect(commands.find((command) => command.name === 'deploy')?.argumentHint).toBe(
+      '[environment] [version] <region>'
+    );
+    expect(commands.find((command) => command.name === 'test')?.argumentHint).toBe('[arguments]');
+    expect(commands.find((command) => command.name === 'no-args')?.argumentHint).toBeUndefined();
+    expect(commands.find((command) => command.name === 'settings')?.argumentHint).toBeUndefined();
   });
 
   it('keeps reserved built-ins hidden when a custom command reuses the name', () => {
