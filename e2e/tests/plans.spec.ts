@@ -17,9 +17,10 @@ for (const theme of ['dark', 'light', 'high-contrast', 'high-contrast-light']) {
     // Chromium can serialize flex-end as flow-end; verify the rendered alignment below too.
     await expect(actions).toHaveCSS('justify-content', /^(flex|flow)-end$/);
     await expect(actions).toHaveCSS('flex-wrap', 'wrap');
+    // Compare outer borders, not the split button's intentionally darker left divider.
     const borders = await actions
       .locator('button')
-      .evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).borderColor));
+      .evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).borderTopColor));
     expect(new Set(borders).size).toBe(3);
     await expect(open).toHaveCSS('font-weight', '400');
     await expect(implement).toHaveCSS('font-weight', '500');

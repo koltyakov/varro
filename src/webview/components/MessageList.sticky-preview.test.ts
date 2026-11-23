@@ -3899,6 +3899,7 @@ describe('MessageList sticky prompt preview', () => {
       text: 'Still is shown as this. Before switching to [Image 2]',
       context: image2Context,
       model: { providerID: 'openai', modelID: 'gpt-5.4' },
+      agent: 'build',
     });
 
     scenario.animationFrames.restore();
@@ -3917,6 +3918,7 @@ describe('MessageList sticky prompt preview', () => {
       text: '',
       context: image2Context,
       model: { providerID: 'openai', modelID: 'gpt-5.4' },
+      agent: 'build',
     });
 
     scenario.animationFrames.restore();
