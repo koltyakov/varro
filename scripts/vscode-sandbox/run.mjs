@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { writeVscodeLaunchMetadata } from '../vscode-launch-process.mjs';
+import { resolveVscodeExecutable, writeVscodeLaunchMetadata } from '../vscode-launch-process.mjs';
 import { isolateVarroTestState } from '../varro-test-state.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -47,35 +47,6 @@ function selectScenarios(args) {
     }
   }
   return requested;
-}
-
-async function resolveVscodeExecutable() {
-  const configured = process.env.VARRO_VSCODE_EXECUTABLE?.trim();
-  if (configured) {
-    await access(configured);
-    return configured;
-  }
-
-  const candidates =
-    process.platform === 'darwin'
-      ? ['/Applications/Visual Studio Code.app/Contents/MacOS/Code']
-      : process.platform === 'win32'
-        ? [
-            path.join(process.env.LOCALAPPDATA || '', 'Programs/Microsoft VS Code/Code.exe'),
-            path.join(process.env.ProgramFiles || '', 'Microsoft VS Code/Code.exe'),
-          ]
-        : ['/usr/share/code/code', '/usr/share/code-insiders/code-insiders'];
-
-  for (const candidate of candidates) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {}
-  }
-
-  throw new Error(
-    'Could not locate the VS Code application executable; set VARRO_VSCODE_EXECUTABLE to Code, Code.exe, or the Linux code binary'
-  );
 }
 
 function reservePort() {
@@ -421,7 +392,7 @@ async function runScenario(scenario, vscodeExecutable) {
 }
 
 const scenarios = selectScenarios(process.argv.slice(2));
-const vscodeExecutable = await resolveVscodeExecutable();
+const vscodeExecutable = await resolveVscodeExecutable('Code, Code.exe, or the Linux code binary');
 const failures = [];
 for (const scenario of scenarios) {
   try {

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import type { AssistantMessage, MessageEntry } from '../../src/webview/types';
 import type { ServerEvent, WebviewMessage } from '../../src/shared/protocol';
+import { installPlaybackCapture } from './helpers';
 
 const sessionId = 'followups-fixture';
 const created = 1_780_000_000_000;
@@ -220,25 +221,17 @@ for (const width of [480, 1280]) {
       page,
     }, testInfo) => {
       await page.setViewportSize({ width, height: 850 });
-      await page.addInitScript(
-        (capture) => {
-          // SAFETY: Only the isolated playback harness consumes this generated fixture.
-          (
-            window as typeof window & { varroPlaybackCapture: typeof capture }
-          ).varroPlaybackCapture = capture;
+      await installPlaybackCapture(page, {
+        session: {
+          id: sessionId,
+          projectID: 'test',
+          directory: '/workspace',
+          title: 'Follow-ups fixture',
+          version: '1',
+          time: { created, updated: created },
         },
-        {
-          session: {
-            id: sessionId,
-            projectID: 'test',
-            directory: '/workspace',
-            title: 'Follow-ups fixture',
-            version: '1',
-            time: { created, updated: created },
-          },
-          initialMessages: history(),
-        }
-      );
+        initialMessages: history(),
+      });
       await page.goto('/e2e/harness/index.html?scenario=session-playback');
       const composer = page.getByRole('textbox', { name: 'Message composer' }).first();
       await expect(composer).toBeVisible();

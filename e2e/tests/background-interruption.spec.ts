@@ -4,6 +4,7 @@ import {
   isV2TranscriptMessage,
   projectV2Message,
 } from '../../src/extension/opencode-v2-projection';
+import { installPlaybackCapture } from './helpers';
 
 for (const width of [441, 1100]) {
   test(`retains Interrupted after a background notice and history reload at ${width}px`, async ({
@@ -48,24 +49,17 @@ for (const width of [441, 1100]) {
         model: { providerID: 'openai', id: 'model', variant: 'high' },
       })
     );
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated playback harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'test',
+        directory: '/workspace',
+        title: 'Stopped background action',
+        version: '2',
+        time: { created, updated: created + 9_001 },
       },
-      {
-        session: {
-          id: sessionID,
-          projectID: 'test',
-          directory: '/workspace',
-          title: 'Stopped background action',
-          version: '2',
-          time: { created, updated: created + 9_001 },
-        },
-        initialMessages,
-      }
-    );
+      initialMessages,
+    });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     for (let reload = 0; reload < 2; reload++) {
       const summary = page.locator('.assistant-dialog-summary');

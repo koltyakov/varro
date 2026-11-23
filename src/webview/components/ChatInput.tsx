@@ -255,6 +255,7 @@ import {
 import type { CompressedImage, ImageCompressionAnalysis } from '../lib/image-compression';
 import { loadImage } from '../lib/image-loading';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
+import type { ToolbarSharedProps } from './chat-input/ChatInputToolbar';
 import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import {
   RichComposerArea,
@@ -1091,6 +1092,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (except !== 'context') setShowContextPopup(false);
     if (except !== 'providerLimit') setShowProviderLimitPopup(false);
     if (except !== 'busy') setShowBusyMenu(false);
+  };
+  // Toggles one popup, closing every other popup first, and returns its new open state.
+  const togglePopup = (
+    kind: PopupKind,
+    shown: () => boolean,
+    setShown: (next: boolean) => void
+  ) => {
+    const next = !shown();
+    closePopups(next ? kind : undefined);
+    setShown(next);
+    return next;
   };
   const anyComposerPopupOpen = () =>
     showWorkspacePicker() ||
@@ -2997,13 +3009,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
       if (e.key === 'Tab') {
         e.preventDefault();
-        const items = composerCompletions();
-        const item = items[Math.min(completionIndex(), items.length - 1)];
-        void applyActiveCompletion();
-        setSuppressCompletion(
-          item?.type !== 'slash' ||
-            (item.name !== SKILLS_COMMAND_NAME && item.name !== PROBLEMS_COMMAND_NAME)
-        );
+        acceptHighlightedCompletion();
         return;
       }
     }
@@ -3029,13 +3035,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       if (showingCompletions) {
         e.preventDefault();
-        const items = composerCompletions();
-        const item = items[Math.min(completionIndex(), items.length - 1)];
-        void applyActiveCompletion();
-        setSuppressCompletion(
-          item?.type !== 'slash' ||
-            (item.name !== SKILLS_COMMAND_NAME && item.name !== PROBLEMS_COMMAND_NAME)
-        );
+        acceptHighlightedCompletion();
         return;
       }
     }
@@ -3137,6 +3137,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (next >= items.length) return 0;
       return next;
     });
+  }
+
+  // Accepts the highlighted item; /skills and /problems keep completions open for sub-items.
+  function acceptHighlightedCompletion() {
+    const items = composerCompletions();
+    const item = items[Math.min(completionIndex(), items.length - 1)];
+    void applyActiveCompletion();
+    setSuppressCompletion(
+      item?.type !== 'slash' ||
+        (item.name !== SKILLS_COMMAND_NAME && item.name !== PROBLEMS_COMMAND_NAME)
+    );
   }
 
   async function applyActiveCompletion() {
@@ -6274,10 +6285,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   function toggleContextPopup() {
-    const next = !showContextPopup();
-    closePopups(next ? 'context' : undefined);
-    setShowContextPopup(next);
-    if (next) void loadCompleteTokenBreakdown();
+    if (togglePopup('context', showContextPopup, setShowContextPopup))
+      void loadCompleteTokenBreakdown();
   }
 
   const activeUsageLimit = createMemo(() => {
@@ -6767,6 +6776,108 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     toolbarFitter.schedule({ contentChanged: true });
   });
+
+  // Refs and handlers the main and meta toolbars share; reactive values stay on each toolbar.
+  const sharedToolbarHandlers = {
+    permissionButtonRef: (el) => {
+      permissionPickerRef = el;
+    },
+    permissionPopoverRef: (el) => {
+      permissionPopoverRef = el;
+    },
+    onTogglePermissionPicker: () =>
+      void togglePopup('permission', showPermissionModePicker, setShowPermissionModePicker),
+    onSelectPermissionMode: (mode) => {
+      void updatePermissionModeForSession(mode, composerSessionId());
+      setShowPermissionModePicker(false);
+    },
+    onOpenPermissionSettings: () => {
+      setShowPermissionModePicker(false);
+      setShowPermissionSettings(true);
+    },
+    agentButtonRef: (el) => {
+      agentPickerRef = el;
+    },
+    agentPopoverRef: (el) => {
+      agentPopoverRef = el;
+    },
+    getAgentLabel: (agent) => formatAgentLabel(agent.name),
+    getAgentDetail: (agent) => agent.description || getAgentBadgeLine(agent),
+    onToggleAgentPicker: () => {
+      if (togglePopup('agent', showAgentPicker, setShowAgentPicker)) setAgentFocusIndex(0);
+    },
+    onSelectAgent: (agent) => {
+      setSelectedAgent(agent.name, { sessionId: composerSessionId() });
+      setShowAgentPicker(false);
+    },
+    onAgentFocusIndex: setAgentFocusIndex,
+    modelButtonRef: (el) => {
+      modelPickerRef = el;
+    },
+    onToggleModelPicker: () => void togglePopup('model', showModelPicker, setShowModelPicker),
+    providerLimitButtonRef: (el) => {
+      providerLimitButtonRef = el;
+    },
+    providerLimitPopupRef: (el) => {
+      providerLimitPopupRef = el;
+    },
+    onToggleProviderLimitPopup: () => {
+      if (!showCurrentProviderLimit()) return;
+      togglePopup('providerLimit', showProviderLimitPopup, setShowProviderLimitPopup);
+    },
+    onCloseProviderLimitPopup: () => setShowProviderLimitPopup(false),
+    variantButtonRef: (el) => {
+      variantPickerRef = el;
+    },
+    variantPopoverRef: (el) => {
+      variantPopoverRef = el;
+    },
+    getVariantLabel: formatVariantLabel,
+    onToggleVariantPicker: () =>
+      void togglePopup('variant', showVariantPicker, setShowVariantPicker),
+    onSelectVariant: (variant) => {
+      const m = currentModel();
+      void handleSelectedModelChange(
+        {
+          providerID: m.providerID!,
+          modelID: m.modelID!,
+          variant: variant || undefined,
+        },
+        variant
+      );
+      setShowVariantPicker(false);
+    },
+    contextButtonRef: (el) => {
+      contextButtonRef = el;
+    },
+    contextPopupRef: (el) => {
+      contextPopupRef = el;
+    },
+    onToggleContextPopup: toggleContextPopup,
+    onCloseContextPopup: () => setShowContextPopup(false),
+    onCompactSession: () => {
+      void compactSession();
+    },
+    onAttach: () => postMessage({ type: 'files/pick' }),
+    onStop: requestAbortSession,
+    busyToggleRef: (el) => {
+      busyToggleRef = el;
+    },
+    onSend: () => sendFromUi(),
+    onToggleBusyMenu: () => void togglePopup('busy', showBusyMenu, setShowBusyMenu),
+    busyMenuRef: (el) => {
+      busyMenuRef = el;
+    },
+    onQueue: () => {
+      sendFromUi('queue');
+      setShowBusyMenu(false);
+    },
+    onSteer: () => {
+      sendFromUi('steer');
+      setShowBusyMenu(false);
+    },
+    onStopAndSend: () => void handleStopAndSend(),
+  } satisfies Partial<ToolbarSharedProps>;
 
   return (
     <div
@@ -7310,6 +7421,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           <div class="chat-input-toolbar-divider" aria-hidden="true" />
 
           <ChatInputMainToolbar
+            {...sharedToolbarHandlers}
             focusComposer={() => {
               closePopups();
               richEditorRef?.focus();
@@ -7329,29 +7441,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             compactTight={toolbarCompactMode() === 'tight'}
             showLeftPopupState={showAgentPicker() || showVariantPicker()}
             showPermissionControl={true}
-            permissionButtonRef={(el) => {
-              permissionPickerRef = el;
-            }}
-            permissionPopoverRef={(el) => {
-              permissionPopoverRef = el;
-            }}
             permissionMode={activePermissionMode()}
             autoPermissionActivity={autoPermissionActivity()}
             autoApproveJudgeModel={autoApproveJudgeModel()}
             showPermissionPicker={showPermissionModePicker()}
-            onTogglePermissionPicker={() => {
-              const next = !showPermissionModePicker();
-              closePopups(next ? 'permission' : undefined);
-              setShowPermissionModePicker(next);
-            }}
-            onSelectPermissionMode={(mode) => {
-              void updatePermissionModeForSession(mode, composerSessionId());
-              setShowPermissionModePicker(false);
-            }}
-            onOpenPermissionSettings={() => {
-              setShowPermissionModePicker(false);
-              setShowPermissionSettings(true);
-            }}
             agents={state.agents}
             selectedAgent={state.selectedAgent}
             selectedAgentLabel={selectedAgentLabel() ?? ''}
@@ -7359,55 +7452,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             agentFocusIndex={agentFocusIndex()}
             showAgentPicker={showAgentPicker()}
             showAgentControl={isToolbarControlVisible('agent')}
-            agentButtonRef={(el) => {
-              agentPickerRef = el;
-            }}
-            agentPopoverRef={(el) => {
-              agentPopoverRef = el;
-            }}
-            getAgentLabel={(agent) => formatAgentLabel(agent.name)}
-            getAgentDetail={(agent) => agent.description || getAgentBadgeLine(agent)}
-            onToggleAgentPicker={() => {
-              const next = !showAgentPicker();
-              closePopups(next ? 'agent' : undefined);
-              setShowAgentPicker(next);
-              if (next) setAgentFocusIndex(0);
-            }}
-            onSelectAgent={(agent) => {
-              setSelectedAgent(agent.name, { sessionId: composerSessionId() });
-              setShowAgentPicker(false);
-            }}
-            onAgentFocusIndex={setAgentFocusIndex}
-            modelButtonRef={(el) => {
-              modelPickerRef = el;
-            }}
             currentModel={currentModel()}
             providers={state.providers}
             modelCanEllipsize={modelCanEllipsize()}
             queueOnly={queueOnlySelection()}
             showModelPicker={showModelPicker()}
-            onToggleModelPicker={() => {
-              const next = !showModelPicker();
-              closePopups(next ? 'model' : undefined);
-              setShowModelPicker(next);
-            }}
             providerLimitBadges={currentProviderLimitBadges()}
             providerLimitTitle={currentProviderLimitTitle()}
             providerLimit={showCurrentProviderLimit() ? currentCompactProviderLimit() : null}
             showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
-            providerLimitButtonRef={(el) => {
-              providerLimitButtonRef = el;
-            }}
-            providerLimitPopupRef={(el) => {
-              providerLimitPopupRef = el;
-            }}
-            onToggleProviderLimitPopup={() => {
-              if (!showCurrentProviderLimit()) return;
-              const next = !showProviderLimitPopup();
-              closePopups(next ? 'providerLimit' : undefined);
-              setShowProviderLimitPopup(next);
-            }}
-            onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
             availableVariants={availableVariants()}
             selectedVariant={effectiveVariant() ?? null}
             selectedVariantLabel={selectedVariantLabel() ?? ''}
@@ -7419,87 +7472,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 ? `Prompt completion failed (${state.promptCompletionModel}): ${promptCompletion.error()}`
                 : ''
             }
-            variantButtonRef={(el) => {
-              variantPickerRef = el;
-            }}
-            variantPopoverRef={(el) => {
-              variantPopoverRef = el;
-            }}
-            getVariantLabel={formatVariantLabel}
-            onToggleVariantPicker={() => {
-              const next = !showVariantPicker();
-              closePopups(next ? 'variant' : undefined);
-              setShowVariantPicker(next);
-            }}
-            onSelectVariant={(variant) => {
-              const m = currentModel();
-              void handleSelectedModelChange(
-                {
-                  providerID: m.providerID!,
-                  modelID: m.modelID!,
-                  variant: variant || undefined,
-                },
-                variant
-              );
-              setShowVariantPicker(false);
-            }}
             contextUsage={contextUsage()}
             contextBreakdown={contextBreakdown()}
             nestedContextBreakdown={nestedContextBreakdown()}
             showContextControl={!!contextUsage()}
-            contextButtonRef={(el) => {
-              contextButtonRef = el;
-            }}
-            contextPopupRef={(el) => {
-              contextPopupRef = el;
-            }}
             showContextPopup={showContextPopup()}
             sessionTokens={sessionTokenBreakdown().session}
             sessionCost={sessionCost()}
             subagentTokens={sessionTokenBreakdown().subagents}
             subagentCount={sessionTokenBreakdown().subagentCount}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
-            onToggleContextPopup={toggleContextPopup}
-            onCloseContextPopup={() => setShowContextPopup(false)}
-            onCompactSession={() => {
-              void compactSession();
-            }}
             showAttachmentsControl={isToolbarControlVisible('attachments')}
-            onAttach={() => postMessage({ type: 'files/pick' })}
             showStopButton={showStopButton()}
-            onStop={requestAbortSession}
             showSendControl={showSendControl()}
             showBusySendControls={showBusySendControls()}
             showBusySendOptions={showBusySendOptions()}
             canSend={canSend()}
-            busyToggleRef={(el) => {
-              busyToggleRef = el;
-            }}
             showBusyMenu={showBusyMenu()}
-            onSend={() => sendFromUi()}
-            onToggleBusyMenu={() => {
-              const next = !showBusyMenu();
-              closePopups(next ? 'busy' : undefined);
-              setShowBusyMenu(next);
-            }}
-            busyMenuRef={(el) => {
-              busyMenuRef = el;
-            }}
-            onQueue={() => {
-              sendFromUi('queue');
-              setShowBusyMenu(false);
-            }}
-            onSteer={() => {
-              sendFromUi('steer');
-              setShowBusyMenu(false);
-            }}
-            onStopAndSend={() => void handleStopAndSend()}
             onSideQuestion={canAskSideQuestion() ? askSideQuestionFromDraft : undefined}
             sideQuestionDisabledReason={sideQuestionSendUnavailableReason() ?? undefined}
           />
         </div>
 
         <ChatInputMetaToolbar
+          {...sharedToolbarHandlers}
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           allowRepositoryLink={!composerEditingMessage()}
@@ -7514,11 +7510,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           workspacePopoverRef={(el) => {
             workspacePopoverRef = el;
           }}
-          onToggleWorkspacePicker={() => {
-            const next = !showWorkspacePicker();
-            closePopups(next ? 'workspace' : undefined);
-            setShowWorkspacePicker(next);
-          }}
+          onToggleWorkspacePicker={() =>
+            void togglePopup('workspace', showWorkspacePicker, setShowWorkspacePicker)
+          }
           onSelectWorkspace={(path) => {
             if (!canSelectWorkspace()) return;
             detachBlankSessionForWorkspace(path);
@@ -7544,11 +7538,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           lspButtonRef={(el) => {
             lspPickerRef = el;
           }}
-          onToggleLsps={() => {
-            const next = !showLspPicker();
-            closePopups(next ? 'lsp' : undefined);
-            setShowLspPicker(next);
-          }}
+          onToggleLsps={() => void togglePopup('lsp', showLspPicker, setShowLspPicker)}
           mcpButtonRef={(el) => {
             mcpPickerRef = el;
           }}
@@ -7559,161 +7549,44 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             setShowMcpPicker(next);
           }}
           showPermissionControl={!composerEditingMessage()}
-          permissionButtonRef={(el) => {
-            permissionPickerRef = el;
-          }}
-          permissionPopoverRef={(el) => {
-            permissionPopoverRef = el;
-          }}
           permissionMode={activePermissionMode()}
           autoPermissionActivity={autoPermissionActivity()}
           autoApproveJudgeModel={autoApproveJudgeModel()}
           showPermissionPicker={showPermissionModePicker()}
-          onTogglePermissionPicker={() => {
-            const next = !showPermissionModePicker();
-            closePopups(next ? 'permission' : undefined);
-            setShowPermissionModePicker(next);
-          }}
-          onSelectPermissionMode={(mode) => {
-            void updatePermissionModeForSession(mode, composerSessionId());
-            setShowPermissionModePicker(false);
-          }}
-          onOpenPermissionSettings={() => {
-            setShowPermissionModePicker(false);
-            setShowPermissionSettings(true);
-          }}
           agents={state.agents}
           selectedAgent={state.selectedAgent}
           selectedAgentLabel={selectedAgentLabel() ?? ''}
           agentFocusIndex={agentFocusIndex()}
           showAgentPicker={showAgentPicker()}
           showAgentControl={isToolbarControlVisible('agent')}
-          agentButtonRef={(el) => {
-            agentPickerRef = el;
-          }}
-          agentPopoverRef={(el) => {
-            agentPopoverRef = el;
-          }}
-          getAgentLabel={(agent) => formatAgentLabel(agent.name)}
-          getAgentDetail={(agent) => agent.description || getAgentBadgeLine(agent)}
-          onToggleAgentPicker={() => {
-            const next = !showAgentPicker();
-            closePopups(next ? 'agent' : undefined);
-            setShowAgentPicker(next);
-            if (next) setAgentFocusIndex(0);
-          }}
-          onSelectAgent={(agent) => {
-            setSelectedAgent(agent.name, { sessionId: composerSessionId() });
-            setShowAgentPicker(false);
-          }}
-          onAgentFocusIndex={setAgentFocusIndex}
-          modelButtonRef={(el) => {
-            modelPickerRef = el;
-          }}
           currentModel={currentModel()}
           modelCanEllipsize={modelCanEllipsize()}
-          onToggleModelPicker={() => {
-            const next = !showModelPicker();
-            closePopups(next ? 'model' : undefined);
-            setShowModelPicker(next);
-          }}
           providerLimitBadges={composerEditingMessage() ? [] : currentProviderLimitBadges()}
           providerLimitTitle={currentProviderLimitTitle()}
           providerLimit={showCurrentProviderLimit() ? currentCompactProviderLimit() : null}
           showProviderLimitPopup={showCurrentProviderLimit() && showProviderLimitPopup()}
-          providerLimitButtonRef={(el) => {
-            providerLimitButtonRef = el;
-          }}
-          providerLimitPopupRef={(el) => {
-            providerLimitPopupRef = el;
-          }}
-          onToggleProviderLimitPopup={() => {
-            if (!showCurrentProviderLimit()) return;
-            const next = !showProviderLimitPopup();
-            closePopups(next ? 'providerLimit' : undefined);
-            setShowProviderLimitPopup(next);
-          }}
-          onCloseProviderLimitPopup={() => setShowProviderLimitPopup(false)}
           availableVariants={availableVariants()}
           selectedVariant={effectiveVariant() ?? null}
           selectedVariantLabel={selectedVariantLabel() ?? ''}
           showVariantPicker={showVariantPicker()}
           showReasoningControl={isToolbarControlVisible('reasoning')}
-          variantButtonRef={(el) => {
-            variantPickerRef = el;
-          }}
-          variantPopoverRef={(el) => {
-            variantPopoverRef = el;
-          }}
-          getVariantLabel={formatVariantLabel}
-          onToggleVariantPicker={() => {
-            const next = !showVariantPicker();
-            closePopups(next ? 'variant' : undefined);
-            setShowVariantPicker(next);
-          }}
-          onSelectVariant={(variant) => {
-            const m = currentModel();
-            void handleSelectedModelChange(
-              {
-                providerID: m.providerID!,
-                modelID: m.modelID!,
-                variant: variant || undefined,
-              },
-              variant
-            );
-            setShowVariantPicker(false);
-          }}
           contextUsage={contextUsage()}
           contextBreakdown={contextBreakdown()}
           nestedContextBreakdown={nestedContextBreakdown()}
           showContextControl={!!contextUsage() && !composerEditingMessage()}
-          contextButtonRef={(el) => {
-            contextButtonRef = el;
-          }}
-          contextPopupRef={(el) => {
-            contextPopupRef = el;
-          }}
           showContextPopup={showContextPopup()}
           sessionTokens={sessionTokenBreakdown().session}
           sessionCost={sessionCost()}
           subagentTokens={sessionTokenBreakdown().subagents}
           subagentCount={sessionTokenBreakdown().subagentCount}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
-          onToggleContextPopup={toggleContextPopup}
-          onCloseContextPopup={() => setShowContextPopup(false)}
-          onCompactSession={() => {
-            void compactSession();
-          }}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
-          onAttach={() => postMessage({ type: 'files/pick' })}
           showStopButton={showStopButton()}
-          onStop={requestAbortSession}
           showSendControl={showSendControl()}
           showBusySendControls={showBusySendControls()}
           showBusySendOptions={showBusySendOptions()}
           canSend={canSend()}
-          busyToggleRef={(el) => {
-            busyToggleRef = el;
-          }}
           showBusyMenu={showBusyMenu()}
-          onSend={() => sendFromUi()}
-          onToggleBusyMenu={() => {
-            const next = !showBusyMenu();
-            closePopups(next ? 'busy' : undefined);
-            setShowBusyMenu(next);
-          }}
-          busyMenuRef={(el) => {
-            busyMenuRef = el;
-          }}
-          onQueue={() => {
-            sendFromUi('queue');
-            setShowBusyMenu(false);
-          }}
-          onSteer={() => {
-            sendFromUi('steer');
-            setShowBusyMenu(false);
-          }}
-          onStopAndSend={() => void handleStopAndSend()}
           onSideQuestion={canAskSideQuestion() ? askSideQuestionFromDraft : undefined}
           sideQuestionDisabledReason={sideQuestionSendUnavailableReason() ?? undefined}
         />

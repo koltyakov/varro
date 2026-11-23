@@ -388,50 +388,23 @@ export function ensureConnectionInitializedWithDependencies(deps: {
   });
 }
 
-export function createConnectionBootstrapOperations(deps: {
-  health(): Promise<HealthResponse>;
-  loadInitialData(): Promise<void | boolean | object>;
-  loadBackgroundData?(): Promise<void | boolean | object>;
-  hydrateSessionStatuses(): Promise<void | boolean | object>;
-  getActiveSessionId(): string | null;
-  getPersistedActiveSessionId(): string | null;
-  getPersistedLastOpenedView?(): LastOpenedView | null;
-  getInitialRoute?(): WebviewRoute | null;
-  markInitialRouteConsumed?(): void;
-  getSessionCount?(): number;
-  getOnlyPrimarySessionId(): string | null;
-  hasSession(sessionId: string): boolean;
-  getSessionDirectory?(sessionId: string): string | undefined;
-  selectSession(sessionId: string, directory?: string): Promise<void | boolean | object>;
-  startNewSession?(): void;
-  setShowSessionPicker(value: boolean): void;
-  setInitialized(value: boolean): void;
-  setError(message: string | null): void;
-  getError?(): string | null;
-  nextConnectionGeneration(): number;
-  isCurrentConnectionGeneration(generation: number): boolean;
-  getCurrentConnectionGeneration(): number;
-  isInitialized(): boolean;
-  consumeInterruptedSessionIds(): string[];
-  acknowledgeInterruptedSessionRecovery(claimId: number, consumedSessionIds: string[]): boolean;
-  getSessionStatus(sessionId: string): SessionStatus | null | undefined;
-  hasPendingQuestion(sessionId: string): boolean;
-  hasPendingPermission(sessionId: string): boolean;
-  loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
-  logError(context: string, cause: unknown): void;
-  recordStartupTiming?(timing: StartupTiming, generation: number): void;
-  syncSessionMcps(sessionId: string): Promise<void | boolean | object>;
-  resolveModel(sessionId: string): ResolvedModel | null;
-  resolveAgent(sessionId: string): string | null;
-  sendAsync(
-    sessionId: string,
-    body: InterruptedSessionContinueBody,
-    options?: { interruptedRecovery?: true }
-  ): Promise<void | boolean | object>;
-  syncSession(sessionId: string): Promise<void | boolean | object>;
-  recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
-  now?(): number;
-}) {
+type ConnectionBootstrapDependencies = Omit<
+  Parameters<typeof initConnectionWithDependencies>[0],
+  'recoverInterruptedSessions'
+> &
+  Omit<
+    Parameters<typeof recoverInterruptedSessionsWithDependencies>[0],
+    'isCurrentGeneration' | 'continueInterruptedSession'
+  > &
+  Parameters<typeof continueInterruptedSessionWithDependencies>[0] & {
+    nextConnectionGeneration(): number;
+    isCurrentConnectionGeneration(generation: number): boolean;
+    getCurrentConnectionGeneration(): number;
+    isInitialized(): boolean;
+    acknowledgeInterruptedSessionRecovery(claimId: number, consumedSessionIds: string[]): boolean;
+  };
+
+export function createConnectionBootstrapOperations(deps: ConnectionBootstrapDependencies) {
   const pendingRecoveryClaims = new Map<number, string[]>();
   const settledRecoveryClaims = new Map<number, string[]>();
   const processingRecoveryClaims = new Set<number>();
@@ -440,19 +413,13 @@ export function createConnectionBootstrapOperations(deps: {
   const recoverSessionIds = (generation: number, sessionIds?: readonly string[]) => {
     return recoverInterruptedSessionsWithDependencies(
       {
-        consumeInterruptedSessionIds: deps.consumeInterruptedSessionIds,
+        ...deps,
         isCurrentGeneration: deps.isCurrentConnectionGeneration,
-        hasSession: deps.hasSession,
-        getSessionStatus: deps.getSessionStatus,
-        hasPendingQuestion: deps.hasPendingQuestion,
-        hasPendingPermission: deps.hasPendingPermission,
-        loadSessionMessages: deps.loadSessionMessages,
         continueInterruptedSession: (sessionId, sourceMessage) =>
           continueInterruptedSession(sessionId, {
             messageID: buildInterruptedSessionMessageID(sessionId, sourceMessage),
             interruptedRecovery: true,
           }),
-        logError: deps.logError,
       },
       generation,
       sessionIds
@@ -463,18 +430,7 @@ export function createConnectionBootstrapOperations(deps: {
     sessionId: string,
     options?: { messageID?: string; interruptedRecovery?: true }
   ) => {
-    return continueInterruptedSessionWithDependencies(
-      {
-        syncSessionMcps: deps.syncSessionMcps,
-        resolveModel: deps.resolveModel,
-        resolveAgent: deps.resolveAgent,
-        sendAsync: deps.sendAsync,
-        syncSession: deps.syncSession,
-        recheckSessionStatus: deps.recheckSessionStatus,
-      },
-      sessionId,
-      options
-    );
+    return continueInterruptedSessionWithDependencies(deps, sessionId, options);
   };
 
   const acknowledgeRecoveryClaim = (claimId: number, consumedSessionIds: string[]) => {
@@ -540,28 +496,8 @@ export function createConnectionBootstrapOperations(deps: {
   const initConnection = () => {
     return initConnectionWithDependencies(
       {
-        health: deps.health,
-        loadInitialData: deps.loadInitialData,
-        loadBackgroundData: deps.loadBackgroundData,
-        getError: deps.getError,
-        logError: deps.logError,
-        recordStartupTiming: deps.recordStartupTiming,
-        hydrateSessionStatuses: deps.hydrateSessionStatuses,
-        getActiveSessionId: deps.getActiveSessionId,
-        getPersistedActiveSessionId: deps.getPersistedActiveSessionId,
-        getPersistedLastOpenedView: deps.getPersistedLastOpenedView,
-        getInitialRoute: deps.getInitialRoute,
-        markInitialRouteConsumed: deps.markInitialRouteConsumed,
-        getSessionCount: deps.getSessionCount,
-        getOnlyPrimarySessionId: deps.getOnlyPrimarySessionId,
-        hasSession: deps.hasSession,
-        getSessionDirectory: deps.getSessionDirectory,
-        selectSession: deps.selectSession,
-        startNewSession: deps.startNewSession,
-        setShowSessionPicker: deps.setShowSessionPicker,
+        ...deps,
         recoverInterruptedSessions,
-        setInitialized: deps.setInitialized,
-        setError: deps.setError,
         now: deps.now || Date.now,
       },
       {

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { postWebviewMessage } from './helpers';
 
 async function samplePixels(
   page: Page,
@@ -85,7 +86,7 @@ for (const theme of ['dark', 'light']) {
       if (width >= 1400) {
         await page.locator('.session-item.active .session-item-main').click();
       } else {
-        await page.evaluate(() => window.postMessage({ type: 'command/highlight-session' }, '*'));
+        await postWebviewMessage(page, { type: 'command/highlight-session' });
       }
       await expect(shell).toHaveClass(/active-session-reselected/);
       for (const [index, point] of geometry.points.entries()) {

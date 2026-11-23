@@ -103,10 +103,6 @@ export function consumeProviderConnectionRequest(id: number) {
   if (providerConnectionRequest()?.id === id) setProviderConnectionRequest(null);
 }
 
-export function clearProviderConnectionRequest() {
-  setProviderConnectionRequest(null);
-}
-
 export function resetProviderConnectionState() {
   setProviderConnectionRequest(null);
   setProviderAuthFailures({});

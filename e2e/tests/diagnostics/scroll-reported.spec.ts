@@ -7,6 +7,7 @@ import {
 } from '../../../src/extension/opencode-v2-projection';
 import type { ServerEvent } from '../../../src/shared/protocol';
 import type { MessageEntry } from '../../../src/webview/types';
+import { installPlaybackCapture } from '../helpers';
 
 test('reported short transcript geometry', async ({ page }, testInfo) => {
   const transcriptPath = 'tmp/scroll-reported-messages.json';
@@ -33,14 +34,7 @@ test('reported short transcript geometry', async ({ page }, testInfo) => {
     time: { created: Date.now(), updated: Date.now() },
   };
   await page.setViewportSize({ width: 476, height: 1272 });
-  await page.addInitScript(
-    (fixture) => {
-      // SAFETY: The isolated E2E harness reads this fixture before mounting.
-      (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-        fixture;
-    },
-    { session, initialMessages: messages.slice(0, 1) }
-  );
+  await installPlaybackCapture(page, { session, initialMessages: messages.slice(0, 1) });
   await page.goto('/e2e/harness/index.html?scenario=session-playback');
   await expect(page.locator('.interactive-list')).toBeVisible();
   const geometry = await page.locator('.interactive-list').evaluate(

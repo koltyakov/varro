@@ -1119,6 +1119,22 @@ const originalPlatform = process.platform;
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
 const originalOpenCodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
 
+type CliUpdateRestartApi = {
+  process: Record<string, unknown> | null;
+  managedProcess: boolean;
+  readInstalledCliVersion: () => Promise<string | null>;
+  maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
+  readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+  hasActiveSessions: () => Promise<boolean>;
+  restartServerForCliUpdate: (serverVersion: string, installedCliVersion: string) => Promise<void>;
+};
+
+function setAutoUpdate(enabled: boolean) {
+  getConfigurationMock.mockImplementation(() => ({
+    get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? enabled : fallback),
+  }));
+}
+
 function stubPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, 'platform', {
     value: platform,
@@ -1137,9 +1153,7 @@ beforeEach(() => {
     identity: 'fixture-listener',
   });
   vscodeMock.window.showWarningMessage.mockReset().mockResolvedValue(undefined);
-  getConfigurationMock.mockImplementation(() => ({
-    get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? false : fallback),
-  }));
+  setAutoUpdate(false);
   vscodeMock.workspace.getConfiguration = getConfigurationMock;
   spawnMock.mockReset();
   mkdirMock.mockReset();
@@ -2909,18 +2923,7 @@ describe('OpenCodeServer maintenance', () => {
   it('restarts a managed idle server when the installed CLI is newer', async () => {
     const server = new OpenCodeServer(4096, false);
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
-    const api = server as unknown as {
-      process: Record<string, unknown> | null;
-      managedProcess: boolean;
-      readInstalledCliVersion: () => Promise<string | null>;
-      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
-      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
-      hasActiveSessions: () => Promise<boolean>;
-      restartServerForCliUpdate: (
-        serverVersion: string,
-        installedCliVersion: string
-      ) => Promise<void>;
-    };
+    const api = server as unknown as CliUpdateRestartApi;
 
     setRunning(server);
     api.process = {};
@@ -3020,18 +3023,7 @@ describe('OpenCodeServer maintenance', () => {
   it('does not restart when there are active sessions', async () => {
     const server = new OpenCodeServer(4096, false);
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
-    const api = server as unknown as {
-      process: Record<string, unknown> | null;
-      managedProcess: boolean;
-      readInstalledCliVersion: () => Promise<string | null>;
-      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
-      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
-      hasActiveSessions: () => Promise<boolean>;
-      restartServerForCliUpdate: (
-        serverVersion: string,
-        installedCliVersion: string
-      ) => Promise<void>;
-    };
+    const api = server as unknown as CliUpdateRestartApi;
 
     setRunning(server);
     api.process = {};
@@ -3050,18 +3042,7 @@ describe('OpenCodeServer maintenance', () => {
   it('does not restart an unmanaged server when auto-start is disabled', async () => {
     const server = new OpenCodeServer(4096, false);
     const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
-    const api = server as unknown as {
-      process: Record<string, unknown> | null;
-      managedProcess: boolean;
-      readInstalledCliVersion: () => Promise<string | null>;
-      maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
-      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
-      hasActiveSessions: () => Promise<boolean>;
-      restartServerForCliUpdate: (
-        serverVersion: string,
-        installedCliVersion: string
-      ) => Promise<void>;
-    };
+    const api = server as unknown as CliUpdateRestartApi;
 
     setRunning(server);
     api.process = null;
@@ -3139,9 +3120,7 @@ describe('OpenCodeServer maintenance', () => {
         ) => Promise<void>;
       };
 
-      getConfigurationMock.mockImplementation(() => ({
-        get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-      }));
+      setAutoUpdate(true);
       setRunning(server);
       api.process = {};
       api.managedProcess = true;
@@ -3182,9 +3161,7 @@ describe('OpenCodeServer maintenance', () => {
       restartServerForCliUpdate: (a: string, b: string) => Promise<void>;
     };
 
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     setRunning(server);
     api.process = {};
     api.managedProcess = true;
@@ -3220,9 +3197,7 @@ describe('OpenCodeServer maintenance', () => {
       hasActiveSessions: () => Promise<boolean>;
     };
 
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     setRunning(server);
     api.process = {};
     api.managedProcess = true;
@@ -3357,9 +3332,7 @@ describe('OpenCodeServer maintenance', () => {
       readLatestCliVersion: () => Promise<string | null>;
     };
 
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     api.readLatestCliVersion = readLatestCliVersion;
     stubCliSpawn({ version: '1.14.22' });
 
@@ -3381,9 +3354,7 @@ describe('OpenCodeServer maintenance', () => {
     const api = server as unknown as {
       readLatestCliVersion: () => Promise<string | null>;
     };
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     api.readLatestCliVersion = vi.fn().mockResolvedValue(nextVersion);
     stubCliSpawn({ version: nextVersion });
 
@@ -3407,9 +3378,7 @@ describe('OpenCodeServer maintenance', () => {
       readLatestCliVersion: () => Promise<string | null>;
       request: typeof request;
     };
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     api.readLatestCliVersion = vi.fn().mockResolvedValue('2.0.22');
     api.request = request;
     const prepare = vi.spyOn(server, 'prepareForWindowsCliUpgrade');
@@ -3434,9 +3403,7 @@ describe('OpenCodeServer maintenance', () => {
     const api = server as unknown as {
       readLatestCliVersion: () => Promise<string | null>;
     };
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     api.readLatestCliVersion = vi.fn().mockResolvedValue('2.0.22');
     stubCliSpawn({ version: '2.0.21', stderr: 'EPERM: binary is being used by another process' });
 
@@ -3490,9 +3457,7 @@ describe('OpenCodeServer maintenance', () => {
       request: typeof request;
     };
 
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     api.readLatestCliVersion = readLatestCliVersion;
     api.request = request;
     setRunning(server);
@@ -3523,9 +3488,7 @@ describe('OpenCodeServer maintenance', () => {
       request: typeof request;
     };
 
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     api.readLatestCliVersion = readLatestCliVersion;
     api.request = request;
     setRunning(server);
@@ -4064,9 +4027,7 @@ describe('OpenCodeServer compatibility gate', () => {
   }
 
   it('coordinates explicit remediation of a server leased by another extension host', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true);
     const hasActiveSessions = vi.fn().mockResolvedValue(false);
     const upgradeRunningServer = vi.fn().mockResolvedValue(true);
@@ -4127,9 +4088,7 @@ describe('OpenCodeServer compatibility gate', () => {
   });
 
   it('does not replace an outdated server while it has active sessions', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true);
     const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
     const upgradeRunningServer = vi.fn().mockResolvedValue(true);
@@ -4154,9 +4113,7 @@ describe('OpenCodeServer compatibility gate', () => {
   });
 
   it('does not replace a server that becomes active while the upgrade is running', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true);
     const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
     const upgradeRunningServer = vi.fn().mockResolvedValue(true);
@@ -4179,9 +4136,7 @@ describe('OpenCodeServer compatibility gate', () => {
   });
 
   it('updates and replaces an idle outdated server during explicit remediation', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true, 'opencode');
     const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
     const upgradeRunningServer = vi.fn().mockResolvedValue(false);
@@ -4269,9 +4224,7 @@ describe('OpenCodeServer compatibility gate', () => {
   }
 
   it('recommends the install-specific command when the required update fails', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true);
     const api = stubIncompatibleServer(server, 'npm');
     api.processManager.upgradeCli = vi
@@ -4301,9 +4254,7 @@ describe('OpenCodeServer compatibility gate', () => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     try {
-      getConfigurationMock.mockImplementation(() => ({
-        get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-      }));
+      setAutoUpdate(true);
       const server = new OpenCodeServer(4096, true);
       const api = stubIncompatibleServer(server, 'npm');
       api.processManager.upgradeCli = vi
@@ -4323,9 +4274,7 @@ describe('OpenCodeServer compatibility gate', () => {
   });
 
   it('falls back to reinstall guidance when the install method is unrecognized', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true);
     const api = stubIncompatibleServer(server, 'unknown');
     api.processManager.upgradeCli = vi
@@ -4346,9 +4295,7 @@ describe('OpenCodeServer compatibility gate', () => {
   });
 
   it('marks an update blocked by disabled auto-update with the setting to change', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? false : fallback),
-    }));
+    setAutoUpdate(false);
     const server = new OpenCodeServer(4096, true);
     stubIncompatibleServer(server);
 
@@ -4370,9 +4317,7 @@ describe('OpenCodeServer compatibility gate', () => {
   });
 
   it('marks an update deferred by active sessions as blocked, not failed', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true);
     const api = stubIncompatibleServer(server);
     api.hasActiveSessions = vi.fn().mockResolvedValue(true);
@@ -5808,9 +5753,7 @@ describe('OpenCodeServer managed process lifecycle', () => {
   it('waits for cancelled CLI work to settle before stopping for restart', async () => {
     // Managed startup skips the CLI preflight on Windows.
     stubPlatform('linux');
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
+    setAutoUpdate(true);
     const server = new OpenCodeServer(4096, true);
     const { api, children } = configureManagedStartup(server);
     const upgradeWork = deferred<void>();

@@ -107,8 +107,13 @@ import {
   setState,
   upsertMessageInfo,
 } from '../lib/state';
-import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
-import { settlePerfEffects as settleMicrotasks } from './harness';
+import {
+  settlePerfEffects as settleMicrotasks,
+  createAssistantMessage,
+  createTextPart,
+  createUserMessage,
+  entry,
+} from './harness';
 import { fixture } from '../test-fixtures';
 
 describe('Virtual metrics perf guards', () => {
@@ -166,52 +171,6 @@ async function settlePerfEffects() {
     callback(animationFrameTime);
   }
   await settleMicrotasks();
-}
-
-function createUserMessage(id: string): UserMessage {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'user',
-    time: { created: 1 },
-    agent: 'build',
-    model: { providerID: 'openai', modelID: 'gpt-4o' },
-  };
-}
-
-function createAssistantMessage(id: string): AssistantMessage {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'assistant',
-    time: { created: 1, completed: 2 },
-    parentID: 'parent-1',
-    modelID: 'gpt-4o',
-    providerID: 'openai',
-    mode: 'default',
-    path: { cwd: '/workspace', root: '/workspace' },
-    cost: 0,
-    tokens: {
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache: { read: 0, write: 0 },
-    },
-  };
-}
-
-function createTextPart(id: string, messageID: string, text: string): TextPart {
-  return {
-    id,
-    sessionID: 'session-1',
-    messageID,
-    type: 'text',
-    text,
-  };
-}
-
-function entry(info: Message, parts: Part[]) {
-  return { info, parts };
 }
 
 function resizeObserverEntry(

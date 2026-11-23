@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, Session } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const measured of [false, true]) {
   for (const split of [false, true]) {
@@ -114,15 +115,7 @@ for (const measured of [false, true]) {
         }).flat();
         initialMessages.unshift(...history);
       }
-      await page.addInitScript(
-        (fixture) => {
-          // SAFETY: The playback harness reads this typed fixture before mounting.
-          (
-            window as typeof window & { varroPlaybackCapture: typeof fixture }
-          ).varroPlaybackCapture = fixture;
-        },
-        { session, initialMessages }
-      );
+      await installPlaybackCapture(page, { session, initialMessages });
       await page.goto('/e2e/harness/index.html?scenario=session-playback');
       await page.evaluate((sessionID) => {
         // SAFETY: This isolated page installs the production-event replay transport.

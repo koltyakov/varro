@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { postWebviewMessage } from './helpers';
 
 test('focus-input without pending attention focuses textarea but does not show attention filter', async ({
   page,
@@ -38,9 +39,7 @@ test('posting focus-input at runtime focuses textarea without activating attenti
   const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
-  await page.evaluate(() => {
-    window.postMessage({ type: 'command/focus-input' }, '*');
-  });
+  await postWebviewMessage(page, { type: 'command/focus-input' });
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).not.toBeVisible();
@@ -58,9 +57,7 @@ test('focus-input followed by open-attention-sessions switches from plain focus 
     'Needs attention'
   );
 
-  await page.evaluate(() => {
-    window.postMessage({ type: 'command/focus-input' }, '*');
-  });
+  await postWebviewMessage(page, { type: 'command/focus-input' });
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeFocused();
   await expect(sessionsPane.locator('.chat-header-filter-chip-label')).toHaveText(

@@ -1,6 +1,6 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These E2E checks inspect controlled restart state exposed by the harness browser global. */
 import { expect, test } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getE2EState, postWebviewMessage } from './helpers';
 
 test('shows restored chat while optional startup status never settles', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=mcp-pickers&startupBackgroundPending');
@@ -220,14 +220,9 @@ test('preserves composer input when startup recovers after a race', async ({ pag
   await composer.fill('Keep this draft through startup recovery');
   await expect(composer).toHaveText('Keep this draft through startup recovery');
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'server/status',
-        payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'server/status',
+    payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
   });
 
   await expect(composer).toHaveText('Keep this draft through startup recovery');

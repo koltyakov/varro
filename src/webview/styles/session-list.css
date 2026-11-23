@@ -96,13 +96,7 @@
   text-overflow: ellipsis;
 }
 
-.session-list-workspace-picker .workspace-picker-button:hover {
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-  color: var(--color-vscode-fg);
-}
-
+.session-list-workspace-picker .workspace-picker-button:hover,
 .session-list-workspace-picker .workspace-picker-button[aria-expanded='true'] {
   border-color: transparent;
   background: transparent;
@@ -627,10 +621,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   text-align: left;
 }
 
-.session-item:hover {
-  background: var(--color-vscode-hover);
-}
-
+.session-item:hover,
 .session-item.keyboard-focus {
   background: var(--color-vscode-hover);
 }
@@ -1278,26 +1269,6 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-}
-
-.session-item-plan-skip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 75%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-warning) 14%, transparent);
-  color: var(--color-vscode-fg);
-  font-size: 10px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.session-item-plan-skip:hover {
-  background: color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
 }
 
 .session-item-archive {

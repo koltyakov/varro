@@ -596,34 +596,12 @@ export class SessionControlOperations {
   constructor(private readonly deps: SessionControlDependencies) {}
 
   readonly reviewSession = async () => {
-    await reviewSessionWithDependencies({
-      sendMessage: this.deps.sendMessage,
-    });
+    await reviewSessionWithDependencies(this.deps);
   };
 
   readonly abortSession = async (sessionId = this.deps.getActiveSessionId()) => {
     if (!sessionId) return;
-    await abortSessionWithDependencies(
-      {
-        getActiveSessionId: this.deps.getActiveSessionId,
-        getSessionTreeRootId: this.deps.getSessionTreeRootId,
-        getSessionTreeIds: this.deps.getSessionTreeIds,
-        getSelectedAgentForSession: this.deps.getSelectedAgentForSession,
-        skipPlanSession: this.deps.skipPlanSession,
-        getSessionStatus: this.deps.getSessionStatus,
-        getSessionUsageLimit: this.deps.getSessionUsageLimit,
-        markPendingAbortTree: this.deps.markPendingAbortTree,
-        setSessionStatusEntry: this.deps.setSessionStatusEntry,
-        stopLoading: this.deps.stopLoading,
-        abortRemoteSession: this.deps.abortRemoteSession,
-        syncSessionMessages: this.deps.syncSessionMessages,
-        clearPendingAbortTree: this.deps.clearPendingAbortTree,
-        setSessionUsageLimit: this.deps.setSessionUsageLimit,
-        setError: this.deps.setError,
-        logError: this.deps.logError,
-      },
-      sessionId
-    );
+    await abortSessionWithDependencies(this.deps, sessionId);
   };
 
   private readonly abortActiveSessionTree = async (sessionId: string) => {
@@ -653,16 +631,7 @@ export class SessionControlOperations {
   };
 
   readonly undoSession = async () => {
-    await undoSessionWithDependencies({
-      getActiveSessionId: this.deps.getActiveSessionId,
-      getMessages: this.deps.getMessages,
-      startLoading: this.deps.startLoading,
-      revertSession: this.deps.revertSession,
-      syncSession: this.deps.syncSession,
-      syncSessionMessages: this.deps.syncSessionMessages,
-      stopLoading: this.deps.stopLoading,
-      setError: this.deps.setError,
-    });
+    await undoSessionWithDependencies(this.deps);
   };
 
   readonly editMessage = async (
@@ -677,25 +646,9 @@ export class SessionControlOperations {
   ) => {
     return await editMessageWithDependencies(
       {
-        getActiveSessionId: this.deps.getActiveSessionId,
-        getMessages: this.deps.getMessages,
-        isSessionWorking: this.deps.isSessionWorking,
+        ...this.deps,
         abortSession: this.abortSession,
-        startLoading: this.deps.startLoading,
-        invalidateMessageSync: this.deps.invalidateMessageSync,
-        deferMessageRemovals: this.deps.deferMessageRemovals,
-        pruneMessagesFrom: this.deps.pruneMessagesFrom,
-        getSessions: this.deps.getSessions,
-        getSessionTreeIds: this.deps.getSessionTreeIds,
         abortActiveSessionTree: this.abortActiveSessionTree,
-        moveSessionTreeToRecycleBin: this.deps.moveSessionTreeToRecycleBin,
-        restoreSessionTreeFromRecycleBin: this.deps.restoreSessionTreeFromRecycleBin,
-        deleteMessage: this.deps.deleteMessage,
-        syncSessionMessages: this.deps.syncSessionMessages,
-        sendEditedMessage: this.deps.sendEditedMessage,
-        prepareEditedMessageSend: this.deps.prepareEditedMessageSend,
-        stopLoading: this.deps.stopLoading,
-        setError: this.deps.setError,
       },
       messageId,
       text,
@@ -704,31 +657,10 @@ export class SessionControlOperations {
   };
 
   readonly redoSession = async () => {
-    await redoSessionWithDependencies({
-      getActiveSessionId: this.deps.getActiveSessionId,
-      startLoading: this.deps.startLoading,
-      unrevertSession: this.deps.unrevertSession,
-      upsertSession: this.deps.upsertSession,
-      syncSession: this.deps.syncSession,
-      syncSessionMessages: this.deps.syncSessionMessages,
-      stopLoading: this.deps.stopLoading,
-      setError: this.deps.setError,
-    });
+    await redoSessionWithDependencies(this.deps);
   };
 
   readonly compactSession = async () => {
-    await compactSessionWithDependencies({
-      getActiveSessionId: this.deps.getActiveSessionId,
-      clearPendingAbort: this.deps.clearPendingAbort,
-      resolveSelectedModel: this.deps.resolveSelectedModel,
-      setError: this.deps.setError,
-      setSessionCompacting: this.deps.setSessionCompacting,
-      startLoading: this.deps.startLoading,
-      compactRemoteSession: this.deps.compactRemoteSession,
-      syncSession: this.deps.syncSession,
-      syncSessionMessages: this.deps.syncSessionMessages,
-      getSession: this.deps.getSession,
-      stopLoading: this.deps.stopLoading,
-    });
+    await compactSessionWithDependencies(this.deps);
   };
 }

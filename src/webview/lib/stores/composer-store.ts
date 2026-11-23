@@ -75,5 +75,3 @@ export const composerStore = {
     setState(storePath('todos', []));
   },
 };
-
-export type ComposerStore = typeof composerStore;

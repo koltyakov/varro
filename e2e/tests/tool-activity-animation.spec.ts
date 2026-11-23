@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry, Session, ToolPart } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const expandable of [false, true]) {
   test(`running command sweeps a wave left to right with ${expandable ? 'expandable' : 'non-expandable'} content`, async ({
@@ -52,14 +53,7 @@ for (const expandable of [false, true]) {
       },
       parts: [],
     };
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: Only the isolated E2E harness consumes this fixture.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages: [user, assistant] }
-    );
+    await installPlaybackCapture(page, { session, initialMessages: [user, assistant] });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await expect(page.locator('.interactive-list')).toBeVisible();
     await expect(page.locator('.chat-turn-user')).toContainText('Clone the repository.');

@@ -5,7 +5,12 @@ import { expect, test } from '@playwright/test';
 import type { Locator } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { TextPart } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import {
+  getListDistanceFromBottom,
+  getScrollMetrics,
+  scrollToBottom,
+  waitForAnimationFrames,
+} from './helpers';
 import { viewportPixelGaps } from './viewport-pixels';
 
 async function getBlankBottomArea(list: Locator) {
@@ -43,9 +48,7 @@ test.describe('viewport content coverage', () => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
     const list = page.locator('.interactive-list');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
     await waitForAnimationFrames(page, 12);
     const streamTimer = await page.evaluate(() => {
       const harness = (
@@ -196,9 +199,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
     await waitForAnimationFrames(page, 4);
     const before = await getBlankBottomArea(list);
 
@@ -216,9 +217,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.scrollTop = 0;
@@ -238,9 +237,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     async function sampleAt(targetRatio: number) {
       await list.evaluate((element, ratio) => {
@@ -459,9 +456,7 @@ test.describe('viewport content coverage', () => {
       element.dispatchEvent(new Event('scroll'));
     });
     await waitForAnimationFrames(page, 8);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeGreaterThan(100);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(100);
 
     const setup = await list.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
@@ -675,9 +670,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const initial = await list.evaluate((element) => ({
       scrollHeight: element.scrollHeight,
@@ -745,9 +738,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const samples: Array<{
       ratio: number;
@@ -823,9 +814,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const viewportHeight = await list.evaluate((element) => element.clientHeight);
     const steps = 30;
@@ -882,9 +871,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const scrollHeight = await list.evaluate((el) => el.scrollHeight);
     const viewportHeight = await list.evaluate((el) => el.clientHeight);
@@ -914,9 +901,7 @@ test.describe('viewport content coverage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
@@ -928,10 +913,7 @@ test.describe('viewport content coverage', () => {
     const topScrollTop = await list.evaluate((element) => element.scrollTop);
     expect(topScrollTop).toBeLessThan(50);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 3);
 
     const metrics = await getScrollMetrics(page, '.interactive-list');

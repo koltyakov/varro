@@ -2,7 +2,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bridge controlled clipboard, drag, and harness request fixtures to the shapes under test. */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getFirstPromptParts, postWebviewMessage } from './helpers';
 
 test('shows the drop overlay when a drag enters and hides on dragleave', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
@@ -340,17 +340,12 @@ test('displays files received from files/dropped in the attachment strip', async
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'files/dropped',
-        payload: [
-          { path: '/workspace/varro/src/index.ts', relativePath: 'src/index.ts', type: 'file' },
-          { path: '/workspace/varro/src/lib', relativePath: 'src/lib', type: 'directory' },
-        ],
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'files/dropped',
+    payload: [
+      { path: '/workspace/varro/src/index.ts', relativePath: 'src/index.ts', type: 'file' },
+      { path: '/workspace/varro/src/lib', relativePath: 'src/lib', type: 'directory' },
+    ],
   });
 
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'index.ts' })).toBeVisible();
@@ -362,26 +357,19 @@ test('removes only the host-removed file from the attachment strip', async ({ pa
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'files/dropped',
-        payload: [
-          { path: '/workspace/varro/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
-          { path: '/workspace/varro/src/b.ts', relativePath: 'src/b.ts', type: 'file' },
-        ],
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'files/dropped',
+    payload: [
+      { path: '/workspace/varro/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+      { path: '/workspace/varro/src/b.ts', relativePath: 'src/b.ts', type: 'file' },
+    ],
   });
 
   await expect(page.locator('.chat-attachment-chip')).toHaveCount(2);
 
-  await page.evaluate(() => {
-    window.postMessage(
-      { type: 'files/removed', payload: { path: '/workspace/varro/src/a.ts' } },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'files/removed',
+    payload: { path: '/workspace/varro/src/a.ts' },
   });
 
   await expect(page.locator('.chat-attachment-chip')).toHaveCount(1);
@@ -394,16 +382,11 @@ test('includes dropped file references in the prompt body', async ({ page }) => 
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'files/dropped',
-        payload: [
-          { path: '/workspace/varro/src/utils.ts', relativePath: 'src/utils.ts', type: 'file' },
-        ],
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'files/dropped',
+    payload: [
+      { path: '/workspace/varro/src/utils.ts', relativePath: 'src/utils.ts', type: 'file' },
+    ],
   });
 
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'utils.ts' })).toBeVisible();
@@ -413,24 +396,12 @@ test('includes dropped file references in the prompt body', async ({ page }) => 
   await page.keyboard.press('Enter');
 
   await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-          }
-        ).__varroE2E;
-        const promptReq = value?.requests.find(
-          (req) => req.method === 'POST' && req.path.includes('prompt_async')
-        );
-        if (!promptReq?.body || typeof promptReq.body !== 'object') return null;
-        const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
-        if (!body.parts) return null;
-        return body.parts.some(
+    .poll(
+      async () =>
+        (await getFirstPromptParts(page))?.some(
           (part) =>
             part.type === 'text' && typeof part.text === 'string' && part.text.includes('utils.ts')
-        );
-      })
+        ) ?? null
     )
     .toBe(true);
 });
@@ -468,29 +439,23 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
   await page.keyboard.press('Enter');
 
   await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-          }
-        ).__varroE2E;
-        const promptReq = value?.requests.find(
-          (req) => req.method === 'POST' && req.path.includes('prompt_async')
-        );
-        if (!promptReq?.body || typeof promptReq.body !== 'object') return false;
-        const body = promptReq.body as {
-          parts?: Array<{ type: string; filename?: string; mime?: string; url?: string }>;
-        };
-        return !!body.parts?.some(
+    .poll(
+      async () =>
+        !!(
+          await getFirstPromptParts<{
+            type: string;
+            filename?: string;
+            mime?: string;
+            url?: string;
+          }>(page)
+        )?.some(
           (part) =>
             part.type === 'file' &&
             part.filename === 'Image 1' &&
             part.mime === 'image/png' &&
             typeof part.url === 'string' &&
             part.url.startsWith('data:image/png;base64,')
-        );
-      })
+        )
     )
     .toBe(true);
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toHaveCount(0);
@@ -974,17 +939,12 @@ test('removes individual dropped files via the chip remove button', async ({ pag
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'files/dropped',
-        payload: [
-          { path: '/workspace/varro/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
-          { path: '/workspace/varro/src/b.ts', relativePath: 'src/b.ts', type: 'file' },
-        ],
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'files/dropped',
+    payload: [
+      { path: '/workspace/varro/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+      { path: '/workspace/varro/src/b.ts', relativePath: 'src/b.ts', type: 'file' },
+    ],
   });
 
   await expect(page.locator('.chat-attachment-chip')).toHaveCount(2);

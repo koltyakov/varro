@@ -12,6 +12,7 @@ import {
   recoverInterruptedSessionsWithDependencies,
   shouldContinueInterruptedSession,
 } from './connection-bootstrap';
+import { deferred } from '../test-fixtures';
 
 const HEALTHY_RESPONSE = { healthy: true, version: '1.0.0' } as const;
 
@@ -38,14 +39,35 @@ function startupDeps() {
   };
 }
 
-describe('startup readiness and recovery', () => {
-  const generation = { next: () => 1, isCurrent: () => true };
+type InitDependencies = Parameters<typeof initConnectionWithDependencies>[0];
 
+function initDeps(overrides: Partial<InitDependencies> = {}): InitDependencies {
+  return {
+    health: vi.fn(async () => HEALTHY_RESPONSE),
+    loadInitialData: vi.fn(async () => {}),
+    hydrateSessionStatuses: vi.fn(async () => {}),
+    getActiveSessionId: () => null,
+    getPersistedActiveSessionId: () => null,
+    getSessionCount: () => 0,
+    getOnlyPrimarySessionId: () => null,
+    hasSession: () => false,
+    selectSession: vi.fn(async () => {}),
+    setShowSessionPicker: vi.fn(),
+    recoverInterruptedSessions: vi.fn(async () => {}),
+    setInitialized: vi.fn(),
+    setError: vi.fn(),
+    ...overrides,
+  };
+}
+
+const currentGeneration = { next: () => 1, isCurrent: () => true };
+
+describe('startup readiness and recovery', () => {
   it('does not wait for optional background status to expose restored chat', async () => {
     const deps = startupDeps();
     const background = deferred<void>();
     deps.loadBackgroundData.mockImplementation(() => background.promise);
-    await initConnectionWithDependencies(deps, generation);
+    await initConnectionWithDependencies(deps, currentGeneration);
     expect(deps.setInitialized).toHaveBeenCalledWith(true);
     expect(deps.recoverInterruptedSessions).toHaveBeenCalled();
     expect(deps.loadBackgroundData).toHaveBeenCalledOnce();
@@ -56,7 +78,7 @@ describe('startup readiness and recovery', () => {
     const deps = startupDeps();
     const essential = deferred<void>();
     deps.loadInitialData.mockImplementation(() => essential.promise);
-    const initialization = initConnectionWithDependencies(deps, generation);
+    const initialization = initConnectionWithDependencies(deps, currentGeneration);
     await Promise.resolve();
     expect(deps.setInitialized).not.toHaveBeenCalled();
     expect(deps.loadBackgroundData).not.toHaveBeenCalled();
@@ -69,7 +91,7 @@ describe('startup readiness and recovery', () => {
     const deps = startupDeps();
     const cause = new Error('MCP unavailable');
     deps.loadBackgroundData.mockRejectedValue(cause);
-    await initConnectionWithDependencies(deps, generation);
+    await initConnectionWithDependencies(deps, currentGeneration);
     await vi.waitFor(() => expect(deps.logError).toHaveBeenCalled());
     expect(deps.setInitialized.mock.calls).toEqual([[true]]);
     expect(deps.setError).not.toHaveBeenCalled();
@@ -80,7 +102,7 @@ describe('startup readiness and recovery', () => {
     vi.useFakeTimers();
     const deps = startupDeps();
     deps.health.mockResolvedValueOnce({ healthy: false });
-    const initialization = initConnectionWithDependencies(deps, generation);
+    const initialization = initConnectionWithDependencies(deps, currentGeneration);
     await vi.advanceTimersByTimeAsync(499);
     expect(deps.loadInitialData).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -94,7 +116,7 @@ describe('startup readiness and recovery', () => {
     vi.useFakeTimers();
     const deps = startupDeps();
     deps.health.mockResolvedValue({ healthy: false });
-    const initialization = initConnectionWithDependencies(deps, generation);
+    const initialization = initConnectionWithDependencies(deps, currentGeneration);
     await vi.advanceTimersByTimeAsync(1000);
     await initialization;
     expect(deps.health).toHaveBeenCalledTimes(3);
@@ -111,7 +133,7 @@ describe('startup readiness and recovery', () => {
   ])('does not retry security or compatibility errors: %s', async (message) => {
     const deps = startupDeps();
     deps.health.mockRejectedValue(new Error(message));
-    await initConnectionWithDependencies(deps, generation);
+    await initConnectionWithDependencies(deps, currentGeneration);
     expect(deps.health).toHaveBeenCalledOnce();
     expect(deps.loadInitialData).not.toHaveBeenCalled();
   });
@@ -143,7 +165,7 @@ describe('startup readiness and recovery', () => {
   ])('clears only startup errors on recovery: %s', async (error, cleared) => {
     const deps = startupDeps();
     deps.getError.mockReturnValue(error);
-    await initConnectionWithDependencies(deps, generation);
+    await initConnectionWithDependencies(deps, currentGeneration);
     if (cleared) expect(deps.setError).toHaveBeenCalledWith(null);
     else expect(deps.setError).not.toHaveBeenCalled();
   });
@@ -151,20 +173,12 @@ describe('startup readiness and recovery', () => {
   it('identifies a catalog failure instead of calling it a connection failure', async () => {
     const deps = startupDeps();
     deps.loadInitialData.mockRejectedValue(new Error('catalog unavailable'));
-    await initConnectionWithDependencies(deps, generation);
+    await initConnectionWithDependencies(deps, currentGeneration);
     expect(deps.setError).toHaveBeenCalledWith(
       'Failed to load OpenCode startup data: catalog unavailable'
     );
   });
 });
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
 
 function userMessage(id: string): UserMessage {
   return {
@@ -473,7 +487,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
+      initDeps({
         health: async () => {
           callOrder.push('health');
           return HEALTHY_RESPONSE;
@@ -484,10 +498,7 @@ describe('connection-bootstrap helpers', () => {
         hydrateSessionStatuses: async () => {
           callOrder.push('hydrateSessionStatuses');
         },
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
         getSessionCount: () => 2,
-        getOnlyPrimarySessionId: () => null,
         selectSession,
         hasSession: () => true,
         setShowSessionPicker,
@@ -496,7 +507,7 @@ describe('connection-bootstrap helpers', () => {
         },
         setInitialized,
         setError,
-      },
+      }),
       {
         next: () => 3,
         isCurrent: () => true,
@@ -515,25 +526,11 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
-        getSessionCount: () => 0,
-        getOnlyPrimarySessionId: () => null,
+      initDeps({
         selectSession,
-        hasSession: () => false,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
@@ -548,7 +545,7 @@ describe('connection-bootstrap helpers', () => {
     });
 
     await initConnectionWithDependencies(
-      {
+      initDeps({
         health: async () => {
           callOrder.push('health');
           return HEALTHY_RESPONSE;
@@ -559,8 +556,6 @@ describe('connection-bootstrap helpers', () => {
         hydrateSessionStatuses: async () => {
           callOrder.push('hydrateSessionStatuses');
         },
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
         getSessionCount: () => 1,
         getOnlyPrimarySessionId: () => 'session-1',
         selectSession,
@@ -569,13 +564,8 @@ describe('connection-bootstrap helpers', () => {
         recoverInterruptedSessions: async (generation) => {
           callOrder.push(`recover:${generation}`);
         },
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(callOrder).toEqual([
@@ -593,11 +583,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-1',
         getPersistedLastOpenedView: () => ({
           type: 'session',
@@ -609,15 +595,9 @@ describe('connection-bootstrap helpers', () => {
         hasSession: () => true,
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_000 + 10 * 60 * 1000,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
@@ -629,11 +609,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => false);
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-b',
         getPersistedLastOpenedView: () => ({
           type: 'session',
@@ -642,19 +618,12 @@ describe('connection-bootstrap helpers', () => {
           timestamp: 1_000_000,
         }),
         getSessionCount: () => 2,
-        getOnlyPrimarySessionId: () => null,
         hasSession: () => true,
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_001,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(selectSession).toHaveBeenCalledWith('session-b', '/repo-b');
@@ -666,11 +635,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => true);
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-b',
         getPersistedLastOpenedView: () => ({
           type: 'session',
@@ -679,20 +644,13 @@ describe('connection-bootstrap helpers', () => {
           timestamp: 1_000_000,
         }),
         getSessionCount: () => 2,
-        getOnlyPrimarySessionId: () => null,
         hasSession: () => true,
         getSessionDirectory: () => '/repo-b',
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_001,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(selectSession).toHaveBeenCalledWith('session-b', '/repo-b');
@@ -704,11 +662,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => true);
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-closed',
         getPersistedLastOpenedView: () => ({
           type: 'session',
@@ -717,19 +671,11 @@ describe('connection-bootstrap helpers', () => {
           timestamp: 1_000_000,
         }),
         getSessionCount: () => 2,
-        getOnlyPrimarySessionId: () => null,
-        hasSession: () => false,
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_001,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(selectSession).not.toHaveBeenCalled();
@@ -741,11 +687,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-1',
         getPersistedLastOpenedView: () => ({
           type: 'session',
@@ -754,19 +696,12 @@ describe('connection-bootstrap helpers', () => {
         }),
         getInitialRoute: () => ({ type: 'session', sessionId: 'session-2' }),
         getSessionCount: () => 2,
-        getOnlyPrimarySessionId: () => null,
         hasSession: () => true,
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_000,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
@@ -778,27 +713,14 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
+      initDeps({
         getPersistedLastOpenedView: () => null,
         getInitialRoute: () => ({ type: 'session', sessionId: 'session-outside-page' }),
         getSessionCount: () => 100,
-        getOnlyPrimarySessionId: () => null,
-        hasSession: () => false,
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
@@ -811,12 +733,8 @@ describe('connection-bootstrap helpers', () => {
     const startNewSession = vi.fn();
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
+      initDeps({
         getActiveSessionId: () => 'session-1',
-        getPersistedActiveSessionId: () => null,
         getPersistedLastOpenedView: () => ({
           type: 'session',
           sessionId: 'session-1',
@@ -829,15 +747,9 @@ describe('connection-bootstrap helpers', () => {
         selectSession,
         startNewSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_000 + 1_000,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
@@ -852,12 +764,8 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async (sessionId: string) => {
       activeSessionId = sessionId;
     });
-    const deps = {
-      health: vi.fn(async () => HEALTHY_RESPONSE),
-      loadInitialData: vi.fn(async () => {}),
-      hydrateSessionStatuses: vi.fn(async () => {}),
+    const deps = initDeps({
       getActiveSessionId: () => activeSessionId,
-      getPersistedActiveSessionId: () => null,
       getPersistedLastOpenedView: () => null,
       getInitialRoute: () =>
         initialRouteConsumed ? null : ({ type: 'session', sessionId: 'session-1' } as const),
@@ -865,14 +773,9 @@ describe('connection-bootstrap helpers', () => {
         initialRouteConsumed = true;
       },
       getSessionCount: () => 2,
-      getOnlyPrimarySessionId: () => null,
       hasSession: () => true,
       selectSession,
-      setShowSessionPicker: vi.fn(),
-      recoverInterruptedSessions: vi.fn(async () => {}),
-      setInitialized: vi.fn(),
-      setError: vi.fn(),
-    };
+    });
     const generationRef = {
       next: () => ++generation,
       isCurrent: (candidate: number) => candidate === generation,
@@ -894,23 +797,14 @@ describe('connection-bootstrap helpers', () => {
       const selectSession = vi.fn(async () => {});
 
       await initConnectionWithDependencies(
-        {
-          health: vi.fn(async () => HEALTHY_RESPONSE),
-          loadInitialData: vi.fn(async () => {}),
-          hydrateSessionStatuses: vi.fn(async () => {}),
-          getActiveSessionId: () => null,
-          getPersistedActiveSessionId: () => null,
+        initDeps({
           getPersistedLastOpenedView: () => ({ type, timestamp: 1_000_000 }),
           getSessionCount: () => 2,
-          getOnlyPrimarySessionId: () => null,
           hasSession: () => true,
           selectSession,
           setShowSessionPicker,
-          recoverInterruptedSessions: vi.fn(async () => {}),
-          setInitialized: vi.fn(),
-          setError: vi.fn(),
           now: () => 1_000_000 + 30 * 24 * 60 * 60 * 1000,
-        },
+        }),
         {
           next: () => 1,
           isCurrent: () => true,
@@ -927,11 +821,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-1',
         getPersistedLastOpenedView: () => ({
           type: 'session',
@@ -943,15 +833,9 @@ describe('connection-bootstrap helpers', () => {
         hasSession: () => true,
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_000 + 30 * 24 * 60 * 60 * 1000,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
@@ -963,25 +847,15 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-1',
         getSessionCount: () => 2,
         getOnlyPrimarySessionId: () => 'session-1',
         selectSession,
         hasSession: () => true,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(true);
@@ -993,25 +867,15 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'other-session',
         getSessionCount: () => 2,
         getOnlyPrimarySessionId: () => 'session-1',
         selectSession,
         hasSession: () => true,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(true);
@@ -1023,11 +887,7 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
+      initDeps({
         getPersistedActiveSessionId: () => 'session-1',
         getPersistedLastOpenedView: () => ({
           type: 'session',
@@ -1035,19 +895,12 @@ describe('connection-bootstrap helpers', () => {
           timestamp: 1_000_000,
         }),
         getSessionCount: () => 2,
-        getOnlyPrimarySessionId: () => null,
         hasSession: () => true,
         selectSession,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
         now: () => 1_000_000 + 30 * 24 * 60 * 60 * 1000,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).toHaveBeenCalledWith(false);
@@ -1059,25 +912,15 @@ describe('connection-bootstrap helpers', () => {
     const selectSession = vi.fn(async () => {});
 
     await initConnectionWithDependencies(
-      {
-        health: vi.fn(async () => HEALTHY_RESPONSE),
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
+      initDeps({
         getActiveSessionId: () => 'session-1',
         getPersistedActiveSessionId: () => 'session-1',
         getSessionCount: () => 3,
-        getOnlyPrimarySessionId: () => null,
         selectSession,
         hasSession: () => true,
         setShowSessionPicker,
-        recoverInterruptedSessions: vi.fn(async () => {}),
-        setInitialized: vi.fn(),
-        setError: vi.fn(),
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setShowSessionPicker).not.toHaveBeenCalled();
@@ -1089,27 +932,14 @@ describe('connection-bootstrap helpers', () => {
     const setError = vi.fn();
 
     await initConnectionWithDependencies(
-      {
+      initDeps({
         health: async () => {
           throw new Error('offline');
         },
-        loadInitialData: vi.fn(async () => {}),
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
-        getSessionCount: () => 0,
-        getOnlyPrimarySessionId: () => null,
-        selectSession: vi.fn(async () => {}),
-        hasSession: () => false,
-        setShowSessionPicker: vi.fn(),
-        recoverInterruptedSessions: vi.fn(async () => {}),
         setInitialized,
         setError,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(setInitialized).toHaveBeenCalledWith(false);
@@ -1122,25 +952,13 @@ describe('connection-bootstrap helpers', () => {
     const setError = vi.fn();
 
     await initConnectionWithDependencies(
-      {
+      initDeps({
         health: async () => ({ healthy: false, version: '1.0.0' }),
         loadInitialData,
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
-        getSessionCount: () => 0,
-        getOnlyPrimarySessionId: () => null,
-        selectSession: vi.fn(async () => {}),
-        hasSession: () => false,
-        setShowSessionPicker: vi.fn(),
-        recoverInterruptedSessions: vi.fn(async () => {}),
         setInitialized,
         setError,
-      },
-      {
-        next: () => 1,
-        isCurrent: () => true,
-      }
+      }),
+      currentGeneration
     );
 
     expect(loadInitialData).not.toHaveBeenCalled();
@@ -1156,24 +974,15 @@ describe('connection-bootstrap helpers', () => {
     const setError = vi.fn();
 
     await initConnectionWithDependencies(
-      {
+      initDeps({
         health: async () => HEALTHY_RESPONSE,
         loadInitialData: async () => {
           current = false;
           throw new Error('stale failure');
         },
-        hydrateSessionStatuses: vi.fn(async () => {}),
-        getActiveSessionId: () => null,
-        getPersistedActiveSessionId: () => null,
-        getSessionCount: () => 0,
-        getOnlyPrimarySessionId: () => null,
-        selectSession: vi.fn(async () => {}),
-        hasSession: () => false,
-        setShowSessionPicker: vi.fn(),
-        recoverInterruptedSessions: vi.fn(async () => {}),
         setInitialized,
         setError,
-      },
+      }),
       {
         next: () => 1,
         isCurrent: () => current,
@@ -1268,21 +1077,10 @@ describe('connection-bootstrap helpers', () => {
     let generation = 0;
     const firstHealth = deferred<typeof HEALTHY_RESPONSE>();
     const setInitialized = vi.fn();
-    const deps = {
+    const deps = initDeps({
       health: () => firstHealth.promise,
-      loadInitialData: vi.fn(async () => {}),
-      hydrateSessionStatuses: vi.fn(async () => {}),
-      getActiveSessionId: () => null,
-      getPersistedActiveSessionId: () => null,
-      getSessionCount: () => 0,
-      getOnlyPrimarySessionId: () => null,
-      selectSession: vi.fn(async () => {}),
-      hasSession: () => false,
-      setShowSessionPicker: vi.fn(),
-      recoverInterruptedSessions: vi.fn(async () => {}),
       setInitialized,
-      setError: vi.fn(),
-    };
+    });
     const generationRef = {
       next: () => ++generation,
       isCurrent: (candidate: number) => candidate === generation,
@@ -1305,21 +1103,10 @@ describe('connection-bootstrap helpers', () => {
       .fn<() => Promise<void>>()
       .mockReturnValueOnce(staleData.promise)
       .mockResolvedValueOnce();
-    const deps = {
-      health: vi.fn(async () => HEALTHY_RESPONSE),
+    const deps = initDeps({
       loadInitialData,
-      hydrateSessionStatuses: vi.fn(async () => {}),
-      getActiveSessionId: () => null,
-      getPersistedActiveSessionId: () => null,
-      getSessionCount: () => 0,
-      getOnlyPrimarySessionId: () => null,
-      selectSession: vi.fn(async () => {}),
-      hasSession: () => false,
-      setShowSessionPicker: vi.fn(),
-      recoverInterruptedSessions: vi.fn(async () => {}),
       setInitialized,
-      setError: vi.fn(),
-    };
+    });
     const generationRef = {
       next: () => ++generation,
       isCurrent: (candidate: number) => candidate === generation,

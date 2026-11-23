@@ -48,10 +48,8 @@ export function detachDiscardableActiveBlankSession(): string | false {
   if (!sessionId) return false;
 
   newChatDraftGeneration += 1;
-  (() => {
-    setState(storePath('activeSessionId', null));
-    persistActiveSessionId(null);
-  })();
+  setState(storePath('activeSessionId', null));
+  persistActiveSessionId(null);
   return sessionId;
 }
 
@@ -67,33 +65,31 @@ export function startNewChatDraft() {
   const deferTranscriptClear = !blankSessionId && state.messages.length > 0;
   const craftedText = readLatestDraftText();
   const sourceKey = currentDraftKey();
-  (() => {
-    setNewChatDraftKey(draftGeneration);
-    resetMessageEditState();
-    resetToolCallExpansionState();
-    // Detach first so a live virtualized transcript can unmount before its
-    // backing entries disappear. Clearing both in one reactive flush can leave
-    // rows and streaming effects reading entries that were just removed.
-    if (!deferTranscriptClear) clearMessages();
-    setState(storePath('messagesLoading', false));
-    setState(storePath('pendingSessionSelectionId', null));
-    if (!blankSessionId) {
-      setState(storePath('activeSessionId', null));
-      persistActiveSessionId(null);
-    }
-    setError(null);
-    setShowModels(false);
-    setShowModelPicker(false);
-    stopLoading();
-    setPersistentShowSessionPicker(false);
-    finishNewChatDraft(sourceKey, craftedText);
-    restoreSelectedModelForComposer(null);
-    setSelectedAgent(getDefaultPrimaryAgentName(state.agents, getPersistedSelectedAgent()), {
-      sessionId: blankSessionId || null,
-      persistGlobal: false,
-    });
-    requestComposerFocus();
-  })();
+  setNewChatDraftKey(draftGeneration);
+  resetMessageEditState();
+  resetToolCallExpansionState();
+  // Detach first so a live virtualized transcript can unmount before its
+  // backing entries disappear. Clearing both in one reactive flush can leave
+  // rows and streaming effects reading entries that were just removed.
+  if (!deferTranscriptClear) clearMessages();
+  setState(storePath('messagesLoading', false));
+  setState(storePath('pendingSessionSelectionId', null));
+  if (!blankSessionId) {
+    setState(storePath('activeSessionId', null));
+    persistActiveSessionId(null);
+  }
+  setError(null);
+  setShowModels(false);
+  setShowModelPicker(false);
+  stopLoading();
+  setPersistentShowSessionPicker(false);
+  finishNewChatDraft(sourceKey, craftedText);
+  restoreSelectedModelForComposer(null);
+  setSelectedAgent(getDefaultPrimaryAgentName(state.agents, getPersistedSelectedAgent()), {
+    sessionId: blankSessionId || null,
+    persistGlobal: false,
+  });
+  requestComposerFocus();
 
   if (deferTranscriptClear) {
     requestAnimationFrame(() => {

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry, UserMessage } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const width of [400, 900]) {
   test(`restored lost-shell notice says cancelled, not finished, at ${width}px`, async ({
@@ -26,24 +27,17 @@ for (const width of [400, 900]) {
         },
       ],
     };
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated playback harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'test',
+        directory: '/workspace',
+        title: 'Restart shell',
+        version: '1',
+        time: { created: 1, updated: 1 },
       },
-      {
-        session: {
-          id: sessionID,
-          projectID: 'test',
-          directory: '/workspace',
-          title: 'Restart shell',
-          version: '1',
-          time: { created: 1, updated: 1 },
-        },
-        initialMessages: [notice],
-      }
-    );
+      initialMessages: [notice],
+    });
     await page.setViewportSize({ width, height: 800 });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     for (const reload of [false, true]) {

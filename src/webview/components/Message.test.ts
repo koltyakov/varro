@@ -48,6 +48,16 @@ let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 let resizeObserverObserveMock: (target: Element, options?: ResizeObserverOptions) => void;
 let resizeObserverDisconnectMock: () => void;
 
+function applyState(setter: Parameters<typeof setAppState>[0]) {
+  setAppState(setter);
+  flushSolid();
+}
+
+function mount(view: Parameters<typeof render>[0]) {
+  cleanup = render(view, container!);
+  flushSolid();
+}
+
 beforeEach(() => {
   installHighlightWorker();
   flushSolid();
@@ -85,10 +95,8 @@ afterEach(() => {
   flushSolid();
   setShowModels(false);
   flushSolid();
-  setAppState(storePath('sessions', []));
-  flushSolid();
-  setAppState(storePath('allAgents', []));
-  flushSolid();
+  applyState(storePath('sessions', []));
+  applyState(storePath('allAgents', []));
   resetToolCallExpansionState();
   flushSolid();
   // SAFETY: The fixture provides the unknown fields read by this statement.
@@ -120,8 +128,7 @@ it('renders a native goal kickoff as a visible prompt instead of collapsed autom
       'session-1'
     )
   );
-  cleanup = render(() => Message(message), container!);
-  flushSolid();
+  mount(() => Message(message));
   expect(container?.textContent).toContain('goal Wait for 1 minute');
   const chip = container?.querySelector('.inline-chip[data-copy-marker="/goal"]');
   expect(chip?.querySelector('.inline-chip-label')?.textContent).toBe('goal');
@@ -183,8 +190,7 @@ describe('V2 generated transcript rendering', () => {
         'session-1'
       )
     );
-    cleanup = render(() => Message(projected), container!);
-    flushSolid();
+    mount(() => Message(projected));
     const bubble = container?.querySelector('.user-message-card');
     expect(bubble).not.toBeNull();
     expect(bubble?.querySelector('.user-message-text-scroll')?.textContent).toBe(visibleText);
@@ -221,11 +227,7 @@ describe('V2 generated transcript rendering', () => {
           synthetic: true,
         },
       ];
-      cleanup = render(
-        () => Message({ info: userMessage('msg_legacy_skill_prompt'), parts }),
-        container!
-      );
-      flushSolid();
+      mount(() => Message({ info: userMessage('msg_legacy_skill_prompt'), parts }));
       const bubble = container?.querySelector('.user-message-card');
       expect(bubble).not.toBeNull();
       expect(bubble?.querySelector('.user-message-text-scroll')?.textContent).toBe(
@@ -257,8 +259,7 @@ describe('V2 generated transcript rendering', () => {
       },
       'session-1'
     );
-    cleanup = render(() => Message(fixture<MessageEntry>(projected)), container!);
-    flushSolid();
+    mount(() => Message(fixture<MessageEntry>(projected)));
     expect(container?.querySelector('.user-message-card')).toBeNull();
     expect(container?.querySelector('.message-compaction-divider')?.textContent).toContain(
       'Context compacted (auto)'
@@ -285,8 +286,7 @@ describe('V2 generated transcript rendering', () => {
     },
   ] as const)('renders $type records as tool activity without a user card', (record) => {
     const projected = projectV2Message(record, 'session-1');
-    cleanup = render(() => Message(fixture<MessageEntry>(projected)), container!);
-    flushSolid();
+    mount(() => Message(fixture<MessageEntry>(projected)));
     expect(container?.querySelector('.user-message-card')).toBeNull();
     const activity = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     expect(activity?.textContent).toContain(record.type === 'skill' ? '1 skill' : '1 command');
@@ -571,17 +571,14 @@ describe('Message user prompt rendering', () => {
         time: { started: 1 },
       });
       const parts = [textPart('stop-text', text)];
-      cleanup = render(
-        () =>
-          Message({
-            info: userMessage('message-1'),
-            parts,
-            promptNumber: 2,
-            showSentTimestamp: true,
-          }),
-        container!
+      mount(() =>
+        Message({
+          info: userMessage('message-1'),
+          parts,
+          promptNumber: 2,
+          showSentTimestamp: true,
+        })
       );
-      flushSolid();
       const action = container?.querySelector<HTMLElement>('.stop-process-action');
       expect(action?.textContent?.trim()).toBe(`Stop process ${pid ?? 'shell-1'}`);
       expect(action?.classList).toContain('user-message-card-wrapperless');
@@ -605,20 +602,16 @@ describe('Message user prompt rendering', () => {
       pid: 42,
       time: { started: 1 },
     });
-    cleanup = render(
-      () => [
-        Message({
-          info: userMessage('message-1'),
-          parts: [textPart('text-1', text), filePart('file-1', 'index.html')],
-        }),
-        Message({
-          info: userMessage('message-2'),
-          parts: [textPart('text-2', `${text}\nAlso run the build.`)],
-        }),
-      ],
-      container!
-    );
-    flushSolid();
+    mount(() => [
+      Message({
+        info: userMessage('message-1'),
+        parts: [textPart('text-1', text), filePart('file-1', 'index.html')],
+      }),
+      Message({
+        info: userMessage('message-2'),
+        parts: [textPart('text-2', `${text}\nAlso run the build.`)],
+      }),
+    ]);
     expect(container?.querySelector('.stop-process-action')).toBeNull();
     expect(container?.textContent).toContain('index.html');
     expect(container?.textContent).toContain('Also run the build.');
@@ -626,17 +619,14 @@ describe('Message user prompt rendering', () => {
 
   it('renders the plan implementation prompt as a compact, non-editable action', () => {
     const parts = [textPart('text-1', buildPlanImplementationPrompt([]))];
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...userMessage('message-1'), agent: 'build' },
-          parts,
-          promptNumber: 2,
-          showSentTimestamp: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...userMessage('message-1'), agent: 'build' },
+        parts,
+        promptNumber: 2,
+        showSentTimestamp: true,
+      })
     );
-    flushSolid();
 
     const action = container?.querySelector<HTMLElement>('.plan-implementation-action');
     expect(action?.textContent?.trim()).toBe('Implement the plan');
@@ -655,17 +645,14 @@ describe('Message user prompt rendering', () => {
         'Investigate the reported parser failures without unrelated edits.'
       ),
     ];
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...userMessage('followup'), followupTitle: 'Inspect parser failures' },
-          parts,
-          promptNumber: 2,
-          showSentTimestamp: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...userMessage('followup'), followupTitle: 'Inspect parser failures' },
+        parts,
+        promptNumber: 2,
+        showSentTimestamp: true,
+      })
     );
-    flushSolid();
     const action = container?.querySelector<HTMLElement>('.followup-action');
     expect(action?.textContent?.trim()).toBe('Inspect parser failures');
     expect(action?.querySelector('.ui-icon')).not.toBeNull();
@@ -679,46 +666,38 @@ describe('Message user prompt rendering', () => {
   });
 
   it('keeps manually typed follow-up text and attachments visible as normal user content', () => {
-    cleanup = render(
-      () => [
-        Message({
-          info: userMessage('typed'),
-          parts: [textPart('typed-text', 'Investigate the parser failures.')],
-        }),
-        Message({
-          info: { ...userMessage('attached'), followupTitle: 'Inspect parser failures' },
-          parts: [
-            textPart('attached-text', 'Investigate the parser failures.'),
-            filePart('attached-file', 'report.pdf'),
-          ],
-        }),
-      ],
-      container!
-    );
-    flushSolid();
+    mount(() => [
+      Message({
+        info: userMessage('typed'),
+        parts: [textPart('typed-text', 'Investigate the parser failures.')],
+      }),
+      Message({
+        info: { ...userMessage('attached'), followupTitle: 'Inspect parser failures' },
+        parts: [
+          textPart('attached-text', 'Investigate the parser failures.'),
+          filePart('attached-file', 'report.pdf'),
+        ],
+      }),
+    ]);
     expect(container?.querySelector('.followup-action')).toBeNull();
     expect(container?.textContent).toContain('Investigate the parser failures.');
     expect(container?.textContent).toContain('report.pdf');
   });
 
   it('does not hide attachments or custom implementation requests', () => {
-    cleanup = render(
-      () => [
-        Message({
-          info: { ...userMessage('message-1'), agent: 'build' },
-          parts: [
-            textPart('text-1', buildPlanImplementationPrompt([])),
-            filePart('file-1', 'plan.pdf'),
-          ],
-        }),
-        Message({
-          info: { ...userMessage('message-2'), agent: 'build' },
-          parts: [textPart('text-2', 'Implement the plan with my changes')],
-        }),
-      ],
-      container!
-    );
-    flushSolid();
+    mount(() => [
+      Message({
+        info: { ...userMessage('message-1'), agent: 'build' },
+        parts: [
+          textPart('text-1', buildPlanImplementationPrompt([])),
+          filePart('file-1', 'plan.pdf'),
+        ],
+      }),
+      Message({
+        info: { ...userMessage('message-2'), agent: 'build' },
+        parts: [textPart('text-2', 'Implement the plan with my changes')],
+      }),
+    ]);
 
     expect(container?.querySelector('.plan-implementation-action')).toBeNull();
     expect(container?.textContent).toContain('plan.pdf');
@@ -726,15 +705,12 @@ describe('Message user prompt rendering', () => {
   });
 
   it('wraps user prompt text in a scroll container', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-1'),
-          parts: [textPart('text-1', 'Line 1'), textPart('text-2', 'Line 2')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-1'),
+        parts: [textPart('text-1', 'Line 1'), textPart('text-2', 'Line 2')],
+      })
     );
-    flushSolid();
 
     const scrollContainer = container?.querySelector('.user-message-text-scroll');
     expect(scrollContainer).toBeInstanceOf(HTMLDivElement);
@@ -742,26 +718,22 @@ describe('Message user prompt rendering', () => {
   });
 
   it('shows the plan agent above planning prompts only', () => {
-    cleanup = render(
-      () => [
-        Message({
-          info: { ...userMessage('message-plan'), agent: 'plan' },
-          parts: [
-            textPart('text-plan', 'Draft an implementation plan'),
-            filePart('file-1', 'one.pdf'),
-            filePart('file-2', 'two.pdf'),
-            filePart('file-3', 'three.pdf'),
-            filePart('file-4', 'four.pdf'),
-          ],
-        }),
-        Message({
-          info: userMessage('message-chat'),
-          parts: [textPart('text-chat', 'Implement the change')],
-        }),
-      ],
-      container!
-    );
-    flushSolid();
+    mount(() => [
+      Message({
+        info: { ...userMessage('message-plan'), agent: 'plan' },
+        parts: [
+          textPart('text-plan', 'Draft an implementation plan'),
+          filePart('file-1', 'one.pdf'),
+          filePart('file-2', 'two.pdf'),
+          filePart('file-3', 'three.pdf'),
+          filePart('file-4', 'four.pdf'),
+        ],
+      }),
+      Message({
+        info: userMessage('message-chat'),
+        parts: [textPart('text-chat', 'Implement the change')],
+      }),
+    ]);
 
     const cards = container?.querySelectorAll('.user-message-card');
     const planRail = cards?.[0]?.querySelector(
@@ -782,15 +754,12 @@ describe('Message user prompt rendering', () => {
   });
 
   it('fades overflowing user prompt text until it is scrolled to the end', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-1'),
-          parts: [textPart('text-1', 'A long prompt')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-1'),
+        parts: [textPart('text-1', 'A long prompt')],
+      })
     );
-    flushSolid();
 
     const scrollContainer = container?.querySelector<HTMLElement>('.user-message-text-scroll');
     expect(scrollContainer).not.toBeNull();
@@ -811,20 +780,17 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders fenced user prompt text as a clipped code block with an overflow fade', async () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-1'),
-          parts: [
-            textPart(
-              'text-1',
-              'Before\n```ts\nconst value = 1;\nconst next = value + 1;\n```\nAfter'
-            ),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-1'),
+        parts: [
+          textPart(
+            'text-1',
+            'Before\n```ts\nconst value = 1;\nconst next = value + 1;\n```\nAfter'
+          ),
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelectorAll('.user-message-text')).toHaveLength(2);
     expect(container?.querySelectorAll('.user-message-text')[0]?.textContent).toBe('Before');
@@ -862,15 +828,12 @@ describe('Message user prompt rendering', () => {
     const send = vi.fn();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     fixture<UnknownRecord>(window).__sendToExtension = send;
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-svg'),
-          parts: [textPart('text-svg', svg)],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-svg'),
+        parts: [textPart('text-svg', svg)],
+      })
     );
-    flushSolid();
 
     const chip = container?.querySelector('.user-message-format-chip');
     expect(chip?.textContent).toBe('SVG59 B');
@@ -899,15 +862,12 @@ describe('Message user prompt rendering', () => {
       '  <rect x="2" y="21" width="7" height="5" />',
       '</svg>',
     ].join('\n');
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-prose-svg'),
-          parts: [textPart('text-prose-svg', prompt)],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-prose-svg'),
+        parts: [textPart('text-prose-svg', prompt)],
+      })
     );
-    flushSolid();
 
     const messageText = container?.querySelectorAll('.user-message-text');
     expect(messageText).toHaveLength(2);
@@ -921,30 +881,24 @@ describe('Message user prompt rendering', () => {
 
   it('leaves malformed markup as user prompt text', () => {
     const malformed = '<svg><path></svg>';
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-malformed-svg'),
-          parts: [textPart('text-malformed-svg', malformed)],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-malformed-svg'),
+        parts: [textPart('text-malformed-svg', malformed)],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.user-message-format-chip')).toBeNull();
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(malformed);
   });
 
   it('does not render an attachments separator for attachment-only user prompts', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-1'),
-          parts: [textPart('text-1', '[Active file: src/shared/extension-message.ts]')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-1'),
+        parts: [textPart('text-1', '[Active file: src/shared/extension-message.ts]')],
+      })
     );
-    flushSolid();
 
     const attachments = container?.querySelector('.message-attachments');
 
@@ -959,29 +913,26 @@ describe('Message user prompt rendering', () => {
     'renders pasted file chips with prose %j using the appropriate bubble',
     (prefix) => {
       const filename = 'pasted-text-18b4d50a.txt';
-      cleanup = render(
-        () =>
-          Message({
-            info: userMessage('message-pasted-file'),
-            parts: [
-              textPart('prompt', `${prefix}@${filename}`),
-              {
-                ...filePart('paste', filename),
-                mime: 'text/plain',
-                url: 'data:text/plain;base64,Y29udGVudA==',
-              },
-              {
-                id: 'agent',
-                sessionID: 'session-1',
-                messageID: 'message-pasted-file',
-                type: 'agent',
-                name: 'build',
-              },
-            ],
-          }),
-        container!
+      mount(() =>
+        Message({
+          info: userMessage('message-pasted-file'),
+          parts: [
+            textPart('prompt', `${prefix}@${filename}`),
+            {
+              ...filePart('paste', filename),
+              mime: 'text/plain',
+              url: 'data:text/plain;base64,Y29udGVudA==',
+            },
+            {
+              id: 'agent',
+              sessionID: 'session-1',
+              messageID: 'message-pasted-file',
+              type: 'agent',
+              name: 'build',
+            },
+          ],
+        })
       );
-      flushSolid();
 
       expect(container?.querySelector('.user-message-text .inline-chip')?.textContent).toBe(
         filename
@@ -995,20 +946,17 @@ describe('Message user prompt rendering', () => {
   );
 
   it('renders sent attachments and image tiles above the user text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-1'),
-          parts: [
-            textPart('text-1', '[Active file: src/shared/extension-message.ts]'),
-            filePart('file-1', 'spec.pdf'),
-            textPart('text-2', 'Please review this.'),
-            imageFilePart('image-1', 'diagram.png'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-1'),
+        parts: [
+          textPart('text-1', '[Active file: src/shared/extension-message.ts]'),
+          filePart('file-1', 'spec.pdf'),
+          textPart('text-2', 'Please review this.'),
+          imageFilePart('image-1', 'diagram.png'),
+        ],
+      })
     );
-    flushSolid();
 
     const rendered = container?.querySelector('.rendered-markdown');
     const children = Array.from(rendered?.children ?? []);
@@ -1027,21 +975,18 @@ describe('Message user prompt rendering', () => {
   });
 
   it('keeps the user bubble when prose ends in a Git remote before an attachment', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-git-remote'),
-          parts: [
-            textPart(
-              'text-prompt',
-              'All JS should be strongly typed similar as in git@github.com:koltyakov/browser-bridge.git'
-            ),
-            textPart('text-file', '[Attached file: app.js]'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-git-remote'),
+        parts: [
+          textPart(
+            'text-prompt',
+            'All JS should be strongly typed similar as in git@github.com:koltyakov/browser-bridge.git'
+          ),
+          textPart('text-file', '[Attached file: app.js]'),
+        ],
+      })
     );
-    flushSolid();
 
     const card = container?.querySelector('.user-message-card');
     expect(card?.classList).not.toContain('user-message-card-wrapperless');
@@ -1056,20 +1001,17 @@ describe('Message user prompt rendering', () => {
     const send = vi.fn();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     fixture<UnknownRecord>(window).__sendToExtension = send;
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-terminal-selection'),
-          parts: [
-            textPart(
-              'text-terminal-selection',
-              '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
-            ),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-terminal-selection'),
+        parts: [
+          textPart(
+            'text-terminal-selection',
+            '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+          ),
+        ],
+      })
     );
-    flushSolid();
 
     const terminalBlock = container?.querySelector('.user-message-terminal-code-block');
     expect(terminalBlock).toBeInstanceOf(HTMLDivElement);
@@ -1084,19 +1026,16 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders inline file mentions as chips inside the user bubble text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-inline-file'),
-          parts: [
-            textPart('text-1', 'Test @README.md and @preview.html'),
-            textPart('text-2', 'README.md'),
-            textPart('text-3', 'preview.html'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-inline-file'),
+        parts: [
+          textPart('text-1', 'Test @README.md and @preview.html'),
+          textPart('text-2', 'README.md'),
+          textPart('text-3', 'preview.html'),
+        ],
+      })
     );
-    flushSolid();
 
     const messageText = container?.querySelector('.user-message-text');
 
@@ -1110,15 +1049,12 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders a sole inline attachment without a user bubble', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-single-inline-file'),
-          parts: [textPart('text-1', '@README.md'), textPart('text-2', 'README.md')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-single-inline-file'),
+        parts: [textPart('text-1', '@README.md'), textPart('text-2', 'README.md')],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.user-message-text')?.textContent).toBe('README.md');
     expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(1);
@@ -1129,7 +1065,7 @@ describe('Message user prompt rendering', () => {
   });
 
   it('links workspace session IDs in user messages and leaves unknown IDs unchanged', () => {
-    setAppState(
+    applyState(
       storePath('sessions', [
         {
           id: 'ses_found123',
@@ -1141,16 +1077,12 @@ describe('Message user prompt rendering', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-session-reference'),
-          parts: [textPart('text-1', 'Session session:ses_found123 and session:ses_missing456')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-session-reference'),
+        parts: [textPart('text-1', 'Session session:ses_found123 and session:ses_missing456')],
+      })
     );
-    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
     expect(link?.textContent).toBe('Permission request states');
@@ -1169,17 +1101,14 @@ describe('Message user prompt rendering', () => {
     const send = vi.fn();
     // SAFETY: The fixture provides the unknown fields read by this statement.
     fixture<UnknownRecord>(window).__sendToExtension = send;
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-external-link'),
-          parts: [
-            textPart('text-1', 'See https://example.test/docs?q=(one), and http://localhost:3000.'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-external-link'),
+        parts: [
+          textPart('text-1', 'See https://example.test/docs?q=(one), and http://localhost:3000.'),
+        ],
+      })
     );
-    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.external-link');
     expect(link?.getAttribute('href')).toBe('https://example.test/docs?q=(one)');
@@ -1209,15 +1138,12 @@ describe('Message user prompt rendering', () => {
   });
 
   it('keeps one-line prose ending in a URL as message text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-trailing-external-link'),
-          parts: [textPart('text-1', 'Test message https://iconoir.com')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-trailing-external-link'),
+        parts: [textPart('text-1', 'Test message https://iconoir.com')],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.message-attachments')).toBeNull();
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(
@@ -1229,15 +1155,12 @@ describe('Message user prompt rendering', () => {
   });
 
   it('does not linkify URLs inside user message code fences', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-code-link'),
-          parts: [textPart('text-1', '```text\nhttps://example.test/docs\n```')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-code-link'),
+        parts: [textPart('text-1', '```text\nhttps://example.test/docs\n```')],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
       'https://example.test/docs\n'
@@ -1246,21 +1169,18 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders inline image placeholders as chips inside the user bubble text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-inline-image'),
-          parts: [
-            textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
-            textPart('text-2', 'e2e/tests/review.spec.ts'),
-            textPart('text-3', 'preview.html'),
-            imageFilePart('image-1', 'Image 1'),
-            imageFilePart('image-2', 'Image 2'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-inline-image'),
+        parts: [
+          textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
+          textPart('text-2', 'e2e/tests/review.spec.ts'),
+          textPart('text-3', 'preview.html'),
+          imageFilePart('image-1', 'Image 1'),
+          imageFilePart('image-2', 'Image 2'),
+        ],
+      })
     );
-    flushSolid();
 
     const messageText = container?.querySelector('.user-message-text');
     const inlineChips = messageText?.querySelectorAll('.inline-chip');
@@ -1292,31 +1212,28 @@ describe('Message user prompt rendering', () => {
       path: '/tmp/varro-drops/drop-1/1786723794731-image-1',
     };
 
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-delegated-vision'),
-          parts: [
-            textPart('text-1', "What's on this image? [Image 1] @vision"),
-            {
-              id: 'agent-1',
-              sessionID: 'session-1',
-              messageID: 'message-1',
-              type: 'agent',
-              name: 'vision',
-              source: { value: '@vision', start: 32, end: 39 },
-            },
-            textPart(
-              'text-2',
-              '[Image for @vision: /tmp/varro-drops/drop-1/1786723794731-image-1]\n' +
-                `${instruction} {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.`
-            ),
-            image,
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-delegated-vision'),
+        parts: [
+          textPart('text-1', "What's on this image? [Image 1] @vision"),
+          {
+            id: 'agent-1',
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            type: 'agent',
+            name: 'vision',
+            source: { value: '@vision', start: 32, end: 39 },
+          },
+          textPart(
+            'text-2',
+            '[Image for @vision: /tmp/varro-drops/drop-1/1786723794731-image-1]\n' +
+              `${instruction} {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.`
+          ),
+          image,
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(
       "What's on this image? Image 1 Vision"
@@ -1329,7 +1246,7 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders known textual agent mentions as chips when no agent part is returned', () => {
-    setAppState(
+    applyState(
       storePath('allAgents', [
         {
           name: 'vision',
@@ -1338,16 +1255,12 @@ describe('Message user prompt rendering', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-textual-agent'),
-          parts: [textPart('text-1', "What's on the image? @vision")],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-textual-agent'),
+        parts: [textPart('text-1', "What's on the image? @vision")],
+      })
     );
-    flushSolid();
 
     const chip = container?.querySelector('.user-message-text .inline-chip');
     expect(chip?.textContent).toBe('Vision');
@@ -1355,15 +1268,12 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders the legacy Image placeholder as the Image 1 pill', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-legacy-inline-image'),
-          parts: [textPart('text-1', 'Review [Image]'), imageFilePart('image-1', 'Image 1')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-legacy-inline-image'),
+        parts: [textPart('text-1', 'Review [Image]'), imageFilePart('image-1', 'Image 1')],
+      })
     );
-    flushSolid();
 
     const imageChip = container?.querySelector('.user-message-text .inline-chip');
     expect(imageChip?.textContent?.trim()).toBe('Image 1');
@@ -1384,15 +1294,12 @@ describe('Message user prompt rendering', () => {
       path: 'clipboard',
     };
 
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-cli-inline-images'),
-          parts: [textPart('text-1', '[Image 1] [Image 2] Review these'), firstImage, secondImage],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-cli-inline-images'),
+        parts: [textPart('text-1', '[Image 1] [Image 2] Review these'), firstImage, secondImage],
+      })
     );
-    flushSolid();
 
     const imageChips = container?.querySelectorAll('.user-message-text .inline-chip');
     expect(Array.from(imageChips ?? []).map((chip) => chip.textContent?.trim())).toEqual([
@@ -1402,21 +1309,18 @@ describe('Message user prompt rendering', () => {
   });
 
   it('opens the matching image preview from an inline image chip and syncs the carousel', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-inline-image-preview'),
-          parts: [
-            textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
-            textPart('text-2', 'e2e/tests/review.spec.ts'),
-            textPart('text-3', 'preview.html'),
-            imageFilePart('image-1', 'Image 1'),
-            imageFilePart('image-2', 'Image 2'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-inline-image-preview'),
+        parts: [
+          textPart('text-1', 'Test @e2e/tests/review.spec.ts and this @preview.html [Image 2]'),
+          textPart('text-2', 'e2e/tests/review.spec.ts'),
+          textPart('text-3', 'preview.html'),
+          imageFilePart('image-1', 'Image 1'),
+          imageFilePart('image-2', 'Image 2'),
+        ],
+      })
     );
-    flushSolid();
 
     const imageChip = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.user-message-text .inline-chip-clickable') ??
@@ -1436,19 +1340,16 @@ describe('Message user prompt rendering', () => {
   });
 
   it('keeps unrelated context attachments in the leading attachment strip', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-inline-file-with-extra-context'),
-          parts: [
-            textPart('text-1', 'Test @README.md'),
-            textPart('text-2', 'README.md'),
-            textPart('text-3', 'preview.html'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-inline-file-with-extra-context'),
+        parts: [
+          textPart('text-1', 'Test @README.md'),
+          textPart('text-2', 'README.md'),
+          textPart('text-3', 'preview.html'),
+        ],
+      })
     );
-    flushSolid();
 
     const inlineChips = container?.querySelectorAll('.user-message-text .inline-chip');
     const attachmentStrip = container?.querySelector('.message-attachments');
@@ -1460,18 +1361,15 @@ describe('Message user prompt rendering', () => {
   });
 
   it('renders trailing slash-style inline file mentions without duplicating the attachment strip', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-inline-file-trailing-path'),
-          parts: [
-            textPart('text-1', 'test @e2e/tests/review.spec.ts'),
-            textPart('text-2', 'e2e/tests/review.spec.ts'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-inline-file-trailing-path'),
+        parts: [
+          textPart('text-1', 'test @e2e/tests/review.spec.ts'),
+          textPart('text-2', 'e2e/tests/review.spec.ts'),
+        ],
+      })
     );
-    flushSolid();
 
     const messageText = container?.querySelector('.user-message-text');
 
@@ -1494,15 +1392,12 @@ describe('Message tool call expansion', () => {
       ),
     ]);
 
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-1'),
-          parts: parts(),
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-1'),
+        parts: parts(),
+      })
     );
-    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
     flushSolid();
@@ -1608,11 +1503,9 @@ describe('parseUserMessageContent', () => {
     expect(getUserMessageEditText([textPart('text-1', text)])).toBe(text);
     expect(getUserMessageEditContext([textPart('text-1', text)]).files).toEqual([]);
 
-    cleanup = render(
-      () => Message({ info: userMessage('message-plain-text'), parts: [textPart('text-1', text)] }),
-      container!
+    mount(() =>
+      Message({ info: userMessage('message-plain-text'), parts: [textPart('text-1', text)] })
     );
-    flushSolid();
 
     expect(container?.querySelector('.message-attachments')).toBeNull();
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(text);
@@ -1731,20 +1624,17 @@ describe('parseUserMessageContent', () => {
   });
 
   it('renders legacy trailing absolute file references as attachment chips', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-inline-attachment'),
-          parts: [
-            textPart(
-              'text-inline-attachment',
-              'Test\n\n/Users/andrew/Downloads/ПД Оккервиль ЛСТ Квартплата 5397.pdf'
-            ),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-inline-attachment'),
+        parts: [
+          textPart(
+            'text-inline-attachment',
+            'Test\n\n/Users/andrew/Downloads/ПД Оккервиль ЛСТ Квартплата 5397.pdf'
+          ),
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.message-attachments-leading .chip-label')?.textContent).toBe(
       'ПД Оккервиль ЛСТ Квартплата 5397.pdf'
@@ -1762,20 +1652,14 @@ describe('parseUserMessageContent', () => {
       { type: 'file-reference', path: '/repo/spec.pdf', isDirectory: false },
     ]);
 
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-attached-pdf-fallback'),
-          parts: [
-            textPart(
-              'text-attached-pdf',
-              'Summarize this document\n[Attached file: /repo/spec.pdf]'
-            ),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-attached-pdf-fallback'),
+        parts: [
+          textPart('text-attached-pdf', 'Summarize this document\n[Attached file: /repo/spec.pdf]'),
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.message-attachments')?.textContent).toContain('spec.pdf');
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(
@@ -1830,19 +1714,16 @@ describe('Message user rendering', () => {
     const created = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 45);
     const [showSentTimestamp, setShowSentTimestamp] = createSignal(false);
     const onUserMessageHoverChange = vi.fn();
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...userMessage('message-timestamp-today'), time: { created: created.getTime() } },
-          parts: [textPart('text-timestamp-today', 'Timestamped prompt')],
-          get showSentTimestamp() {
-            return showSentTimestamp();
-          },
-          onUserMessageHoverChange,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...userMessage('message-timestamp-today'), time: { created: created.getTime() } },
+        parts: [textPart('text-timestamp-today', 'Timestamped prompt')],
+        get showSentTimestamp() {
+          return showSentTimestamp();
+        },
+        onUserMessageHoverChange,
+      })
     );
-    flushSolid();
 
     const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
     expect(timestamp?.classList.contains('is-visible')).toBe(false);
@@ -1896,16 +1777,13 @@ describe('Message user rendering', () => {
   it('shows the relative age for messages sent before today', () => {
     const now = new Date();
     const created = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2, 13, 45);
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...userMessage('message-timestamp-older'), time: { created: created.getTime() } },
-          parts: [textPart('text-timestamp-older', 'Older prompt')],
-          showSentTimestamp: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...userMessage('message-timestamp-older'), time: { created: created.getTime() } },
+        parts: [textPart('text-timestamp-older', 'Older prompt')],
+        showSentTimestamp: true,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.message-sent-time')?.textContent).toBe('2 days ago');
   });
@@ -1913,17 +1791,14 @@ describe('Message user rendering', () => {
   it('reveals the timestamp on the last message in a consecutive user series', () => {
     vi.useFakeTimers();
     const onUserMessageHoverChange = vi.fn();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-series-first'),
-          parts: [textPart('text-series-first', 'First queued prompt')],
-          userMessageSeriesEndId: 'message-series-last',
-          onUserMessageHoverChange,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-series-first'),
+        parts: [textPart('text-series-first', 'First queued prompt')],
+        userMessageSeriesEndId: 'message-series-last',
+        onUserMessageHoverChange,
+      })
     );
-    flushSolid();
 
     container?.querySelector('.user-message-card')?.dispatchEvent(new MouseEvent('mouseenter'));
     flushSolid();
@@ -1937,41 +1812,35 @@ describe('Message user rendering', () => {
   });
 
   it('does not render empty user message shells with no meaningful content', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-empty-user'),
-          parts: [
-            {
-              id: 'text-empty-user',
-              sessionID: 'session-1',
-              messageID: 'message-empty-user',
-              type: 'text',
-              text: '[Working directory: /repo]',
-            },
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-empty-user'),
+        parts: [
+          {
+            id: 'text-empty-user',
+            sessionID: 'session-1',
+            messageID: 'message-empty-user',
+            type: 'text',
+            text: '[Working directory: /repo]',
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.textContent).toBe('');
     expect(container?.querySelector('.user-message-empty')).toBeNull();
   });
 
   it('renders one responsive-chat notice for an omitted change set', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: {
-            ...userMessage('message-large-change-set'),
-            summary: { diffs: [], diffsOmitted: true, diffsTruncated: true },
-          },
-          parts: [textPart('text-large-change-set', 'Update the infrastructure')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: {
+          ...userMessage('message-large-change-set'),
+          summary: { diffs: [], diffsOmitted: true, diffsTruncated: true },
+        },
+        parts: [textPart('text-large-change-set', 'Update the infrastructure')],
+      })
     );
-    flushSolid();
 
     const notice = container?.querySelector('.change-set-omission');
     expect(notice?.textContent).toContain('Large change set condensed');
@@ -1983,23 +1852,20 @@ describe('Message user rendering', () => {
   });
 
   it('copies inline attachment mentions using their original marker text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-copy-inline-attachment'),
-          parts: [
-            textPart(
-              'text-copy-inline-attachment',
-              "Check @broserbridge/bbx and @handlers.js if it's aligned @README.md - don't do anything this is template test"
-            ),
-            textPart('attachment-broserbridge', 'broserbridge/bbx'),
-            textPart('attachment-handlers', 'handlers.js'),
-            textPart('attachment-readme', 'README.md'),
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-copy-inline-attachment'),
+        parts: [
+          textPart(
+            'text-copy-inline-attachment',
+            "Check @broserbridge/bbx and @handlers.js if it's aligned @README.md - don't do anything this is template test"
+          ),
+          textPart('attachment-broserbridge', 'broserbridge/bbx'),
+          textPart('attachment-handlers', 'handlers.js'),
+          textPart('attachment-readme', 'README.md'),
+        ],
+      })
     );
-    flushSolid();
 
     const messageCard = container?.querySelector<HTMLElement>('.rendered-markdown');
     const selection = window.getSelection();
@@ -2146,24 +2012,19 @@ describe('Message user editing', () => {
   }
 
   afterEach(() => {
-    setAppState(storePath('activeSessionId', null));
-    flushSolid();
-    setAppState(storePath('sessions', []));
-    flushSolid();
-    setAppState(storePath('sessionStatus', {}));
-    flushSolid();
+    applyState(storePath('activeSessionId', null));
+    applyState(storePath('sessions', []));
+    applyState(storePath('sessionStatus', {}));
     resetMessageEditState();
     flushSolid();
   });
 
   it('labels automatic continuation prompts and prevents editing them as user messages', () => {
-    setAppState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    applyState(storePath('activeSessionId', 'session-1'));
     const text =
       'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.';
     const parts: Part[] = [{ ...textPart('continuation', text), synthetic: true }];
-    cleanup = render(() => Message({ info: userMessage('continuation'), parts }), container!);
-    flushSolid();
+    mount(() => Message({ info: userMessage('continuation'), parts }));
 
     const notice = container?.querySelector<HTMLElement>('.assistant-activity-summary');
     expect(notice?.textContent).toContain('1 action');
@@ -2181,8 +2042,7 @@ describe('Message user editing', () => {
   });
 
   it('summarizes automatic context outside a mixed user prompt and excludes it from editing', () => {
-    setAppState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    applyState(storePath('activeSessionId', 'session-1'));
     const parts: Part[] = [
       textPart('prompt', 'Test message'),
       {
@@ -2207,8 +2067,7 @@ describe('Message user editing', () => {
         synthetic: true,
       },
     ];
-    cleanup = render(() => Message({ info: userMessage('mixed'), parts }), container!);
-    flushSolid();
+    mount(() => Message({ info: userMessage('mixed'), parts }));
     expect(container?.querySelector('.user-message-card')?.textContent).toBe('Test message');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       '3 actions'
@@ -2271,15 +2130,12 @@ describe('Message user editing', () => {
     ['Reading MCP resource: example (resource://example)', 'Added MCP resource context'],
     ['Unknown internal instruction with a long private payload', 'Added automatic context'],
   ])('shows a short action for automatic prompt %s', (text, label) => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('automatic'),
-          parts: [{ ...textPart('auto', text), synthetic: true }],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('automatic'),
+        parts: [{ ...textPart('auto', text), synthetic: true }],
+      })
     );
-    flushSolid();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       '1 action'
     );
@@ -2299,15 +2155,12 @@ describe('Message user editing', () => {
   it('hides generic session instruction updates', () => {
     const text =
       '<system-reminder>\nSession instructions changed.\nLong internal instructions\n</system-reminder>';
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('session-instructions'),
-          parts: [{ ...textPart('auto', text), synthetic: true }],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('session-instructions'),
+        parts: [{ ...textPart('auto', text), synthetic: true }],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.chat-turn')).toBeNull();
@@ -2315,29 +2168,25 @@ describe('Message user editing', () => {
   });
 
   it('keeps a user-authored continuation prompt editable even with synthetic context', () => {
-    setAppState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    applyState(storePath('activeSessionId', 'session-1'));
     const text =
       'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.';
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('typed-continuation'),
-          parts: [
-            textPart('typed', text),
-            {
-              id: 'context',
-              sessionID: 'session-1',
-              messageID: 'typed-continuation',
-              type: 'text',
-              text: '[Working directory: /repo]',
-              synthetic: true,
-            },
-          ],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('typed-continuation'),
+        parts: [
+          textPart('typed', text),
+          {
+            id: 'context',
+            sessionID: 'session-1',
+            messageID: 'typed-continuation',
+            type: 'text',
+            text: '[Working directory: /repo]',
+            synthetic: true,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.user-message-card-editable')).not.toBeNull();
@@ -2371,10 +2220,8 @@ describe('Message user editing', () => {
     'renders delivered steering as read-only with attachments=%s',
     (withImage) => {
       const onTurnHoverChange = vi.fn();
-      setAppState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setAppState(storePath('sessionStatus', {}));
-      flushSolid();
+      applyState(storePath('activeSessionId', 'session-1'));
+      applyState(storePath('sessionStatus', {}));
       const parts: Part[] = [textPart('steer-text', 'Change direction')];
       if (withImage)
         parts.push({
@@ -2385,11 +2232,9 @@ describe('Message user editing', () => {
           mime: 'image/png',
           url: 'data:image/png;base64,test',
         });
-      cleanup = render(
-        () => Message({ info: userMessage('steer'), parts, steering: true, onTurnHoverChange }),
-        container!
+      mount(() =>
+        Message({ info: userMessage('steer'), parts, steering: true, onTurnHoverChange })
       );
-      flushSolid();
       const card = container!.querySelector<HTMLElement>('.user-message-card')!;
       expect(card.classList).toContain('user-message-steering');
       expect(card.classList).not.toContain('user-message-card-editable');
@@ -2405,20 +2250,16 @@ describe('Message user editing', () => {
   );
 
   it('opens mixed-message image previews without starting a message edit', () => {
-    setAppState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-mixed-image'),
-          parts: [
-            textPart('text-mixed-image', 'Prompt with image'),
-            imageFilePart('file-mixed-image', 'preview.png'),
-          ],
-        }),
-      container!
+    applyState(storePath('activeSessionId', 'session-1'));
+    mount(() =>
+      Message({
+        info: userMessage('message-mixed-image'),
+        parts: [
+          textPart('text-mixed-image', 'Prompt with image'),
+          imageFilePart('file-mixed-image', 'preview.png'),
+        ],
+      })
     );
-    flushSolid();
 
     const card = container?.querySelector('.user-message-card');
     const imageTile = container?.querySelector<HTMLButtonElement>('.user-message-image-tile');
@@ -2443,7 +2284,7 @@ describe('Message user editing', () => {
   it('opens a user message as Markdown on Alt-click without editing it', () => {
     const send = vi.fn();
     fixture<UnknownRecord>(window).__sendToExtension = send;
-    setAppState(
+    applyState(
       storePath('sessions', [
         fixture<Session>({
           id: 'session-1',
@@ -2455,19 +2296,14 @@ describe('Message user editing', () => {
         }),
       ])
     );
-    flushSolid();
-    setAppState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-edit'),
-          parts: [textPart('text-edit', 'original prompt')],
-          promptNumber: 3,
-        }),
-      container!
+    applyState(storePath('activeSessionId', 'session-1'));
+    mount(() =>
+      Message({
+        info: userMessage('message-edit'),
+        parts: [textPart('text-edit', 'original prompt')],
+        promptNumber: 3,
+      })
     );
-    flushSolid();
 
     window.getSelection()?.removeAllRanges();
     flushSolid();
@@ -2489,17 +2325,13 @@ describe('Message user editing', () => {
   });
 
   it('starts a composer edit for image-only user messages', () => {
-    setAppState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-image-only'),
-          parts: [imageFilePart('file-image-1', 'screenshot.png')],
-        }),
-      container!
+    applyState(storePath('activeSessionId', 'session-1'));
+    mount(() =>
+      Message({
+        info: userMessage('message-image-only'),
+        parts: [imageFilePart('file-image-1', 'screenshot.png')],
+      })
     );
-    flushSolid();
 
     window.getSelection()?.removeAllRanges();
     flushSolid();
@@ -2534,22 +2366,18 @@ describe('Message user editing', () => {
   it('edits from a terminal header and opens terminal content from its body', () => {
     const send = vi.fn();
     fixture<UnknownRecord>(window).__sendToExtension = send;
-    setAppState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-terminal-edit'),
-          parts: [
-            textPart(
-              'text-terminal-edit',
-              '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
-            ),
-          ],
-        }),
-      container!
+    applyState(storePath('activeSessionId', 'session-1'));
+    mount(() =>
+      Message({
+        info: userMessage('message-terminal-edit'),
+        parts: [
+          textPart(
+            'text-terminal-edit',
+            '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+          ),
+        ],
+      })
     );
-    flushSolid();
 
     window.getSelection()?.removeAllRanges();
     flushSolid();
@@ -2577,25 +2405,21 @@ describe('Message user editing', () => {
   });
 
   it('does not offer editing when the message belongs to another session', () => {
-    setAppState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-other-session'),
-          parts: [
-            {
-              id: 'text-other-session',
-              sessionID: 'session-1',
-              messageID: 'message-other-session',
-              type: 'text',
-              text: 'original prompt',
-            },
-          ],
-        }),
-      container!
+    applyState(storePath('activeSessionId', 'session-2'));
+    mount(() =>
+      Message({
+        info: userMessage('message-other-session'),
+        parts: [
+          {
+            id: 'text-other-session',
+            sessionID: 'session-1',
+            messageID: 'message-other-session',
+            type: 'text',
+            text: 'original prompt',
+          },
+        ],
+      })
     );
-    flushSolid();
 
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(false);
@@ -2606,8 +2430,7 @@ describe('Message user editing', () => {
   });
 
   it('does not offer editing while the active session is working', () => {
-    setAppState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
-    flushSolid();
+    applyState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
     renderEditableUserMessage();
     flushSolid();
 
@@ -2620,7 +2443,7 @@ describe('Message user editing', () => {
   });
 
   it('does not offer editing in a managed sub-agent session', () => {
-    setAppState(
+    applyState(
       storePath('sessions', [
         {
           id: 'session-1',
@@ -2633,7 +2456,6 @@ describe('Message user editing', () => {
         },
       ])
     );
-    flushSolid();
     renderEditableUserMessage();
     flushSolid();
 
@@ -2657,48 +2479,42 @@ describe('Message streamed assistant text rendering', () => {
       tool: 'question',
     };
 
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...assistantMessage('message-1'), time: { created: 0 } },
-          parts: [questionTool],
-          visibleActiveActivityPartKeys: new Set(),
-          questionRequestForTool: (part) =>
-            part.id === questionTool.id
-              ? {
-                  id: 'question-request',
-                  sessionID: 'session-1',
-                  questions: [
-                    {
-                      question: 'Which option?',
-                      header: 'Choose',
-                      options: [{ label: 'One', description: 'First option' }],
-                    },
-                  ],
-                  tool: { messageID: questionTool.messageID, callID: questionTool.callID },
-                }
-              : null,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...assistantMessage('message-1'), time: { created: 0 } },
+        parts: [questionTool],
+        visibleActiveActivityPartKeys: new Set(),
+        questionRequestForTool: (part) =>
+          part.id === questionTool.id
+            ? {
+                id: 'question-request',
+                sessionID: 'session-1',
+                questions: [
+                  {
+                    question: 'Which option?',
+                    header: 'Choose',
+                    options: [{ label: 'One', description: 'First option' }],
+                  },
+                ],
+                tool: { messageID: questionTool.messageID, callID: questionTool.callID },
+              }
+            : null,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.question-prompt-card')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('renders streamed assistant markdown formatting immediately', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...assistantMessage('message-stream-1'), time: { created: 0 } },
-          parts: [textPart('text-1', 'Loading...')],
-          streamingPartId: 'text-1',
-          streamingText:
-            '## Accessibility\n\n| # | Issue |\n| --- | --- |\n| A1 | Live region |\n\n- Fix announcer',
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...assistantMessage('message-stream-1'), time: { created: 0 } },
+        parts: [textPart('text-1', 'Loading...')],
+        streamingPartId: 'text-1',
+        streamingText:
+          '## Accessibility\n\n| # | Issue |\n| --- | --- |\n| A1 | Live region |\n\n- Fix announcer',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('h2')?.textContent).toBe('Accessibility');
     expect(container?.querySelector('table')).toBeInstanceOf(HTMLTableElement);
@@ -2706,17 +2522,14 @@ describe('Message streamed assistant text rendering', () => {
   });
 
   it('renders streamed fenced code blocks through the markdown renderer', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...assistantMessage('message-stream-2'), time: { created: 0 } },
-          parts: [textPart('text-1', 'Loading...')],
-          streamingPartId: 'text-1',
-          streamingText: 'Before\n\n```ts\nconst value = 1;\n```\n\nAfter',
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...assistantMessage('message-stream-2'), time: { created: 0 } },
+        parts: [textPart('text-1', 'Loading...')],
+        streamingPartId: 'text-1',
+        streamingText: 'Before\n\n```ts\nconst value = 1;\n```\n\nAfter',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.interactive-result-code-block')).toBeInstanceOf(
       HTMLDivElement
@@ -2732,17 +2545,14 @@ describe('Message streamed assistant text rendering', () => {
   });
 
   it('renders streamed reasoning updates without mutating the stored part text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...assistantMessage('message-stream-reasoning'), time: { created: 0 } },
-          parts: [reasoningPart('reason-1', 'Planning')],
-          streamingPartId: 'reason-1',
-          streamingText: '**Plan**\n\nInspect logs',
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...assistantMessage('message-stream-reasoning'), time: { created: 0 } },
+        parts: [reasoningPart('reason-1', 'Planning')],
+        streamingPartId: 'reason-1',
+        streamingText: '**Plan**\n\nInspect logs',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.thinking-label-text')?.textContent).toContain('Plan');
     container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
@@ -2751,35 +2561,29 @@ describe('Message streamed assistant text rendering', () => {
   });
 
   it('does not mark streamed assistant text as a final answer before completion highlighting', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...assistantMessage('message-stream-3'), time: { created: 0 } },
-          parts: [reasoningPart('reason-1', 'Inspecting'), textPart('text-1', 'Loading...')],
-          streamingPartId: 'text-1',
-          streamingText: 'Implemented the fix.',
-          highlightFinalAnswer: false,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...assistantMessage('message-stream-3'), time: { created: 0 } },
+        parts: [reasoningPart('reason-1', 'Inspecting'), textPart('text-1', 'Loading...')],
+        streamingPartId: 'text-1',
+        streamingText: 'Implemented the fix.',
+        highlightFinalAnswer: false,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
   });
 
   it('marks completed text from the streaming buffer as the final answer', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-stream-final'),
-          parts: [textPart('text-1', '')],
-          streamingPartId: 'text-1',
-          streamingText: 'Implemented the fix.',
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-stream-final'),
+        parts: [textPart('text-1', '')],
+        streamingPartId: 'text-1',
+        streamingText: 'Implemented the fix.',
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     const finalItem = container?.querySelector('.assistant-message-flow-item-final');
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
@@ -2787,17 +2591,14 @@ describe('Message streamed assistant text rendering', () => {
   });
 
   it('hides compaction boundary hr markers from rendered streamed text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...assistantMessage('message-stream-4'), time: { created: 0 } },
-          parts: [compactionPart('compaction-1', { auto: true }), textPart('text-1', 'Loading...')],
-          streamingPartId: 'text-1',
-          streamingText: '---\n\nCompacted session summary.\n\n---',
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...assistantMessage('message-stream-4'), time: { created: 0 } },
+        parts: [compactionPart('compaction-1', { auto: true }), textPart('text-1', 'Loading...')],
+        streamingPartId: 'text-1',
+        streamingText: '---\n\nCompacted session summary.\n\n---',
+      })
     );
-    flushSolid();
 
     expect(container?.textContent).toContain('Compacted session summary.');
     expect(container?.querySelectorAll('hr')).toHaveLength(0);
@@ -2811,19 +2612,16 @@ describe('Message streamed assistant text rendering', () => {
     const [streamingText, setStreamingText] = createSignal(
       'Files: `src/webview/components/MarkdownRenderer'
     );
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantSummaryMessage('message-stream-pending-summary'),
-          parts: [textPart('text-1', '')],
-          streamingPartId: 'text-1',
-          get streamingText() {
-            return streamingText();
-          },
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantSummaryMessage('message-stream-pending-summary'),
+        parts: [textPart('text-1', '')],
+        streamingPartId: 'text-1',
+        get streamingText() {
+          return streamingText();
+        },
+      })
     );
-    flushSolid();
 
     const indicator = container?.querySelector('.streaming-markdown-indicator');
     expect(indicator?.getAttribute('aria-label')).toBe('Streaming content');
@@ -2843,17 +2641,14 @@ describe('Message streamed assistant text rendering', () => {
   });
 
   it('preserves a compact stream boundary that completes a bare URL', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: { ...assistantSummaryMessage('message-stream-url-summary'), time: { created: 0 } },
-          parts: [textPart('text-1', '')],
-          streamingPartId: 'text-1',
-          streamingText: 'Docs: https://example.test/summary ',
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: { ...assistantSummaryMessage('message-stream-url-summary'), time: { created: 0 } },
+        parts: [textPart('text-1', '')],
+        streamingPartId: 'text-1',
+        streamingText: 'Docs: https://example.test/summary ',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
     expect(
@@ -2862,15 +2657,12 @@ describe('Message streamed assistant text rendering', () => {
   });
 
   it('hides compaction boundary hr markers for assistant summary messages', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantSummaryMessage('message-stream-5'),
-          parts: [textPart('text-1', '---\n\nGoal\n\n- Fix issue\n\n---')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantSummaryMessage('message-stream-5'),
+        parts: [textPart('text-1', '---\n\nGoal\n\n- Fix issue\n\n---')],
+      })
     );
-    flushSolid();
 
     expect(container?.textContent).toContain('Goal');
     expect(container?.querySelectorAll('hr')).toHaveLength(0);
@@ -2884,20 +2676,17 @@ describe('Message assistant final answer rendering', () => {
     host.appendChild(container!);
     document.body.appendChild(host);
 
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-normal-observers'),
-          parts: [
-            reasoningPart('reason-1', 'Inspecting', true),
-            textPart('text-1', 'Status update.'),
-            textPart('text-2', 'Final answer.'),
-          ],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-normal-observers'),
+        parts: [
+          reasoningPart('reason-1', 'Inspecting', true),
+          textPart('text-1', 'Status update.'),
+          textPart('text-2', 'Final answer.'),
+        ],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     await Promise.resolve();
     flushSolid();
@@ -2913,32 +2702,29 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('shows the read mode toggle for large final answers only while Alt is pressed', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-read-large'),
-          parts: [
-            reasoningPart('reason-1', 'Inspecting'),
-            textPart('text-1', 'Status update.'),
-            textPart(
-              'text-2',
-              [
-                'Implemented the final fix across the highlighted layout and kept the intermediate updates separate.',
-                'The final answer now has enough detail to warrant read mode.',
-                'It includes multiple lines of explanation so longer responses stay comfortable to read.',
-                'This also gives the toggle a clear threshold-based behavior.',
-                'Users will no longer see the expand affordance for very short replies.',
-                'Only responses with enough content should show the button.',
-                'That keeps the card cleaner for compact confirmations.',
-                'This paragraph pushes the response over the large-response threshold.',
-              ].join('\n\n')
-            ),
-          ],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-read-large'),
+        parts: [
+          reasoningPart('reason-1', 'Inspecting'),
+          textPart('text-1', 'Status update.'),
+          textPart(
+            'text-2',
+            [
+              'Implemented the final fix across the highlighted layout and kept the intermediate updates separate.',
+              'The final answer now has enough detail to warrant read mode.',
+              'It includes multiple lines of explanation so longer responses stay comfortable to read.',
+              'This also gives the toggle a clear threshold-based behavior.',
+              'Users will no longer see the expand affordance for very short replies.',
+              'Only responses with enough content should show the button.',
+              'That keeps the card cleaner for compact confirmations.',
+              'This paragraph pushes the response over the large-response threshold.',
+            ].join('\n\n')
+          ),
+        ],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
 
@@ -2953,51 +2739,45 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('hides the read mode toggle for short final answers', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-read-short'),
-          parts: [
-            reasoningPart('reason-1', 'Inspecting'),
-            textPart('text-1', 'Status update.'),
-            textPart('text-2', 'Final answer for reading.'),
-          ],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-read-short'),
+        parts: [
+          reasoningPart('reason-1', 'Inspecting'),
+          textPart('text-1', 'Status update.'),
+          textPart('text-2', 'Final answer for reading.'),
+        ],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
   });
 
   it('opens the final answer in read mode and closes with Escape', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-read-1'),
-          parts: [
-            reasoningPart('reason-1', 'Inspecting'),
-            textPart('text-1', 'Status update.'),
-            textPart(
-              'text-2',
-              [
-                'Final answer for reading.',
-                'This version is intentionally long enough to trigger the read mode affordance.',
-                'It spans several paragraphs so the expanded reading surface is useful.',
-                'That keeps the test aligned with the production behavior for large responses.',
-                'The extra lines ensure the threshold is crossed without depending on exact markdown rendering.',
-                'Read mode should open from the final answer only.',
-                'Earlier status updates must stay out of the overlay.',
-                'Escape should still close the overlay cleanly.',
-              ].join('\n\n')
-            ),
-          ],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-read-1'),
+        parts: [
+          reasoningPart('reason-1', 'Inspecting'),
+          textPart('text-1', 'Status update.'),
+          textPart(
+            'text-2',
+            [
+              'Final answer for reading.',
+              'This version is intentionally long enough to trigger the read mode affordance.',
+              'It spans several paragraphs so the expanded reading surface is useful.',
+              'That keeps the test aligned with the production behavior for large responses.',
+              'The extra lines ensure the threshold is crossed without depending on exact markdown rendering.',
+              'Read mode should open from the final answer only.',
+              'Earlier status updates must stay out of the overlay.',
+              'Escape should still close the overlay cleanly.',
+            ].join('\n\n')
+          ),
+        ],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     pressAlt();
     flushSolid();
@@ -3026,20 +2806,17 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('marks the final text update inside a mixed assistant turn as a dedicated final answer block', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-2'),
-          parts: [
-            reasoningPart('reason-1', 'Inspecting'),
-            textPart('text-1', 'Status update.'),
-            textPart('text-2', 'Final answer.'),
-          ],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-2'),
+        parts: [
+          reasoningPart('reason-1', 'Inspecting'),
+          textPart('text-1', 'Status update.'),
+          textPart('text-2', 'Final answer.'),
+        ],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
     const finalItem = container?.querySelector('.assistant-message-flow-item-final');
@@ -3056,20 +2833,17 @@ describe('Message assistant final answer rendering', () => {
     });
     const [highlightFinalAnswer, setHighlightFinalAnswer] = createSignal(false);
 
-    cleanup = render(
-      () =>
-        Message({
-          get info() {
-            return info();
-          },
-          parts: [textPart('text-final-pulse', 'Final answer.')],
-          get highlightFinalAnswer() {
-            return highlightFinalAnswer();
-          },
-        }),
-      container!
+    mount(() =>
+      Message({
+        get info() {
+          return info();
+        },
+        parts: [textPart('text-final-pulse', 'Final answer.')],
+        get highlightFinalAnswer() {
+          return highlightFinalAnswer();
+        },
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
 
@@ -3112,20 +2886,17 @@ describe('Message assistant final answer rendering', () => {
     });
     const [highlightFinalAnswer, setHighlightFinalAnswer] = createSignal(false);
 
-    cleanup = render(
-      () =>
-        Message({
-          get info() {
-            return info();
-          },
-          parts: [textPart('text-final-follow-up', 'Existing final answer.')],
-          get highlightFinalAnswer() {
-            return highlightFinalAnswer();
-          },
-        }),
-      container!
+    mount(() =>
+      Message({
+        get info() {
+          return info();
+        },
+        parts: [textPart('text-final-follow-up', 'Existing final answer.')],
+        get highlightFinalAnswer() {
+          return highlightFinalAnswer();
+        },
+      })
     );
-    flushSolid();
 
     setInfo(assistantMessage('message-final-follow-up'));
     flushSolid();
@@ -3145,16 +2916,13 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('does not replay the final mark pulse for an already completed response', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-final-restored'),
-          parts: [textPart('text-final-restored', 'Restored final answer.')],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-final-restored'),
+        parts: [textPart('text-final-restored', 'Restored final answer.')],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
       HTMLDivElement
@@ -3163,26 +2931,23 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('does not mark text as a dedicated final answer block when a visible tool call follows it', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-tool-after-text'),
-          parts: [
-            textPart('text-1', 'Selected excerpt'),
-            toolPart('tool-1', {
-              status: 'completed',
-              input: { command: 'pwd' },
-              output: '/workspace',
-              title: 'Inspect cwd',
-              time: { start: 1, end: 2 },
-              metadata: {},
-            }),
-          ],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-tool-after-text'),
+        parts: [
+          textPart('text-1', 'Selected excerpt'),
+          toolPart('tool-1', {
+            status: 'completed',
+            input: { command: 'pwd' },
+            output: '/workspace',
+            title: 'Inspect cwd',
+            time: { start: 1, end: 2 },
+            metadata: {},
+          }),
+        ],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.assistant-turn-content-plain')).toBeInstanceOf(
       HTMLDivElement
@@ -3205,17 +2970,14 @@ describe('Message assistant final answer rendering', () => {
       },
     ]);
 
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-with-diff'),
-          parts: [textPart('text-1', 'Hello\nworld')],
-          isLastAssistant: true,
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-with-diff'),
+        parts: [textPart('text-1', 'Hello\nworld')],
+        isLastAssistant: true,
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     await vi.waitFor(() => {
       expect(container?.querySelector('.diff-summary')).toBeInstanceOf(HTMLDivElement);
@@ -3234,21 +2996,18 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('renders thinking outside highlighted planning cards and hides workspace text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-3'),
-          parts: [
-            reasoningPart('reason-1', 'Inspecting'),
-            textPart('text-1', '[Working directory: /workspace]'),
-            textPart('text-2', 'Dummy Plan\n\n- First step'),
-          ],
-          highlightFinalAnswer: true,
-          highlightPlanningAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-3'),
+        parts: [
+          reasoningPart('reason-1', 'Inspecting'),
+          textPart('text-1', '[Working directory: /workspace]'),
+          textPart('text-2', 'Dummy Plan\n\n- First step'),
+        ],
+        highlightFinalAnswer: true,
+        highlightPlanningAnswer: true,
+      })
     );
-    flushSolid();
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
     const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
@@ -3266,20 +3025,17 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('renders thinking outside highlighted result cards and hides workspace text', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-4'),
-          parts: [
-            reasoningPart('reason-1', 'Inspecting'),
-            textPart('text-1', '[Working directory: /workspace]'),
-            textPart('text-2', 'Implemented the fix.'),
-          ],
-          highlightFinalAnswer: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistantMessage('message-4'),
+        parts: [
+          reasoningPart('reason-1', 'Inspecting'),
+          textPart('text-1', '[Working directory: /workspace]'),
+          textPart('text-2', 'Implemented the fix.'),
+        ],
+        highlightFinalAnswer: true,
+      })
     );
-    flushSolid();
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
     const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
@@ -3295,15 +3051,12 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('renders carousel navigation inside the image block footer row', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-5'),
-          parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-5'),
+        parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
+      })
     );
-    flushSolid();
 
     const figure = container?.querySelector('.message-image-carousel-figure');
     const captionRow = container?.querySelector('.message-image-carousel-caption-row');
@@ -3320,15 +3073,12 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('opens a larger preview for a single image and closes with Escape', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-image-preview-1'),
-          parts: [imageFilePart('image-1', 'diagram.png')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-image-preview-1'),
+        parts: [imageFilePart('image-1', 'diagram.png')],
+      })
     );
-    flushSolid();
 
     const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
     const card = container?.querySelector('.user-message-card');
@@ -3357,15 +3107,12 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('opens the current carousel image in the larger preview', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-image-preview-2'),
-          parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-image-preview-2'),
+        parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
+      })
     );
-    flushSolid();
 
     const nextButton = container?.querySelectorAll<HTMLButtonElement>(
       '.message-image-carousel-nav'
@@ -3391,15 +3138,12 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('navigates between attached images from the larger preview', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: userMessage('message-image-preview-3'),
-          parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: userMessage('message-image-preview-3'),
+        parts: [imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')],
+      })
     );
-    flushSolid();
 
     const trigger = container?.querySelector<HTMLButtonElement>(
       '.message-image-carousel-preview-trigger'
@@ -3436,21 +3180,18 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('renders assistant message errors as an inline error block', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: {
-            ...assistantMessage('message-3'),
-            error: {
-              name: 'server_error',
-              data: { message: 'An error occurred while processing your request.' },
-            },
+    mount(() =>
+      Message({
+        info: {
+          ...assistantMessage('message-3'),
+          error: {
+            name: 'server_error',
+            data: { message: 'An error occurred while processing your request.' },
           },
-          parts: [reasoningPart('reason-1', 'Inspecting')],
-        }),
-      container!
+        },
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      })
     );
-    flushSolid();
 
     const errorText = container?.querySelector('.assistant-message-flow-item-error');
     const diffSummary = container?.querySelector('.diff-summary');
@@ -3461,21 +3202,18 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('keeps the provider explanation in the expanded error details', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: {
-            ...assistantMessage('message-3'),
-            error: {
-              name: 'APIError',
-              data: { message: 'Not Found', statusCode: 404, isRetryable: true },
-            },
+    mount(() =>
+      Message({
+        info: {
+          ...assistantMessage('message-3'),
+          error: {
+            name: 'APIError',
+            data: { message: 'Not Found', statusCode: 404, isRetryable: true },
           },
-          parts: [reasoningPart('reason-1', 'Inspecting')],
-        }),
-      container!
+        },
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      })
     );
-    flushSolid();
 
     const errorText = container?.querySelector('.assistant-message-flow-item-error');
 
@@ -3494,28 +3232,25 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('reveals the original provider error from a details toggle', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: {
-            ...assistantMessage('message-3'),
-            error: {
-              name: 'APIError',
-              data: {
-                message: 'Not Found',
-                statusCode: 404,
-                isRetryable: true,
-                responseBody: '',
-                responseHeaders: { server: 'cloudflare', 'cf-ray': 'a3558afbee816c31-DFW' },
-                metadata: { url: 'https://api.openai.com/v1/responses' },
-              },
+    mount(() =>
+      Message({
+        info: {
+          ...assistantMessage('message-3'),
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'Not Found',
+              statusCode: 404,
+              isRetryable: true,
+              responseBody: '',
+              responseHeaders: { server: 'cloudflare', 'cf-ray': 'a3558afbee816c31-DFW' },
+              metadata: { url: 'https://api.openai.com/v1/responses' },
             },
           },
-          parts: [reasoningPart('reason-1', 'Inspecting')],
-        }),
-      container!
+        },
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      })
     );
-    flushSolid();
 
     const detailsToggle = container?.querySelector<HTMLButtonElement>(
       '.assistant-message-flow-item-error-details-toggle'
@@ -3553,17 +3288,15 @@ describe('Message assistant final answer rendering', () => {
         data: { message: 'Not Found', statusCode: 404, isRetryable: true },
       },
     };
-    cleanup = render(() => Message({ info, parts: [] }), container!);
-    flushSolid();
+    mount(() => Message({ info, parts: [] }));
     container
       ?.querySelector<HTMLButtonElement>('.assistant-message-flow-item-error-details-toggle')
       ?.click();
     flushSolid();
-    cleanup();
+    cleanup!();
     flushSolid();
 
-    cleanup = render(() => Message({ info, parts: [] }), container!);
-    flushSolid();
+    mount(() => Message({ info, parts: [] }));
 
     expect(
       container
@@ -3574,22 +3307,19 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('renders a historical failure as a neutral notice after a later successful response', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: {
-            ...assistantMessage('message-3'),
-            error: {
-              name: 'server_error',
-              data: { message: 'OpenCode failed before a response was recorded.' },
-            },
+    mount(() =>
+      Message({
+        info: {
+          ...assistantMessage('message-3'),
+          error: {
+            name: 'server_error',
+            data: { message: 'OpenCode failed before a response was recorded.' },
           },
-          parts: [],
-          retryState: 'resolved',
-        }),
-      container!
+        },
+        parts: [],
+        retryState: 'resolved',
+      })
     );
-    flushSolid();
     const notice = container?.querySelector('.assistant-message-flow-item-error-notice');
     expect(notice?.textContent).toBe('Provider reconnected.');
     expect(notice?.querySelector('.assistant-message-flow-item-error-details-toggle')).toBeNull();
@@ -3623,16 +3353,13 @@ describe('Message assistant final answer rendering', () => {
     );
     flushSolid();
 
-    cleanup = render(
-      () =>
-        Message({
-          info: assistant,
-          parts: [reasoningPart('reason-1', 'Inspecting')],
-          isLastAssistant: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistant,
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+        isLastAssistant: true,
+      })
     );
-    flushSolid();
 
     const retryButton = container?.querySelector<HTMLButtonElement>(
       '.assistant-message-flow-item-error-action'
@@ -3670,8 +3397,7 @@ describe('Message assistant final answer rendering', () => {
         })
       );
       flushSolid();
-      cleanup = render(() => Message({ info, parts: [], isLastAssistant: true }), container!);
-      flushSolid();
+      mount(() => Message({ info, parts: [], isLastAssistant: true }));
       const button = container?.querySelector<HTMLButtonElement>(
         '.assistant-message-flow-item-error-action'
       );
@@ -3731,16 +3457,13 @@ describe('Message assistant final answer rendering', () => {
     flushSolid();
 
     try {
-      cleanup = render(
-        () =>
-          Message({
-            info: assistant,
-            parts: [reasoningPart('reason-1', 'Inspecting')],
-            isLastAssistant: true,
-          }),
-        container!
+      mount(() =>
+        Message({
+          info: assistant,
+          parts: [reasoningPart('reason-1', 'Inspecting')],
+          isLastAssistant: true,
+        })
       );
-      flushSolid();
 
       expect(container?.querySelector('.assistant-message-flow-item-error')).toBeNull();
 
@@ -3784,18 +3507,15 @@ describe('Message assistant final answer rendering', () => {
     );
     flushSolid();
 
-    cleanup = render(
-      () =>
-        Message({
-          info: assistant,
-          parts: [reasoningPart('reason-1', 'Inspecting')],
-          get isLastAssistant() {
-            return isLastAssistant();
-          },
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistant,
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+        get isLastAssistant() {
+          return isLastAssistant();
+        },
+      })
     );
-    flushSolid();
 
     const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
     const reauthenticateButton = container?.querySelector<HTMLButtonElement>(
@@ -3868,25 +3588,20 @@ describe('Message assistant final answer rendering', () => {
       },
     };
     try {
-      setAppState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-6' }));
-      flushSolid();
-      cleanup = render(() => Message({ info, parts: [], isLastAssistant: true }), container!);
-      flushSolid();
+      applyState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-6' }));
+      mount(() => Message({ info, parts: [], isLastAssistant: true }));
       expect(
         container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
       ).toBe('Re-authenticate');
-      setAppState(storePath('selectedModel', { providerID: 'anthropic', modelID: 'claude' }));
-      flushSolid();
+      applyState(storePath('selectedModel', { providerID: 'anthropic', modelID: 'claude' }));
       expect(container?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
       expect(container?.querySelector('.assistant-message-flow-item-error')).not.toBeNull();
-      setAppState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-6' }));
-      flushSolid();
+      applyState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-6' }));
       expect(
         container?.querySelector('.assistant-message-flow-item-error-action')?.textContent
       ).toBe('Re-authenticate');
     } finally {
-      setAppState(storePath('selectedModel', null));
-      flushSolid();
+      applyState(storePath('selectedModel', null));
     }
   });
 
@@ -3898,18 +3613,15 @@ describe('Message assistant final answer rendering', () => {
         data: { message: 'Token refresh failed: 401' },
       },
     });
-    cleanup = render(
-      () =>
-        Message({
-          get info() {
-            return info();
-          },
-          parts: [],
-          retryState: 'resolved',
-        }),
-      container!
+    mount(() =>
+      Message({
+        get info() {
+          return info();
+        },
+        parts: [],
+        retryState: 'resolved',
+      })
     );
-    flushSolid();
     resolveProviderAuthFailure(info().providerID);
     flushSolid();
     setInfo({
@@ -3940,16 +3652,13 @@ describe('Message assistant final answer rendering', () => {
       },
     };
 
-    cleanup = render(
-      () =>
-        Message({
-          info: assistant,
-          parts: [reasoningPart('reason-1', 'Inspecting')],
-          isLastAssistant: true,
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: assistant,
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+        isLastAssistant: true,
+      })
     );
-    flushSolid();
 
     const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
     const retryButton = container?.querySelector<HTMLButtonElement>(
@@ -3969,18 +3678,15 @@ describe('Message assistant final answer rendering', () => {
   });
 
   it('shows friendly label for MessageOutputLengthError (no data.message)', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: {
-            ...assistantMessage('message-3'),
-            error: { name: 'MessageOutputLengthError' },
-          },
-          parts: [reasoningPart('reason-1', 'Inspecting')],
-        }),
-      container!
+    mount(() =>
+      Message({
+        info: {
+          ...assistantMessage('message-3'),
+          error: { name: 'MessageOutputLengthError' },
+        },
+        parts: [reasoningPart('reason-1', 'Inspecting')],
+      })
     );
-    flushSolid();
 
     const errorText = container?.querySelector('.assistant-message-flow-item-error');
     expect(errorText?.textContent).toContain('Output length exceeded');
@@ -4007,11 +3713,7 @@ describe('Message assistant final answer rendering', () => {
     );
     flushSolid();
 
-    cleanup = render(
-      () => Message({ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }),
-      container!
-    );
-    flushSolid();
+    mount(() => Message({ info: assistant, parts: [reasoningPart('reason-1', 'Inspecting')] }));
 
     const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
     const retryButton = container?.querySelector('.assistant-message-flow-item-error-action');

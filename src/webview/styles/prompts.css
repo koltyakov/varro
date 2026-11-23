@@ -190,12 +190,6 @@
   -webkit-user-select: none;
 }
 
-.question-option-input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
 .question-option:hover {
   border-color: color-mix(in srgb, var(--color-vscode-border) 24%, transparent);
   background: color-mix(in srgb, var(--color-vscode-hover) 84%, transparent);
@@ -209,10 +203,6 @@
 .question-option:focus-visible {
   outline: 2px solid var(--color-vscode-accent);
   outline-offset: 1px;
-}
-
-.question-option-input:focus-visible {
-  outline: none;
 }
 
 .question-radio,
@@ -702,23 +692,7 @@ body.vscode-high-contrast-light {
   --color-code-operator: var(--color-vscode-fg);
 }
 
-body.vscode-high-contrast
-  :is(
-    .assistant-turn-content,
-    .todo-block,
-    .chat-queue-container,
-    .chat-tool-invocation-part,
-    .chat-thinking-box,
-    .diff-view-widget,
-    .composer-completion-menu,
-    .composer-completion-help,
-    .toolbar-popover,
-    .dropdown-menu,
-    .model-picker-details,
-    .provider-limit-popup,
-    .context-popup
-  ),
-body.vscode-high-contrast-light
+body:is(.vscode-high-contrast, .vscode-high-contrast-light)
   :is(
     .assistant-turn-content,
     .todo-block,
@@ -738,23 +712,12 @@ body.vscode-high-contrast-light
   box-shadow: none;
 }
 
-body.vscode-high-contrast
+body:is(.vscode-high-contrast, .vscode-high-contrast-light)
   :is(
     .toolbar-picker,
     .chat-send-button.enabled,
     .send-mode-options,
     .question-btn,
-    .chat-stop-button,
-    .question-option,
-    .server-status-action-button
-  ),
-body.vscode-high-contrast-light
-  :is(
-    .toolbar-picker,
-    .chat-send-button.enabled,
-    .send-mode-options,
-    .question-btn,
-    .chat-stop-button,
     .question-option,
     .server-status-action-button
   ) {
@@ -762,8 +725,7 @@ body.vscode-high-contrast-light
   outline-offset: -1px;
 }
 
-body.vscode-high-contrast :is(button:focus-visible, input:focus-visible, textarea:focus-visible),
-body.vscode-high-contrast-light
+body:is(.vscode-high-contrast, .vscode-high-contrast-light)
   :is(button:focus-visible, input:focus-visible, textarea:focus-visible) {
   outline: 2px solid var(--color-vscode-contrast-active-border);
 }

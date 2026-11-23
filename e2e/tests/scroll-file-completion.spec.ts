@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { ToolPart } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getListDistanceFromBottom, postWebviewMessage, waitForAnimationFrames } from './helpers';
 
 test('keeps painted content fixed when an inline file edit drops its running status card', async ({
   page,
@@ -12,21 +12,16 @@ test('keeps painted content fixed when an inline file edit drops its running sta
   const sessionID = 'session-rapid-streaming-jitter';
   const row = page.locator(`[data-msg-id="${messageID}"]`);
   await expect(row.locator('.rendered-markdown')).toHaveText('Starting...');
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'config/update',
-        payload: {
-          desktopSessionPaneSide: 'left',
-          defaultPermissionMode: 'default',
-          chatFontSize: 13,
-          chatEditorFontSize: 12,
-          chatFontFamily: 'default',
-          showFileDiffs: true,
-        },
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'config/update',
+    payload: {
+      desktopSessionPaneSide: 'left',
+      defaultPermissionMode: 'default',
+      chatFontSize: 13,
+      chatEditorFontSize: 12,
+      chatFontFamily: 'default',
+      showFileDiffs: true,
+    },
   });
   const content =
     Array.from({ length: 82 }, (_, index) => `export const value${index} = ${index};`).join('\n') +
@@ -64,22 +59,13 @@ test('keeps painted content fixed when an inline file edit drops its running sta
       time: { start: Date.now() },
     },
   };
-  await page.evaluate((activity) => {
-    window.postMessage(
-      {
-        type: 'server/event',
-        payload: { type: 'message.part.updated', properties: { part: activity } },
-      },
-      '*'
-    );
-  }, part);
+  await postWebviewMessage(page, {
+    type: 'server/event',
+    payload: { type: 'message.part.updated', properties: { part } },
+  });
   await expect(row.locator('.file-change-card')).toBeVisible();
   await expect(row.locator('.file-change-inline-diffs')).toBeVisible();
-  await expect
-    .poll(() =>
-      getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-    )
-    .toBeLessThan(2);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
   await waitForAnimationFrames(page, 12);
 
   const samples = await row.evaluate(async (element, activity) => {

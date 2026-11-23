@@ -54,18 +54,16 @@ function flushStreamBatch() {
   if (streamBatch.length === 0) return;
   const messages = streamBatch;
   streamBatch = [];
-  (() => {
-    for (const message of messages) {
-      try {
-        for (const handler of handlers) handler(message);
-      } catch (error) {
-        // Preserve normal uncaught-error reporting without losing subsequent packets in the batch.
-        queueMicrotask(() => {
-          throw error;
-        });
-      }
+  for (const message of messages) {
+    try {
+      for (const handler of handlers) handler(message);
+    } catch (error) {
+      // Preserve normal uncaught-error reporting without losing subsequent packets in the batch.
+      queueMicrotask(() => {
+        throw error;
+      });
     }
-  })();
+  }
 }
 
 const messageListener = (event: Pick<MessageEvent, 'data'>) => {
@@ -82,10 +80,8 @@ const messageListener = (event: Pick<MessageEvent, 'data'>) => {
     return;
   }
   // Permissions, questions, completion, and RPC messages are ordering barriers and remain immediate.
-  (() => {
-    flushStreamBatch();
-    for (const handler of handlers) handler(msg);
-  })();
+  flushStreamBatch();
+  for (const handler of handlers) handler(msg);
 };
 
 export function cleanupBridge() {
@@ -258,15 +254,7 @@ function sendApiCall<T>(
   method: string,
   path: string,
   body: UnknownRecord[string],
-  options: {
-    timeoutMs: number;
-    signal?: AbortSignal;
-    retries: number;
-    permissionAutomationLease?: number;
-    permissionAutomationSessionID?: string;
-    queuedMessageDispatch?: { itemId: string; lease: number };
-    interruptedRecovery?: true;
-  }
+  options: ApiCallOptions & { timeoutMs: number; retries: number }
 ): Promise<T> {
   if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
   const id = ++reqId;

@@ -7,35 +7,10 @@
  * subsequent sends. See AUDIT.md (2026-08-31).
  */
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import { appendStreamingDelta } from './scroll-helpers';
+import type { StreamingPartTarget } from './scroll-helpers';
 
-type StreamTarget = { sessionID: string; messageID: string; partID: string };
-
-async function postDelta(page: Page, target: StreamTarget, delta: string) {
-  await page.evaluate(
-    ({ part, nextDelta }) => {
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'message.part.delta',
-            properties: {
-              sessionID: part.sessionID,
-              messageID: part.messageID,
-              partID: part.partID,
-              field: 'text',
-              delta: nextDelta,
-            },
-          },
-        },
-        '*'
-      );
-    },
-    { part: target, nextDelta: delta }
-  );
-}
-
-const BUSY_TARGET: StreamTarget = {
+const BUSY_TARGET: StreamingPartTarget = {
   sessionID: 'session-busy-stop-send',
   messageID: 'message-busy-assistant',
   partID: 'message-busy-assistant-part-1',
@@ -108,7 +83,11 @@ test('new chat during active streaming opens a draft and keeps handlers alive', 
   ).toBeVisible();
 
   for (let index = 0; index < 6; index += 1) {
-    await postDelta(page, BUSY_TARGET, `\n\nStreaming chunk ${index} with extra prose. `);
+    await appendStreamingDelta(
+      page,
+      BUSY_TARGET,
+      `\n\nStreaming chunk ${index} with extra prose. `
+    );
   }
   await expect(page.getByText('Streaming chunk 5', { exact: false })).toBeVisible();
 
@@ -122,7 +101,7 @@ test('new chat during active streaming opens a draft and keeps handlers alive', 
 
   // Old-session deltas keep arriving after the draft starts.
   for (let index = 0; index < 6; index += 1) {
-    await postDelta(page, BUSY_TARGET, `\n\nPost-draft chunk ${index}. `);
+    await appendStreamingDelta(page, BUSY_TARGET, `\n\nPost-draft chunk ${index}. `);
   }
 
   // Draft must not resurrect the old transcript.
@@ -146,10 +125,10 @@ test('message typed in the draft after + goes to a new session, not the busy one
     page.getByText('Still working through the requested refactor steps.', { exact: true })
   ).toBeVisible();
 
-  await postDelta(page, BUSY_TARGET, '\n\nStill going. ');
+  await appendStreamingDelta(page, BUSY_TARGET, '\n\nStill going. ');
   await expect(page.getByText('Still going.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'New chat' }).first().click();
-  await postDelta(page, BUSY_TARGET, '\n\nStill going after draft. ');
+  await appendStreamingDelta(page, BUSY_TARGET, '\n\nStill going after draft. ');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Hello from the draft chat.');

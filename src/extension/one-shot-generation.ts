@@ -86,3 +86,19 @@ export async function tryGenerateOneShot(
     throw new Error('OpenCode returned an invalid one-shot generation response');
   return { text: data.text };
 }
+
+/** Parses model output as JSON, tolerating a surrounding Markdown code fence. */
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- Callers decode the untrusted model output before use.
+export function parseJsonObject(text: string): unknown | null {
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+  try {
+    // SAFETY: Widening the parsed value to unknown forces callers to validate it.
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
+}

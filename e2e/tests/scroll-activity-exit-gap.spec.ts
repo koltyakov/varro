@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, Part, Session } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const virtualized of [false, true]) {
   test(`reserves the final tray's flow gap before removal${virtualized ? ' with virtualization' : ''}`, async ({
@@ -92,14 +93,7 @@ for (const virtualized of [false, true]) {
         },
       ],
     });
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated harness reads its fixture before mounting the application.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages: initial }
-    );
+    await installPlaybackCapture(page, { session, initialMessages: initial });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     const row = page.locator(`[data-msg-id="${info.id}"]`);
     await expect(row.locator('.rendered-markdown')).toContainText('Paragraph 11.');

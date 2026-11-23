@@ -187,83 +187,81 @@ export const sessionStore = {
       }
     }
     let reconciledStatuses = effectiveStatuses;
-    (() => {
-      setState(
-        storePath('sessionBackgroundServices', (current) => {
-          let next: Record<string, number> | undefined;
-          for (const sessionId of new Set([...Object.keys(current), ...Object.keys(statuses)])) {
-            const updatedAt = backgroundServicesUpdatedAt.get(sessionId);
-            if (
-              snapshotStartedAt !== undefined &&
-              updatedAt !== undefined &&
-              updatedAt > snapshotStartedAt
-            )
-              continue;
-            if (snapshotStartedAt !== undefined && updatedAt !== undefined)
-              backgroundServicesUpdatedAt.delete(sessionId);
-            const status = statuses[sessionId];
-            const count =
-              status?.type === 'idle' || status?.type === 'busy'
-                ? (status.backgroundServices ?? 0)
-                : 0;
-            if (
-              !Number.isSafeInteger(count) ||
-              count < 0 ||
-              current[sessionId] === count ||
-              (current[sessionId] === undefined && count === 0)
-            )
-              continue;
-            next ??= { ...current };
-            next[sessionId] = count;
-          }
-          return next ?? current;
-        })
-      );
-      setState(
-        storePath('sessionStatus', (current) => {
-          if (snapshotStartedAt === undefined) {
-            reconciledStatuses = areEqualSessionStatusRecords(current, effectiveStatuses)
-              ? current
-              : effectiveStatuses;
-            return reconciledStatuses;
-          }
-
-          const next = { ...effectiveStatuses };
-          for (const [sessionId, updatedAt] of sessionStatusLocalUpdatedAt) {
-            if (updatedAt <= snapshotStartedAt) {
-              sessionStatusLocalUpdatedAt.delete(sessionId);
-              continue;
-            }
-
-            const currentStatus = current[sessionId];
-            if (currentStatus) next[sessionId] = currentStatus;
-            else delete next[sessionId];
-          }
-
-          const activeRootId = getSessionTreeRootId(state.activeSessionId) || state.activeSessionId;
-          for (const sessionId of getSessionTreeIds(activeRootId)) {
-            const currentStatus = current[sessionId];
-            const incomingStatus = next[sessionId];
-            if (
-              currentStatus &&
-              isRunningSessionStatus(currentStatus) &&
-              (!incomingStatus || incomingStatus.type === 'idle') &&
-              !hasSettledLatestAssistantMessage(sessionId)
-            ) {
-              next[sessionId] = currentStatus;
-            }
-          }
-          reconciledStatuses = areEqualSessionStatusRecords(current, next) ? current : next;
+    setState(
+      storePath('sessionBackgroundServices', (current) => {
+        let next: Record<string, number> | undefined;
+        for (const sessionId of new Set([...Object.keys(current), ...Object.keys(statuses)])) {
+          const updatedAt = backgroundServicesUpdatedAt.get(sessionId);
+          if (
+            snapshotStartedAt !== undefined &&
+            updatedAt !== undefined &&
+            updatedAt > snapshotStartedAt
+          )
+            continue;
+          if (snapshotStartedAt !== undefined && updatedAt !== undefined)
+            backgroundServicesUpdatedAt.delete(sessionId);
+          const status = statuses[sessionId];
+          const count =
+            status?.type === 'idle' || status?.type === 'busy'
+              ? (status.backgroundServices ?? 0)
+              : 0;
+          if (
+            !Number.isSafeInteger(count) ||
+            count < 0 ||
+            current[sessionId] === count ||
+            (current[sessionId] === undefined && count === 0)
+          )
+            continue;
+          next ??= { ...current };
+          next[sessionId] = count;
+        }
+        return next ?? current;
+      })
+    );
+    setState(
+      storePath('sessionStatus', (current) => {
+        if (snapshotStartedAt === undefined) {
+          reconciledStatuses = areEqualSessionStatusRecords(current, effectiveStatuses)
+            ? current
+            : effectiveStatuses;
           return reconciledStatuses;
-        })
+        }
+
+        const next = { ...effectiveStatuses };
+        for (const [sessionId, updatedAt] of sessionStatusLocalUpdatedAt) {
+          if (updatedAt <= snapshotStartedAt) {
+            sessionStatusLocalUpdatedAt.delete(sessionId);
+            continue;
+          }
+
+          const currentStatus = current[sessionId];
+          if (currentStatus) next[sessionId] = currentStatus;
+          else delete next[sessionId];
+        }
+
+        const activeRootId = getSessionTreeRootId(state.activeSessionId) || state.activeSessionId;
+        for (const sessionId of getSessionTreeIds(activeRootId)) {
+          const currentStatus = current[sessionId];
+          const incomingStatus = next[sessionId];
+          if (
+            currentStatus &&
+            isRunningSessionStatus(currentStatus) &&
+            (!incomingStatus || incomingStatus.type === 'idle') &&
+            !hasSettledLatestAssistantMessage(sessionId)
+          ) {
+            next[sessionId] = currentStatus;
+          }
+        }
+        reconciledStatuses = areEqualSessionStatusRecords(current, next) ? current : next;
+        return reconciledStatuses;
+      })
+    );
+    for (let index = state.questionResponsePendingSessionIds.length - 1; index >= 0; index -= 1) {
+      clearQuestionResponsePending(
+        state.questionResponsePendingSessionIds[index]!,
+        snapshotStartedAt
       );
-      for (let index = state.questionResponsePendingSessionIds.length - 1; index >= 0; index -= 1) {
-        clearQuestionResponsePending(
-          state.questionResponsePendingSessionIds[index]!,
-          snapshotStartedAt
-        );
-      }
-    })();
+    }
     return reconciledStatuses;
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
@@ -278,42 +276,36 @@ export const sessionStore = {
     const prev = state.sessionStatus[sessionId];
     sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
     recordStatusCompletionTransition(sessionId, prev, status);
-    (() => {
-      const count = incomingServiceCount ?? retainedServiceCount;
-      if (count !== undefined && Number.isSafeInteger(count) && count >= 0) {
-        if (incomingServiceCount !== undefined)
-          backgroundServicesUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
-        if (state.sessionBackgroundServices[sessionId] !== count)
-          setState(storePath('sessionBackgroundServices', sessionId, count));
-      }
-      setState(
-        storePath('sessionStatus', (current) => {
-          const currentStatus = current[sessionId];
-          if (currentStatus && isEqualSessionStatus(currentStatus, status)) return current;
-          return { ...current, [sessionId]: status };
-        })
-      );
-      clearQuestionResponsePending(sessionId);
-    })();
+    const count = incomingServiceCount ?? retainedServiceCount;
+    if (count !== undefined && Number.isSafeInteger(count) && count >= 0) {
+      if (incomingServiceCount !== undefined)
+        backgroundServicesUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
+      if (state.sessionBackgroundServices[sessionId] !== count)
+        setState(storePath('sessionBackgroundServices', sessionId, count));
+    }
+    setState(
+      storePath('sessionStatus', (current) => {
+        const currentStatus = current[sessionId];
+        if (currentStatus && isEqualSessionStatus(currentStatus, status)) return current;
+        return { ...current, [sessionId]: status };
+      })
+    );
+    clearQuestionResponsePending(sessionId);
   },
   clearSessionStatusEntry(sessionId: string) {
     sessionStore.cancelProviderRetry(sessionId);
     scheduledProviderRetries.delete(sessionId);
     sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
-    (() => {
-      setState(
-        storePath('sessionStatus', (statuses) => {
-          delete statuses[sessionId];
+    setState(
+      storePath('sessionStatus', (statuses) => {
+        delete statuses[sessionId];
 
-          return statuses;
-        })
-      );
-      clearQuestionResponsePending(sessionId);
-    })();
+        return statuses;
+      })
+    );
+    clearQuestionResponsePending(sessionId);
   },
 };
-
-export type SessionStore = typeof sessionStore;
 
 function isEqualSessionStatus(a: SessionStatus, b: SessionStatus): boolean {
   if (a.type !== b.type) return false;

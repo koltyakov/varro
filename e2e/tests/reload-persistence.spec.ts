@@ -1,7 +1,5 @@
-/* oxlint-disable anti-slop/no-runtime-typeof -- Playwright callbacks validate serialized browser state before reading persistence fields. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The asserted browser state is produced by this test's controlled harness fixture. */
 import { expect, test } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getE2EState, getFirstPromptParts, postWebviewMessage } from './helpers';
 
 const SESSION_ID = 'session-reload-persistence';
 
@@ -84,20 +82,15 @@ test('keeps composer text and attached files after reload', async ({ page }) => 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await expect(composer).toBeVisible();
   await composer.fill('Keep this file context');
-  await page.evaluate(() => {
-    window.postMessage(
+  await postWebviewMessage(page, {
+    type: 'files/dropped',
+    payload: [
       {
-        type: 'files/dropped',
-        payload: [
-          {
-            path: '/workspace/varro/src/persisted.ts',
-            relativePath: 'src/persisted.ts',
-            type: 'file',
-          },
-        ],
+        path: '/workspace/varro/src/persisted.ts',
+        relativePath: 'src/persisted.ts',
+        type: 'file',
       },
-      '*'
-    );
+    ],
   });
   await expect(
     page.locator('.chat-attachment-chip').filter({ hasText: 'persisted.ts' })
@@ -112,22 +105,11 @@ test('keeps composer text and attached files after reload', async ({ page }) => 
   await composer.press('Enter');
 
   await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-          }
-        ).__varroE2E;
-        const promptReq = value?.requests.find(
-          (request) => request.method === 'POST' && request.path.includes('prompt_async')
-        );
-        if (!promptReq?.body || typeof promptReq.body !== 'object') return false;
-        const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
-        return !!body.parts?.some(
+    .poll(
+      async () =>
+        !!(await getFirstPromptParts(page))?.some(
           (part) => part.type === 'text' && part.text === '[Attached file: src/persisted.ts]'
-        );
-      })
+        )
     )
     .toBe(true);
   await expect(

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 const sessionId = 'sticky-reflow';
 const created = 1_780_000_000_000;
@@ -67,24 +68,17 @@ test('narrowing preserves a prompt at its final sticky-navigation destination', 
   page,
 }) => {
   await page.setViewportSize({ width: 486, height: 850 });
-  await page.addInitScript(
-    (capture) => {
-      // SAFETY: Only the isolated playback harness consumes this generated history.
-      (window as typeof window & { varroPlaybackCapture: typeof capture }).varroPlaybackCapture =
-        capture;
+  await installPlaybackCapture(page, {
+    session: {
+      id: sessionId,
+      projectID: 'test',
+      directory: '/workspace',
+      title: 'Sticky reflow',
+      version: '1',
+      time: { created, updated: created },
     },
-    {
-      session: {
-        id: sessionId,
-        projectID: 'test',
-        directory: '/workspace',
-        title: 'Sticky reflow',
-        version: '1',
-        time: { created, updated: created },
-      },
-      initialMessages: history(),
-    }
-  );
+    initialMessages: history(),
+  });
   await page.goto('/e2e/harness/index.html?scenario=session-playback');
   const list = page.locator('.interactive-list');
   await expect(page.locator('[data-msg-id="answer-110"]')).toBeVisible();

@@ -3,7 +3,7 @@ import { projectV2Message } from '../../src/extension/opencode-v2-projection';
 import type { SessionGoal } from '../../src/shared/session-goal';
 import type { MessageEntry, Session } from '../../src/webview/types';
 import { fixture } from '../../src/webview/test-fixtures';
-import { waitForHarnessStartup } from './helpers';
+import { installPlaybackCapture, waitForHarnessStartup } from './helpers';
 
 for (const width of [360, 1100]) {
   test(`shows the goal prompt and persistent composer controls at ${width}px`, async ({
@@ -40,14 +40,7 @@ for (const width of [360, 1100]) {
         session.id
       )
     );
-    await page.addInitScript(
-      (capture) => {
-        // SAFETY: This fixture is consumed only by the isolated browser harness.
-        (window as typeof window & { varroPlaybackCapture: typeof capture }).varroPlaybackCapture =
-          capture;
-      },
-      { session, initialMessages: [message], goal }
-    );
+    await installPlaybackCapture(page, { session, initialMessages: [message], goal });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await waitForHarnessStartup(page);
     await expect(page.locator('.user-message-card')).toContainText(`goal ${goal.objective}`);

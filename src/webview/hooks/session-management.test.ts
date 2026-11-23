@@ -11,6 +11,7 @@ import {
   restoreSessionWithDependencies,
   SessionManagementOperations,
 } from './session/session-management';
+import { deferred } from '../test-fixtures';
 
 function session(id = 'session-1', overrides?: Partial<Session>): Session {
   return {
@@ -22,16 +23,6 @@ function session(id = 'session-1', overrides?: Partial<Session>): Session {
     time: { created: 0, updated: 0 },
     ...overrides,
   };
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: Error) => void;
-  const promise = new Promise<T>((next, rejectPromise) => {
-    resolve = next;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
 }
 
 type OperationsDependencies = ConstructorParameters<typeof SessionManagementOperations>[0];
@@ -46,25 +37,72 @@ function renameOperations(
   return new SessionManagementOperations(deps as OperationsDependencies);
 }
 
+type CreateSessionDependencies = Parameters<typeof createSessionWithDependencies>[0];
+
+function createSessionDeps(
+  overrides: Partial<CreateSessionDependencies> &
+    Pick<CreateSessionDependencies, 'createRemoteSession' | 'buildCreatePermission'>
+): CreateSessionDependencies {
+  return {
+    getActiveSessionId: () => null,
+    getNewChatDraftGeneration: () => 0,
+    upsertSession: vi.fn(),
+    resetToolCallExpansionState: vi.fn(),
+    setActiveSessionId: vi.fn(),
+    clearDraftCurrentDocumentState: vi.fn(),
+    adoptDraftCurrentDocumentState: vi.fn(),
+    setSessionStatusEntry: vi.fn(),
+    setSessionUsageLimit: vi.fn(),
+    persistActiveSessionId: vi.fn(),
+    markSessionSeen: vi.fn(),
+    getDefaultSelectedModel: () => null,
+    setSelectedModel: vi.fn(),
+    publishSessionModel: vi.fn(),
+    resolveDefaultAgent: () => null,
+    setSelectedAgent: vi.fn(),
+    getInitialMcpNames: () => [],
+    setSelectedMcpsForSession: vi.fn(),
+    resetDraftSelectedMcps: vi.fn(),
+    setPermissionModeForSession: vi.fn(),
+    resetDraftPermissionMode: vi.fn(),
+    resetTodoSync: vi.fn(),
+    clearMessages: vi.fn(),
+    stopLoading: vi.fn(),
+    setError: vi.fn(),
+    ...overrides,
+  };
+}
+
+type ForkSessionDependencies = Parameters<typeof forkSessionWithDependencies>[0];
+
+function forkSessionDeps(
+  overrides: Partial<ForkSessionDependencies> &
+    Pick<ForkSessionDependencies, 'forkRemoteSession' | 'selectSession'>
+): ForkSessionDependencies {
+  return {
+    getActiveSessionId: () => 'session-1',
+    getNewChatDraftGeneration: () => 0,
+    getEffectiveSessionModel: () => null,
+    setSelectedModel: vi.fn(),
+    publishSessionModel: vi.fn(),
+    getPermissionModeForSession: () => 'default',
+    setPermissionModeForSession: vi.fn(),
+    upsertSession: vi.fn(),
+    setError: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('session management helpers', () => {
   it('coalesces repeated fork actions until the fork has opened and allows a later fork', async () => {
     const remoteFork = deferred<Session>();
     const selection = deferred<void>();
     const forkRemoteSession = vi.fn(() => remoteFork.promise);
     const selectSession = vi.fn(() => selection.promise);
-    const deps: Parameters<typeof forkSessionWithDependencies>[0] = {
-      getActiveSessionId: () => 'session-1',
-      getNewChatDraftGeneration: () => 0,
+    const deps = forkSessionDeps({
       forkRemoteSession,
-      getEffectiveSessionModel: () => null,
-      setSelectedModel: vi.fn(),
-      publishSessionModel: vi.fn(),
-      getPermissionModeForSession: () => 'default',
-      setPermissionModeForSession: vi.fn(),
-      upsertSession: vi.fn(),
       selectSession,
-      setError: vi.fn(),
-    };
+    });
     // SAFETY: Only forkSession is invoked, and all of its dependencies are supplied.
     const operations = new SessionManagementOperations(deps as OperationsDependencies);
 
@@ -97,19 +135,10 @@ describe('session management helpers', () => {
     const remoteFork = deferred<Session>();
     const forkRemoteSession = vi.fn(() => remoteFork.promise);
     const selectSession = vi.fn(async () => {});
-    const deps: Parameters<typeof forkSessionWithDependencies>[0] = {
-      getActiveSessionId: () => 'session-1',
-      getNewChatDraftGeneration: () => 0,
+    const deps = forkSessionDeps({
       forkRemoteSession,
-      getEffectiveSessionModel: () => null,
-      setSelectedModel: vi.fn(),
-      publishSessionModel: vi.fn(),
-      getPermissionModeForSession: () => 'default',
-      setPermissionModeForSession: vi.fn(),
-      upsertSession: vi.fn(),
       selectSession,
-      setError: vi.fn(),
-    };
+    });
     // SAFETY: Only forkSession is invoked, and all of its dependencies are supplied.
     const operations = new SessionManagementOperations(deps as OperationsDependencies);
     const background = operations.forkSession('session-1', undefined, { select: false });
@@ -138,20 +167,9 @@ describe('session management helpers', () => {
       const resetDraftSelectedMcps = vi.fn();
 
       const result = await createSessionWithDependencies(
-        {
-          getActiveSessionId: () => null,
-          getNewChatDraftGeneration: () => 0,
+        createSessionDeps({
           createRemoteSession: vi.fn(async () => session('session-2')),
           buildCreatePermission: () => [{ permission: 'read', pattern: '*', action: 'allow' }],
-          upsertSession: vi.fn(),
-          resetToolCallExpansionState: vi.fn(),
-          setActiveSessionId: vi.fn(),
-          clearDraftCurrentDocumentState: vi.fn(),
-          adoptDraftCurrentDocumentState: vi.fn(),
-          setSessionStatusEntry: vi.fn(),
-          setSessionUsageLimit: vi.fn(),
-          persistActiveSessionId: vi.fn(),
-          markSessionSeen: vi.fn(),
           getDefaultSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
           setSelectedModel,
           publishSessionModel,
@@ -160,13 +178,7 @@ describe('session management helpers', () => {
           getInitialMcpNames: () => names,
           setSelectedMcpsForSession,
           resetDraftSelectedMcps,
-          setPermissionModeForSession: vi.fn(),
-          resetDraftPermissionMode: vi.fn(),
-          resetTodoSync: vi.fn(),
-          clearMessages: vi.fn(),
-          stopLoading: vi.fn(),
-          setError: vi.fn(),
-        },
+        }),
         undefined,
         'default'
       );
@@ -197,37 +209,13 @@ describe('session management helpers', () => {
     const persistConfirmedPermissionModeForSession = vi.fn(() => confirmation.promise);
 
     const pending = createSessionWithDependencies(
-      {
-        getActiveSessionId: () => null,
-        getNewChatDraftGeneration: () => 0,
+      createSessionDeps({
         createRemoteSession: vi.fn(async () => session('session-auto')),
         buildCreatePermission: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
-        upsertSession: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
-        setActiveSessionId: vi.fn(),
-        clearDraftCurrentDocumentState: vi.fn(),
-        adoptDraftCurrentDocumentState: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        setSessionUsageLimit: vi.fn(),
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
-        getDefaultSelectedModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
-        resolveDefaultAgent: () => null,
-        setSelectedAgent: vi.fn(),
-        getInitialMcpNames: () => [],
-        setSelectedMcpsForSession: vi.fn(),
-        resetDraftSelectedMcps: vi.fn(),
         setPermissionModeForSession,
         setPendingSessionPermissionMode,
         persistConfirmedPermissionModeForSession,
-        resetDraftPermissionMode: vi.fn(),
-        resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
-        stopLoading: vi.fn(),
-        setError: vi.fn(),
-      },
+      }),
       undefined,
       'auto'
     );
@@ -254,39 +242,15 @@ describe('session management helpers', () => {
     const setPendingSessionPermissionMode = vi.fn().mockReturnValueOnce(4).mockReturnValueOnce(4);
 
     const result = await createSessionWithDependencies(
-      {
-        getActiveSessionId: () => null,
-        getNewChatDraftGeneration: () => 0,
+      createSessionDeps({
         createRemoteSession: vi.fn(async () => session('session-auto')),
         buildCreatePermission: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
-        upsertSession: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
-        setActiveSessionId: vi.fn(),
-        clearDraftCurrentDocumentState: vi.fn(),
-        adoptDraftCurrentDocumentState: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        setSessionUsageLimit: vi.fn(),
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
-        getDefaultSelectedModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
-        resolveDefaultAgent: () => null,
-        setSelectedAgent: vi.fn(),
-        getInitialMcpNames: () => [],
-        setSelectedMcpsForSession: vi.fn(),
-        resetDraftSelectedMcps: vi.fn(),
-        setPermissionModeForSession: vi.fn(),
         setPendingSessionPermissionMode,
         persistConfirmedPermissionModeForSession: vi.fn(async () => {
           throw new Error('Permission mode was not saved; safe default recovery is in progress');
         }),
-        resetDraftPermissionMode: vi.fn(),
-        resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
-        stopLoading: vi.fn(),
         setError,
-      },
+      }),
       undefined,
       'auto'
     );
@@ -302,35 +266,10 @@ describe('session management helpers', () => {
     const createRemoteSession = vi.fn(async () => session('session-default'));
 
     const result = await createSessionWithDependencies(
-      {
-        getActiveSessionId: () => null,
-        getNewChatDraftGeneration: () => 0,
+      createSessionDeps({
         createRemoteSession,
         buildCreatePermission: () => [],
-        upsertSession: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
-        setActiveSessionId: vi.fn(),
-        clearDraftCurrentDocumentState: vi.fn(),
-        adoptDraftCurrentDocumentState: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        setSessionUsageLimit: vi.fn(),
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
-        getDefaultSelectedModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
-        resolveDefaultAgent: () => null,
-        setSelectedAgent: vi.fn(),
-        getInitialMcpNames: () => [],
-        setSelectedMcpsForSession: vi.fn(),
-        resetDraftSelectedMcps: vi.fn(),
-        setPermissionModeForSession: vi.fn(),
-        resetDraftPermissionMode: vi.fn(),
-        resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
-        stopLoading: vi.fn(),
-        setError: vi.fn(),
-      },
+      }),
       undefined,
       'default'
     );
@@ -355,20 +294,13 @@ describe('session management helpers', () => {
     const clearMessages = vi.fn();
 
     const pending = createSessionWithDependencies(
-      {
+      createSessionDeps({
         getActiveSessionId: () => activeSessionId,
-        getNewChatDraftGeneration: () => 0,
         createRemoteSession: vi.fn(() => remoteSession.promise),
         buildCreatePermission: () => [{ permission: 'read', pattern: '*', action: 'allow' }],
-        upsertSession: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
         setActiveSessionId,
-        clearDraftCurrentDocumentState: vi.fn(),
         adoptDraftCurrentDocumentState,
-        setSessionStatusEntry: vi.fn(),
-        setSessionUsageLimit: vi.fn(),
         persistActiveSessionId,
-        markSessionSeen: vi.fn(),
         getDefaultSelectedModel: () => ({ providerID: 'openai', modelID: 'draft-model' }),
         setSelectedModel,
         publishSessionModel,
@@ -376,14 +308,8 @@ describe('session management helpers', () => {
         setSelectedAgent,
         getInitialMcpNames: () => initialMcpNames,
         setSelectedMcpsForSession,
-        resetDraftSelectedMcps: vi.fn(),
-        setPermissionModeForSession: vi.fn(),
-        resetDraftPermissionMode: vi.fn(),
-        resetTodoSync: vi.fn(),
         clearMessages,
-        stopLoading: vi.fn(),
-        setError: vi.fn(),
-      },
+      }),
       undefined,
       'default'
     );
@@ -422,35 +348,17 @@ describe('session management helpers', () => {
       const setError = vi.fn();
 
       const pending = createSessionWithDependencies(
-        {
+        createSessionDeps({
           getActiveSessionId: () => activeSessionId,
           getNewChatDraftGeneration: () => draftGeneration,
           createRemoteSession: vi.fn(() => remoteSession.promise),
           buildCreatePermission: () => [{ permission: 'read', pattern: '*', action: 'allow' }],
-          upsertSession: vi.fn(),
-          resetToolCallExpansionState: vi.fn(),
           setActiveSessionId,
-          clearDraftCurrentDocumentState: vi.fn(),
           adoptDraftCurrentDocumentState,
-          setSessionStatusEntry: vi.fn(),
-          setSessionUsageLimit: vi.fn(),
           persistActiveSessionId,
-          markSessionSeen: vi.fn(),
-          getDefaultSelectedModel: () => null,
-          setSelectedModel: vi.fn(),
-          publishSessionModel: vi.fn(),
-          resolveDefaultAgent: () => null,
-          setSelectedAgent: vi.fn(),
-          getInitialMcpNames: () => [],
-          setSelectedMcpsForSession: vi.fn(),
-          resetDraftSelectedMcps: vi.fn(),
-          setPermissionModeForSession: vi.fn(),
-          resetDraftPermissionMode: vi.fn(),
-          resetTodoSync: vi.fn(),
           clearMessages,
-          stopLoading: vi.fn(),
           setError,
-        },
+        }),
         undefined,
         'default'
       );
@@ -683,37 +591,13 @@ describe('session management helpers', () => {
     const setError = vi.fn();
 
     const result = await createSessionWithDependencies(
-      {
-        getActiveSessionId: () => null,
-        getNewChatDraftGeneration: () => 0,
+      createSessionDeps({
         createRemoteSession: vi.fn(async () => {
           throw new Error('create failed');
         }),
         buildCreatePermission: () => [],
-        upsertSession: vi.fn(),
-        resetToolCallExpansionState: vi.fn(),
-        setActiveSessionId: vi.fn(),
-        clearDraftCurrentDocumentState: vi.fn(),
-        adoptDraftCurrentDocumentState: vi.fn(),
-        setSessionStatusEntry: vi.fn(),
-        setSessionUsageLimit: vi.fn(),
-        persistActiveSessionId: vi.fn(),
-        markSessionSeen: vi.fn(),
-        getDefaultSelectedModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
-        resolveDefaultAgent: () => null,
-        setSelectedAgent: vi.fn(),
-        getInitialMcpNames: () => [],
-        setSelectedMcpsForSession: vi.fn(),
-        resetDraftSelectedMcps: vi.fn(),
-        setPermissionModeForSession: vi.fn(),
-        resetDraftPermissionMode: vi.fn(),
-        resetTodoSync: vi.fn(),
-        clearMessages: vi.fn(),
-        stopLoading: vi.fn(),
         setError,
-      },
+      }),
       undefined,
       'default'
     );
@@ -789,20 +673,13 @@ describe('session management helpers', () => {
     const setError = vi.fn();
 
     const result = await forkSessionWithDependencies(
-      {
-        getActiveSessionId: () => 'session-1',
-        getNewChatDraftGeneration: () => 0,
+      forkSessionDeps({
         forkRemoteSession,
-        getEffectiveSessionModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
         getPermissionModeForSession: () => 'full',
         isPermissionModeStable: () => false,
-        setPermissionModeForSession: vi.fn(),
-        upsertSession: vi.fn(),
         selectSession: vi.fn(),
         setError,
-      },
+      }),
       'session-1'
     );
 
@@ -819,20 +696,13 @@ describe('session management helpers', () => {
     const selectSession = vi.fn(async () => {});
     const upsertSession = vi.fn();
     const pending = forkSessionWithDependencies(
-      {
+      forkSessionDeps({
         getActiveSessionId: () => activeSessionId,
         getWorkspaceGeneration: () => 0,
-        getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(() => remoteFork.promise),
-        getEffectiveSessionModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
-        getPermissionModeForSession: () => 'default',
-        setPermissionModeForSession: vi.fn(),
         upsertSession,
         selectSession,
-        setError: vi.fn(),
-      },
+      }),
       'session-1'
     );
 
@@ -850,20 +720,12 @@ describe('session management helpers', () => {
     const remoteFork = deferred<Session>();
     const selectSession = vi.fn(async () => {});
     const pending = forkSessionWithDependencies(
-      {
+      forkSessionDeps({
         getActiveSessionId: () => activeSessionId,
         getSessionSelectionGeneration: () => selectionGeneration,
-        getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(() => remoteFork.promise),
-        getEffectiveSessionModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
-        getPermissionModeForSession: () => 'default',
-        setPermissionModeForSession: vi.fn(),
-        upsertSession: vi.fn(),
         selectSession,
-        setError: vi.fn(),
-      },
+      }),
       'session-1'
     );
 
@@ -881,20 +743,12 @@ describe('session management helpers', () => {
     const setPermissionModeForSession = vi.fn();
 
     await forkSessionWithDependencies(
-      {
-        getActiveSessionId: () => 'session-1',
+      forkSessionDeps({
         getWorkspaceGeneration: () => 0,
-        getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(async () => session('session-3')),
-        getEffectiveSessionModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
-        getPermissionModeForSession: () => 'default',
         setPermissionModeForSession,
-        upsertSession: vi.fn(),
         selectSession: vi.fn(async () => {}),
-        setError: vi.fn(),
-      },
+      }),
       'session-1'
     );
 
@@ -905,22 +759,15 @@ describe('session management helpers', () => {
     const setError = vi.fn();
 
     const result = await forkSessionWithDependencies(
-      {
-        getActiveSessionId: () => 'session-1',
+      forkSessionDeps({
         getWorkspaceGeneration: () => 0,
-        getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(async () => {
           throw new Error('fork failed');
         }),
-        getEffectiveSessionModel: () => null,
-        setSelectedModel: vi.fn(),
-        publishSessionModel: vi.fn(),
         getPermissionModeForSession: () => 'full',
-        setPermissionModeForSession: vi.fn(),
-        upsertSession: vi.fn(),
         selectSession: vi.fn(async () => {}),
         setError,
-      },
+      }),
       'session-1'
     );
 

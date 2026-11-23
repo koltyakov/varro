@@ -66,6 +66,29 @@ import {
   updateUsageLimitStateWithDependencies,
 } from './session/session-status';
 
+type RecheckDependencies = Parameters<typeof recheckSessionStatusWithDependencies>[0];
+
+function recheckDeps(
+  overrides: Partial<RecheckDependencies> & Pick<RecheckDependencies, 'loadSessionStatuses'>
+): RecheckDependencies {
+  return {
+    isDocumentVisible: () => true,
+    shouldIgnorePendingAbortStatus: () => false,
+    hasPendingAbort: () => false,
+    updateUsageLimitState: vi.fn(),
+    clearPendingAbort: vi.fn(),
+    stopLoading: vi.fn(),
+    setSessionStatuses: vi.fn(),
+    shouldResyncSessionAfterIdle: () => false,
+    syncSession: vi.fn(async () => {}),
+    syncSessionMessages: vi.fn(async () => {}),
+    startLoading: vi.fn(),
+    isActiveSession: () => true,
+    logError: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('session status helpers', () => {
   it('tracks pending abort retries and clears them', () => {
     const pendingAbortRetryAttempts = new Map<string, number | null>();
@@ -312,11 +335,8 @@ describe('session status helpers', () => {
     const logError = vi.fn();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
         updateUsageLimitState,
         clearPendingAbort,
         stopLoading: stopLoadingSpy,
@@ -325,9 +345,8 @@ describe('session status helpers', () => {
         syncSession,
         syncSessionMessages,
         startLoading: startLoadingSpy,
-        isActiveSession: () => true,
         logError,
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -353,13 +372,10 @@ describe('session status helpers', () => {
     startLoadingSpy.mockClear();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({
           'session-1': { type: 'retry', attempt: 1, message: 'retry', next: 3 },
         }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
         updateUsageLimitState,
         clearPendingAbort,
         stopLoading: stopLoadingSpy,
@@ -368,9 +384,8 @@ describe('session status helpers', () => {
         syncSession,
         syncSessionMessages,
         startLoading: startLoadingSpy,
-        isActiveSession: () => true,
         logError,
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -392,22 +407,11 @@ describe('session status helpers', () => {
     });
 
     await recheckSessionStatusWithDependencies(
-      {
+      recheckDeps({
         isDocumentVisible: () => false,
         loadSessionStatuses,
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
-        stopLoading: vi.fn(),
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
-        startLoading: vi.fn(),
-        isActiveSession: () => true,
         logError,
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -415,22 +419,10 @@ describe('session status helpers', () => {
     expect(loadSessionStatuses).not.toHaveBeenCalled();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses,
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
-        stopLoading: vi.fn(),
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
-        startLoading: vi.fn(),
-        isActiveSession: () => true,
         logError,
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -511,22 +503,14 @@ describe('session status helpers', () => {
     const syncSessionMessages = vi.fn(async () => {});
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
         syncSession,
         syncSessionMessages,
         startLoading: startLoadingSpy,
         isActiveSession: () => false,
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -543,23 +527,13 @@ describe('session status helpers', () => {
     const messages = [{ info: userMessage(), parts: [] }];
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
-        setSessionStatuses: vi.fn(),
         shouldResyncSessionAfterIdle: () => true,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
         startLoading: startLoadingSpy,
-        isActiveSession: () => true,
         getMessages: () => messages,
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -590,24 +564,14 @@ describe('session status helpers', () => {
         },
       ];
       await recheckSessionStatusWithDependencies(
-        {
-          isDocumentVisible: () => true,
+        recheckDeps({
           loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-          shouldIgnorePendingAbortStatus: () => false,
-          hasPendingAbort: () => false,
-          updateUsageLimitState: vi.fn(),
-          clearPendingAbort: vi.fn(),
           stopLoading: stopLoadingSpy,
-          setSessionStatuses: vi.fn(),
           shouldResyncSessionAfterIdle: () => true,
-          syncSession: vi.fn(async () => {}),
-          syncSessionMessages: vi.fn(async () => {}),
           startLoading: startLoadingSpy,
           loadingStartedAt: () => 3,
-          isActiveSession: () => true,
           getMessages: () => messages,
-          logError: vi.fn(),
-        },
+        }),
         'session-1'
       );
       flushSolid();
@@ -622,24 +586,14 @@ describe('session status helpers', () => {
     const messages = [{ info: completedAssistantMessage(), parts: [] }];
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
-        setSessionStatuses: vi.fn(),
         shouldResyncSessionAfterIdle: () => true,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
         startLoading: startLoadingSpy,
         loadingStartedAt: () => 3,
-        isActiveSession: () => true,
         getMessages: () => messages,
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -655,28 +609,19 @@ describe('session status helpers', () => {
     let messages = [{ info: userMessage(), parts: [] }];
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
         setSessionStatusEntry,
-        setSessionStatuses: vi.fn(),
         shouldResyncSessionAfterIdle: () => true,
-        syncSession: vi.fn(async () => {}),
         syncSessionMessages: vi.fn(async () => {
           messages = [{ info: completedAssistantMessage(), parts: [] }];
         }),
         startLoading: startLoadingSpy,
         loadingStartedAt: () => 1,
-        isActiveSession: () => true,
         getCurrentSessionStatus: () => ({ type: 'idle' }),
         getMessages: () => messages,
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -690,22 +635,11 @@ describe('session status helpers', () => {
     const setSessionStatuses = vi.fn();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-2': { type: 'idle' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
-        stopLoading: vi.fn(),
         setSessionStatuses,
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
-        startLoading: vi.fn(),
         isActiveSession: (sessionId) => sessionId === 'session-2',
-        logError: vi.fn(),
-      },
+      }),
       'session-2'
     );
     flushSolid();
@@ -736,28 +670,19 @@ describe('session status helpers', () => {
         finishSync = resolve;
       });
       const recheck = recheckSessionStatusWithDependencies(
-        {
-          isDocumentVisible: () => true,
+        recheckDeps({
           loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
-          shouldIgnorePendingAbortStatus: () => false,
-          hasPendingAbort: () => false,
-          updateUsageLimitState: vi.fn(),
-          clearPendingAbort: vi.fn(),
           stopLoading: stopLoadingSpy,
           setSessionStatusEntry,
-          setSessionStatuses: vi.fn(),
           shouldResyncSessionAfterIdle: () => true,
-          syncSession: vi.fn(async () => {}),
           syncSessionMessages: vi.fn(async () => {
             startedSync();
             await syncFinished;
           }),
           startLoading: startLoadingSpy,
-          isActiveSession: () => true,
           getCurrentSessionStatus: () => currentStatus,
           getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
-          logError: vi.fn(),
-        },
+        }),
         'session-1'
       );
       await syncStarted;
@@ -782,27 +707,16 @@ describe('session status helpers', () => {
     const updateUsageLimitState = vi.fn();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
         loadSessionStatusSnapshot: async () => ({
           statuses: { 'session-1': { type: 'busy' } },
           startedAt: 1_000,
         }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
         updateUsageLimitState,
-        clearPendingAbort: vi.fn(),
-        stopLoading: vi.fn(),
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
-        startLoading: vi.fn(),
         isActiveSession: () => false,
         getCurrentSessionStatus: () => retryStatus,
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -815,23 +729,12 @@ describe('session status helpers', () => {
     const startLoadingSpy = vi.fn();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
         startLoading: startLoadingSpy,
-        isActiveSession: () => true,
         getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -851,26 +754,16 @@ describe('session status helpers', () => {
     });
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
         setSessionStatusEntry,
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
         syncSessionMessages,
         syncBusySessionMessages,
         startLoading: startLoadingSpy,
         loadingStartedAt: () => 1,
-        isActiveSession: () => true,
         getMessages: () => messages,
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -888,26 +781,15 @@ describe('session status helpers', () => {
     const setSessionStatusEntry = vi.fn();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
         setSessionStatusEntry,
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
         startLoading: startLoadingSpy,
         loadingStartedAt: () => 1,
-        isActiveSession: () => true,
         getCurrentSessionStatus: () => ({ type: 'idle' }),
         getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();
@@ -922,24 +804,13 @@ describe('session status helpers', () => {
     const startLoadingSpy = vi.fn();
 
     await recheckSessionStatusWithDependencies(
-      {
-        isDocumentVisible: () => true,
+      recheckDeps({
         loadSessionStatuses: async () => ({ 'session-1': { type: 'busy' } }),
-        shouldIgnorePendingAbortStatus: () => false,
-        hasPendingAbort: () => false,
-        updateUsageLimitState: vi.fn(),
-        clearPendingAbort: vi.fn(),
         stopLoading: stopLoadingSpy,
-        setSessionStatuses: vi.fn(),
-        shouldResyncSessionAfterIdle: () => false,
-        syncSession: vi.fn(async () => {}),
-        syncSessionMessages: vi.fn(async () => {}),
         startLoading: startLoadingSpy,
         loadingStartedAt: () => 3,
-        isActiveSession: () => true,
         getMessages: () => [{ info: completedAssistantMessage(), parts: [] }],
-        logError: vi.fn(),
-      },
+      }),
       'session-1'
     );
     flushSolid();

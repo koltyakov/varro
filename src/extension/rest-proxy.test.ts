@@ -215,6 +215,36 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
   };
 }
 
+function serverWith(request: unknown) {
+  return { ...createCallbacks().server, request } as never;
+}
+
+const siblingRoots = () => [
+  { name: 'repo-a', path: '/repo-a' },
+  { name: 'repo-b', path: '/repo-b' },
+];
+const openSiblingRoot = (directory: string) =>
+  directory === '/repo-a' || directory === '/repo-b' ? directory : null;
+
+function openSiblingRoots(callbacks: RestProxyCallbacks) {
+  callbacks.contextProvider.context.workspaceFolders = siblingRoots();
+  callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn(openSiblingRoot);
+}
+
+function siblingRootsContextProvider(workspacePath: string) {
+  return {
+    ...createCallbacks().contextProvider,
+    context: {
+      workspacePath,
+      workspaceFolders: siblingRoots(),
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    },
+    getOpenWorkspaceRoot: vi.fn(openSiblingRoot),
+  } as never;
+}
+
 function createProxy(overrides: Partial<RestProxyCallbacks> = {}) {
   const callbacks = createCallbacks(overrides);
   return { proxy: new RestProxy(callbacks), callbacks };
@@ -433,9 +463,7 @@ function makeSessionMessage(messageID: string, partID: string, sessionID = 's1')
 
 async function requestSanitizedMessagePage(messages: unknown[]) {
   const serverRequest = vi.fn(() => Promise.resolve({ data: messages }));
-  const { proxy, callbacks } = createProxy({
-    server: { ...createCallbacks().server, request: serverRequest } as never,
-  });
+  const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
   await proxy.handleRequest(makePayload(118, 'GET', '/session/s1/message?limit=50'));
 
@@ -2423,9 +2451,7 @@ describe('RestProxy handleRequest', () => {
           });
         })
     );
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     const operation = proxy.handleRequest({
       id: 41,
@@ -2460,7 +2486,7 @@ describe('RestProxy handleRequest', () => {
     );
     let generation = 1;
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       getRequestGeneration: () => generation,
     });
 
@@ -2512,7 +2538,7 @@ describe('RestProxy handleRequest', () => {
     const cleanup = deferred<void>();
     const serverRequest = vi.fn(() => Promise.resolve([]));
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       cleanupExpiredRecycleBin: vi.fn(() => cleanup.promise),
     });
 
@@ -2670,7 +2696,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         isSessionInWorkspace: vi.fn(() => false),
@@ -2732,7 +2758,7 @@ describe('RestProxy handleRequest', () => {
           diagnostics: [],
         },
       } as never,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         isSessionInWorkspace: vi.fn(() => false),
@@ -2761,7 +2787,7 @@ describe('RestProxy handleRequest', () => {
           diagnostics: [],
         },
       } as never,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(
@@ -2836,23 +2862,8 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
     const { proxy, callbacks } = createProxy({
       getWorkspacePath: () => '/repo-b',
-      contextProvider: {
-        ...createCallbacks().contextProvider,
-        context: {
-          workspacePath: '/repo-b',
-          workspaceFolders: [
-            { name: 'repo-a', path: '/repo-a' },
-            { name: 'repo-b', path: '/repo-b' },
-          ],
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-        },
-        getOpenWorkspaceRoot: vi.fn((path: string) =>
-          path === '/repo-a' || path === '/repo-b' ? path : null
-        ),
-      } as never,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      contextProvider: siblingRootsContextProvider('/repo-b'),
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(
@@ -2899,23 +2910,8 @@ describe('RestProxy handleRequest', () => {
     );
     const { proxy, callbacks } = createProxy({
       getWorkspacePath: () => '/repo-a',
-      contextProvider: {
-        ...createCallbacks().contextProvider,
-        context: {
-          workspacePath: '/repo-a',
-          workspaceFolders: [
-            { name: 'repo-a', path: '/repo-a' },
-            { name: 'repo-b', path: '/repo-b' },
-          ],
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-        },
-        getOpenWorkspaceRoot: vi.fn((path: string) =>
-          path === '/repo-a' || path === '/repo-b' ? path : null
-        ),
-      } as never,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      contextProvider: siblingRootsContextProvider('/repo-a'),
+      server: serverWith(serverRequest),
     });
 
     const request = proxy.handleRequest(
@@ -2937,23 +2933,8 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn();
     const { proxy, callbacks } = createProxy({
       getWorkspacePath: () => '/repo-a',
-      contextProvider: {
-        ...createCallbacks().contextProvider,
-        context: {
-          workspacePath: '/repo-a',
-          workspaceFolders: [
-            { name: 'repo-a', path: '/repo-a' },
-            { name: 'repo-b', path: '/repo-b' },
-          ],
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-        },
-        getOpenWorkspaceRoot: vi.fn((path: string) =>
-          path === '/repo-a' || path === '/repo-b' ? path : null
-        ),
-      } as never,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      contextProvider: siblingRootsContextProvider('/repo-a'),
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(
@@ -2993,7 +2974,7 @@ describe('RestProxy handleRequest', () => {
         ...createCallbacks().contextProvider,
         getOpenWorkspaceRoot: vi.fn(() => 'C:\\Projects\\Varro'),
       } as never,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(
@@ -3023,7 +3004,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         isSessionInWorkspace: vi.fn(() => false),
@@ -3064,19 +3045,13 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         isSessionInWorkspace: vi.fn(() => false),
       } as never,
     });
-    callbacks.contextProvider.context.workspaceFolders = [
-      { name: 'repo-a', path: '/repo-a' },
-      { name: 'repo-b', path: '/repo-b' },
-    ];
-    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
-      directory === '/repo-a' || directory === '/repo-b' ? directory : null
-    );
+    openSiblingRoots(callbacks);
     const { proxy } = createProxy(callbacks);
 
     await proxy.handleRequest(makePayload(951, 'GET', '/session?directory=%2Frepo-b'));
@@ -3102,7 +3077,7 @@ describe('RestProxy handleRequest', () => {
     async (route) => {
       const serverRequest = vi.fn(() => Promise.resolve({ id: 'session-a', directory: '/repo-a' }));
       const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: {
           ...createCallbacks().sessionState,
           isSessionInWorkspace: vi.fn(() => false),
@@ -3225,7 +3200,7 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy, callbacks } = createProxy({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         list: vi.fn(() => [sibling, foreign]),
@@ -3268,10 +3243,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(() => Promise.resolve(true));
     const { proxy, callbacks } = createProxy({
       getSessionHistoryScope: () => 'descendants',
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         empty,
@@ -3320,10 +3292,7 @@ describe('RestProxy handleRequest', () => {
     );
     const serverRequest = vi.fn(() => Promise.resolve(true));
     const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         deletePermanently,
@@ -3362,10 +3331,7 @@ describe('RestProxy handleRequest', () => {
       return Promise.reject(new Error('404 Session not found'));
     });
     const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         deletePermanently,
@@ -3392,10 +3358,7 @@ describe('RestProxy handleRequest', () => {
       return Promise.resolve([{ id: 'busy-1' }]);
     });
     const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         deletePermanently,
@@ -3778,7 +3741,7 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy, callbacks } = createProxy({
       getStatus: vi.fn(() => ({ state: 'stopped' as const })),
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       autoApproveJudge: {
         judge: vi.fn(() => Promise.resolve(judgeResult)),
         resolveModel: vi.fn(() => Promise.resolve(null)),
@@ -3825,9 +3788,7 @@ describe('RestProxy handleRequest', () => {
 
   it('keeps manual permission replies lease-free', async () => {
     const serverRequest = vi.fn(() => Promise.resolve(true));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(
       makePayload(83, 'POST', '/permission/perm-1/reply', { reply: 'once' })
@@ -3863,9 +3824,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve(undefined);
     });
-    const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const callbacks = createCallbacks({ server: serverWith(serverRequest) });
     const approvalProxy = new RestProxy(callbacks);
     const viewerProxy = new RestProxy(callbacks);
 
@@ -3927,7 +3886,7 @@ describe('RestProxy handleRequest', () => {
       return Promise.resolve(undefined);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       isPermissionAutomationLeaseCurrent: vi.fn(() => leaseCurrent),
     });
 
@@ -3956,7 +3915,7 @@ describe('RestProxy handleRequest', () => {
     let leaseCurrent = true;
     const serverRequest = vi.fn(() => Promise.resolve(true));
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       cleanupExpiredRecycleBin: vi.fn(() => cleanup.promise),
       isPermissionAutomationLeaseCurrent: vi.fn(() => leaseCurrent),
     });
@@ -3986,7 +3945,7 @@ describe('RestProxy handleRequest', () => {
       )
     );
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       isPermissionAutomationLeaseCurrent: vi.fn(() => false),
     });
 
@@ -4120,9 +4079,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve(undefined);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(
       makePayload(852, 'POST', '/varro/permission/project-allow?directory=%2Frepo', {
@@ -4187,7 +4144,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       getWorkspacePath: () => '/repo',
       getSessionHistoryScope: () => 'project',
       sessionState: {
@@ -4256,7 +4213,7 @@ describe('RestProxy handleRequest', () => {
       mocks.vscode.workspace.fs.writeFile.mockClear();
       const serverRequest = vi.fn(async () => ({ id: 'session-1', directory: '/repo' }));
       const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: {
           ...createCallbacks().sessionState,
           isSessionInWorkspace: vi.fn(() => false),
@@ -4301,7 +4258,7 @@ describe('RestProxy handleRequest', () => {
         throw new Error(`Unexpected request: ${method} ${path}`);
       });
       const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: {
           ...createCallbacks().sessionState,
           isSessionInWorkspace: vi.fn(() => false),
@@ -4351,9 +4308,7 @@ describe('RestProxy handleRequest', () => {
           : undefined
       )
     );
-    const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(
       makePayload(856, 'POST', '/varro/permission/project-allow?directory=%2Frepo', {
@@ -4394,9 +4349,7 @@ describe('RestProxy handleRequest', () => {
           : undefined
       )
     );
-    const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(
       makePayload(857, 'POST', '/varro/permission/project-allow?directory=%2Frepo', {
@@ -4432,7 +4385,7 @@ describe('RestProxy handleRequest', () => {
     );
     const allowPermissionForSession = vi.fn(() => Promise.resolve());
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       allowPermissionForSession,
     });
 
@@ -4569,7 +4522,7 @@ describe('RestProxy handleRequest', () => {
       return Promise.resolve(undefined);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       forgetServerMemoryPermission: vi.fn(() => {
         observed = [];
       }),
@@ -4635,7 +4588,7 @@ describe('RestProxy handleRequest', () => {
       return Promise.resolve(undefined);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       forgetServerMemoryPermission: vi.fn(() => {
         observed = [];
       }),
@@ -5251,9 +5204,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn((method: string, path: string) =>
       Promise.resolve(method === 'GET' && path === '/permission' ? [] : undefined)
     );
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(
       makePayload(853, 'POST', '/varro/permission/project-allow', {
@@ -5291,9 +5242,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve(undefined);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest({
       ...makePayload(83, 'POST', '/varro/permission/judge', {
@@ -5461,9 +5410,7 @@ describe('RestProxy handleRequest', () => {
             ]
       );
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(82, 'GET', '/varro/session/session-1/diff-summary'));
 
@@ -5797,7 +5744,7 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy } = createProxy({
       readLocalSessionSummary,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(makePayload(823, 'GET', '/varro/session/session-1/diff-summary'));
@@ -5826,7 +5773,7 @@ describe('RestProxy handleRequest', () => {
       );
       const { proxy, callbacks } = createProxy({
         readLocalSessionSummary: vi.fn(async () => local),
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
       });
 
       await proxy.handleRequest(makePayload(824, 'GET', '/varro/session/session-1/diff-summary'));
@@ -5868,7 +5815,7 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy, callbacks } = createProxy({
       readLocalSessionSummary: vi.fn(async () => null),
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(makePayload(825, 'GET', '/varro/session/session-1/diff-summary'));
@@ -5899,9 +5846,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve([]);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(88, 'GET', '/varro/session/session-1/diff-summary'));
 
@@ -5926,9 +5871,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve([]);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(89, 'GET', '/varro/session/session-1/diff-summary'));
 
@@ -5964,9 +5907,7 @@ describe('RestProxy handleRequest', () => {
       }
       return [];
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(821, 'GET', '/varro/session/session-1/diff-summary'));
 
@@ -6030,9 +5971,7 @@ describe('RestProxy handleRequest', () => {
             ]
       );
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(83, 'GET', '/varro/session/session-1/diff-summary'));
 
@@ -6080,9 +6019,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve([]);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(831, 'GET', '/varro/session/session-1/diff-summary'));
 
@@ -6139,9 +6076,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve([]);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(832, 'GET', '/varro/session/session-1/diff-summary'));
 
@@ -6166,9 +6101,7 @@ describe('RestProxy handleRequest', () => {
       if (path === '/session?limit=1000000') return sessionList.promise;
       return Promise.resolve([]);
     });
-    const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy } = createProxy({ server: serverWith(serverRequest) });
 
     const requests = [
       proxy.handleRequest(makePayload(84, 'GET', '/varro/session/session-1/diff-summary')),
@@ -6190,9 +6123,7 @@ describe('RestProxy handleRequest', () => {
 
   it('reuses a completed diff summary for the same session revision', async () => {
     const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
-    const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy } = createProxy({ server: serverWith(serverRequest) });
     const path = '/varro/session/session-1/diff-summary?revision=123';
 
     await proxy.handleRequest(makePayload(84, 'GET', path));
@@ -6238,9 +6169,7 @@ describe('RestProxy handleRequest', () => {
 
   it('refreshes an unversioned diff summary after the previous request settles', async () => {
     const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
-    const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy } = createProxy({ server: serverWith(serverRequest) });
     const path = '/varro/session/session-1/diff-summary';
 
     await proxy.handleRequest(makePayload(84, 'GET', path));
@@ -6284,9 +6213,7 @@ describe('RestProxy handleRequest', () => {
       }
       return [];
     });
-    const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy } = createProxy({ server: serverWith(serverRequest) });
 
     const requests = [
       proxy.handleRequest(makePayload(86, 'GET', '/varro/session/session-1/diff-summary')),
@@ -6325,9 +6252,7 @@ describe('RestProxy handleRequest', () => {
       }
       return Promise.resolve(undefined);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(901, 'GET', '/model/default'));
 
@@ -6355,9 +6280,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(() =>
       Promise.resolve({ providerID: 'anthropic', id: 'claude-current' })
     );
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(902, 'GET', '/model/default'));
 
@@ -6402,10 +6325,7 @@ describe('RestProxy handleRequest', () => {
       Promise.resolve(path === '/session/status' ? {} : [])
     );
     const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         moveToTrash: vi.fn(() => Promise.resolve(entry)),
@@ -6441,7 +6361,7 @@ describe('RestProxy handleRequest', () => {
       moveToTrash: vi.fn(() => Promise.resolve({ sessions: [runningSession] })),
     };
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionTrash: sessionTrash as never,
     });
 
@@ -6485,7 +6405,7 @@ describe('RestProxy handleRequest', () => {
         moveToTrash: vi.fn(() => Promise.resolve({ sessions: [runningSession] })),
       };
       const { proxy } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionTrash: sessionTrash as never,
       });
 
@@ -6513,7 +6433,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'descendants',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         moveToTrash: vi.fn(() => Promise.resolve(entry)),
@@ -6537,12 +6457,7 @@ describe('RestProxy handleRequest', () => {
       .fn()
       .mockResolvedValueOnce({ id: 'some-id', directory: '/repo' })
       .mockResolvedValueOnce(true);
-    const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(111, 'DELETE', '/varro/session/some-id/delete'));
     await proxy.handleRequest(makePayload(112, 'DELETE', '/varro/session/some-id/delete'));
@@ -6562,12 +6477,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn((method: string) =>
       Promise.resolve(method === 'DELETE' ? false : { id: 'some-id', directory: '/repo' })
     );
-    const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(113, 'DELETE', '/varro/session/some-id/delete'));
 
@@ -6594,10 +6504,7 @@ describe('RestProxy handleRequest', () => {
           diagnostics: [],
         },
       } as never,
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         moveToTrash: vi.fn(() => Promise.resolve(entry)),
@@ -6617,10 +6524,7 @@ describe('RestProxy handleRequest', () => {
       Promise.resolve(path === '/session/status' ? {} : [])
     );
     const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         moveToTrash: vi.fn(() => Promise.resolve(null)),
@@ -6652,12 +6556,7 @@ describe('RestProxy handleRequest', () => {
   it('loads the full session catalog for an unpaginated workspace request', async () => {
     const serverData = [{ id: 's1', directory: '/repo' }];
     const serverRequest = vi.fn(() => Promise.resolve(serverData));
-    const { proxy, callbacks } = createProxy({
-      server: {
-        ...createCallbacks().server,
-        request: serverRequest,
-      } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
     await proxy.handleRequest(makePayload(15, 'GET', '/session'));
     expect(serverRequest).toHaveBeenCalledWith(
       'GET',
@@ -6678,9 +6577,7 @@ describe('RestProxy handleRequest', () => {
       { id: 'oldest', directory: '/repo' },
     ];
     const serverRequest = vi.fn(() => Promise.resolve(sessions));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(151, 'GET', '/session?limit=2'));
 
@@ -6717,9 +6614,7 @@ describe('RestProxy handleRequest', () => {
         },
       ])
     );
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(1512, 'GET', '/session?limit=1'));
 
@@ -6742,9 +6637,7 @@ describe('RestProxy handleRequest', () => {
   it('forwards native session search while preserving its constraints', async () => {
     const sessions = [{ id: 'match', directory: '/repo', title: 'Dark mode' }];
     const serverRequest = vi.fn(() => Promise.resolve(sessions));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(
       makePayload(1511, 'GET', '/session?limit=30&search=dark%20mode&roots=true')
@@ -6776,7 +6669,7 @@ describe('RestProxy handleRequest', () => {
       return Promise.resolve(undefined);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         getSessionWorkspaceMatch: vi.fn(() => undefined),
@@ -6803,9 +6696,7 @@ describe('RestProxy handleRequest', () => {
       { id: 'oldest', directory: '/repo' },
     ];
     const serverRequest = vi.fn(() => Promise.resolve(sessions));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(152, 'GET', '/session?limit=2'));
 
@@ -6887,7 +6778,7 @@ describe('RestProxy handleRequest', () => {
       return Promise.resolve(undefined);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         getSessionWorkspaceMatch: vi.fn(() => undefined),
@@ -6929,7 +6820,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(() => Promise.resolve(sessions));
     const filterVisible = vi.fn(() => filtered);
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         filterVisibleSessions: filterVisible,
@@ -6974,7 +6865,7 @@ describe('RestProxy handleRequest', () => {
     );
     const hiddenSessions = new HiddenSessionManager();
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       hiddenSessions,
     });
 
@@ -7016,7 +6907,7 @@ describe('RestProxy handleRequest', () => {
     const hiddenSessions = new HiddenSessionManager();
     const retainUntilDeleted = vi.spyOn(hiddenSessions, 'retainUntilDeleted');
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       hiddenSessions,
     });
 
@@ -7050,7 +6941,7 @@ describe('RestProxy handleRequest', () => {
     });
     const hiddenSessions = new HiddenSessionManager();
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       hiddenSessions,
     });
 
@@ -7090,7 +6981,7 @@ describe('RestProxy handleRequest', () => {
       retainUntilDeleted: vi.fn(),
     };
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       hiddenSessions,
     });
 
@@ -7165,7 +7056,7 @@ describe('RestProxy handleRequest', () => {
       retainUntilDeleted: vi.fn(),
     };
     const overrides = {
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       hiddenSessions,
       internalHelperCleanupCoordinator: coordinator,
     };
@@ -7198,7 +7089,7 @@ describe('RestProxy handleRequest', () => {
     );
     const hiddenSessions = new HiddenSessionManager();
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       hiddenSessions,
     });
     callbacks.contextProvider.context.workspacePath = '/repo-a';
@@ -7228,9 +7119,7 @@ describe('RestProxy handleRequest', () => {
       { id: 'other', directory: '/other' },
     ];
     const serverRequest = vi.fn(() => Promise.resolve(sessions));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(116, 'GET', '/session'));
 
@@ -7301,9 +7190,7 @@ describe('RestProxy handleRequest', () => {
       },
     ];
     const serverRequest = vi.fn(() => Promise.resolve(messages));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
     await proxy.handleRequest(makePayload(17, 'GET', '/session/s1/message'));
     const response = (callbacks.postApiResponse as Mock<RestProxyCallbacks['postApiResponse']>).mock
       .calls[0]![1] as SanitizedMessageResponse;
@@ -7321,9 +7208,7 @@ describe('RestProxy handleRequest', () => {
         { file: 'node_modules/pkg/index.js', additions: 100, deletions: 0 },
       ])
     );
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(171, 'GET', '/session/s1/diff'));
 
@@ -7372,9 +7257,7 @@ describe('RestProxy handleRequest', () => {
       },
     ];
     const serverRequest = vi.fn(() => Promise.resolve({ data: messages, nextCursor: 'cursor-2' }));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(117, 'GET', '/session/s1/message?limit=200'));
 
@@ -7414,9 +7297,7 @@ describe('RestProxy handleRequest', () => {
       const serverRequest = vi.fn(async (_method: string, path: string) =>
         path.includes('/message/m1') ? message : { data: [message] }
       );
-      const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
-      });
+      const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
       await proxy.handleRequest(makePayload(191, 'GET', '/session/s1/message?limit=200'));
       const response = vi.mocked(callbacks.postApiResponse).mock.calls.at(-1)?.[1];
       expect(JSON.stringify(response).length).toBeLessThan(1000);
@@ -7455,9 +7336,7 @@ describe('RestProxy handleRequest', () => {
     const convert = vi
       .spyOn(SharedThumbnailClient.prototype, 'convert')
       .mockResolvedValue(thumbnail);
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
     try {
       const path = '/session/s1/message/m1/part/image-1';
       await proxy.handleRequest(makePayload(194, 'GET', `${path}?view=thumbnail`));
@@ -7499,9 +7378,7 @@ describe('RestProxy handleRequest', () => {
       .fn()
       .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
       .mockResolvedValueOnce({ data: messages, nextCursor: 'cursor-2' });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(118, 'GET', '/session/s1/message?limit=200'));
 
@@ -7529,9 +7406,7 @@ describe('RestProxy handleRequest', () => {
       .fn()
       .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
       .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(
       makePayload(119, 'GET', '/session/s1/message?limit=200&before=cursor-3')
@@ -7573,9 +7448,7 @@ describe('RestProxy handleRequest', () => {
       },
     ];
     const serverRequest = vi.fn(() => Promise.resolve(messages));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
     await proxy.handleRequest(makePayload(18, 'GET', '/session/s1/message'));
     const response = (callbacks.postApiResponse as Mock<RestProxyCallbacks['postApiResponse']>).mock
       .calls[0]![1] as SanitizedMessageResponse;
@@ -7673,7 +7546,7 @@ describe('RestProxy handleRequest', () => {
     );
     const filterSessions = vi.fn(() => [sessions[0]]);
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         filterVisibleSessions: filterSessions,
@@ -7691,7 +7564,7 @@ describe('RestProxy handleRequest', () => {
       const foreign = { sessionID: 'foreign' };
       const serverRequest = vi.fn(() => Promise.resolve([local, foreign]));
       const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: {
           ...createCallbacks().sessionState,
           getSessionWorkspaceMatch: vi.fn((sessionID: string) => sessionID === 'local'),
@@ -7729,7 +7602,7 @@ describe('RestProxy handleRequest', () => {
       });
       const callbacks = createCallbacks({
         getWorkspacePath: () => '/repo-b',
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: {
           ...createCallbacks().sessionState,
           getSessionWorkspaceMatch: vi.fn(() => undefined),
@@ -7737,13 +7610,7 @@ describe('RestProxy handleRequest', () => {
       });
       callbacks.contextProvider.context.workspacePath = '/repo-b';
       callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
-      callbacks.contextProvider.context.workspaceFolders = [
-        { name: 'repo-a', path: '/repo-a' },
-        { name: 'repo-b', path: '/repo-b' },
-      ];
-      callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
-        directory === '/repo-a' || directory === '/repo-b' ? directory : null
-      );
+      openSiblingRoots(callbacks);
       const { proxy } = createProxy(callbacks);
 
       await proxy.handleRequest(makePayload(221, 'GET', path));
@@ -7772,7 +7639,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getWorkspacePath: () => '/repo-b',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         getSessionWorkspaceMatch: vi.fn(() => undefined),
@@ -7780,13 +7647,7 @@ describe('RestProxy handleRequest', () => {
     });
     callbacks.contextProvider.context.workspacePath = '/repo-b';
     callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
-    callbacks.contextProvider.context.workspaceFolders = [
-      { name: 'repo-a', path: '/repo-a' },
-      { name: 'repo-b', path: '/repo-b' },
-    ];
-    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
-      directory === '/repo-a' || directory === '/repo-b' ? directory : null
-    );
+    openSiblingRoots(callbacks);
     const { proxy } = createProxy(callbacks);
 
     await proxy.handleRequest(makePayload(222, 'GET', '/permission'));
@@ -7817,7 +7678,7 @@ describe('RestProxy handleRequest', () => {
       );
       const callbacks = createCallbacks({
         getWorkspacePath: () => '/repo-b',
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: {
           ...createCallbacks().sessionState,
           getSessionWorkspaceMatch: vi.fn(
@@ -7831,13 +7692,7 @@ describe('RestProxy handleRequest', () => {
       });
       callbacks.contextProvider.context.workspacePath = '/repo-b';
       callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
-      callbacks.contextProvider.context.workspaceFolders = [
-        { name: 'repo-a', path: '/repo-a' },
-        { name: 'repo-b', path: '/repo-b' },
-      ];
-      callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
-        directory === '/repo-a' || directory === '/repo-b' ? directory : null
-      );
+      openSiblingRoots(callbacks);
       const { proxy } = createProxy(callbacks);
 
       await proxy.handleRequest(makePayload(225, 'GET', path));
@@ -7900,7 +7755,7 @@ describe('RestProxy handleRequest', () => {
       );
       const { proxy, callbacks } = createProxy({
         getSessionHistoryScope: () => 'descendants',
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
       });
 
       await proxy.handleRequest(makePayload(225, 'GET', '/session/status'));
@@ -7935,17 +7790,11 @@ describe('RestProxy handleRequest', () => {
     );
     const callbacks = createCallbacks({
       getWorkspacePath: () => '/repo-b',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.context.workspacePath = '/repo-b';
     callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
-    callbacks.contextProvider.context.workspaceFolders = [
-      { name: 'repo-a', path: '/repo-a' },
-      { name: 'repo-b', path: '/repo-b' },
-    ];
-    callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
-      directory === '/repo-a' || directory === '/repo-b' ? directory : null
-    );
+    openSiblingRoots(callbacks);
     const { proxy } = createProxy(callbacks);
 
     await proxy.handleRequest(makePayload(227, 'GET', '/permission'));
@@ -7991,18 +7840,12 @@ describe('RestProxy handleRequest', () => {
       });
       const callbacks = createCallbacks({
         getWorkspacePath: () => '/repo-b',
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: manager,
       });
       callbacks.contextProvider.context.workspacePath = '/repo-b';
       callbacks.contextProvider.context.workspaceDirectory = '/repo-a';
-      callbacks.contextProvider.context.workspaceFolders = [
-        { name: 'repo-a', path: '/repo-a' },
-        { name: 'repo-b', path: '/repo-b' },
-      ];
-      callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((directory: string) =>
-        directory === '/repo-a' || directory === '/repo-b' ? directory : null
-      );
+      openSiblingRoots(callbacks);
       const { proxy } = createProxy(callbacks);
 
       await proxy.handleRequest(makePayload(223, 'GET', path));
@@ -8025,7 +7868,7 @@ describe('RestProxy handleRequest', () => {
     );
     const callbacks = createCallbacks({
       activateSession,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         getSessionWorkspaceMatch: vi.fn(
@@ -8069,7 +7912,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected path: ${path}`);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         getSessionWorkspaceMatch: vi.fn(() => undefined),
@@ -8098,7 +7941,7 @@ describe('RestProxy handleRequest', () => {
         throw new Error(`Unexpected path: ${path}`);
       });
       const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         sessionState: {
           ...createCallbacks().sessionState,
           getSessionWorkspaceMatch: vi.fn(() => undefined),
@@ -8137,7 +7980,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected path: ${path}`);
     });
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         getSessionWorkspaceMatch: vi.fn(() => undefined),
@@ -8177,7 +8020,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected path: ${path}`);
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         handleServerEvent: (
@@ -8211,9 +8054,7 @@ describe('RestProxy handleRequest', () => {
         if (path === '/session/status') return { 'session-1': { type: 'busy' } };
         throw new Error(`Unexpected path: ${path}`);
       });
-      const { proxy } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
-      });
+      const { proxy } = createProxy({ server: serverWith(serverRequest) });
 
       for (let poll = 0; poll < 5; poll += 1) {
         now.mockReturnValue(1_000 + poll * 1_000);
@@ -8254,9 +8095,7 @@ describe('RestProxy handleRequest', () => {
       }
       throw new Error(`Unexpected path: ${path}`);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(228, 'GET', '/session/status'));
     now += 5_000;
@@ -8287,9 +8126,7 @@ describe('RestProxy handleRequest', () => {
       }
       throw new Error(`Unexpected path: ${path}`);
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
 
     await proxy.handleRequest(makePayload(230, 'GET', '/session/status'));
     await proxy.handleRequest(makePayload(231, 'POST', '/session', {}));
@@ -8325,7 +8162,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected path: ${path}`);
     });
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       getSessionHistoryScope: () => 'descendants',
     });
     callbacks.contextProvider.context.workspacePath = '/repo/packages/app';
@@ -8360,7 +8197,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(() => Promise.resolve(rows));
     const { proxy, callbacks } = createProxy({
       getSessionHistoryScope: () => 'descendants',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(makePayload(22411, 'GET', '/session?limit=1'));
@@ -8384,7 +8221,7 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy, callbacks } = createProxy({
       getSessionHistoryScope: () => 'descendants',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(makePayload(22412, 'GET', '/session?limit=1'));
@@ -8439,7 +8276,7 @@ describe('RestProxy handleRequest', () => {
     const currentProject = deferred<{ id: string; worktree: string; vcs: string }>();
     const serverRequest = vi.fn(() => currentProject.promise);
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       associateSessionHistoryScope: vi.fn(() => Promise.resolve()),
     });
     const { proxy } = createProxy(callbacks);
@@ -8484,7 +8321,7 @@ describe('RestProxy handleRequest', () => {
     });
     const { proxy, callbacks } = createProxy({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(makePayload(22474, 'GET', '/session/status'));
@@ -8525,7 +8362,7 @@ describe('RestProxy handleRequest', () => {
     );
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8578,7 +8415,7 @@ describe('RestProxy handleRequest', () => {
     );
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8614,7 +8451,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8662,7 +8499,7 @@ describe('RestProxy handleRequest', () => {
         );
         const callbacks = createCallbacks({
           getSessionHistoryScope: () => 'project',
-          server: { ...createCallbacks().server, request: serverRequest } as never,
+          server: serverWith(serverRequest),
         });
         callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
           path === '/repo' ? '/repo' : null
@@ -8726,7 +8563,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected path: ${path}`);
     });
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       getSessionHistoryScope: () => 'project',
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
@@ -8768,7 +8605,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8815,7 +8652,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8851,7 +8688,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'descendants',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8887,7 +8724,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'descendants',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8932,7 +8769,7 @@ describe('RestProxy handleRequest', () => {
     });
     const callbacks = createCallbacks({
       getSessionHistoryScope: () => 'project',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
     callbacks.contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
       path === '/repo' ? '/repo' : null
@@ -8984,7 +8821,7 @@ describe('RestProxy handleRequest', () => {
       throw new Error(`Unexpected path: ${path}`);
     });
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       getSessionHistoryScope: () => 'project',
     });
     const { proxy } = createProxy(callbacks);
@@ -9019,7 +8856,7 @@ describe('RestProxy handleRequest', () => {
       }
     );
     const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       getSessionHistoryScope,
     });
     callbacks.contextProvider.context.workspaceFolders = [
@@ -9045,9 +8882,7 @@ describe('RestProxy handleRequest', () => {
         return [{ id: 'session-a', directory: '/repo-a' }];
       }
     );
-    const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const callbacks = createCallbacks({ server: serverWith(serverRequest) });
     callbacks.contextProvider.context.workspaceFolders = [
       { name: 'repo-a', path: '/repo-a' },
       { name: 'repo-b', path: '/repo-b' },
@@ -9074,9 +8909,7 @@ describe('RestProxy handleRequest', () => {
         return [{ id: 'healthy', directory: '/repo-a' }];
       }
     );
-    const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const callbacks = createCallbacks({ server: serverWith(serverRequest) });
     callbacks.contextProvider.context.workspaceFolders = [
       { name: 'a', path: '/repo-a' },
       { name: 'b', path: '/repo-b' },
@@ -9101,7 +8934,7 @@ describe('RestProxy handleRequest', () => {
         throw new Error('404 Location not found');
       });
       const callbacks = createCallbacks({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         getSessionHistoryScope: () => scope,
       });
       const { proxy } = createProxy(callbacks);
@@ -9119,9 +8952,7 @@ describe('RestProxy handleRequest', () => {
       const serverRequest = vi.fn(async () => {
         throw new Error(message);
       });
-      const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
-      });
+      const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
       await proxy.handleRequest(makePayload(2249, 'GET', '/session?limit=100'));
       expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 2249, error: message });
     }
@@ -9131,9 +8962,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(async () => {
       throw new Error('404 Location not found');
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
     await proxy.handleRequest(makePayload(2250, 'GET', '/session'));
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 2250,
@@ -9147,9 +8976,7 @@ describe('RestProxy handleRequest', () => {
       const serverRequest = vi.fn(async () => {
         throw new Error('404 Location not found');
       });
-      const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
-      });
+      const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
       await proxy.handleRequest(makePayload(2251, 'GET', path));
       expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
         id: 2251,
@@ -9163,9 +8990,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(async () => {
       throw new Error('404 Location not found');
     });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
     await proxy.handleRequest(makePayload(2252, 'GET', '/session/status'));
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 2252,
@@ -9182,9 +9007,7 @@ describe('RestProxy handleRequest', () => {
           : [{ id: 'session-a', directory: '/repo-a' }];
       }
     );
-    const callbacks = createCallbacks({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const callbacks = createCallbacks({ server: serverWith(serverRequest) });
     callbacks.contextProvider.context.workspaceFolders = [
       { name: 'repo-a', path: '/repo-a' },
       { name: 'repo-b', path: '/repo-b' },
@@ -9266,7 +9089,7 @@ describe('RestProxy handleRequest', () => {
           diagnostics: [],
         },
       } as never,
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
     });
 
     await proxy.handleRequest(makePayload(224, 'GET', '/session'));
@@ -9311,7 +9134,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(() => Promise.resolve(questions));
     const filterQuestions = vi.fn(() => filtered);
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionTrash: {
         ...createCallbacks().sessionTrash,
         filterVisibleSessionRequests: filterQuestions,
@@ -9423,9 +9246,7 @@ describe('RestProxy handleRequest', () => {
   it('passes through non-session responses without filtering', async () => {
     const configData = { providers: [{ id: 'openai' }] };
     const serverRequest = vi.fn(() => Promise.resolve(configData));
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
+    const { proxy, callbacks } = createProxy({ server: serverWith(serverRequest) });
     await proxy.handleRequest(makePayload(24, 'GET', '/config/providers'));
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 24,
@@ -9460,7 +9281,7 @@ describe('RestProxy handleRequest', () => {
       order.push('markBusy');
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
     });
 
@@ -9522,7 +9343,7 @@ describe('RestProxy handleRequest', () => {
       order.push('markBusy');
     });
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
     });
 
@@ -9583,7 +9404,7 @@ describe('RestProxy handleRequest', () => {
     });
     const markSessionBusy = vi.fn();
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
     });
 
@@ -9611,7 +9432,7 @@ describe('RestProxy handleRequest', () => {
     });
     const markSessionBusy = vi.fn();
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
     });
 
@@ -9640,7 +9461,7 @@ describe('RestProxy handleRequest', () => {
     const beginQueuedMessageDispatchClaim = vi.fn(() => Promise.resolve(true));
     const { proxy, callbacks } = createProxy({
       getWorkspacePath: () => '/repo-b',
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         isSessionInWorkspace: vi.fn(() => false),
@@ -9713,7 +9534,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn();
     const isQueuedMessageDispatchClaimCurrent = vi.fn(() => false);
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       isQueuedMessageDispatchClaimCurrent,
     });
 
@@ -9773,7 +9594,7 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(() => serverResponse.promise);
     const confirmPromptAdmission = vi.fn(() => admission.promise);
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       confirmPromptAdmission,
       beginQueuedMessageDispatchClaim: (sessionId, itemId, lease, requestId, messageId) =>
         queue.beginDispatchAdmission('view-a', sessionId, itemId, lease, requestId, messageId),
@@ -9846,7 +9667,7 @@ describe('RestProxy handleRequest', () => {
     const claim = queue.claimDispatch('view-a', 'session-1', 'queue-1', allViewsEligible)!;
     const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       beginQueuedMessageDispatchClaim: (sessionId, itemId, lease, requestId, messageId) =>
         queue.beginDispatchAdmission('view-a', sessionId, itemId, lease, requestId, messageId),
       isQueuedMessageDispatchClaimCurrent: (sessionId, itemId, lease, requestId) =>
@@ -9890,7 +9711,7 @@ describe('RestProxy handleRequest', () => {
   it('reports exhausted completion persistence without resending accepted work', async () => {
     const serverRequest = vi.fn(() => Promise.resolve({ ok: true }));
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       completeQueuedMessageDispatchClaim: vi.fn(() =>
         Promise.reject(new Error('Memento unavailable'))
       ),
@@ -9920,7 +9741,7 @@ describe('RestProxy handleRequest', () => {
     const confirmPromptAdmission = vi.fn(() => admission.promise);
     const serverRequest = vi.fn();
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       confirmPromptAdmission,
     });
     const operation = proxy.handleRequest({
@@ -9956,7 +9777,7 @@ describe('RestProxy handleRequest', () => {
     const markSessionBusy = vi.fn();
     const confirmPromptAdmission = vi.fn(() => Promise.resolve(false));
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
       confirmPromptAdmission,
     });
@@ -10008,7 +9829,7 @@ describe('RestProxy handleRequest', () => {
       });
       const confirmPromptAdmission = vi.fn(async () => scenario !== 'admission-denied');
       const { proxy, callbacks } = createProxy({
-        server: { ...createCallbacks().server, request: serverRequest } as never,
+        server: serverWith(serverRequest),
         confirmPromptAdmission,
       });
       await proxy.handleRequest(makePayload(303, 'POST', '/session/session-1/resume-steering'));
@@ -10050,7 +9871,7 @@ describe('RestProxy handleRequest', () => {
     const markSessionBusy = vi.fn(() => attempt);
     const reconcilePromptFailure = vi.fn();
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         markSessionBusy,
@@ -10098,7 +9919,7 @@ describe('RestProxy handleRequest', () => {
     const reconcilePromptFailure = vi.fn();
     const deferPromptFailure = vi.fn();
     const { proxy } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         markSessionBusy: vi.fn(() => attempt),
@@ -10123,7 +9944,7 @@ describe('RestProxy handleRequest', () => {
     const reconcilePromptFailure = vi.fn();
     const deferPromptFailure = vi.fn();
     const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
+      server: serverWith(serverRequest),
       sessionState: {
         ...createCallbacks().sessionState,
         markSessionBusy: vi.fn(() => attempt),

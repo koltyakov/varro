@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
+  getListDistanceFromBottom,
   getScrollMetrics,
   getVisibleMessageAnchor,
   sampleMessageTopAcrossFrames,
@@ -14,9 +15,7 @@ for (const gesture of ['tap', 'horizontal swipe'] as const) {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     const bounds = await list.boundingBox();
     if (!bounds) throw new Error('Missing transcript viewport');
     const cdp = await page.context().newCDPSession(page);
@@ -37,9 +36,7 @@ for (const gesture of ['tap', 'horizontal swipe'] as const) {
     const before = (await getScrollMetrics(page, '.interactive-list')).scrollTop;
     await appendDeltaToRapidStreaming(page, `\n\nAfter gesture: ${'More output. '.repeat(80)}`);
     await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     await cdp.detach();
   });
 }
@@ -50,9 +47,7 @@ test('native touch scrolling releases streaming follow and preserves older conte
   await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
   const list = page.locator('.interactive-list');
   await expect(list).toBeVisible();
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   const bounds = await list.boundingBox();
   if (!bounds) throw new Error('Missing transcript viewport');
   await list.evaluate((element) => {
@@ -96,8 +91,6 @@ test('native touch scrolling releases streaming follow and preserves older conte
     JSON.stringify({ anchor, samples })
   ).toBe(true);
   await page.getByRole('button', { name: 'Scroll to latest message' }).click();
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await cdp.detach();
 });

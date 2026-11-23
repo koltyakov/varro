@@ -170,13 +170,6 @@ export function takeCachedSessionHistoryPage(
   return page;
 }
 
-export function clearCachedSessionHistoryPages(sessionId: string) {
-  if (prefetchedHistoryPages.delete(sessionId)) {
-    clearHistoryPageRecency(sessionId);
-    setPrefetchedHistoryVersion((version) => version + 1);
-  }
-}
-
 export function isSessionHistoryTruncated(sessionId: string | null | undefined): boolean {
   if (sessionId) touchExistingHistorySession(sessionId);
   return !!sessionId && truncatedSessionIds().has(sessionId);
@@ -246,10 +239,8 @@ export function clearSessionMessageWindowState(sessionId: string) {
 }
 
 export function resetSessionMessageWindowForRefetch(sessionId: string) {
-  (() => {
-    clearSessionMessageWindowStateInternal(sessionId);
-    pendingMessageWindowResets.add(sessionId);
-  })();
+  clearSessionMessageWindowStateInternal(sessionId);
+  pendingMessageWindowResets.add(sessionId);
 }
 
 export function isSessionMessageWindowResetPending(sessionId: string): boolean {

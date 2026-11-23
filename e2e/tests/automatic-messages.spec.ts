@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { scrollToBottom } from './helpers';
 
 for (const history of [false, true]) {
   for (const width of [400, 900]) {
@@ -66,10 +67,7 @@ for (const history of [false, true]) {
           element.dispatchEvent(new Event('scroll'));
         });
         await expect(owner).toHaveCount(0);
-        await list.evaluate((element) => {
-          element.scrollTop = element.scrollHeight;
-          element.dispatchEvent(new Event('scroll'));
-        });
+        await scrollToBottom(list);
         await expect(shell.locator('.tool-invocation-detail')).toContainText('Long test output');
       }
       await summary.click();

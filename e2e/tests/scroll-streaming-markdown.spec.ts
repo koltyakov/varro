@@ -1,7 +1,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The frame collector is installed by this test in its isolated browser page. */
 import { expect, test } from '@playwright/test';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getListDistanceFromBottom, waitForAnimationFrames } from './helpers';
 import { appendDeltaToRapidStreaming } from './scroll-helpers';
 
 for (const reference of [
@@ -38,9 +38,7 @@ for (const reference of [
     const marker = 'Replay reference-completion anchor.';
     await appendDeltaToRapidStreaming(page, `\n\n${marker}\n\nSee ${reference.open}`);
     await expect(row.locator('p').filter({ hasText: marker })).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
 
     await page.evaluate((text) => {
       const anchor = [...document.querySelectorAll('.rendered-markdown p')].find(
@@ -67,17 +65,13 @@ for (const reference of [
       await waitForAnimationFrames(page, 4);
       await expect(row.getByRole('img', { name: 'Streaming content' })).toBeVisible();
       expect(await row.innerText()).not.toContain(chunk);
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThanOrEqual(1);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
       await waitForAnimationFrames(page, 2);
     }
     await appendDeltaToRapidStreaming(page, reference.close);
     await expect(row.locator('.streaming-markdown-pending')).toHaveCount(0);
     await expect(row.locator('a').filter({ hasText: reference.final })).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     await waitForAnimationFrames(page, 5);
     const samples = await page.evaluate(() => {
       const collector = (
@@ -136,9 +130,7 @@ test('off-core file links preserve row height while a later response streams', a
     { messageID: historyId, text }
   );
   await expect(history.locator('a.file-path-link')).toHaveCount(24);
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await waitForAnimationFrames(page, 3);
   const collector = await history.evaluateHandle((row) => {
     const state = { running: true, samples: [] as Array<{ height: number; links: number }> };

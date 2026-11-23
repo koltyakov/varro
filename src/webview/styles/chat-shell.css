@@ -1,12 +1,10 @@
 /* Narrow scrollbars for inline widgets */
-.toolbar-popover,
-.tool-invocation-params {
+.toolbar-popover {
   --scrollbar-thumb-color: transparent;
   scrollbar-gutter: stable;
 }
 
-.toolbar-popover:hover,
-.tool-invocation-params:hover {
+.toolbar-popover:hover {
   --scrollbar-thumb-color: var(
     --vscode-scrollbarSlider-hoverBackground,
     color-mix(in srgb, var(--color-vscode-fg) 12%, transparent)
@@ -166,15 +164,6 @@ input:focus-visible {
   justify-content: space-between;
   gap: 8px;
   padding: 0 8px 0 12px;
-}
-
-.chat-session-sidebar-title {
-  min-width: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-vscode-muted);
 }
 
 .interactive-list-shell {
@@ -803,21 +792,12 @@ input:focus-visible {
 
 .interactive-list-track.virtualized
   .interactive-item-off-core
-  :is(.shimmer-progress, .thinking-in-progress, .tool-status-running, .tool-call-spinner) {
-  animation-play-state: paused;
-}
-
+  :is(.shimmer-progress, .thinking-in-progress, .tool-status-running, .tool-call-spinner),
 .interactive-list-track.virtualized .interactive-item-off-core .chat-animated-ellipsis::after {
   animation-play-state: paused;
 }
 
-.interactive-list-track.virtualized .virtual-spacer {
-  flex: 0 0 auto;
-  min-height: 0;
-  pointer-events: none;
-  overflow-anchor: none;
-}
-
+.interactive-list-track.virtualized .virtual-spacer,
 .append-scroll-bottom-reserve,
 .activity-exit-bottom-reserve {
   flex: 0 0 auto;

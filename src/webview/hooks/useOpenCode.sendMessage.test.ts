@@ -1,39 +1,51 @@
-import { flush as flushSolid, createRoot } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PermissionRule } from '../../shared/opencode-types';
-import type { onMessage } from '../lib/bridge';
 import {
   assistantMessage,
+  captureBridgeHandler,
   getBridgeMocks,
   getClientMocks,
+  gpt4oProvider,
+  loadAndMountUseOpenCode,
   loadModules,
+  mountUseOpenCode,
+  primaryAgent,
   provider,
   session,
   todoPart,
   userMessage,
 } from './useOpenCode.test-support';
+import { deferred } from '../test-fixtures';
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
-type BridgeOnMessage = typeof onMessage;
-const bridgeOnMessage = vi.fn<BridgeOnMessage>();
-Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
 const OPEN_CODE_MESSAGE_ID = /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
 
 function sessionInWorkspace(id: string) {
   return {
     ...session(id),
     directory: id === 'session-old' ? '/repo-old' : '/repo-new',
   };
+}
+
+/** Loads fresh modules with session-1 active and a vision-capable GPT-4o selected. */
+async function loadWithVisionGpt4oSelected() {
+  const { stateModule, hookModule } = await loadModules();
+  flushSolid();
+
+  stateModule.setState(storePath('activeSessionId', 'session-1'));
+  flushSolid();
+  stateModule.setState(storePath('sessions', [session()]));
+  flushSolid();
+  stateModule.setState(storePath('providers', [gpt4oProvider({ toolcall: true, vision: true })]));
+  flushSolid();
+  stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
+  flushSolid();
+  stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
+  flushSolid();
+  return { stateModule, hookModule };
 }
 
 describe('sendMessage', () => {
@@ -171,18 +183,7 @@ describe('sendMessage', () => {
     flushSolid();
     stateModule.setPermissionModeForSession(null, 'full');
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [gpt4oProvider()]));
     flushSolid();
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
     flushSolid();
@@ -279,18 +280,7 @@ describe('sendMessage', () => {
     flushSolid();
     stateModule.setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [gpt4oProvider()]));
     flushSolid();
     stateModule.replaceMessages([{ info: userMessage('user-1'), parts: [] }]);
     flushSolid();
@@ -440,18 +430,7 @@ describe('sendMessage', () => {
     flushSolid();
     stateModule.setState(storePath('sessions', [session()]));
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [gpt4oProvider()]));
     flushSolid();
     stateModule.setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
     flushSolid();
@@ -540,30 +519,7 @@ describe('sendMessage', () => {
   });
 
   it('keeps pasted images for vision-capable models', async () => {
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-
-    stateModule.setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    stateModule.setState(storePath('sessions', [session()]));
-    flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    flushSolid();
+    const { stateModule, hookModule } = await loadWithVisionGpt4oSelected();
     stateModule.addClipboardImage({
       id: 'img-1',
       url: 'blob:1',
@@ -600,18 +556,7 @@ describe('sendMessage', () => {
 
     stateModule.setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [gpt4oProvider({ toolcall: true, vision: true })]));
     flushSolid();
     stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
     flushSolid();
@@ -666,18 +611,7 @@ describe('sendMessage', () => {
 
     stateModule.setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [gpt4oProvider({ toolcall: true, vision: true })]));
     flushSolid();
     stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
     flushSolid();
@@ -717,30 +651,7 @@ describe('sendMessage', () => {
   });
 
   it('sends merged explicit selections as a single document attachment', async () => {
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-
-    stateModule.setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    stateModule.setState(storePath('sessions', [session()]));
-    flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    flushSolid();
+    const { stateModule, hookModule } = await loadWithVisionGpt4oSelected();
     stateModule.setState(
       storePath('editorContext', {
         workspacePath: '/repo',
@@ -787,30 +698,7 @@ describe('sendMessage', () => {
   });
 
   it('includes only unique live-selection lines alongside explicit same-file context', async () => {
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-
-    stateModule.setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    stateModule.setState(storePath('sessions', [session()]));
-    flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    flushSolid();
+    const { stateModule, hookModule } = await loadWithVisionGpt4oSelected();
     stateModule.setState(
       storePath('editorContext', {
         workspacePath: '/repo',
@@ -858,30 +746,7 @@ describe('sendMessage', () => {
   });
 
   it('subtracts overlapping explicit ranges from the live same-file selection payload', async () => {
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-
-    stateModule.setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    stateModule.setState(storePath('sessions', [session()]));
-    flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    flushSolid();
+    const { stateModule, hookModule } = await loadWithVisionGpt4oSelected();
     stateModule.setState(
       storePath('editorContext', {
         workspacePath: '/repo',
@@ -936,30 +801,7 @@ describe('sendMessage', () => {
   });
 
   it('hides the duplicate active file payload when the file is explicitly added without a live selection', async () => {
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-
-    stateModule.setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    stateModule.setState(storePath('sessions', [session()]));
-    flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    flushSolid();
+    const { stateModule, hookModule } = await loadWithVisionGpt4oSelected();
     stateModule.setState(
       storePath('editorContext', {
         workspacePath: '/repo',
@@ -998,30 +840,7 @@ describe('sendMessage', () => {
   });
 
   it('omits a disabled current document while keeping other context attachments', async () => {
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-
-    stateModule.setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    stateModule.setState(storePath('sessions', [session()]));
-    flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
-    flushSolid();
+    const { stateModule, hookModule } = await loadWithVisionGpt4oSelected();
     stateModule.setState(
       storePath('editorContext', {
         workspacePath: '/repo',
@@ -1165,24 +984,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
     flushSolid();
 
-    stateModule.setState(
-      storePath('agents', [
-        {
-          name: 'build',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-        {
-          name: 'plan',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-      ])
-    );
+    stateModule.setState(storePath('agents', [primaryAgent('build'), primaryAgent('plan')]));
     flushSolid();
     stateModule.setSelectedAgent(savedAgent);
     flushSolid();
@@ -1202,24 +1004,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
     flushSolid();
 
-    stateModule.setState(
-      storePath('agents', [
-        {
-          name: 'build',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-        {
-          name: 'plan',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-      ])
-    );
+    stateModule.setState(storePath('agents', [primaryAgent('build'), primaryAgent('plan')]));
     flushSolid();
     stateModule.setSelectedAgent('plan');
     flushSolid();
@@ -1266,18 +1051,7 @@ describe('sendMessage', () => {
       })
     );
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [gpt4oProvider()]));
     flushSolid();
     stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
     flushSolid();
@@ -1337,24 +1111,7 @@ describe('sendMessage', () => {
     flushSolid();
     const created = deferred<ReturnType<typeof session>>();
 
-    stateModule.setState(
-      storePath('agents', [
-        {
-          name: 'build',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-        {
-          name: 'plan',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-      ])
-    );
+    stateModule.setState(storePath('agents', [primaryAgent('build'), primaryAgent('plan')]));
     flushSolid();
     stateModule.setState(
       storePath('providers', [
@@ -1438,13 +1195,7 @@ describe('sendMessage', () => {
   });
 
   it('detaches pending lazy creation when the production workspace resets', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     const oldCreation = deferred<ReturnType<typeof session>>();
     const newCreation = deferred<ReturnType<typeof session>>();
     clientMocks.sessionCreate
@@ -1471,30 +1222,17 @@ describe('sendMessage', () => {
 
     const { stateModule, hookModule } = await loadModules();
     flushSolid();
-    const providers = [
-      provider('openai', {
-        'gpt-4o': {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          capabilities: { toolcall: true },
-          cost: { input: 0, output: 0 },
-        },
-      }),
-    ];
+    const providers = [gpt4oProvider()];
     const applyDraftRouting = () => {
       stateModule.setState(storePath('providers', providers));
       stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
       stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4o' });
     };
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'context/update',
         payload: {
           workspacePath: '/repo-old',
@@ -1512,7 +1250,7 @@ describe('sendMessage', () => {
       await vi.waitFor(() => expect(clientMocks.sessionCreate).toHaveBeenCalledTimes(1));
       flushSolid();
 
-      bridgeHandler({
+      bridge.send({
         type: 'context/update',
         payload: {
           workspacePath: '/repo-new',
@@ -1655,24 +1393,7 @@ describe('sendMessage', () => {
       const { stateModule, hookModule } = await loadModules();
       flushSolid();
 
-      stateModule.setState(
-        storePath('agents', [
-          {
-            name: 'build',
-            mode: 'primary',
-            builtIn: true,
-            permission: { edit: 'ask', bash: {} },
-            tools: {},
-          },
-          {
-            name: 'plan',
-            mode: 'primary',
-            builtIn: true,
-            permission: { edit: 'ask', bash: {} },
-            tools: {},
-          },
-        ])
-      );
+      stateModule.setState(storePath('agents', [primaryAgent('build'), primaryAgent('plan')]));
       flushSolid();
       stateModule.setSelectedAgent('build');
       flushSolid();
@@ -1712,24 +1433,7 @@ describe('sendMessage', () => {
     const { stateModule, hookModule } = await loadModules();
     flushSolid();
 
-    stateModule.setState(
-      storePath('agents', [
-        {
-          name: 'build',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-        {
-          name: 'plan',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-      ])
-    );
+    stateModule.setState(storePath('agents', [primaryAgent('build'), primaryAgent('plan')]));
     flushSolid();
     stateModule.setSelectedAgent('build');
     flushSolid();
@@ -1800,13 +1504,7 @@ describe('sendMessage', () => {
   });
 
   it('requests opening attention sessions when the extension sends that command', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -1815,21 +1513,13 @@ describe('sendMessage', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
       expect(stateModule.openAttentionSessionsKey()).toBe(0);
       flushSolid();
 
-      bridgeHandler({ type: 'command/open-attention-sessions' });
+      bridge.send({ type: 'command/open-attention-sessions' });
       flushSolid();
 
       expect(stateModule.openAttentionSessionsKey()).toBe(1);
@@ -1848,24 +1538,7 @@ describe('sendMessage', () => {
     flushSolid();
     stateModule.setState(storePath('sessions', [session()]));
     flushSolid();
-    stateModule.setState(
-      storePath('agents', [
-        {
-          name: 'build',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-        {
-          name: 'plan',
-          mode: 'primary',
-          builtIn: true,
-          permission: { edit: 'ask', bash: {} },
-          tools: {},
-        },
-      ])
-    );
+    stateModule.setState(storePath('agents', [primaryAgent('build'), primaryAgent('plan')]));
     flushSolid();
     stateModule.setSelectedAgent('plan');
     flushSolid();

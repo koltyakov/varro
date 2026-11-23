@@ -275,12 +275,7 @@ export function createDataLoaderOperations(deps: {
     const workspace = workspaceGeneration;
     const generation = ++mcpLoadGeneration;
     const request = loadMcpsWithDependencies(
-      {
-        listMcpStatus: deps.listMcpStatus,
-        listMcpDefaults: deps.listMcpDefaults,
-        setMcpDefaults: deps.setMcpDefaults,
-        setMcpStatus: deps.setMcpStatus,
-      },
+      deps,
       deps.logError,
       () => workspace === workspaceGeneration && generation === mcpLoadGeneration
     );
@@ -335,20 +330,7 @@ export function createDataLoaderOperations(deps: {
     const generation = ++agentLoadGeneration;
     const isLatest = () => workspace === workspaceGeneration && generation === agentLoadGeneration;
     const request = inheritSupersededLoad(
-      loadAgentsWithDependencies(
-        {
-          listAgents: deps.listAgents,
-          getActiveSessionId: deps.getActiveSessionId,
-          getSelectedAgent: deps.getSelectedAgent,
-          getSelectedAgentForSession: deps.getSelectedAgentForSession,
-          getPersistedSelectedAgent: deps.getPersistedSelectedAgent,
-          setAllAgents: deps.setAllAgents,
-          setPrimaryAgents: deps.setPrimaryAgents,
-          setSelectedAgent: deps.setSelectedAgent,
-        },
-        deps.logError,
-        isLatest
-      ),
+      loadAgentsWithDependencies(deps, deps.logError, isLatest),
       workspace,
       isLatest,
       () => latestAgentLoad
@@ -363,14 +345,7 @@ export function createDataLoaderOperations(deps: {
     const isLatest = () =>
       workspace === workspaceGeneration && generation === commandLoadGeneration;
     const request = inheritSupersededLoad(
-      loadCommandsWithDependencies(
-        {
-          listCommands: deps.listCommands,
-          setCommands: deps.setCommands,
-        },
-        deps.logError,
-        isLatest
-      ),
+      loadCommandsWithDependencies(deps, deps.logError, isLatest),
       workspace,
       isLatest,
       () => latestCommandLoad
@@ -391,8 +366,8 @@ export function createDataLoaderOperations(deps: {
     const request = inheritSupersededLoad(
       loadProvidersWithDependencies(
         {
+          ...deps,
           listProviders: () => deps.listProviders(signal),
-          setProvidersLoaded: deps.setProvidersLoaded,
           setProviders: (providers, defaults) => {
             const knownProviders = knownProviderIDs;
             const newlyConnectedProviderIDs = knownProviders
@@ -404,12 +379,6 @@ export function createDataLoaderOperations(deps: {
             knownProviderIDs ??= new Set();
             for (const provider of providers) knownProviderIDs.add(provider.id);
           },
-          setProviderDefaults: deps.setProviderDefaults,
-          getSelectedModel: deps.getSelectedModel,
-          getLastSelectedModel: deps.getLastSelectedModel,
-          getSelectedModelForSession: deps.getSelectedModelForSession,
-          getComposerSessionId: deps.getComposerSessionId,
-          setSelectedModel: deps.setSelectedModel,
         },
         (context, error) => {
           if (startup && isCurrent()) {
@@ -543,10 +512,7 @@ export function createDataLoaderOperations(deps: {
   const refreshProviderLimit = async (providerID: string, modelID?: string | null) => {
     const workspace = workspaceGeneration;
     await refreshProviderLimitWithDependencies(
-      {
-        loadProviderLimit: deps.loadProviderLimit,
-        setProviderLimit: deps.setProviderLimit,
-      },
+      deps,
       providerID,
       modelID,
       deps.logError,
@@ -560,22 +526,8 @@ export function createDataLoaderOperations(deps: {
     const isCurrent = () =>
       workspace === workspaceGeneration && generation === compatibilityLoadGeneration;
     await Promise.all([
-      loadProviderAuthMethodsWithDependencies(
-        {
-          listProviderAuthMethods: deps.listProviderAuthMethods,
-          setProviderAuthMethods: deps.setProviderAuthMethods,
-        },
-        deps.logError,
-        isCurrent
-      ),
-      loadWorkspaceStatusesWithDependencies(
-        {
-          listWorkspaceStatuses: deps.listWorkspaceStatuses,
-          setWorkspaceStatuses: deps.setWorkspaceStatuses,
-        },
-        deps.logError,
-        isCurrent
-      ),
+      loadProviderAuthMethodsWithDependencies(deps, deps.logError, isCurrent),
+      loadWorkspaceStatusesWithDependencies(deps, deps.logError, isCurrent),
     ]);
   };
 
@@ -715,10 +667,7 @@ export function createDataLoaderOperations(deps: {
     const workspace = workspaceGeneration;
     const generation = ++recycleBinLoadGeneration;
     const loaded = await loadRecycleBinWithDependencies(
-      {
-        listRecycleBin: deps.listRecycleBin,
-        setRecycleBinEntries: deps.setRecycleBinEntries,
-      },
+      deps,
       deps.logError,
       () => workspace === workspaceGeneration && generation === recycleBinLoadGeneration
     );

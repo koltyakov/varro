@@ -90,6 +90,7 @@ import {
   terminalIcon,
   toolsIcon,
 } from '../lib/ui-icons';
+import { createAltKeyTracker } from './alt-key-tracker';
 import { UiIcon } from './UiIcon';
 import { ChildTaskControls } from './chat/ChildTaskControls';
 
@@ -97,44 +98,8 @@ export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
-const [taskActivityAltPressed, setTaskActivityAltPressed] = createSignal(false);
-let taskActivityAltListenerCount = 0;
-
-function handleTaskActivityAltKeydown(event: KeyboardEvent) {
-  if (event.key === 'Alt') setTaskActivityAltPressed(true);
-}
-
-function handleTaskActivityAltKeyup(event: KeyboardEvent) {
-  if (event.key === 'Alt') setTaskActivityAltPressed(false);
-}
-
-function handleTaskActivityAltMousemove(event: MouseEvent) {
-  setTaskActivityAltPressed(event.altKey);
-}
-
-function handleTaskActivityAltBlur() {
-  setTaskActivityAltPressed(false);
-}
-
-function retainTaskActivityAltListener() {
-  if (taskActivityAltListenerCount === 0) {
-    window.addEventListener('keydown', handleTaskActivityAltKeydown);
-    window.addEventListener('keyup', handleTaskActivityAltKeyup);
-    window.addEventListener('mousemove', handleTaskActivityAltMousemove);
-    window.addEventListener('blur', handleTaskActivityAltBlur);
-  }
-  taskActivityAltListenerCount += 1;
-
-  return () => {
-    taskActivityAltListenerCount -= 1;
-    if (taskActivityAltListenerCount > 0) return;
-    window.removeEventListener('keydown', handleTaskActivityAltKeydown);
-    window.removeEventListener('keyup', handleTaskActivityAltKeyup);
-    window.removeEventListener('mousemove', handleTaskActivityAltMousemove);
-    window.removeEventListener('blur', handleTaskActivityAltBlur);
-    setTaskActivityAltPressed(false);
-  };
-}
+const { pressed: taskActivityAltPressed, retain: retainTaskActivityAltListener } =
+  createAltKeyTracker();
 
 export function getToolCallExpansionKey(part: ToolPart) {
   return `${part.sessionID}\u0000${part.messageID}\u0000${part.callID}`;

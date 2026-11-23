@@ -28,25 +28,23 @@ export function setQuestions(questions: QuestionRequest[]) {
     if (!questionGenerations.has(question.id)) questionGenerations.set(question.id, 1);
   }
   const nextQuestionIds = new Set(nextQuestions.map((question) => question.id));
-  (() => {
-    for (const question of state.questions) {
-      if (nextQuestionIds.has(question.id) || resolvedQuestionIds.has(question.id)) continue;
-      const wasTransitioned = transitionedQuestionIds.has(question.id);
-      nativeFormDrafts.remove(question.id);
-      rememberResolvedQuestion(question.id, question.sessionID);
-      transitionedQuestionIds.add(question.id);
-      if (!wasTransitioned) markQuestionResponsePending(question.id, question.sessionID);
-    }
-    setState((draft) => {
-      const previous = new Map(draft.questions.map((question) => [question.id, question]));
-      draft.questions = nextQuestions.map((question) => {
-        const retained = previous.get(question.id);
-        if (!retained) return question;
-        reconcile(question)(retained);
-        return retained;
-      });
+  for (const question of state.questions) {
+    if (nextQuestionIds.has(question.id) || resolvedQuestionIds.has(question.id)) continue;
+    const wasTransitioned = transitionedQuestionIds.has(question.id);
+    nativeFormDrafts.remove(question.id);
+    rememberResolvedQuestion(question.id, question.sessionID);
+    transitionedQuestionIds.add(question.id);
+    if (!wasTransitioned) markQuestionResponsePending(question.id, question.sessionID);
+  }
+  setState((draft) => {
+    const previous = new Map(draft.questions.map((question) => [question.id, question]));
+    draft.questions = nextQuestions.map((question) => {
+      const retained = previous.get(question.id);
+      if (!retained) return question;
+      reconcile(question)(retained);
+      return retained;
     });
-  })();
+  });
 }
 
 export function upsertQuestion(question: QuestionRequest) {
@@ -56,26 +54,24 @@ export function upsertQuestion(question: QuestionRequest) {
   else if (reusesResolvedID) {
     questionGenerations.set(question.id, questionGenerations.get(question.id)! + 1);
   }
-  (() => {
-    // An initial/replayed ask can restore a checkpoint before questions hydrate.
-    // Only an explicit ask reusing a resolved ID starts a fresh draft.
-    if (reusesResolvedID) nativeFormDrafts.remove(question.id);
-    if (!hasCurrentQuestion || reusesResolvedID) {
-      resolvedQuestionIds.delete(question.id);
-      transitionedQuestionIds.delete(question.id);
-      resolvedQuestionSessions.delete(question.id);
-      clearQuestionResponsePendingRequest(question.id);
-    }
-    setState(
-      storePath('questions', (questions) => {
-        const idx = questions.findIndex((item) => item.id === question.id);
-        if (idx !== -1) questions[idx] = question;
-        else questions.push(question);
+  // An initial/replayed ask can restore a checkpoint before questions hydrate.
+  // Only an explicit ask reusing a resolved ID starts a fresh draft.
+  if (reusesResolvedID) nativeFormDrafts.remove(question.id);
+  if (!hasCurrentQuestion || reusesResolvedID) {
+    resolvedQuestionIds.delete(question.id);
+    transitionedQuestionIds.delete(question.id);
+    resolvedQuestionSessions.delete(question.id);
+    clearQuestionResponsePendingRequest(question.id);
+  }
+  setState(
+    storePath('questions', (questions) => {
+      const idx = questions.findIndex((item) => item.id === question.id);
+      if (idx !== -1) questions[idx] = question;
+      else questions.push(question);
 
-        return questions;
-      })
-    );
-  })();
+      return questions;
+    })
+  );
 }
 
 export function removeQuestion(requestID: string) {
@@ -107,12 +103,10 @@ export function removeResolvedQuestion(requestID: string, expectedGeneration?: n
   const sessionID =
     state.questions.find((question) => question.id === requestID)?.sessionID ??
     resolvedQuestionSessions.get(requestID);
-  (() => {
-    if (sessionID && !wasTransitioned) markQuestionResponsePending(requestID, sessionID);
-    rememberResolvedQuestion(requestID, sessionID);
-    transitionedQuestionIds.add(requestID);
-    removeQuestionEntry(requestID);
-  })();
+  if (sessionID && !wasTransitioned) markQuestionResponsePending(requestID, sessionID);
+  rememberResolvedQuestion(requestID, sessionID);
+  transitionedQuestionIds.add(requestID);
+  removeQuestionEntry(requestID);
   return true;
 }
 
@@ -294,44 +288,42 @@ export function removePermission(permissionId: string, options?: { removeGroup?:
       ? getPermissionGroupMembers(matchedPermission).map((member) => member.id)
       : [permissionId]
   );
-  (() => {
-    if (matchedPermission) prepareForPermissionRemoval(permissionId, removeGroup);
-    setState(
-      storePath('permissions', (perms) => {
-        const idx = perms.findIndex(
-          (p) =>
-            p.id === permissionId ||
-            p.duplicateIDs?.includes(permissionId) ||
-            p.groupMembers?.some((member) => member.id === permissionId)
-        );
-        if (idx === -1) return perms;
-        if (removeGroup) {
-          perms.splice(idx, 1);
-          return perms;
-        }
-
-        const permission = perms[idx]!;
-        const groupMembers = getPermissionGroupMembers(permission).filter(
-          (member) => member.id !== permissionId
-        );
-        if (groupMembers.length === 0) {
-          perms.splice(idx, 1);
-          return perms;
-        }
-
-        const nextLeader = groupMembers[0]!;
-        permission.id = nextLeader.id;
-        permission.sessionID = nextLeader.sessionID;
-        permission.messageID = nextLeader.messageID;
-        permission.callID = nextLeader.callID;
-        permission.groupMembers = groupMembers.length > 1 ? groupMembers : undefined;
-        permission.duplicateIDs =
-          groupMembers.length > 1 ? groupMembers.map((member) => member.id) : undefined;
-
+  if (matchedPermission) prepareForPermissionRemoval(permissionId, removeGroup);
+  setState(
+    storePath('permissions', (perms) => {
+      const idx = perms.findIndex(
+        (p) =>
+          p.id === permissionId ||
+          p.duplicateIDs?.includes(permissionId) ||
+          p.groupMembers?.some((member) => member.id === permissionId)
+      );
+      if (idx === -1) return perms;
+      if (removeGroup) {
+        perms.splice(idx, 1);
         return perms;
-      })
-    );
-  })();
+      }
+
+      const permission = perms[idx]!;
+      const groupMembers = getPermissionGroupMembers(permission).filter(
+        (member) => member.id !== permissionId
+      );
+      if (groupMembers.length === 0) {
+        perms.splice(idx, 1);
+        return perms;
+      }
+
+      const nextLeader = groupMembers[0]!;
+      permission.id = nextLeader.id;
+      permission.sessionID = nextLeader.sessionID;
+      permission.messageID = nextLeader.messageID;
+      permission.callID = nextLeader.callID;
+      permission.groupMembers = groupMembers.length > 1 ? groupMembers : undefined;
+      permission.duplicateIDs =
+        groupMembers.length > 1 ? groupMembers.map((member) => member.id) : undefined;
+
+      return perms;
+    })
+  );
 }
 
 export function reconcilePermissions(

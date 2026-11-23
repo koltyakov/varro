@@ -1,9 +1,12 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access test-only fields installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import {
+  getListDistanceFromBottom,
   getScrollMetrics,
   getVisibleMessageAnchor,
+  postWebviewMessage,
   sampleMessageTopAcrossFrames,
+  scrollToBottom,
   STREAMING_SCROLL_POLL_OPTIONS,
   waitForAnimationFrame,
   waitForAnimationFrames,
@@ -136,14 +139,9 @@ test.describe('scroll stability regressions', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let index = 0; index < 12; index += 1) {
@@ -152,14 +150,10 @@ test.describe('scroll stability regressions', () => {
         `\n\nRapid chunk ${index}: ${'filling content '.repeat(6)}`
       );
       await waitForAnimationFrames(page, 2);
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThan(15);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('first streamed item stays painted within its clipped bottom-follow viewport', async ({
@@ -176,35 +170,27 @@ test.describe('scroll stability regressions', () => {
       content:
         '.assistant-message-flow-item-streamed.measured-entrance-active { animation-play-state: paused; }',
     });
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
-    await page.evaluate(() => {
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'message.part.updated',
-            properties: {
-              part: {
-                id: 'message-rapid-assistant-streaming-text-2',
-                sessionID: 'session-rapid-streaming-jitter',
-                messageID: 'message-rapid-assistant-streaming',
-                type: 'text',
-                text:
-                  '## 1. Orientation\n\n' +
-                  Array.from(
-                    { length: 6 },
-                    (_, index) =>
-                      `Streamed paragraph ${index + 1} enters while the measured wrapper clips its natural layout.`
-                  ).join('\n\n'),
-              },
-            },
+    await scrollToBottom(list);
+    await postWebviewMessage(page, {
+      type: 'server/event',
+      payload: {
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'message-rapid-assistant-streaming-text-2',
+            sessionID: 'session-rapid-streaming-jitter',
+            messageID: 'message-rapid-assistant-streaming',
+            type: 'text',
+            text:
+              '## 1. Orientation\n\n' +
+              Array.from(
+                { length: 6 },
+                (_, index) =>
+                  `Streamed paragraph ${index + 1} enters while the measured wrapper clips its natural layout.`
+              ).join('\n\n'),
           },
         },
-        '*'
-      );
+      },
     });
 
     const entering = page
@@ -273,9 +259,7 @@ test.describe('scroll stability regressions', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
@@ -294,14 +278,9 @@ test.describe('scroll stability regressions', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let index = 0; index < 10; index += 1) {
@@ -315,9 +294,7 @@ test.describe('scroll stability regressions', () => {
     await expect(page.locator('.chat-turn-assistant').last()).toContainText(
       'Growing content block 9'
     );
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 });
 
@@ -390,14 +367,9 @@ test.describe('rapid streaming bottom follow', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let i = 0; i < 20; i += 1) {
@@ -408,16 +380,11 @@ test.describe('rapid streaming bottom follow', () => {
       await appendDeltaToRapidStreaming(page, `\n\nVarying-size chunk ${i}: ${size}`);
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(
-          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
-          STREAMING_SCROLL_POLL_OPTIONS
-        )
+        .poll(() => getListDistanceFromBottom(page), STREAMING_SCROLL_POLL_OPTIONS)
         .toBeLessThan(15);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('holds unfinished inline code until completion while keeping bottom follow engaged', async ({
@@ -427,9 +394,7 @@ test.describe('rapid streaming bottom follow', () => {
     const list = page.locator('.interactive-list');
     const row = page.locator('[data-msg-id="message-rapid-assistant-streaming"]');
     await expect(list).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const codeText = 'VFZ-PENDING-MARKDOWN '.repeat(24).trim();
     await appendDeltaToRapidStreaming(page, `\n\nPending inline \`${codeText}`);
@@ -437,21 +402,13 @@ test.describe('rapid streaming bottom follow', () => {
     await expect(row.getByRole('img', { name: 'Streaming content' })).toBeVisible();
     await expect(row).not.toContainText('VFZ-PENDING-MARKDOWN');
     await expect(row.locator('code')).toHaveCount(0);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
 
     await appendDeltaToRapidStreaming(page, '`');
     await expect(row.locator('.streaming-markdown-pending')).toHaveCount(0);
     await expect(row.locator('code').filter({ hasText: 'VFZ-PENDING-MARKDOWN' })).toBeVisible();
     await expect(row.locator('code')).toHaveText(codeText);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     for (let frame = 0; frame < 4; frame += 1) {
       await waitForAnimationFrame(page);
       expect(
@@ -466,9 +423,7 @@ test.describe('rapid streaming bottom follow', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     for (let i = 0; i < 20; i += 1) {
       await appendDeltaToRapidStreaming(
@@ -478,9 +433,7 @@ test.describe('rapid streaming bottom follow', () => {
     }
     await waitForAnimationFrames(page, 5);
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(10);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(10);
   });
 
   test('keeps the same visible row fixed while detached streaming arrives', async ({ page }) => {
@@ -488,9 +441,7 @@ test.describe('rapid streaming bottom follow', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       const mid = Math.floor(element.scrollHeight / 2);
@@ -520,9 +471,7 @@ test.describe('rapid streaming bottom follow', () => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     await waitForAnimationFrames(page, 4);
 
     // Trackpads can deliver subpixel intent before the browser paints a scroll movement.
@@ -555,9 +504,7 @@ test.describe('rapid streaming bottom follow', () => {
       const list = page.locator('.interactive-list');
       await expect(list).toBeVisible();
 
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThan(15);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
       await appendDeltaToRapidStreaming(page, '\n\nOutput arriving before the upward gesture.');
       if (input === 'wheel') {
@@ -599,9 +546,7 @@ test.describe('bottom scroll stability during height changes', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.hover();
     for (let i = 0; i < 15; i += 1) {
@@ -612,16 +557,11 @@ test.describe('bottom scroll stability during height changes', () => {
       );
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(
-          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
-          STREAMING_SCROLL_POLL_OPTIONS
-        )
+        .poll(() => getListDistanceFromBottom(page), STREAMING_SCROLL_POLL_OPTIONS)
         .toBeLessThan(15);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('keeps bottom follow engaged across large multi-agent height changes', async ({ page }) => {
@@ -629,14 +569,9 @@ test.describe('bottom scroll stability during height changes', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let i = 0; i < 20; i += 1) {
@@ -647,16 +582,11 @@ test.describe('bottom scroll stability during height changes', () => {
       await appendDeltaToMultiAgentLargeStreaming(page, `\n\n${content}`);
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(
-          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
-          STREAMING_SCROLL_POLL_OPTIONS
-        )
+        .poll(() => getListDistanceFromBottom(page), STREAMING_SCROLL_POLL_OPTIONS)
         .toBeLessThan(15);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('re-engages bottom follow after returning within threshold in a multi-agent transcript', async ({
@@ -666,9 +596,7 @@ test.describe('bottom scroll stability during height changes', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, bubbles: true }));
@@ -704,8 +632,6 @@ test.describe('bottom scroll stability during height changes', () => {
       await waitForAnimationFrames(page, 2);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 });

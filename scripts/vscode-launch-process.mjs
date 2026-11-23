@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { rename, writeFile } from 'node:fs/promises';
+import { access, rename, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -83,6 +83,67 @@ export function createCdpRequestClient(socket, timeoutMs = DEFAULT_CDP_REQUEST_T
   };
 }
 
+export const listCdpTargets = (port) =>
+  fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) => response.json());
+
+export const isVscodeWorkbenchTarget = (target) =>
+  target.type === 'page' && target.title.includes('[Extension Development Host]');
+
+export async function openCdpSocket(url) {
+  const socket = new WebSocket(url);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
+  return socket;
+}
+
+/** Dispatches one native press and release at a point through any client exposing `call`. */
+export async function dispatchCdpClick(
+  client,
+  point,
+  { button = 'left', pressed = 1, modifiers } = {}
+) {
+  for (const [type, buttons] of [
+    ['mousePressed', pressed],
+    ['mouseReleased', 0],
+  ]) {
+    const event = { type, ...point, button, buttons, clickCount: 1 };
+    if (modifiers !== undefined) event.modifiers = modifiers;
+    await client.call('Input.dispatchMouseEvent', event);
+  }
+}
+
+/** Resolves the VS Code GUI executable; `expected` completes the not-found guidance. */
+export async function resolveVscodeExecutable(expected) {
+  const configured = process.env.VARRO_VSCODE_EXECUTABLE?.trim();
+  if (configured) {
+    await access(configured);
+    return configured;
+  }
+
+  const candidates =
+    process.platform === 'darwin'
+      ? ['/Applications/Visual Studio Code.app/Contents/MacOS/Code']
+      : process.platform === 'win32'
+        ? [
+            path.join(process.env.LOCALAPPDATA || '', 'Programs/Microsoft VS Code/Code.exe'),
+            path.join(process.env.ProgramFiles || '', 'Microsoft VS Code/Code.exe'),
+          ]
+        : ['/usr/share/code/code', '/usr/share/code-insiders/code-insiders'];
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {}
+  }
+
+  throw new Error(
+    `Could not locate the VS Code application executable; set VARRO_VSCODE_EXECUTABLE to ${expected}`
+  );
+}
+
 export async function writeVscodeLaunchMetadata(filePath, details) {
   const birthIdentity = await readProcessBirthIdentity(details.pid);
   const metadata = {
@@ -150,9 +211,7 @@ export async function verifyVscodeLaunchIdentity(launch) {
     if (!response.ok) throw new Error(`CDP endpoint returned HTTP ${String(response.status)}`);
     return response.json();
   });
-  const workbenches = targets.filter(
-    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-  );
+  const workbenches = targets.filter(isVscodeWorkbenchTarget);
   if (workbenches.length !== 1) {
     throw new Error(
       `Launch CDP endpoint has ${String(workbenches.length)} Extension Development Host targets`
@@ -178,11 +237,7 @@ export function reserveLoopbackPort() {
 }
 
 async function bringTargetToFront(webSocketDebuggerUrl) {
-  const socket = new WebSocket(webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
+  const socket = await openCdpSocket(webSocketDebuggerUrl);
   const requests = createCdpRequestClient(socket);
   try {
     return await requests.call('Page.bringToFront');
@@ -248,20 +303,12 @@ export async function executeVscodeCommand(
   commandLabel,
   { alreadySelectedCommand } = {}
 ) {
-  const targets = await fetch(`http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`).then(
-    (response) => response.json()
-  );
-  const workbenches = targets.filter(
-    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-  );
+  const targets = await listCdpTargets(remoteDebuggingPort);
+  const workbenches = targets.filter(isVscodeWorkbenchTarget);
   if (workbenches.length !== 1 || !workbenches[0]?.webSocketDebuggerUrl) {
     throw new Error(`Expected one VS Code workbench target, found ${String(workbenches.length)}`);
   }
-  const socket = new WebSocket(workbenches[0].webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
+  const socket = await openCdpSocket(workbenches[0].webSocketDebuggerUrl);
   const requests = createCdpRequestClient(socket);
   try {
     const dismissPalette = async () => {
@@ -340,18 +387,7 @@ export async function executeVscodeCommand(
       });
       const point = response.result?.value;
       if (!point) throw error;
-      for (const [type, buttons] of [
-        ['mousePressed', 1],
-        ['mouseReleased', 0],
-      ]) {
-        await requests.call('Input.dispatchMouseEvent', {
-          type,
-          ...point,
-          button: 'left',
-          buttons,
-          clickCount: 1,
-        });
-      }
+      await dispatchCdpClick(requests, point);
       return;
     }
     // Search results can move between measuring a row and clicking it. Select the
@@ -433,20 +469,12 @@ export async function resizeVscodeSidebar(remoteDebuggingPort, targetWidth, time
 
   while (Date.now() < deadline) {
     try {
-      const targets = await fetch(`http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`).then(
-        (response) => response.json()
-      );
-      const workbench = targets.find(
-        (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-      );
+      const targets = await listCdpTargets(remoteDebuggingPort);
+      const workbench = targets.find(isVscodeWorkbenchTarget);
       if (!workbench?.webSocketDebuggerUrl)
         throw new Error('VS Code workbench target is not ready');
 
-      const socket = new WebSocket(workbench.webSocketDebuggerUrl);
-      await new Promise((resolve, reject) => {
-        socket.addEventListener('open', resolve, { once: true });
-        socket.addEventListener('error', reject, { once: true });
-      });
+      const socket = await openCdpSocket(workbench.webSocketDebuggerUrl);
       const requests = createCdpRequestClient(socket, Math.max(1, deadline - Date.now()));
       try {
         const geometry = await requests.call('Runtime.evaluate', {
@@ -513,12 +541,8 @@ export async function reloadVscodeWindow(
   timeoutMs = 20_000,
   expectedVarroTargetId = null
 ) {
-  const targets = await fetch(`http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`).then(
-    (response) => response.json()
-  );
-  const workbench = targets.find(
-    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-  );
+  const targets = await listCdpTargets(remoteDebuggingPort);
+  const workbench = targets.find(isVscodeWorkbenchTarget);
   if (!workbench?.webSocketDebuggerUrl) throw new Error('VS Code workbench target is not ready');
   const originalVarroTargetIds = new Set(
     targets
@@ -538,12 +562,8 @@ export async function reloadVscodeWindow(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const currentTargets = await fetch(
-        `http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`
-      ).then((response) => response.json());
-      const currentWorkbench = currentTargets.find(
-        (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-      );
+      const currentTargets = await listCdpTargets(remoteDebuggingPort);
+      const currentWorkbench = currentTargets.find(isVscodeWorkbenchTarget);
       const varroTargets = currentTargets.filter(
         (target) => target.type === 'iframe' && target.url.includes('extensionId=koltyakov.varro')
       );

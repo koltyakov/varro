@@ -18,6 +18,26 @@ function user(overrides: Partial<UserMessage> = {}): MessageEntry {
   };
 }
 
+// An assistant reply to user-1 that carries the model but no agent or reasoning variant.
+function assistant(): MessageEntry {
+  return {
+    info: {
+      id: 'assistant-1',
+      sessionID: 'session-1',
+      role: 'assistant',
+      parentID: 'user-1',
+      time: { created: 2 },
+      providerID: model.providerID,
+      modelID: model.modelID,
+      mode: 'default',
+      path: { cwd: '/repo', root: '/repo' },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [],
+  };
+}
+
 describe('active turn selection', () => {
   it('requires matching agent, provider, model and normalized reasoning', () => {
     const messages = [user()];
@@ -55,25 +75,7 @@ describe('active turn selection', () => {
   });
 
   it('uses assistant settings and falls back to its parent for missing agent and reasoning', () => {
-    const messages: MessageEntry[] = [
-      user(),
-      {
-        info: {
-          id: 'assistant-1',
-          sessionID: 'session-1',
-          role: 'assistant',
-          parentID: 'user-1',
-          time: { created: 2 },
-          providerID: model.providerID,
-          modelID: model.modelID,
-          mode: 'default',
-          path: { cwd: '/repo', root: '/repo' },
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        },
-        parts: [],
-      },
-    ];
+    const messages: MessageEntry[] = [user(), assistant()];
     expect(matchesActiveTurnSelection(messages, 'session-1', 'build', model)).toBe(true);
   });
 
@@ -98,22 +100,7 @@ describe('active turn selection', () => {
     const messages: MessageEntry[] = [
       ...history,
       user(),
-      {
-        info: {
-          id: 'assistant-1',
-          sessionID: 'session-1',
-          role: 'assistant',
-          parentID: 'user-1',
-          time: { created: 2 },
-          providerID: model.providerID,
-          modelID: model.modelID,
-          mode: 'default',
-          path: { cwd: '/repo', root: '/repo' },
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        },
-        parts: [],
-      },
+      assistant(),
       user({ sessionID: 'child', model: { ...model, variant: 'xhigh' } }),
       user({ id: 'steer', delivery: 'steer', model: { ...model, variant: 'xhigh' } }),
     ];

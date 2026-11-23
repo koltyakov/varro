@@ -9,6 +9,16 @@ import type { Message, Part, Session } from '../types';
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
+function mountView(view: Parameters<typeof render>[0]) {
+  cleanup = render(view, container!);
+  flushSolid();
+}
+
+function applyState(setter: Parameters<typeof setState>[0]) {
+  setState(setter);
+  flushSolid();
+}
+
 function session(overrides?: Partial<Session>): Session {
   return {
     id: 'session-1',
@@ -88,9 +98,8 @@ describe('ChangedFilesList', () => {
   });
 
   it('keeps authoritative session summary files visible while the session is busy', () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(
       storePath('sessions', [
         session({
           summary: {
@@ -104,12 +113,9 @@ describe('ChangedFilesList', () => {
         }),
       ])
     );
-    flushSolid();
-    setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
-    flushSolid();
+    applyState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
 
     expect(container?.textContent).toContain('Files');
     expect(container?.textContent).toContain('1');
@@ -120,17 +126,13 @@ describe('ChangedFilesList', () => {
   it('hides changed files until the setting is enabled', async () => {
     setShowChangedFiles(false);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session()]));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(storePath('sessions', [session()]));
+    applyState(
       storePath('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
 
     expect(container?.textContent).not.toContain('Files');
 
@@ -143,17 +145,13 @@ describe('ChangedFilesList', () => {
   });
 
   it('keeps message-derived files visible while the same session is busy', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session()]));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(storePath('sessions', [session()]));
+    applyState(
       storePath('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
     await Promise.resolve();
     flushSolid();
 
@@ -162,8 +160,7 @@ describe('ChangedFilesList', () => {
     expect(container?.textContent).toContain('+3');
     expect(container?.textContent).toContain('-1');
 
-    setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
-    flushSolid();
+    applyState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     await Promise.resolve();
     flushSolid();
 
@@ -174,30 +171,24 @@ describe('ChangedFilesList', () => {
   });
 
   it('compacts large line counts in the header', () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session()]));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(storePath('sessions', [session()]));
+    applyState(
       storePath('messages', [
         { info: assistantMessage(), parts: [largeFileEditPart('src/app.ts')] },
       ])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
 
     expect(container?.querySelector('.changed-files-lines')?.textContent).toContain('+3392');
     expect(container?.querySelector('.changed-files-lines')?.textContent).toContain('-30K');
   });
 
   it('caps large file lists and hides incomplete line totals', () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session()]));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(storePath('sessions', [session()]));
+    applyState(
       storePath('messages', [
         {
           info: assistantMessage(),
@@ -207,10 +198,8 @@ describe('ChangedFilesList', () => {
         },
       ])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
 
     expect(container?.querySelector('.todo-block-count')?.textContent).toBe('Details omitted');
     expect(container?.querySelector('.changed-files-lines')).toBeNull();
@@ -220,11 +209,9 @@ describe('ChangedFilesList', () => {
   });
 
   it('shows a trimmed-summary notice when no file rows were retained', () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session()]));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(storePath('sessions', [session()]));
+    applyState(
       storePath('messages', [
         {
           info: {
@@ -240,10 +227,8 @@ describe('ChangedFilesList', () => {
         },
       ])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
 
     expect(container?.querySelector('.todo-block-count')?.textContent).toBe('Details omitted');
     expect(container?.querySelector('.changed-files-lines')).toBeNull();
@@ -252,17 +237,13 @@ describe('ChangedFilesList', () => {
   it('opens nested-session file rows with their exact directory', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session({ directory: '/workspace/packages/app' })]));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(storePath('sessions', [session({ directory: '/workspace/packages/app' })]));
+    applyState(
       storePath('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
     container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
     flushSolid();
     expect(container?.querySelector('.changed-files-file-icon')).toBeInstanceOf(HTMLImageElement);
@@ -291,11 +272,9 @@ describe('ChangedFilesList', () => {
     if (bPart.type === 'tool') bPart.state.input = { path: 'src/b.ts', additions: 4 };
     if (aPart.type === 'tool') aPart.state.input = { path: 'src/a.ts', deletions: 4 };
 
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session()]));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(storePath('sessions', [session()]));
+    applyState(
       storePath('messages', [
         {
           info: assistantMessage(),
@@ -303,10 +282,8 @@ describe('ChangedFilesList', () => {
         },
       ])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
     container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
     flushSolid();
 
@@ -320,9 +297,8 @@ describe('ChangedFilesList', () => {
   it('hides backend summary files for an idle session that made no edits', () => {
     // The backend session summary can carry workspace-wide git changes (manual
     // edits, sibling-session writes). A read-only session must not surface them.
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(
       storePath('sessions', [
         session({
           summary: {
@@ -337,10 +313,8 @@ describe('ChangedFilesList', () => {
         }),
       ])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
 
     expect(container?.textContent).not.toContain('Files');
   });
@@ -348,9 +322,8 @@ describe('ChangedFilesList', () => {
   it('restricts the files board to files the session actually edited', async () => {
     // A writing session: the agent edited src/app.ts, but the backend summary
     // also includes a manually-edited file. Only the session's own edit shows.
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(
       storePath('sessions', [
         session({
           summary: {
@@ -365,14 +338,11 @@ describe('ChangedFilesList', () => {
         }),
       ])
     );
-    flushSolid();
-    setState(
+    applyState(
       storePath('messages', [{ info: assistantMessage(), parts: [fileEditPart('src/app.ts')] }])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
     await Promise.resolve();
     flushSolid();
 
@@ -384,13 +354,11 @@ describe('ChangedFilesList', () => {
   });
 
   it('only aggregates active-session messages and drops stale messages during a switch', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'session-1'));
+    applyState(
       storePath('sessions', [session(), session({ id: 'session-2', title: 'Other session' })])
     );
-    flushSolid();
-    setState(
+    applyState(
       storePath('messages', [
         { info: assistantMessage(), parts: [fileEditPart('src/active.ts')] },
         {
@@ -399,10 +367,8 @@ describe('ChangedFilesList', () => {
         },
       ])
     );
-    flushSolid();
 
-    cleanup = render(() => <ChangedFilesList />, container!);
-    flushSolid();
+    mountView(() => <ChangedFilesList />);
     container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
     flushSolid();
 
@@ -410,14 +376,12 @@ describe('ChangedFilesList', () => {
     expect(container?.textContent).not.toContain('other.ts');
     expect(container?.querySelector('.todo-block-count')?.textContent).toBe('1');
 
-    setState(
+    applyState(
       storePath('messages', (messages) =>
         messages.filter(({ info }) => info.sessionID === 'session-1')
       )
     );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    applyState(storePath('activeSessionId', 'session-2'));
     await Promise.resolve();
     flushSolid();
 

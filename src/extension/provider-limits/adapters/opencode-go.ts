@@ -1,6 +1,5 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- OpenCode Go API payloads are decoded before quota extraction. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
-import type { ProviderAuthRecord, ProviderMetadata } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
   asRecord,
@@ -9,20 +8,20 @@ import {
   readBoundedResponseJson,
   unsupportedProviderStatus,
   providerErrorStatus,
+  resolveProviderAuthToken,
   VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const OPENCODE_GO_USAGE_ENDPOINT = 'https://opencode.ai/inference/go/v1/usage';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 export function createOpenCodeGoAdapter(): ProviderLimitAdapter {
   return {
     id: 'opencode-go',
     matches(provider, authStore) {
-      return provider.id === 'opencode-go' && resolveOpenCodeGoApiKey(provider, authStore) != null;
+      return provider.id === 'opencode-go' && resolveProviderAuthToken(provider, authStore) != null;
     },
     async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
-      const apiKey = resolveOpenCodeGoApiKey(provider, authStore);
+      const apiKey = resolveProviderAuthToken(provider, authStore);
       if (!apiKey) {
         return unsupportedProviderStatus(
           provider.id,
@@ -135,17 +134,4 @@ function buildOpenCodeGoWindow(
     resetAt,
     percent,
   };
-}
-
-function resolveOpenCodeGoApiKey(
-  provider: ProviderMetadata,
-  authStore: Record<string, ProviderAuthRecord>
-) {
-  const auth = authStore[provider.id];
-  if (auth?.type === 'oauth') return auth.access;
-  if (auth && 'key' in auth) return auth.key;
-
-  const apiKey = getString(asRecord(provider.options)?.apiKey);
-  if (!apiKey || apiKey === OPENCODE_OAUTH_DUMMY_KEY) return null;
-  return apiKey;
 }

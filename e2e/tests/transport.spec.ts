@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { postWebviewMessage } from './helpers';
 
 test('shows the degraded transport banner while keeping chat usable', async ({ page }) => {
   await page.clock.install();
@@ -19,28 +20,18 @@ test('clears the reconnect banner after live updates recover for an active sessi
   const banner = page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' });
   await expect(banner).toHaveCount(0);
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'server/status',
-        payload: { state: 'running', url: 'mock://opencode', eventStream: 'degraded' },
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'server/status',
+    payload: { state: 'running', url: 'mock://opencode', eventStream: 'degraded' },
   });
 
   await page.clock.fastForward(10_000);
   await expect(banner).toBeVisible();
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeEditable();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'server/status',
-        payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'server/status',
+    payload: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
   });
 
   await expect(banner).toBeVisible();

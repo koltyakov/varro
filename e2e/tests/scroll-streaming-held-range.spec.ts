@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getListDistanceFromBottom, getScrollMetrics, waitForAnimationFrames } from './helpers';
 
 // Headless Chromium hides native scrollbars by default, making thumb drags inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
@@ -42,9 +42,7 @@ test('a new step after held-thumb drags through a shrunken cold range keeps rows
   );
   const list = page.locator('.interactive-list');
   await expect(list).toBeVisible();
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await waitForAnimationFrames(page, 12);
   const followed = await getScrollMetrics(page, '.interactive-list');
   const bounds = await list.boundingBox();
@@ -60,9 +58,7 @@ test('a new step after held-thumb drags through a shrunken cold range keeps rows
 
   // Native drag back to the latest row reattaches bottom-follow without a programmatic write.
   await dragThumb(page, list, bounds.y + bounds.height + 40);
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await waitForAnimationFrames(page, 20);
   const released = await sampleFrame(list, 0);
   expect(released.paintedRows).toBeGreaterThan(0);

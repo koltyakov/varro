@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Antigravity HTTP and process responses are validated before quota extraction. */
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Antigravity HTTP and process responses are validated before quota extraction. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API records are asserted only after required-field checks. */
 import { execFile } from 'child_process';
 import { request as httpRequest } from 'http';
@@ -14,6 +14,7 @@ import {
   PROVIDER_RESPONSE_MAX_BYTES,
   unsupportedProviderStatus,
   providerErrorStatus,
+  parseJsonBody,
 } from '../adapter-utils';
 
 const ANTIGRAVITY_GET_UNLEASH_DATA_PATH =
@@ -641,17 +642,6 @@ function parseResetAt(value: unknown, checkedAt: number) {
 function parsePortNumber(value: string) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function parseJsonBody(bodyText: string): unknown | null {
-  const trimmed = bodyText.trim();
-  if (!trimmed) return null;
-
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 function escapeRegExp(value: string) {

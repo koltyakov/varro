@@ -51,23 +51,20 @@ export const TOOLBAR_COMPACT_MODES: ToolbarCompactMode[] = [
   'tight',
 ];
 
+// How many controls from the front of TOOLBAR_HIDE_ORDER each mode hides.
+const HIDDEN_CONTROL_COUNT: Partial<Record<ToolbarCompactMode, number>> = {
+  'hide-permission': 1,
+  'hide-attachments': 2,
+  'hide-send': 3,
+  'hide-reasoning': 4,
+  'hide-agent': 5,
+  'hide-stop': 6,
+  'hide-context': 7,
+  tight: 7,
+};
+
 export function isToolbarControlHidden(mode: ToolbarCompactMode, control: ToolbarControl) {
-  const hiddenControlCount =
-    mode === 'hide-permission'
-      ? 1
-      : mode === 'hide-attachments'
-        ? 2
-        : mode === 'hide-send'
-          ? 3
-          : mode === 'hide-reasoning'
-            ? 4
-            : mode === 'hide-agent'
-              ? 5
-              : mode === 'hide-stop'
-                ? 6
-                : mode === 'hide-context' || mode === 'tight'
-                  ? 7
-                  : 0;
+  const hiddenControlCount = HIDDEN_CONTROL_COUNT[mode] ?? 0;
   const hiddenControlIndex = TOOLBAR_HIDE_ORDER.indexOf(control);
   return hiddenControlIndex !== -1 && hiddenControlIndex < hiddenControlCount;
 }
@@ -80,21 +77,7 @@ export function isToolbarControlCompacted(
     return !['full', 'compact-provider-limit', 'compact-stop'].includes(mode);
   if (control === 'reasoning')
     return !['full', 'compact-provider-limit', 'compact-stop', 'compact-agent'].includes(mode);
-  return [
-    'compact-provider-limit',
-    'compact-stop',
-    'compact-agent',
-    'compact-reasoning',
-    'truncate-model',
-    'hide-permission',
-    'hide-attachments',
-    'hide-send',
-    'hide-reasoning',
-    'hide-agent',
-    'hide-stop',
-    'hide-context',
-    'tight',
-  ].includes(mode);
+  return mode !== 'full';
 }
 
 export function filterCompactProviderLimitForModel(

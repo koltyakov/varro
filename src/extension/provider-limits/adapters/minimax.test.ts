@@ -11,6 +11,15 @@ const provider: ProviderMetadata = {
   models: {},
 };
 
+const fetchStatus = (overrides: Partial<Parameters<typeof adapter.fetch>[0]> = {}) =>
+  adapter.fetch({
+    provider,
+    authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
+    modelID: null,
+    checkedAt: 1_000,
+    ...overrides,
+  });
+
 describe('createMiniMaxAdapter', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
@@ -87,12 +96,7 @@ describe('createMiniMaxAdapter', () => {
       );
     });
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'minimax',
@@ -135,12 +139,7 @@ describe('createMiniMaxAdapter', () => {
       )
     );
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-      modelID: 'MiniMax-M2',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'MiniMax-M2' });
 
     expect(status).toEqual({
       providerID: 'minimax',
@@ -166,12 +165,7 @@ describe('createMiniMaxAdapter', () => {
       )
     );
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'minimax',
@@ -194,12 +188,7 @@ describe('createMiniMaxAdapter', () => {
       )
     );
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'minimax',
@@ -234,12 +223,7 @@ describe('createMiniMaxAdapter', () => {
       )
     );
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-      modelID: 'MiniMax-M2.5',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'MiniMax-M2.5' });
 
     expect(status).toEqual({
       providerID: 'minimax',
@@ -273,12 +257,7 @@ describe('createMiniMaxAdapter', () => {
   it('treats HTTP auth failures as unsupported', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 401 }));
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'minimax',
@@ -320,14 +299,7 @@ describe('createMiniMaxAdapter', () => {
         )
       );
 
-    await expect(
-      adapter.fetch({
-        provider,
-        authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-        modelID: null,
-        checkedAt: 1_000,
-      })
-    ).resolves.toEqual({
+    await expect(fetchStatus()).resolves.toEqual({
       providerID: 'minimax',
       modelID: null,
       status: 'error',
@@ -336,14 +308,7 @@ describe('createMiniMaxAdapter', () => {
       note: 'MiniMax quota endpoint returned an API error 500 (quota temporarily unavailable)',
     });
 
-    await expect(
-      adapter.fetch({
-        provider,
-        authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-        modelID: 'MiniMax-M2',
-        checkedAt: 2_000,
-      })
-    ).resolves.toEqual({
+    await expect(fetchStatus({ modelID: 'MiniMax-M2', checkedAt: 2_000 })).resolves.toEqual({
       providerID: 'minimax',
       modelID: 'MiniMax-M2',
       status: 'error',
@@ -352,14 +317,7 @@ describe('createMiniMaxAdapter', () => {
       note: 'MiniMax quota endpoint returned an invalid response',
     });
 
-    await expect(
-      adapter.fetch({
-        provider,
-        authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-        modelID: null,
-        checkedAt: 3_000,
-      })
-    ).resolves.toEqual({
+    await expect(fetchStatus({ checkedAt: 3_000 })).resolves.toEqual({
       providerID: 'minimax',
       modelID: null,
       status: 'error',
@@ -372,12 +330,7 @@ describe('createMiniMaxAdapter', () => {
   it('reports fetch failures as transient errors', async () => {
     vi.mocked(fetch).mockRejectedValue(new Error('network down'));
 
-    const status = await adapter.fetch({
-      provider,
-      authStore: { minimax: { type: 'api', key: 'minimax_test_key_12345' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'minimax',

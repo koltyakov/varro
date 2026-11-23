@@ -7,14 +7,7 @@ import {
   registerProviderLimitRefreshEffect,
   registerVisibleRunningSessionSyncEffect,
 } from './session/session-effects';
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
+import { deferred } from '../test-fixtures';
 
 describe('session effect helpers', () => {
   it.each([

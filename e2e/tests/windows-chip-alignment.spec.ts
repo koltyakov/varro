@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import type { MessageEntry, Part, Session } from '../../src/webview/types';
-import { waitForHarnessStartup } from './helpers';
+import { installPlaybackCapture, waitForHarnessStartup } from './helpers';
 
 const WINDOWS_FONT = '"Segoe WPC", "Segoe UI", sans-serif';
 const FILE_NAMES = ['README.md', 'main.ts', 'main.go', 'app.java'];
@@ -92,14 +92,7 @@ async function openWindowsChips(page: Page) {
       },
     })),
   });
-  await page.addInitScript(
-    (capture) => {
-      // SAFETY: Only the isolated playback harness consumes these generated messages.
-      (window as typeof window & { varroPlaybackCapture: typeof capture }).varroPlaybackCapture =
-        capture;
-    },
-    { session, initialMessages, goal: null }
-  );
+  await installPlaybackCapture(page, { session, initialMessages, goal: null });
   await page.goto('/e2e/harness/index.html?scenario=session-playback');
   await waitForHarnessStartup(page);
   await page.evaluate(async (family) => {

@@ -46,6 +46,22 @@ function makeAddedPatch(lineCount: number) {
   ].join('\n');
 }
 
+/** Mocks an HTMLElement layout getter so only elements with `className` report `value`. */
+function mockClassMetric(
+  property: 'offsetTop' | 'clientHeight' | 'scrollHeight' | 'clientWidth' | 'scrollWidth',
+  className: string,
+  value: number
+) {
+  vi.spyOn(HTMLElement.prototype, property, 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains(className) ? value : 0;
+  });
+}
+
+function mountView(view: Parameters<typeof render>[0]) {
+  cleanup = render(view, container!);
+  flushSolid();
+}
+
 beforeEach(() => {
   messageListShell = document.createElement('div');
   messageListShell.className = 'interactive-list-shell';
@@ -198,22 +214,19 @@ describe('DiffView', () => {
   });
 
   it('shows line-by-line changes when inline rendering is enabled', async () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/example.ts',
-              patch: '@@ -10,2 +10,2 @@\n-const oldValue = 1;\n+const newValue = 2;',
-              additions: 1,
-              deletions: 1,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/example.ts',
+            patch: '@@ -10,2 +10,2 @@\n-const oldValue = 1;\n+const newValue = 2;',
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     const rows = container?.querySelectorAll('.diff-view-line');
     expect(rows).toHaveLength(2);
@@ -252,57 +265,34 @@ describe('DiffView', () => {
   });
 
   it('starts at the first change and expands and collapses multi-hunk previews', async () => {
-    vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-scroll-anchor') ? 57 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-lines') ? 80 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-lines') ? 320 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-lines') ? 300 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-lines') ? 600 : 0;
-    });
+    mockClassMetric('offsetTop', 'diff-view-scroll-anchor', 57);
+    mockClassMetric('clientHeight', 'diff-view-lines', 80);
+    mockClassMetric('scrollHeight', 'diff-view-lines', 320);
+    mockClassMetric('clientWidth', 'diff-view-lines', 300);
+    mockClassMetric('scrollWidth', 'diff-view-lines', 600);
 
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/example.ts',
-              patch: [
-                '@@ -10,2 +10,3 @@',
-                ' context before',
-                '+const firstChange = true;',
-                ' context after',
-                '@@ -40,2 +41,3 @@',
-                ' later context',
-                '+const laterChange = true;',
-                ' final context',
-              ].join('\n'),
-              additions: 2,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/example.ts',
+            patch: [
+              '@@ -10,2 +10,3 @@',
+              ' context before',
+              '+const firstChange = true;',
+              ' context after',
+              '@@ -40,2 +41,3 @@',
+              ' later context',
+              '+const laterChange = true;',
+              ' final context',
+            ].join('\n'),
+            additions: 2,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
     await Promise.resolve();
     flushSolid();
 
@@ -458,11 +448,7 @@ describe('DiffView', () => {
       },
     ]);
 
-    cleanup = render(
-      () => DiffView({ showChanges: true, diffs: diffs(), stateKey: 'tool-1' }),
-      container!
-    );
-    flushSolid();
+    mountView(() => DiffView({ showChanges: true, diffs: diffs(), stateKey: 'tool-1' }));
     await Promise.resolve();
     flushSolid();
 
@@ -493,13 +479,9 @@ describe('DiffView', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(updatedViewport?.scrollTop).toBe(44);
 
-    cleanup();
+    cleanup!();
     flushSolid();
-    cleanup = render(
-      () => DiffView({ showChanges: true, diffs: diffs(), stateKey: 'tool-1' }),
-      container!
-    );
-    flushSolid();
+    mountView(() => DiffView({ showChanges: true, diffs: diffs(), stateKey: 'tool-1' }));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -530,16 +512,13 @@ describe('DiffView', () => {
       }
     );
 
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [{ file: 'src/live.ts', patch: makeAddedPatch(40), additions: 40, deletions: 0 }],
-          stateKey: 'tool-1',
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [{ file: 'src/live.ts', patch: makeAddedPatch(40), additions: 40, deletions: 0 }],
+        stateKey: 'tool-1',
+      })
     );
-    flushSolid();
     await Promise.resolve();
     flushSolid();
 
@@ -596,21 +575,14 @@ describe('DiffView', () => {
       }
       return 0;
     });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-lines') ? 600 : 0;
-    });
+    mockClassMetric('scrollWidth', 'diff-view-lines', 600);
 
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [{ file: 'src/live.ts', patch: makeAddedPatch(4), additions: 4, deletions: 0 }],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [{ file: 'src/live.ts', patch: makeAddedPatch(4), additions: 4, deletions: 0 }],
+      })
     );
-    flushSolid();
     await Promise.resolve();
     flushSolid();
     clientWidthReads = 0;
@@ -627,54 +599,40 @@ describe('DiffView', () => {
   });
 
   it('collapses empty number gutters for unnumbered patch fragments', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/example.ts',
-              patch: '@@\n-old\n+new',
-              additions: 1,
-              deletions: 1,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/example.ts',
+            patch: '@@\n-old\n+new',
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.diff-view-lines-unnumbered')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('shows horizontal scrolling when the preview already contains every line', async () => {
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-lines') ? 300 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return this.classList.contains('diff-view-lines') ? 600 : 0;
-    });
+    mockClassMetric('clientWidth', 'diff-view-lines', 300);
+    mockClassMetric('scrollWidth', 'diff-view-lines', 600);
 
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/example.ts',
-              patch: '@@ -1 +1 @@\n-old\n+new',
-              additions: 1,
-              deletions: 1,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/example.ts',
+            patch: '@@ -1 +1 @@\n-old\n+new',
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      })
     );
-    flushSolid();
     await Promise.resolve();
     flushSolid();
 
@@ -708,32 +666,29 @@ describe('DiffView', () => {
   });
 
   it('falls back to snapshots when patch text is invalid or header-only', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/header-only.ts',
-              patch: '--- a/src/header-only.ts\n+++ b/src/header-only.ts',
-              before: 'const value = 1;',
-              after: 'const value = 2;',
-              additions: 1,
-              deletions: 1,
-            },
-            {
-              file: 'src/invalid.ts',
-              patch: 'not a textual patch',
-              before: 'before',
-              after: 'after',
-              additions: 1,
-              deletions: 1,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/header-only.ts',
+            patch: '--- a/src/header-only.ts\n+++ b/src/header-only.ts',
+            before: 'const value = 1;',
+            after: 'const value = 2;',
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            file: 'src/invalid.ts',
+            patch: 'not a textual patch',
+            before: 'before',
+            after: 'after',
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     const files = container?.querySelectorAll('.diff-view-file');
     expect(files?.[0]?.querySelector('.diff-view-line-deletion')?.textContent).toContain(
@@ -773,8 +728,7 @@ describe('DiffView', () => {
       },
     };
 
-    cleanup = render(() => DiffView(props), container!);
-    flushSolid();
+    mountView(() => DiffView(props));
     expect(container?.querySelector('.diff-view-lines')).toBeNull();
 
     setDiffs([
@@ -795,30 +749,27 @@ describe('DiffView', () => {
   });
 
   it('does not treat after-only edits as whole-file additions', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/edited.ts',
-              changeKind: 'edited',
-              after: 'line one\nline two',
-              additions: 2,
-              deletions: 0,
-            },
-            {
-              file: 'src/added.ts',
-              changeKind: 'added',
-              after: 'line one\nline two',
-              additions: 2,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/edited.ts',
+            changeKind: 'edited',
+            after: 'line one\nline two',
+            additions: 2,
+            deletions: 0,
+          },
+          {
+            file: 'src/added.ts',
+            changeKind: 'added',
+            after: 'line one\nline two',
+            additions: 2,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     const files = container?.querySelectorAll('.diff-view-file');
     expect(files?.[0]?.querySelector('.diff-view-preview-unavailable')?.textContent).toContain(
@@ -829,23 +780,20 @@ describe('DiffView', () => {
   });
 
   it('renders metadata-only moves as explicit compact fallbacks', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/new-name.ts',
-              fromFile: 'src/old-name.ts',
-              changeKind: 'moved',
-              additions: 0,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/new-name.ts',
+            fromFile: 'src/old-name.ts',
+            changeKind: 'moved',
+            additions: 0,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.diff-view-filename')?.textContent).toBe(
       'old-name.ts -> new-name.ts'
@@ -856,22 +804,19 @@ describe('DiffView', () => {
   });
 
   it('mounts only a bounded line window until a large preview is expanded', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/generated.ts',
-              patch: makeAddedPatch(500),
-              additions: 500,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/generated.ts',
+            patch: makeAddedPatch(500),
+            additions: 500,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-line')).toHaveLength(6);
     const toggle = container?.querySelector<HTMLButtonElement>('.diff-view-toggle');
@@ -996,22 +941,19 @@ describe('DiffView', () => {
   });
 
   it('closes an expanded preview from its header or with Escape', async () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/example.ts',
-              patch: makeAddedPatch(7),
-              additions: 7,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/example.ts',
+            patch: makeAddedPatch(7),
+            additions: 7,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     const toggle = container?.querySelector<HTMLButtonElement>('.diff-view-toggle');
     toggle?.click();
@@ -1061,22 +1003,19 @@ describe('DiffView', () => {
   });
 
   it('closes an expanded preview through the shared collapse action', async () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/example.ts',
-              patch: makeAddedPatch(7),
-              additions: 7,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/example.ts',
+            patch: makeAddedPatch(7),
+            additions: 7,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.diff-view-toggle')?.click();
     flushSolid();
@@ -1093,22 +1032,19 @@ describe('DiffView', () => {
   });
 
   it('shows an explicit truncated state instead of parsing oversized patches', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/too-large.ts',
-              patch: makeAddedPatch(2_100),
-              additions: 2_100,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/too-large.ts',
+            patch: makeAddedPatch(2_100),
+            additions: 2_100,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.diff-view-preview-truncated')?.textContent).toContain(
       'patch exceeds 2,000 lines or 256 KB'
@@ -1117,22 +1053,19 @@ describe('DiffView', () => {
   });
 
   it('caps oversized single-line patches by UTF-8 byte size', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/wide-line.ts',
-              patch: `@@ -0,0 +1 @@\n+${'x'.repeat(300 * 1024)}`,
-              additions: 1,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/wide-line.ts',
+            patch: `@@ -0,0 +1 @@\n+${'x'.repeat(300 * 1024)}`,
+            additions: 1,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.diff-view-preview-truncated')?.textContent).toContain(
       'patch exceeds 2,000 lines or 256 KB'
@@ -1144,21 +1077,18 @@ describe('DiffView', () => {
     const before = Array.from({ length: 350 }, (_, index) => `old ${index}`).join('\n');
     const after = Array.from({ length: 350 }, (_, index) => `new ${index}`).join('\n');
 
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: Array.from({ length: 5 }, (_, index) => ({
-            file: `src/file-${index}.ts`,
-            before,
-            after,
-            additions: 350,
-            deletions: 350,
-          })),
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: Array.from({ length: 5 }, (_, index) => ({
+          file: `src/file-${index}.ts`,
+          before,
+          after,
+          additions: 350,
+          deletions: 350,
+        })),
+      })
     );
-    flushSolid();
 
     expect(container?.querySelectorAll('.diff-view-lines')).toHaveLength(4);
     expect(container?.querySelector('.diff-view-preview-unavailable')?.textContent).toContain(
@@ -1168,21 +1098,18 @@ describe('DiffView', () => {
   });
 
   it('keeps patch content hidden in compact mode', () => {
-    cleanup = render(
-      () =>
-        DiffView({
-          diffs: [
-            {
-              file: 'src/example.ts',
-              patch: '@@ -1 +1 @@\n-old\n+new',
-              additions: 1,
-              deletions: 1,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        diffs: [
+          {
+            file: 'src/example.ts',
+            patch: '@@ -1 +1 @@\n-old\n+new',
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.diff-view-lines')).toBeNull();
     expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('src/example.ts');
@@ -1223,21 +1150,18 @@ describe('DiffView', () => {
     );
     flushSolid();
 
-    cleanup = render(
-      () =>
-        DiffView({
-          diffs: [
-            {
-              file: 'src/app.ts',
-              patch: makeAddedPatch(1),
-              additions: 1,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        diffs: [
+          {
+            file: 'src/app.ts',
+            patch: makeAddedPatch(1),
+            additions: 1,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
     container?.querySelector<HTMLButtonElement>('button.diff-view-filename')?.click();
     flushSolid();
 
@@ -1257,22 +1181,19 @@ describe('DiffView', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
 
-    cleanup = render(
-      () =>
-        DiffView({
-          showChanges: true,
-          diffs: [
-            {
-              file: 'src/webview/components/Chat.tsx',
-              patch: makeAddedPatch(7),
-              additions: 7,
-              deletions: 0,
-            },
-          ],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        showChanges: true,
+        diffs: [
+          {
+            file: 'src/webview/components/Chat.tsx',
+            patch: makeAddedPatch(7),
+            additions: 7,
+            deletions: 0,
+          },
+        ],
+      })
     );
-    flushSolid();
 
     const header = container?.querySelector('.diff-view-item');
     const filenameSlot = container?.querySelector('.diff-view-filename-slot');
@@ -1337,14 +1258,11 @@ describe('DiffView', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
 
-    cleanup = render(
-      () =>
-        DiffView({
-          diffs: [{ additions: 1, deletions: 0 }],
-        }),
-      container!
+    mountView(() =>
+      DiffView({
+        diffs: [{ additions: 1, deletions: 0 }],
+      })
     );
-    flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = container?.querySelector('button.diff-view-filename') as HTMLButtonElement;

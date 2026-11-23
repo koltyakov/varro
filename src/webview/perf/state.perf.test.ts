@@ -19,42 +19,16 @@ import {
   upsertMessageInfo,
   upsertPart,
 } from '../lib/state';
-import type { AssistantMessage, FileDiff, NormalizedTodo, Permission, TextPart } from '../types';
+import type { FileDiff, NormalizedTodo, Permission } from '../types';
 import { respondPermissionWithDependencies } from '../hooks/session/session-approvals';
-import { createPerfRoot, settlePerfEffects } from './harness';
+import {
+  createPerfRoot,
+  settlePerfEffects,
+  createAssistantMessage,
+  createTextPart,
+} from './harness';
 import { defaultAppState, messageIndex } from '../lib/app-state';
 import { flushPendingStreamingDeltasFor } from '../lib/streaming-deltas';
-
-function createAssistantMessage(id: string): AssistantMessage {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'assistant',
-    time: { created: 1, completed: 2 },
-    parentID: 'parent-1',
-    modelID: 'gpt-4o',
-    providerID: 'openai',
-    mode: 'default',
-    path: { cwd: '/workspace', root: '/workspace' },
-    cost: 0,
-    tokens: {
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache: { read: 0, write: 0 },
-    },
-  };
-}
-
-function createTextPart(id: string, messageID: string, text: string): TextPart {
-  return {
-    id,
-    sessionID: 'session-1',
-    messageID,
-    type: 'text',
-    text,
-  };
-}
 
 function createTodo(id: string): NormalizedTodo {
   return {

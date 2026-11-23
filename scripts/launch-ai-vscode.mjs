@@ -11,6 +11,7 @@ import { isolateVarroTestState } from './varro-test-state.mjs';
 import {
   executeVscodeCommand,
   reserveLoopbackPort,
+  resolveVscodeExecutable,
   resizeVscodeSidebar,
   waitForVscodeProcess,
   writeVscodeLaunchMetadata,
@@ -18,36 +19,7 @@ import {
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-async function resolveVscodeExecutable() {
-  const configured = process.env.VARRO_VSCODE_EXECUTABLE?.trim();
-  if (configured) {
-    await access(configured);
-    return configured;
-  }
-
-  const candidates =
-    process.platform === 'darwin'
-      ? ['/Applications/Visual Studio Code.app/Contents/MacOS/Code']
-      : process.platform === 'win32'
-        ? [
-            path.join(process.env.LOCALAPPDATA || '', 'Programs/Microsoft VS Code/Code.exe'),
-            path.join(process.env.ProgramFiles || '', 'Microsoft VS Code/Code.exe'),
-          ]
-        : ['/usr/share/code/code', '/usr/share/code-insiders/code-insiders'];
-
-  for (const candidate of candidates) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {}
-  }
-
-  throw new Error(
-    'Could not locate the VS Code application executable; set VARRO_VSCODE_EXECUTABLE to the GUI executable'
-  );
-}
-
-const executable = await resolveVscodeExecutable();
+const executable = await resolveVscodeExecutable('the GUI executable');
 const workspace = path.resolve(process.env.VARRO_AI_WORKSPACE?.trim() || projectRoot);
 await access(workspace);
 const replayUrl = process.env.VARRO_AI_REPLAY_URL;

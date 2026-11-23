@@ -284,37 +284,11 @@ describe('mount bridge helpers', () => {
     const ensureConnectionInitialized = vi.fn();
 
     handleExtensionMessageWithDependencies(
-      {
+      createMessageDependencies({
         setServerStatus,
         clearError,
         ensureConnectionInitialized,
-        getServerState: () => 'stopped',
-        invalidateConnection: vi.fn(),
-        clearProvidersState: vi.fn(),
-        setTheme: vi.fn(),
-        setConfig: vi.fn(),
-        getPreviousActiveFilePath: () => null,
-        getCurrentWorkspacePath: () => null,
-        setCurrentWorkspacePath: vi.fn(),
-        setEditorContext: vi.fn(),
-        rememberCurrentDocumentNavigation: vi.fn(),
-        syncWorkspaceState: vi.fn(),
-        resetWorkspaceForChange: vi.fn(),
-        reloadWorkspaceAfterChange: vi.fn(),
-        isInitialized: () => false,
-        setTerminalSelection: vi.fn(),
-        addContextFiles: vi.fn(),
-        removeContextFile: vi.fn(),
-        createSession: vi.fn(),
-        requestComposerFocus: vi.fn(),
-        requestOpenAttentionSessions: vi.fn(),
-        requestOpenCompletedSessions: vi.fn(),
-        abortSession: vi.fn(),
-        refreshMcps: vi.fn(),
-        refreshProviders: vi.fn(),
-        setWorkspaceStatusSummary: vi.fn(),
-        setWorkspaceStatuses: vi.fn(),
-      },
+      }),
       {
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
@@ -341,37 +315,14 @@ describe('mount bridge helpers', () => {
         serverState = payload.state;
       }
     );
-    const deps = {
+    const deps = createMessageDependencies({
       setServerStatus,
       clearError,
       ensureConnectionInitialized,
       getServerState: () => serverState,
       invalidateConnection,
       clearProvidersState,
-      setTheme: vi.fn(),
-      setConfig: vi.fn(),
-      getPreviousActiveFilePath: () => null,
-      getCurrentWorkspacePath: () => null,
-      setCurrentWorkspacePath: vi.fn(),
-      setEditorContext: vi.fn(),
-      rememberCurrentDocumentNavigation: vi.fn(),
-      syncWorkspaceState: vi.fn(),
-      resetWorkspaceForChange: vi.fn(),
-      reloadWorkspaceAfterChange: vi.fn(),
-      isInitialized: () => false,
-      setTerminalSelection: vi.fn(),
-      addContextFiles: vi.fn(),
-      removeContextFile: vi.fn(),
-      createSession: vi.fn(),
-      requestComposerFocus: vi.fn(),
-      requestOpenAttentionSessions: vi.fn(),
-      requestOpenCompletedSessions: vi.fn(),
-      abortSession: vi.fn(),
-      refreshMcps: vi.fn(),
-      refreshProviders: vi.fn(),
-      setWorkspaceStatusSummary: vi.fn(),
-      setWorkspaceStatuses: vi.fn(),
-    };
+    });
 
     handleExtensionMessageWithDependencies(deps, {
       type: 'server/status',
@@ -394,42 +345,15 @@ describe('mount bridge helpers', () => {
     const setServerReconnecting = vi.fn();
     let serverState: Extract<ExtensionMessage, { type: 'server/status' }>['payload']['state'] =
       'running';
-    const deps = {
+    const deps = createMessageDependencies({
       setServerStatus: (
         payload: Extract<ExtensionMessage, { type: 'server/status' }>['payload']
       ) => {
         serverState = payload.state;
       },
       setServerReconnecting,
-      clearError: vi.fn(),
-      ensureConnectionInitialized: vi.fn(),
       getServerState: () => serverState,
-      invalidateConnection: vi.fn(),
-      clearProvidersState: vi.fn(),
-      setTheme: vi.fn(),
-      setConfig: vi.fn(),
-      getPreviousActiveFilePath: () => null,
-      getCurrentWorkspacePath: () => null,
-      setCurrentWorkspacePath: vi.fn(),
-      setEditorContext: vi.fn(),
-      rememberCurrentDocumentNavigation: vi.fn(),
-      syncWorkspaceState: vi.fn(),
-      resetWorkspaceForChange: vi.fn(),
-      reloadWorkspaceAfterChange: vi.fn(),
-      isInitialized: () => false,
-      setTerminalSelection: vi.fn(),
-      addContextFiles: vi.fn(),
-      removeContextFile: vi.fn(),
-      createSession: vi.fn(),
-      requestComposerFocus: vi.fn(),
-      requestOpenAttentionSessions: vi.fn(),
-      requestOpenCompletedSessions: vi.fn(),
-      abortSession: vi.fn(),
-      refreshMcps: vi.fn(),
-      refreshProviders: vi.fn(),
-      setWorkspaceStatusSummary: vi.fn(),
-      setWorkspaceStatuses: vi.fn(),
-    };
+    });
 
     handleExtensionMessageWithDependencies(deps, {
       type: 'server/status',
@@ -490,15 +414,8 @@ describe('mount bridge helpers', () => {
     };
 
     handleExtensionMessageWithDependencies(
-      {
-        setServerStatus: vi.fn(),
-        clearError: vi.fn(),
-        ensureConnectionInitialized: vi.fn(),
+      createMessageDependencies({
         getServerState: () => 'running',
-        invalidateConnection: vi.fn(),
-        clearProvidersState: vi.fn(),
-        setTheme: vi.fn(),
-        setConfig: vi.fn(),
         getPreviousActiveFilePath: () => '/repo/src/old.ts',
         getCurrentWorkspacePath: () => '/repo',
         setCurrentWorkspacePath,
@@ -508,19 +425,7 @@ describe('mount bridge helpers', () => {
         resetWorkspaceForChange,
         reloadWorkspaceAfterChange,
         isInitialized: () => true,
-        setTerminalSelection: vi.fn(),
-        addContextFiles: vi.fn(),
-        removeContextFile: vi.fn(),
-        createSession: vi.fn(),
-        requestComposerFocus: vi.fn(),
-        requestOpenAttentionSessions: vi.fn(),
-        requestOpenCompletedSessions: vi.fn(),
-        abortSession: vi.fn(),
-        refreshMcps: vi.fn(),
-        refreshProviders: vi.fn(),
-        setWorkspaceStatusSummary: vi.fn(),
-        setWorkspaceStatuses: vi.fn(),
-      },
+      }),
       {
         type: 'context/update',
         payload,
@@ -551,37 +456,15 @@ describe('mount bridge helpers', () => {
     const reloadWorkspaceAfterChange = vi.fn();
 
     handleExtensionMessageWithDependencies(
-      {
-        setServerStatus: vi.fn(),
-        clearError: vi.fn(),
-        ensureConnectionInitialized: vi.fn(),
+      createMessageDependencies({
         getServerState: () => 'running',
-        invalidateConnection: vi.fn(),
-        clearProvidersState: vi.fn(),
-        setTheme: vi.fn(),
-        setConfig: vi.fn(),
-        getPreviousActiveFilePath: () => null,
         getCurrentWorkspacePath: () => 'C:\\Users\\Andrew\\Repo',
         setCurrentWorkspacePath,
-        setEditorContext: vi.fn(),
-        rememberCurrentDocumentNavigation: vi.fn(),
         syncWorkspaceState,
         resetWorkspaceForChange,
         reloadWorkspaceAfterChange,
         isInitialized: () => true,
-        setTerminalSelection: vi.fn(),
-        addContextFiles: vi.fn(),
-        removeContextFile: vi.fn(),
-        createSession: vi.fn(),
-        requestComposerFocus: vi.fn(),
-        requestOpenAttentionSessions: vi.fn(),
-        requestOpenCompletedSessions: vi.fn(),
-        abortSession: vi.fn(),
-        refreshMcps: vi.fn(),
-        refreshProviders: vi.fn(),
-        setWorkspaceStatusSummary: vi.fn(),
-        setWorkspaceStatuses: vi.fn(),
-      },
+      }),
       {
         type: 'context/update',
         payload: {
@@ -606,37 +489,13 @@ describe('mount bridge helpers', () => {
     const reloadWorkspaceAfterChange = vi.fn();
 
     handleExtensionMessageWithDependencies(
-      {
-        setServerStatus: vi.fn(),
-        clearError: vi.fn(),
-        ensureConnectionInitialized: vi.fn(),
+      createMessageDependencies({
         getServerState: () => 'running',
-        invalidateConnection: vi.fn(),
-        clearProvidersState: vi.fn(),
-        setTheme: vi.fn(),
-        setConfig: vi.fn(),
-        getPreviousActiveFilePath: () => null,
         getCurrentWorkspacePath: () => undefined,
-        setCurrentWorkspacePath: vi.fn(),
-        setEditorContext: vi.fn(),
-        rememberCurrentDocumentNavigation: vi.fn(),
         syncWorkspaceState,
         resetWorkspaceForChange,
         reloadWorkspaceAfterChange,
-        isInitialized: () => false,
-        setTerminalSelection: vi.fn(),
-        addContextFiles: vi.fn(),
-        removeContextFile: vi.fn(),
-        createSession: vi.fn(),
-        requestComposerFocus: vi.fn(),
-        requestOpenAttentionSessions: vi.fn(),
-        requestOpenCompletedSessions: vi.fn(),
-        abortSession: vi.fn(),
-        refreshMcps: vi.fn(),
-        refreshProviders: vi.fn(),
-        setWorkspaceStatusSummary: vi.fn(),
-        setWorkspaceStatuses: vi.fn(),
-      },
+      }),
       {
         type: 'context/update',
         payload: {
@@ -658,37 +517,12 @@ describe('mount bridge helpers', () => {
     const reloadWorkspaceAfterChange = vi.fn();
 
     handleExtensionMessageWithDependencies(
-      {
-        setServerStatus: vi.fn(),
-        clearError: vi.fn(),
-        ensureConnectionInitialized: vi.fn(),
+      createMessageDependencies({
         getServerState: () => 'running',
-        invalidateConnection: vi.fn(),
-        clearProvidersState: vi.fn(),
-        setTheme: vi.fn(),
-        setConfig: vi.fn(),
-        getPreviousActiveFilePath: () => null,
         getCurrentWorkspacePath: () => '/repo-old',
-        setCurrentWorkspacePath: vi.fn(),
-        setEditorContext: vi.fn(),
-        rememberCurrentDocumentNavigation: vi.fn(),
-        syncWorkspaceState: vi.fn(),
         resetWorkspaceForChange,
         reloadWorkspaceAfterChange,
-        isInitialized: () => false,
-        setTerminalSelection: vi.fn(),
-        addContextFiles: vi.fn(),
-        removeContextFile: vi.fn(),
-        createSession: vi.fn(),
-        requestComposerFocus: vi.fn(),
-        requestOpenAttentionSessions: vi.fn(),
-        requestOpenCompletedSessions: vi.fn(),
-        abortSession: vi.fn(),
-        refreshMcps: vi.fn(),
-        refreshProviders: vi.fn(),
-        setWorkspaceStatusSummary: vi.fn(),
-        setWorkspaceStatuses: vi.fn(),
-      },
+      }),
       {
         type: 'context/update',
         payload: {
@@ -720,25 +554,8 @@ describe('mount bridge helpers', () => {
     const openExternal = vi.fn();
     const addDroppedContextFiles = vi.fn();
     const removeDroppedContextFile = vi.fn();
-    const deps = {
-      setServerStatus: vi.fn(),
-      clearError: vi.fn(),
-      ensureConnectionInitialized: vi.fn(),
+    const deps = createMessageDependencies({
       getServerState: () => 'running' as const,
-      invalidateConnection: vi.fn(),
-      clearProvidersState: vi.fn(),
-      setTheme: vi.fn(),
-      setConfig: vi.fn(),
-      getPreviousActiveFilePath: () => null,
-      getCurrentWorkspacePath: () => null,
-      setCurrentWorkspacePath: vi.fn(),
-      setEditorContext: vi.fn(),
-      rememberCurrentDocumentNavigation: vi.fn(),
-      syncWorkspaceState: vi.fn(),
-      resetWorkspaceForChange: vi.fn(),
-      reloadWorkspaceAfterChange: vi.fn(),
-      isInitialized: () => false,
-      setTerminalSelection: vi.fn(),
       addContextFiles: addDroppedContextFiles,
       removeContextFile: removeDroppedContextFile,
       createSession,
@@ -754,9 +571,7 @@ describe('mount bridge helpers', () => {
       setProviderRefreshPending,
       revalidateProviderAuth,
       openExternal,
-      setWorkspaceStatusSummary: vi.fn(),
-      setWorkspaceStatuses: vi.fn(),
-    };
+    });
 
     const quotaUpdate: ExtensionMessage = {
       type: 'provider-limit/updated',
@@ -1053,37 +868,11 @@ describe('mount bridge helpers', () => {
       latest: undefined,
     });
 
-    const deps = {
-      setServerStatus: vi.fn(),
-      clearError: vi.fn(),
-      ensureConnectionInitialized: vi.fn(),
+    const deps = createMessageDependencies({
       getServerState: () => 'running' as const,
-      invalidateConnection: vi.fn(),
-      clearProvidersState: vi.fn(),
-      setTheme: vi.fn(),
-      setConfig: vi.fn(),
-      getPreviousActiveFilePath: () => null,
-      getCurrentWorkspacePath: () => null,
-      setCurrentWorkspacePath: vi.fn(),
-      setEditorContext: vi.fn(),
-      rememberCurrentDocumentNavigation: vi.fn(),
-      syncWorkspaceState: vi.fn(),
-      resetWorkspaceForChange: vi.fn(),
-      reloadWorkspaceAfterChange: vi.fn(),
-      isInitialized: () => false,
-      setTerminalSelection: vi.fn(),
-      addContextFiles: vi.fn(),
-      removeContextFile: vi.fn(),
-      createSession: vi.fn(),
-      requestComposerFocus: vi.fn(),
-      requestOpenAttentionSessions: vi.fn(),
-      requestOpenCompletedSessions: vi.fn(),
-      abortSession: vi.fn(),
-      refreshMcps: vi.fn(),
-      refreshProviders: vi.fn(),
       setWorkspaceStatusSummary,
       setWorkspaceStatuses,
-    };
+    });
 
     handleExtensionMessageWithDependencies(deps, {
       type: 'server/event',

@@ -3,7 +3,12 @@ import { writeFile } from 'node:fs/promises';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
-import { getScrollMetrics, getVisibleMessageAnchor, waitForAnimationFrames } from './helpers';
+import {
+  getListDistanceFromBottom,
+  getScrollMetrics,
+  getVisibleMessageAnchor,
+  waitForAnimationFrames,
+} from './helpers';
 import { appendDeltaToRapidStreaming } from './scroll-helpers';
 
 const SESSION_ID = 'session-rapid-streaming-jitter';
@@ -112,11 +117,7 @@ test('preserves a settled equation and its horizontal position as more math stre
   const equation = markdown.locator('[data-markdown-segment="stable"] .katex-display').first();
   await expect(equation).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
-  await expect
-    .poll(() =>
-      getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-    )
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await equation.hover();
   await page.mouse.wheel(200, 0);
   await expect.poll(() => equation.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
@@ -1365,18 +1366,14 @@ for (const width of [1280, 390]) {
       await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
       const list = page.locator('.interactive-list');
       await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThan(15);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
       await appendDeltaToRapidStreaming(page, '\n\nStable prose before detaching.\n\nOpen tail');
       await expect(page.locator(`${ROW} [data-markdown-segment="stable"]`)).toContainText(
         'Stable prose before detaching.'
       );
       await list.hover();
       await page.mouse.wheel(0, -480);
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeGreaterThan(300);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(300);
       await waitForAnimationFrames(page, 8);
       const anchor = await getVisibleMessageAnchor(list);
 
@@ -1421,9 +1418,7 @@ for (const width of [1280, 390]) {
       ).toBeGreaterThan(300);
 
       await page.mouse.wheel(0, 10000);
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThan(15);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
       const before = await getScrollMetrics(page, '.interactive-list');
       const followWatcher = await list.evaluateHandle((element) => {
         const state = { running: true, tops: [] as number[] };
@@ -1441,10 +1436,7 @@ for (const width of [1280, 390]) {
         // The viewport follows with the same bounded easing as standalone blocks.
         // Keep the bottom-distance contract while observing every intermediate frame.
         await expect
-          .poll(
-            () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
-            { timeout: 1500 }
-          )
+          .poll(() => getListDistanceFromBottom(page), { timeout: 1500 })
           .toBeLessThan(15);
       }
       const followTops = await followWatcher.evaluate((state) => {

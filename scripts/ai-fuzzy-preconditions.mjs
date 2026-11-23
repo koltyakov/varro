@@ -30,7 +30,7 @@ export async function requireFixtureWorkspace(workspace) {
   return expected;
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const [command, ...rest] = argv;
   const options = {};
   for (let index = 0; index < rest.length; index += 1) {
@@ -45,7 +45,7 @@ function parseArgs(argv) {
   return { command, options };
 }
 
-function requiredOption(options, name) {
+export function requiredOption(options, name) {
   const value = options[name]?.trim();
   if (!value) throw new Error(`--${name} is required`);
   return value;
@@ -214,7 +214,7 @@ async function fixtureStatus(workspace) {
   return { status: status.trim(), commit: commit.trim() };
 }
 
-function parseModel(model) {
+export function parseModel(model) {
   const separator = model.indexOf('/');
   if (separator <= 0 || separator === model.length - 1) {
     throw new Error('--model must use provider/model format');

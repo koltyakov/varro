@@ -1,7 +1,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These E2E callbacks install deterministic browser timing fixtures with the asserted global shape. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { getE2EState, waitForAnimationFrame } from './helpers';
+import { getE2EState, scrollToBottom, waitForAnimationFrame } from './helpers';
 
 async function getRenderedMessageRowCount(page: Page) {
   return getE2EState(page, () => document.querySelectorAll('[data-msg-id]').length);
@@ -90,10 +90,7 @@ test('large transcripts keep rendered rows bounded while scrolling', async ({ pa
   await waitForAnimationFrame(page);
   await expect.poll(() => getRenderedMessageRowCount(page)).toBeLessThan(90);
 
-  await list.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event('scroll'));
-  });
+  await scrollToBottom(list);
   await waitForAnimationFrame(page);
   await expect.poll(() => getRenderedMessageRowCount(page)).toBeLessThan(90);
 
@@ -1150,10 +1147,7 @@ test('width resizing preserves bottom follow and respects user detachment', asyn
   const shell = page.locator('.chat-main-column-shell');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
 
-  await list.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event('scroll'));
-  });
+  await scrollToBottom(list);
   await shell.evaluate(async (element) => {
     element.style.maxWidth = 'none';
     for (let frame = 0; frame <= 40; frame += 1) {

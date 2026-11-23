@@ -1,6 +1,12 @@
+import { createRoot, flush as flushSolid } from 'solid-js';
 import { beforeEach, vi } from 'vitest';
-import type { Message, Part, Provider, Session } from '../types';
+import type { onMessage } from '../lib/bridge';
+import type { Agent, Message, Part, Provider, Session } from '../types';
 import { fixture } from '../test-fixtures';
+
+type BridgeHandler = Parameters<typeof onMessage>[0];
+type ServerEventHandler = (data: { properties?: unknown }) => void;
+type ServerEventsOn = (event: string, handler: ServerEventHandler) => () => void;
 
 const mocks = vi.hoisted(() => ({
   client: {
@@ -50,11 +56,11 @@ const mocks = vi.hoisted(() => ({
     sessionPersistGlobalPermissionAllow: vi.fn(),
     questionReply: vi.fn(),
     questionReject: vi.fn(),
-    serverEventsOn: vi.fn(() => () => {}),
+    serverEventsOn: vi.fn<ServerEventsOn>(() => () => {}),
     invalidateClientWorkspaceCaches: vi.fn(),
   },
   bridge: {
-    onMessage: vi.fn(() => () => {}),
+    onMessage: vi.fn<typeof onMessage>(() => () => {}),
     postMessage: vi.fn(),
   },
 }));
@@ -225,11 +231,79 @@ export function todoPart(
   });
 }
 
+/** The single-model OpenAI provider most tests select. */
+export function gpt4oProvider(
+  capabilities: Record<string, boolean> = { toolcall: true }
+): Provider {
+  return provider('openai', {
+    'gpt-4o': { id: 'gpt-4o', name: 'GPT-4o', capabilities, cost: { input: 0, output: 0 } },
+  });
+}
+
+export function primaryAgent(name: string): Agent {
+  return {
+    name,
+    mode: 'primary',
+    builtIn: true,
+    permission: { edit: 'ask', bash: {} },
+    tools: {},
+  };
+}
+
 export async function loadModules() {
   const stateModule = await import('../lib/state');
   const hookModule = await import('./useOpenCode');
   return { stateModule, hookModule };
 }
+
+/** Mounts the hook in its own root and returns that root's disposer. */
+export function mountUseOpenCode(hookModule: { useOpenCode: () => void }) {
+  return createRoot((cleanup) => {
+    hookModule.useOpenCode();
+    return cleanup;
+  });
+}
+
+/** Loads fresh modules and mounts the hook, flushing after each step. */
+export async function loadAndMountUseOpenCode() {
+  const { stateModule, hookModule } = await loadModules();
+  flushSolid();
+  const dispose = mountUseOpenCode(hookModule);
+  flushSolid();
+  return { stateModule, hookModule, dispose };
+}
+
+/** Captures the listener the runtime registers with the webview bridge. */
+export function captureBridgeHandler() {
+  let bridgeHandler: BridgeHandler | undefined;
+  bridgeMocks.onMessage.mockImplementation((handler) => {
+    bridgeHandler = handler;
+    return () => {
+      bridgeHandler = undefined;
+    };
+  });
+  return {
+    send(message: Parameters<BridgeHandler>[0]) {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+      bridgeHandler(message);
+    },
+  };
+}
+
+/** Captures the server event listeners the runtime registers, keyed by event name. */
+export function captureServerEventHandlers() {
+  const handlers = new Map<string, ServerEventHandler>();
+  clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+    handlers.set(event, handler);
+    return () => {
+      handlers.delete(event);
+    };
+  });
+  return handlers;
+}
+
+// These mocks have never been reset between tests, so their calls and results carry over.
+const UNRESET_CLIENT_MOCKS = new Set(['interruptChild', 'childTaskControls', 'backgroundParent']);
 
 beforeEach(() => {
   vi.resetModules();
@@ -237,52 +311,10 @@ beforeEach(() => {
   (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
     permissionAutomation: { owner: true, lease: 1 },
   };
-  clientMocks.health.mockReset();
-  clientMocks.commandList.mockReset();
-  clientMocks.sessionList.mockReset();
-  clientMocks.sessionActivate.mockReset();
-  clientMocks.sessionCreate.mockReset();
-  clientMocks.sessionDelete.mockReset();
-  clientMocks.sessionGet.mockReset();
-  clientMocks.sessionMessages.mockReset();
-  clientMocks.sessionDeleteMessage.mockReset();
-  clientMocks.sessionTodos.mockReset();
-  clientMocks.sessionSendAsync.mockReset();
-  clientMocks.sessionCommand.mockReset();
-  clientMocks.sessionInit.mockReset();
-  clientMocks.sessionRevert.mockReset();
-  clientMocks.sessionUnrevert.mockReset();
-  clientMocks.sessionAbort.mockReset();
-  clientMocks.sessionStatus.mockReset();
-  clientMocks.agentList.mockReset();
-  clientMocks.providerList.mockReset();
-  clientMocks.providerLimit.mockReset();
-  clientMocks.mcpStatus.mockReset();
-  clientMocks.mcpDefaults.mockReset();
-  clientMocks.mcpConnect.mockReset();
-  clientMocks.mcpAuthenticate.mockReset();
-  clientMocks.mcpDisconnect.mockReset();
-  clientMocks.questionList.mockReset();
-  clientMocks.permissionList.mockReset();
-  clientMocks.varroOpenPlan.mockReset();
-  clientMocks.varroJudgePermission.mockReset();
-  clientMocks.varroResolveJudgeModel.mockReset();
-  clientMocks.varroSessionRenameIfUntitled.mockReset();
-  clientMocks.varroSessionUpdatePermissionMode.mockReset();
-  clientMocks.recycleBinList.mockReset();
-  clientMocks.recycleBinRestore.mockReset();
-  clientMocks.recycleBinDelete.mockReset();
-  clientMocks.recycleBinEmpty.mockReset();
-  clientMocks.sessionUpdate.mockReset();
-  clientMocks.sessionCompact.mockReset();
-  clientMocks.sessionRespondPermission.mockReset();
-  clientMocks.sessionPersistProjectPermissionAllow.mockReset();
-  clientMocks.sessionPersistGlobalPermissionAllow.mockReset();
-  clientMocks.questionReply.mockReset();
-  clientMocks.questionReject.mockReset();
-  clientMocks.serverEventsOn.mockReset();
+  for (const [name, mock] of Object.entries(clientMocks)) {
+    if (!UNRESET_CLIENT_MOCKS.has(name)) mock.mockReset();
+  }
   clientMocks.serverEventsOn.mockImplementation(() => () => {});
-  clientMocks.invalidateClientWorkspaceCaches.mockReset();
   bridgeMocks.onMessage.mockReset();
   bridgeMocks.onMessage.mockImplementation(() => () => {});
   bridgeMocks.postMessage.mockReset();

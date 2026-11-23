@@ -1,29 +1,27 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Ollama API payloads are decoded before quota extraction. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
-import type { ProviderAuthRecord, ProviderMetadata } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
   asRecord,
-  getString,
   readBoundedResponseJson,
   unsupportedProviderStatus,
   providerErrorStatus,
+  resolveProviderAuthToken,
   VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const OLLAMA_CLOUD_USAGE_ENDPOINT = 'https://ollama.com/api/usage';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 export function createOllamaCloudAdapter(): ProviderLimitAdapter {
   return {
     id: 'ollama-cloud',
     matches(provider, authStore) {
       return (
-        provider.id === 'ollama-cloud' && resolveOllamaCloudApiKey(provider, authStore) != null
+        provider.id === 'ollama-cloud' && resolveProviderAuthToken(provider, authStore) != null
       );
     },
     async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
-      const apiKey = resolveOllamaCloudApiKey(provider, authStore);
+      const apiKey = resolveProviderAuthToken(provider, authStore);
       if (!apiKey) {
         return unsupportedProviderStatus(
           provider.id,
@@ -124,17 +122,4 @@ function buildOllamaCloudWindow(
     resetAt: null,
     percent,
   };
-}
-
-function resolveOllamaCloudApiKey(
-  provider: ProviderMetadata,
-  authStore: Record<string, ProviderAuthRecord>
-) {
-  const auth = authStore[provider.id];
-  if (auth?.type === 'oauth') return auth.access;
-  if (auth && 'key' in auth) return auth.key;
-
-  const apiKey = getString(asRecord(provider.options)?.apiKey);
-  if (!apiKey || apiKey === OPENCODE_OAUTH_DUMMY_KEY) return null;
-  return apiKey;
 }

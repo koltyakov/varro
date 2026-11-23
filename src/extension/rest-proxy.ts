@@ -91,7 +91,10 @@ import {
 } from './util/plan-file';
 import { getRelativePath } from './util/path';
 import { FULL_SESSION_LIST_LIMIT, FULL_SESSION_LIST_PATH } from './util/session-list';
-import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-coordinator';
+import {
+  raceAgainstAbort,
+  WorkspaceSessionStatusCoordinator,
+} from './workspace-session-status-coordinator';
 import { OpenCodeConfigService, type OpenCodeConfigRequest } from './opencode-config-service';
 import { PromptCompletionService } from './prompt-completion-service';
 import { FollowupService } from './followup-service';
@@ -5323,25 +5326,6 @@ function projectWorkspaceCatalogStatus(value: unknown) {
 
 function isNotFoundError(error: unknown) {
   return error instanceof Error && /^404\b/.test(error.message);
-}
-
-function raceAgainstAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise;
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(signal.reason ?? new Error('API call aborted'));
-    signal.addEventListener('abort', abort, { once: true });
-    void promise.then(
-      (value) => {
-        signal.removeEventListener('abort', abort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', abort);
-        reject(error);
-      }
-    );
-  });
 }
 
 function getExplicitWorkspaceDirectory(path: string): string | null {

@@ -1,11 +1,12 @@
 import { storePath } from '@solidjs/signals';
-import { untrack, reconcile } from 'solid-js';
+import { untrack } from 'solid-js';
 import type { SessionLookup } from '../../shared/protocol';
 import { isMissingWorkspaceDirectoryMessage } from '../../shared/workspace-directory-error';
 import { normalizeWorkspaceIdentity } from '../../shared/workspace-path';
 import { client } from './client';
 import { SESSION_ID_RE } from './session-reference';
 import { setState, state } from './state';
+import { reconcileStoreField } from './store-reconcile';
 
 const CACHE_LIMIT = 256;
 const CACHE_TTL_MS = 60_000;
@@ -39,13 +40,7 @@ function syncLookupScope(nextScope: string | null) {
   generation += 1;
   pending.clear();
   settled.clear();
-  setState((draft) => {
-    const current = draft['sessionLookups'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionLookups'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setState((draft) => reconcileStoreField(draft, 'sessionLookups', {}));
 }
 
 export function lookupSessionReferences(

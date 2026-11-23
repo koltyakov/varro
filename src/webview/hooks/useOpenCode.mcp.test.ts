@@ -1,33 +1,19 @@
-import { flush as flushSolid, createRoot } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import type { ExtensionMessage, McpStatus, ServerEventName } from '../../shared/protocol';
-import type { onMessage } from '../lib/bridge';
-import { getBridgeMocks, getClientMocks, loadModules, session } from './useOpenCode.test-support';
-
-interface ServerEvent {
-  properties: unknown;
-}
+import type { ExtensionMessage, McpStatus } from '../../shared/protocol';
+import {
+  captureServerEventHandlers,
+  getBridgeMocks,
+  getClientMocks,
+  loadModules,
+  mountUseOpenCode,
+  session,
+} from './useOpenCode.test-support';
+import { deferred } from '../test-fixtures';
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
-type BridgeOnMessage = typeof onMessage;
-type ServerEventsOn = (
-  event: ServerEventName | '*',
-  handler: (data: ServerEvent) => void
-) => () => void;
-const bridgeOnMessage = vi.fn<BridgeOnMessage>();
-const serverEventsOn = vi.fn<ServerEventsOn>();
-Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
-Object.assign(clientMocks, { serverEventsOn });
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
 
 describe('useOpenCode mcp flows', () => {
   it('keeps deferred MCP refreshes latest-wins across active-session changes', async () => {
@@ -41,16 +27,13 @@ describe('useOpenCode mcp flows', () => {
     flushSolid();
     stateModule.setState(storePath('activeSessionId', 'session-a'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
       await Promise.resolve();
       flushSolid();
-      const handleMessage = bridgeOnMessage.mock.calls[0]?.[0];
+      const handleMessage = bridgeMocks.onMessage.mock.calls[0]?.[0];
       if (!handleMessage) throw new Error('Expected the runtime bridge listener');
 
       const refreshMessage: ExtensionMessage = {
@@ -109,10 +92,7 @@ describe('useOpenCode mcp flows', () => {
     stateModule.setSelectedMcpsForSession('session-1', ['beta']);
     flushSolid();
 
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -275,13 +255,7 @@ describe('useOpenCode mcp flows', () => {
   });
 
   it('disconnects an MCP retained only by a background session after it becomes idle', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
     clientMocks.mcpStatus.mockResolvedValue({ alpha: { status: 'connected' } });
 
     const { stateModule, hookModule } = await loadModules();
@@ -295,10 +269,7 @@ describe('useOpenCode mcp flows', () => {
     stateModule.setState(storePath('mcpStatus', { alpha: { status: 'connected' } }));
     flushSolid();
 
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {

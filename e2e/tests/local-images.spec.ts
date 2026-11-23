@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { MessageEntry, TextPart } from '../../src/webview/types';
 import type { ServerEvent } from '../../src/shared/protocol';
+import { scrollToBottom } from './helpers';
 
 async function installImage(page: Page, source: string) {
   await page.evaluate((path) => {
@@ -108,10 +109,7 @@ for (const width of [360, 960]) {
       element.dispatchEvent(new Event('scroll'));
     });
     await expect(row).toHaveCount(0);
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await expect(frame.locator('img')).toBeVisible();
     expect(await frame.boundingBox().then((box) => box?.height)).toBe(before?.height);
     expect(errors).toEqual([]);

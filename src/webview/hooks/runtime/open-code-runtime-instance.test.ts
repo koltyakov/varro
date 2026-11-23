@@ -28,14 +28,7 @@ import {
   createSessionStatusSnapshotCoordinator,
   resetWorkspaceDerivedState,
 } from './open-code-runtime-instance';
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
+import { deferred } from '../../test-fixtures';
 
 describe('open code runtime synchronization', () => {
   it('retains the active transcript and pagination when transfer activation changes the workspace', () => {

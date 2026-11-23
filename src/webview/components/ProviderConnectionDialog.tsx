@@ -24,8 +24,9 @@ import { modalFocus } from '../lib/modal-focus';
 import { resolveProviderAuthFailure } from '../lib/provider-connection-state';
 import { openProviderSetup } from '../lib/provider-setup';
 import { state } from '../lib/state';
-import { arrowLeftIcon, checkIcon, lockIcon, navArrowDownIcon, xmarkIcon } from '../lib/ui-icons';
+import { arrowLeftIcon, checkIcon, lockIcon, navArrowDownIcon } from '../lib/ui-icons';
 import { CopyIconButton } from './CopyIconButton';
+import { DialogCloseButton } from './DialogCloseButton';
 import { UiIcon } from './UiIcon';
 
 export function ProviderConnectionDialog(props: {
@@ -436,9 +437,7 @@ export function ProviderConnectionDialog(props: {
                 {(provider) => <div class="provider-connect-subtitle">{provider().name}</div>}
               </Show>
             </div>
-            <button type="button" class="provider-connect-close" onClick={close} aria-label="Close">
-              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
-            </button>
+            <DialogCloseButton onClick={close} />
           </div>
 
           <div class={['provider-connect-body', { 'is-provider-list': !providerID() }]}>

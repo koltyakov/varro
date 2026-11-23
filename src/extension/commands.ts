@@ -12,7 +12,7 @@ import { getOpenCodeConfigDirectory } from './open-code-process';
 import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
-import { compareVersions, extractVersion } from './server-utils';
+import { compareVersions, extractVersion, getString } from './server-utils';
 import { openCodeApiVersion } from './opencode-connection';
 import { renderAboutHtml } from './about-view';
 import type { AboutViewData } from './about-view';
@@ -849,6 +849,31 @@ function renderAboutMarkdown(
   ].join('\n');
 }
 
+function createAboutViewBase(
+  pkg: ExtensionPackageJson,
+  logoUri: string,
+  database: AboutDatabaseDetails
+) {
+  return {
+    name: getString(pkg.displayName) || getString(pkg.name) || 'Varro',
+    description:
+      'OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.',
+    logoUri,
+    varroVersion: getString(pkg.version) || 'unknown',
+    databaseLocation: database.location,
+    databaseSize: database.size,
+    databaseReusable: database.reusable,
+    databaseAge: database.age,
+    databaseProjects: database.projects,
+    databaseSessions: database.sessions,
+    databaseNote: database.note,
+    autoUpdate: vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true),
+    vscodeVersion: vscode.version,
+    nodeVersion: process.version,
+    platform: `${process.platform} ${process.arch}`,
+  };
+}
+
 function createInitialAboutViewData(
   pkg: ExtensionPackageJson,
   logoUri: string,
@@ -857,11 +882,7 @@ function createInitialAboutViewData(
 ): AboutViewData {
   const placeholder = error ? 'Unknown' : 'Loading...';
   return {
-    name: getString(pkg.displayName) || getString(pkg.name) || 'Varro',
-    description:
-      'OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.',
-    logoUri,
-    varroVersion: getString(pkg.version) || 'unknown',
+    ...createAboutViewBase(pkg, logoUri, database),
     cliVersion: placeholder,
     installMethod: placeholder,
     installedOn: placeholder,
@@ -877,17 +898,6 @@ function createInitialAboutViewData(
     serverStartedOn: placeholder,
     vscodeClients: placeholder,
     otherClients: '0',
-    databaseLocation: database.location,
-    databaseSize: database.size,
-    databaseReusable: database.reusable,
-    databaseAge: database.age,
-    databaseProjects: database.projects,
-    databaseSessions: database.sessions,
-    databaseNote: database.note,
-    autoUpdate: vscode.workspace.getConfiguration('varro').get<boolean>('server.autoUpdate', true),
-    vscodeVersion: vscode.version,
-    nodeVersion: process.version,
-    platform: `${process.platform} ${process.arch}`,
   };
 }
 
@@ -905,17 +915,11 @@ function createAboutViewData(
         ? `Error: ${serverInfo.status.message}`
         : serverInfo.status.state;
   const cliVersion = serverInfo.cliVersion ? extractVersion(serverInfo.cliVersion) : null;
-  const autoUpdate = vscode.workspace
-    .getConfiguration('varro')
-    .get<boolean>('server.autoUpdate', true);
-  const update = describeOpenCodeUpdate(serverInfo, autoUpdate);
+  const base = createAboutViewBase(pkg, logoUri, database);
+  const update = describeOpenCodeUpdate(serverInfo, base.autoUpdate);
 
   return {
-    name: getString(pkg.displayName) || getString(pkg.name) || 'Varro',
-    description:
-      'OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.',
-    logoUri,
-    varroVersion: getString(pkg.version) || 'unknown',
+    ...base,
     cliVersion: cliVersion || (serverInfo.cliVersionError ? 'Unavailable' : 'Not found'),
     installMethod: describeInstallMethod(serverInfo.installMethod),
     installedOn: formatAboutDateTime(serverInfo.cliInstalledAt),
@@ -933,17 +937,6 @@ function createAboutViewData(
     serverStartedOn: formatAboutDateTime(serverInfo.connections?.startedAt),
     vscodeClients: String(serverInfo.connections?.vscodeClients ?? 'Unknown'),
     otherClients: String(serverInfo.connections?.otherClients ?? 'Unknown'),
-    databaseLocation: database.location,
-    databaseSize: database.size,
-    databaseReusable: database.reusable,
-    databaseAge: database.age,
-    databaseProjects: database.projects,
-    databaseSessions: database.sessions,
-    databaseNote: database.note,
-    autoUpdate,
-    vscodeVersion: vscode.version,
-    nodeVersion: process.version,
-    platform: `${process.platform} ${process.arch}`,
     updateTitle: update?.title,
     updateNotice: update
       ? [
@@ -983,10 +976,6 @@ function markdownCode(value: string | number) {
 function readPackageJson(context: vscode.ExtensionContext): ExtensionPackageJson {
   const pkg = (context as { extension?: { packageJSON?: unknown } }).extension?.packageJSON;
   return pkg && typeof pkg === 'object' ? (pkg as ExtensionPackageJson) : {};
-}
-
-function getString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
 }
 
 async function getEditorSelectionTarget() {

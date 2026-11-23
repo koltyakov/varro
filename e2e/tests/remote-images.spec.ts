@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { MessageEntry, TextPart } from '../../src/webview/types';
 import type { ServerEvent } from '../../src/shared/protocol';
-import { waitForAnimationFrames } from './helpers';
+import { scrollToBottom, waitForAnimationFrames } from './helpers';
 
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 
@@ -210,10 +210,7 @@ for (const width of [360, 960]) {
       element.dispatchEvent(new Event('scroll'));
     });
     await expect(row).toHaveCount(0);
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await expect(row.locator('[data-remote-image] img')).toBeVisible();
     expect(await requestCount(page)).toBe(1);
 

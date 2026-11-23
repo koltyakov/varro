@@ -15,6 +15,7 @@ import {
   unsupportedProviderStatus,
   providerErrorStatus,
   VARRO_USER_AGENT,
+  clampFraction,
 } from '../adapter-utils';
 
 const GEMINI_QUOTA_ENDPOINT = 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota';
@@ -197,11 +198,6 @@ function parseGeminiCredentials(raw: string) {
   } catch {
     return null;
   }
-}
-
-function clampFraction(value: number | null) {
-  if (value == null || !Number.isFinite(value)) return null;
-  return Math.max(0, Math.min(1, value));
 }
 
 function roundMetric(value: number) {

@@ -12,7 +12,6 @@ import {
   state,
 } from '../lib/state';
 import {
-  formatVariantLabel as formatThinkingLabel,
   formatContextLimit,
   formatModelReleaseDate,
   formatProviderLimitTitle,
@@ -812,5 +811,3 @@ function modelCostRows(
       : []
   );
 }
-
-export { formatThinkingLabel, formatContextLimit };

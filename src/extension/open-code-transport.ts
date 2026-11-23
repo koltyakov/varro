@@ -201,11 +201,7 @@ export class OpenCodeTransport {
           throw new Error('OpenCode endpoint changed during request admission');
         return await this.requestAdmitted(method, path, body, { ...options, signal });
       } finally {
-        this.requestControllers.delete(controller);
-        if (!this.requestControllers.size) {
-          for (const resolve of this.requestSettlementWaiters) resolve();
-          this.requestSettlementWaiters.clear();
-        }
+        this.releaseRequestController(controller);
       }
     }
     return this.requestAdmitted(method, path, body, options);
@@ -244,11 +240,7 @@ export class OpenCodeTransport {
           throw new OpenCodeResponseTooLargeError(maxBytes);
         return result;
       } finally {
-        this.requestControllers.delete(controller);
-        if (!this.requestControllers.size) {
-          for (const resolve of this.requestSettlementWaiters) resolve();
-          this.requestSettlementWaiters.clear();
-        }
+        this.releaseRequestController(controller);
       }
     }
     return this.requestWire(method, path, body, options);
@@ -372,11 +364,7 @@ export class OpenCodeTransport {
       }
       throw err;
     } finally {
-      this.requestControllers.delete(controller);
-      if (this.requestControllers.size === 0) {
-        for (const resolve of this.requestSettlementWaiters) resolve();
-        this.requestSettlementWaiters.clear();
-      }
+      this.releaseRequestController(controller);
     }
   }
 
@@ -883,6 +871,14 @@ export class OpenCodeTransport {
     if (this.eventController) {
       this.eventController.abort();
       this.eventController = null;
+    }
+  }
+
+  private releaseRequestController(controller: AbortController) {
+    this.requestControllers.delete(controller);
+    if (this.requestControllers.size === 0) {
+      for (const resolve of this.requestSettlementWaiters) resolve();
+      this.requestSettlementWaiters.clear();
     }
   }
 

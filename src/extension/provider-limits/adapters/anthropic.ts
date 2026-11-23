@@ -28,6 +28,7 @@ import {
   unsupportedProviderStatus,
   providerErrorStatus,
   VARRO_USER_AGENT,
+  clampFraction,
 } from '../adapter-utils';
 import { delay } from '../../server-utils';
 
@@ -844,11 +845,6 @@ function parsePositiveInteger(value: unknown) {
   const parsed = parseFiniteNumber(value);
   if (parsed == null || parsed <= 0) return null;
   return Math.round(parsed);
-}
-
-function clampFraction(value: number | null) {
-  if (value == null || !Number.isFinite(value)) return null;
-  return Math.max(0, Math.min(1, value));
 }
 
 function parseJsonRecord(raw: string) {

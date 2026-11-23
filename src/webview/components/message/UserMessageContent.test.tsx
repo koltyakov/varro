@@ -181,7 +181,6 @@ describe('native subagent results', () => {
 
 it('renders independent problem links with file and line labels and restores them for editing', () => {
   const send = installSendToExtension();
-  flushSolid();
   const references = [
     {
       id: 'first',
@@ -232,7 +231,6 @@ it('renders independent problem links with file and line labels and restores the
 
 it('renders an All snapshot as one inline Problems count chip', () => {
   const send = installSendToExtension();
-  flushSolid();
   const error = { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'First error' };
   const warning = {
     path: '/repo/b.ts',
@@ -271,7 +269,6 @@ it.each(['separate', 'combined', 'combined-crlf'])(
   (layout) => {
     const warn = vi.spyOn(console, 'warn');
     const send = installSendToExtension();
-    flushSolid();
     const details =
       '[VS Code problems for playwright.config.ts: 1 errors, 0 warnings]\nCannot find module @playwright/test';
     const parts =
@@ -367,7 +364,6 @@ it.each(['separate', 'combined'])(
 
 it('renders saved table attachments with their table identity and keeps the snapshot openable', () => {
   const send = installSendToExtension();
-  flushSolid();
   const path = '/snapshots/users-context.json';
   renderUserContent([
     textPart(
@@ -402,6 +398,7 @@ function installSendToExtension() {
   const send = vi.fn();
   // SAFETY: The fixture provides the unknown fields read by this statement.
   fixture<UnknownRecord>(window).__sendToExtension = send;
+  flushSolid();
   return send;
 }
 
@@ -453,7 +450,6 @@ describe('UserMessageContent', () => {
       vi.useFakeTimers();
       try {
         const send = installSendToExtension();
-        flushSolid();
         const file = createChatAnnotation('Selected passage', 'Please check this assumption');
         const part: FilePart = {
           id: 'annotation-1',
@@ -505,7 +501,6 @@ describe('UserMessageContent', () => {
     'renders pasted text once inline after %s and opens its content',
     (prefix) => {
       const send = installSendToExtension();
-      flushSolid();
       const filename = 'pasted-text-a530137f.txt';
       const content = 'Long pasted content\n'.repeat(100);
       const file: FilePart = {
@@ -545,7 +540,6 @@ describe('UserMessageContent', () => {
     'consumes pasted file clicks when content is available: %s',
     (available) => {
       const send = installSendToExtension();
-      flushSolid();
       const filename = 'pasted-text.txt';
       const file: FilePart = {
         id: 'paste',
@@ -602,7 +596,6 @@ describe('UserMessageContent', () => {
     'renders %s plan attachments above the prompt and restores them for editing',
     (layout) => {
       const send = installSendToExtension();
-      flushSolid();
       const path = '/Users/andrew/.opencode/plan/project-adoption.md';
       const prompt = 'Use the project name in commits and docs.';
       const parts =
@@ -880,7 +873,6 @@ describe('UserMessageContent', () => {
 
   it('renders unsaved editor text as an attachment and opens its captured content', () => {
     const send = installSendToExtension();
-    flushSolid();
     renderUserContent([
       textPart('text-prompt', 'Fix the session state.'),
       textPart(
@@ -923,7 +915,6 @@ describe('UserMessageContent', () => {
 
   it('keeps selected Markdown with nested fences out of the bubble and opens the full attachment', () => {
     const send = installSendToExtension();
-    flushSolid();
     const content =
       'Please share the repository paths:\n```text\nDockerfile\nsrc/\n```\nWe need:\n- Pinned versions.';
     renderUserContent([
@@ -997,7 +988,6 @@ describe('UserMessageContent', () => {
 
   it('renders Markdown links through the external-link bridge', () => {
     const send = installSendToExtension();
-    flushSolid();
     renderUserContent([textPart('text-1', 'Read the [documentation](https://example.test/docs).')]);
     flushSolid();
 
@@ -1031,7 +1021,6 @@ describe('UserMessageContent', () => {
 
   it('compacts standalone SVG markup into a chip that opens in an editor', () => {
     const send = installSendToExtension();
-    flushSolid();
     const svg = '<svg viewBox="0 0 10 10">\n  <path d="M0 0h10v10z" />\n</svg>';
     renderUserContent([textPart('text-svg', svg)]);
     flushSolid();
@@ -1197,7 +1186,6 @@ describe('UserMessageContent', () => {
 
   it('expands a standalone terminal selection into an editor-backed terminal preview', () => {
     const send = installSendToExtension();
-    flushSolid();
     renderUserContent([
       textPart(
         'text-terminal-selection',
@@ -1278,7 +1266,6 @@ describe('UserMessageContent', () => {
 
   it('opens a mixed terminal selection chip as shellscript text', () => {
     const send = installSendToExtension();
-    flushSolid();
     renderUserContent([
       textPart(
         'text-1',
@@ -1314,7 +1301,6 @@ describe('UserMessageContent', () => {
 
   it('renders the pasted terminal marker inline with the message text', () => {
     const send = installSendToExtension();
-    flushSolid();
     renderUserContent([
       textPart('text-prompt', '[Terminal selection] seems to be slower than usual'),
       textPart(
@@ -1345,7 +1331,6 @@ describe('UserMessageContent', () => {
 
   it('renders a terminal selection without text as a non-clickable chip', () => {
     const send = installSendToExtension();
-    flushSolid();
     renderUserContent([textPart('text-1', '[Selection from terminal zsh]')]);
     flushSolid();
 
@@ -1363,7 +1348,6 @@ describe('UserMessageContent', () => {
 
   it('resolves attachment opens against the workspace with selection lines and directory kind', () => {
     const send = installSendToExtension();
-    flushSolid();
     setAppState(
       storePath('editorContext', { ...state.editorContext, workspacePath: '/workspace' })
     );
@@ -1532,7 +1516,6 @@ describe('UserMessageContent', () => {
     '.session-reference-link .session-reference-icon',
   ])('selects a known session when clicking %s in a normal user message', (target) => {
     const send = installSendToExtension();
-    flushSolid();
     setAppState(storePath('activeSessionId', 'ses_origin123'));
     flushSolid();
     setAppState(
@@ -1583,7 +1566,6 @@ describe('UserMessageContent', () => {
     'keeps sticky session-link clicks owned by message navigation with loading=%s',
     (loading) => {
       const send = installSendToExtension();
-      flushSolid();
       const onClick = vi.fn();
       setAppState(storePath('activeSessionId', 'ses_origin123'));
       flushSolid();
@@ -1683,7 +1665,6 @@ describe('UserMessageContent', () => {
       'resolves a %s ID without assistant rendering and labels its project',
       async (_kind, text, marker) => {
         const send = installSendToExtension();
-        flushSolid();
         const { lookup, open } = installSessionLookups();
         flushSolid();
         renderUserContent([textPart('text-1', text)]);
@@ -1721,7 +1702,6 @@ describe('UserMessageContent', () => {
       '.session-reference-link .session-reference-folder',
     ])('opens the project window when clicking %s', async (target) => {
       const send = installSendToExtension();
-      flushSolid();
       const { open, warn } = installSessionLookups();
       flushSolid();
       renderUserContent([textPart('text-1', 'Check session:ses_external123 too')]);
@@ -1838,7 +1818,6 @@ describe('UserMessageContent', () => {
     'renders %s as an external link and opens it through the bridge',
     (url) => {
       const send = installSendToExtension();
-      flushSolid();
       renderUserContent([textPart('text-1', `See ${url}.`)]);
       flushSolid();
 
@@ -1908,7 +1887,6 @@ describe('UserMessageContent', () => {
     'does not forward handled user-message link clicks on %s to the VS Code webview host',
     (url) => {
       const send = installSendToExtension();
-      flushSolid();
       renderUserContent([textPart('text-1', `See ${url}.`)]);
       flushSolid();
       const hostLinkHandler = vi.fn();
@@ -1936,7 +1914,6 @@ describe('UserMessageContent', () => {
 
   it('keeps prose ending in a Git remote as linked message text', () => {
     const send = installSendToExtension();
-    flushSolid();
     const prompt =
       'All JS should be strongly typed similar as in git@github.com:koltyakov/browser-bridge.git';
     renderUserContent([textPart('text-1', prompt)]);

@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { ServerEvent, WebviewMessage } from '../../src/shared/protocol';
 import type { SessionSendBody } from '../../src/webview/hooks/session/session-send';
 import type { MessageEntry, Part } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getListDistanceFromBottom, getScrollMetrics, waitForAnimationFrames } from './helpers';
 
 type SteeringWindow = Window & {
   capturedSteer?: { requestId: number; body: SessionSendBody };
@@ -29,9 +29,7 @@ for (const virtual of [false, true]) {
       const list = page.locator('.interactive-list');
       const tray = page.locator('.assistant-active-activity-item');
       await expect(tray).toHaveCount(1);
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThanOrEqual(1);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
       // Preserve production retention, then collapse the live tool into its summary.
       await page.waitForTimeout(2100);
       await page.evaluate((id) => {
@@ -95,9 +93,7 @@ for (const virtual of [false, true]) {
       const scrollAway = async () => {
         await list.hover();
         await page.mouse.wheel(0, -300);
-        await expect
-          .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-          .toBeGreaterThan(150);
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(150);
         await waitForAnimationFrames(page, 10);
       };
       if (detach === 'before steering') await scrollAway();
@@ -161,9 +157,7 @@ for (const virtual of [false, true]) {
         .filter({ hasText: 'Steering instruction line 1.' });
       await expect(card).toHaveCount(1);
       if (detach === 'never') {
-        await expect
-          .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-          .toBeLessThanOrEqual(1);
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
         await expect(card).toBeInViewport();
       } else {
         const samples = await list.evaluate(async (element) => {

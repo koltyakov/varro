@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry, Session } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 const SESSION_ID = 'session-typing-load';
 
@@ -62,14 +63,7 @@ for (const count of [20, 10_000]) {
         ],
       };
     });
-    await page.addInitScript(
-      (capture) => {
-        // SAFETY: The session-playback harness reads this controlled fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: unknown }).varroPlaybackCapture =
-          capture;
-      },
-      { session, initialMessages: messages, events: [] }
-    );
+    await installPlaybackCapture(page, { session, initialMessages: messages, events: [] });
     await page.goto(`/e2e/harness/index.html?scenario=session-playback&messagePageSize=${count}`);
     // Loading this all-at-once history fixture can exceed the default assertion timeout on CI.
     // Give setup its own budget; input-to-frame latency is measured separately below.

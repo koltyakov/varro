@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { WebviewMessage } from '../../src/shared/protocol';
 import type { MessageEntry, Session } from '../../src/webview/types';
+import { installPlaybackCapture, postWebviewMessage } from './helpers';
 
 for (const width of [480, 1280]) {
   test(`reserves the empty inline editor size while reconciling an edit at ${width}px`, async ({
@@ -34,14 +35,7 @@ for (const width of [480, 1280]) {
         },
       ],
     }));
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated playback harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages }
-    );
+    await installPlaybackCapture(page, { session, initialMessages });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await page.evaluate(() => {
       // SAFETY: These hooks belong to the isolated E2E transport, not a production session.
@@ -184,14 +178,7 @@ test('keeps model and reasoning when clicking a prompt with an empty historical 
       },
     ],
   };
-  await page.addInitScript(
-    (fixture) => {
-      // SAFETY: The isolated playback harness reads this fixture before mounting.
-      (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-        fixture;
-    },
-    { session, initialMessages: [message] }
-  );
+  await installPlaybackCapture(page, { session, initialMessages: [message] });
   await page.goto('/e2e/harness/index.html?scenario=session-playback');
   await page.locator('.model-picker-btn').click();
   await page.getByRole('button', { name: 'GPT-4.1', exact: true }).click();
@@ -250,14 +237,7 @@ for (const withImage of [false, true]) {
         url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
       });
     }
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated playback harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages: [message] }
-    );
+    await installPlaybackCapture(page, { session, initialMessages: [message] });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
 
     const row = page.locator('[data-msg-id="prompt"]');
@@ -293,18 +273,13 @@ for (const withImage of [false, true]) {
       await expect(page.locator('.inline-edit-composer-slot')).toHaveCount(0);
     }
 
-    await page.evaluate((sessionID) => {
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'session.status',
-            properties: { sessionID, status: { type: 'idle' } },
-          },
-        },
-        '*'
-      );
-    }, session.id);
+    await postWebviewMessage(page, {
+      type: 'server/event',
+      payload: {
+        type: 'session.status',
+        properties: { sessionID: session.id, status: { type: 'idle' } },
+      },
+    });
     await expect(card).toHaveClass(/user-message-card-editable/);
     await expect(bubble).not.toHaveCSS('border-color', border);
     await bubble.click();

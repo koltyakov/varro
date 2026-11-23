@@ -51,6 +51,16 @@ import {
   textPart,
   toolPart,
   userMessage,
+  flushFrame,
+  installTrackedResizeObservers,
+  captureResizeObserverCallbacks,
+  notifyResizeObservers,
+  mockElementRects,
+  assistantRows,
+  conversationTurns,
+  promptAndResponse,
+  defineLayoutMetrics,
+  backScrollTop,
 } from './MessageList.test-utils';
 import { fixture } from '../test-fixtures';
 
@@ -67,6 +77,14 @@ installMessageListTestEnvironment({
     cleanup = nextCleanup;
   },
 });
+
+/** Mounts MessageList into the test container and returns its scroll container. */
+function mountList(): HTMLDivElement {
+  cleanup = render(() => MessageList(), container!);
+  flushSolid();
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+  return container?.querySelector('.interactive-list') as HTMLDivElement;
+}
 
 describe('getStickyUserMessagePreview', () => {
   it.each([2, 3])(
@@ -470,24 +488,16 @@ describe('shouldShowStickyUserMessagePreview', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
     const rectMap = new Map<Element, DOMRect>();
     const defaultRect = new DOMRect(0, -600, 500, 40);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || defaultRect;
+    mockElementRects((element) => {
+      return rectMap.get(element) || defaultRect;
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -513,9 +523,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     flushSolid();
 
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -561,40 +569,32 @@ describe('shouldShowStickyUserMessagePreview', () => {
       .mockResolvedValueOnce([
         { info: userMessage('root'), parts: [textPart('root-text', 'Original long-turn prompt')] },
       ]);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.hasAttribute('data-msg-id')) {
-        const index = Number(this.dataset.msgId?.replace('response-', ''));
+    mockElementRects((element) => {
+      if (element.hasAttribute('data-msg-id')) {
+        const index = Number(element.dataset.msgId?.replace('response-', ''));
         return new DOMRect(0, index * 120 - (list?.scrollTop ?? 0), 500, 120);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, -(list?.scrollTop ?? 0), 500, 24_000);
       }
       return new DOMRect(0, 0, 500, 500);
     });
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 24_000 });
+    defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 24_000 });
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     flushSolid();
     list.scrollTop = 12_000;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
     await loadOlderSessionPrompts('session-1');
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -613,11 +613,11 @@ describe('shouldShowStickyUserMessagePreview', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     const boundaryRowDocumentTop = 500;
     const boundaryCardDocumentTop = 520;
     const scrollIntoView = vi.fn(() => {
-      scrollTopValue = boundaryRowDocumentTop;
+      scrollTop.value = boundaryRowDocumentTop;
     });
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -643,27 +643,24 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ]);
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 500);
       }
-      const row = this.classList.contains('interactive-item-container')
-        ? this
-        : this.closest<HTMLElement>('[data-msg-id]');
+      const row = element.classList.contains('interactive-item-container')
+        ? element
+        : element.closest<HTMLElement>('[data-msg-id]');
       if (row?.dataset.msgId === 'boundary-user') {
-        const documentTop = this.classList.contains('user-message-card')
+        const documentTop = element.classList.contains('user-message-card')
           ? boundaryCardDocumentTop
           : boundaryRowDocumentTop;
-        return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
+        return new DOMRect(0, documentTop - scrollTop.value, 500, 52);
       }
       if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
       return new DOMRect(0, 20, 500, 320);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -671,21 +668,12 @@ describe('shouldShowStickyUserMessagePreview', () => {
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 1200 });
+    backScrollTop(list, scrollTop);
     track.style.setProperty('--latest-user-message-sticky-gap', '13px');
     flushSolid();
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -697,9 +685,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(list.scrollTop).toBe(700);
@@ -781,24 +767,17 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
     flushSolid();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const list = mountList();
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -865,24 +844,17 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
     flushSolid();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const list = mountList();
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -964,24 +936,17 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
     flushSolid();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const list = mountList();
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -1011,19 +976,16 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ]);
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.classList.contains('latest-user-message-sticky-overlay')) {
         return new DOMRect(0, 10, 500, 74);
       }
-      if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+      if (element.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1032,9 +994,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -1097,21 +1057,17 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ]);
     flushSolid();
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
+    mockElementRects((element) => {
+      return rectMap.get(element) || new DOMRect(0, 20, 500, 320);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
+    defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 1200 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
     rectMap.set(list, new DOMRect(0, 0, 500, 500));
     flushSolid();
@@ -1120,9 +1076,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     retry?.click();
     flushSolid();
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -1205,14 +1159,11 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ]);
     flushSolid();
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
+    mockElementRects((element) => {
+      return rectMap.get(element) || new DOMRect(0, 20, 500, 320);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1223,8 +1174,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     );
     const sourceRow = sourceCard?.closest<HTMLElement>('[data-msg-id="boundary-user"]');
     flushSolid();
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
+    defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 1200 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
     rectMap.set(list, new DOMRect(0, 0, 500, 500));
     flushSolid();
@@ -1233,9 +1183,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     rectMap.set(sourceRow!, new DOMRect(0, -600, 500, 40));
     flushSolid();
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -1358,8 +1306,7 @@ describe('MessageList sticky prompt preview', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1494,8 +1441,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1540,8 +1486,7 @@ describe('MessageList sticky prompt preview', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1549,14 +1494,11 @@ describe('MessageList sticky prompt preview', () => {
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9600 });
+    defineLayoutMetrics(list!, { clientHeight: 400, scrollHeight: 9600 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 9200 });
 
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -1596,24 +1538,20 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
 
     try {
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const list = container?.querySelector('.interactive-list') as HTMLDivElement;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 9_600 });
+      defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 9_600 });
       Object.defineProperty(list, 'scrollTop', {
         configurable: true,
         writable: true,
         value: 9_200,
       });
       list.dispatchEvent(new Event('scroll'));
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -1712,8 +1650,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1766,8 +1703,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1950,8 +1886,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1982,8 +1917,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.textContent).toContain('Collecting stats...');
@@ -2032,8 +1966,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -2141,8 +2074,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
@@ -2185,20 +2117,7 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 60 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [
-            {
-              ...textPart(`text-${index}`, `Response ${index}`),
-              messageID: messageId,
-            },
-          ],
-        };
-      })
-    );
+    replaceMessages(assistantRows(60));
     flushSolid();
 
     expect(() => {
@@ -2206,9 +2125,7 @@ describe('MessageList sticky prompt preview', () => {
     }).not.toThrow();
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2222,8 +2139,7 @@ describe('MessageList sticky prompt preview', () => {
     setShowModelPicker(true);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -2247,8 +2163,7 @@ describe('MessageList sticky prompt preview', () => {
     startEditingMessage('user-2', 'session-1', 'Prompt 2');
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -2273,25 +2188,17 @@ describe('MessageList sticky prompt preview', () => {
   it('prevents scrolling down past the edited message top', async () => {
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
     startEditingMessage('user-2', 'session-1', 'Prompt 2');
     flushSolid();
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || new DOMRect(0, 0, 500, 40);
+    mockElementRects((element) => {
+      return rectMap.get(element) || new DOMRect(0, 0, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -2332,58 +2239,42 @@ describe('MessageList sticky prompt preview', () => {
   it('reveals a partially hidden message panel when editing starts', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    let scrollTopValue = 500;
+    const scrollTop = { value: 500 };
     let editedRowDocumentTop = 380;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.dataset.msgId === 'user-2') {
-        return new DOMRect(0, editedRowDocumentTop - scrollTopValue, 500, 180);
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.dataset.msgId === 'user-2') {
+        return new DOMRect(0, editedRowDocumentTop - scrollTop.value, 500, 180);
       }
       return new DOMRect(0, 0, 500, 40);
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    backScrollTop(list, scrollTop);
 
     startEditingMessage('user-2', 'session-1', 'Prompt 2');
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
-    expect(scrollTopValue).toBe(372);
+    expect(scrollTop.value).toBe(372);
     editedRowDocumentTop = 340;
     animationFrames.flush();
     flushSolid();
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(332);
+    expect(scrollTop.value).toBe(332);
 
     animationFrames.restore();
     flushSolid();
@@ -2392,52 +2283,38 @@ describe('MessageList sticky prompt preview', () => {
   it('clamps an aligned sticky destination before the first editing frame', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    let scrollTopValue = 500;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.dataset.msgId === 'user-2') {
-        return new DOMRect(0, 502 - scrollTopValue, 500, 180);
+    const scrollTop = { value: 500 };
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.dataset.msgId === 'user-2') {
+        return new DOMRect(0, 502 - scrollTop.value, 500, 180);
       }
       return new DOMRect(0, 0, 500, 40);
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    backScrollTop(list, scrollTop);
 
     startEditingMessage('user-2', 'session-1', 'Prompt 2');
     flushSolid();
     await Promise.resolve();
     flushSolid();
 
-    expect(scrollTopValue).toBe(494);
+    expect(scrollTop.value).toBe(494);
     animationFrames.flush();
     flushSolid();
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(494);
+    expect(scrollTop.value).toBe(494);
 
     animationFrames.restore();
     flushSolid();
@@ -2447,76 +2324,49 @@ describe('MessageList sticky prompt preview', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     let scrollHeightValue = 1200;
     let trackHeight = 1200;
     const assignedScrollTops: number[] = [];
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, trackHeight);
       }
-      if (this.dataset.msgId === 'user-2') {
-        return new DOMRect(0, 700 - scrollTopValue, 500, 80);
+      if (element.dataset.msgId === 'user-2') {
+        return new DOMRect(0, 700 - scrollTop.value, 500, 80);
       }
       return new DOMRect(0, 0, 500, 100);
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list, scrollTop, (value) => assignedScrollTops.push(value));
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
+    await Promise.resolve();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    await Promise.resolve();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
     startEditingMessage('user-2', 'session-1', 'Prompt 2');
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(692);
+    expect(scrollTop.value).toBe(692);
 
     trackHeight = 1400;
     scrollHeightValue = 1400;
@@ -2528,7 +2378,7 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
 
     expect(assignedScrollTops).not.toContain(1000);
-    expect(scrollTopValue).toBe(692);
+    expect(scrollTop.value).toBe(692);
 
     resetMessageEditState();
     flushSolid();
@@ -2537,23 +2387,19 @@ describe('MessageList sticky prompt preview', () => {
     setState(storePath('streamingText', 'More streaming growth after edit cancellation'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     expect(assignedScrollTops).not.toContain(1200);
-    expect(scrollTopValue).toBe(692);
+    expect(scrollTop.value).toBe(692);
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1200);
+    expect(scrollTop.value).toBe(1200);
     animationFrames.restore();
     flushSolid();
   });
@@ -2575,14 +2421,11 @@ describe('MessageList sticky prompt preview', () => {
 
     const rectMap = new Map<Element, DOMRect>();
     const defaultRect = new DOMRect(0, -600, 500, 40);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || defaultRect;
+    mockElementRects((element) => {
+      return rectMap.get(element) || defaultRect;
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -2621,9 +2464,7 @@ describe('MessageList sticky prompt preview', () => {
 
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2640,9 +2481,7 @@ describe('MessageList sticky prompt preview', () => {
 
     list!.scrollTop = 1400;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2705,34 +2544,28 @@ describe('MessageList sticky prompt preview', () => {
       ]);
       flushSolid();
       let noticeTop = 200;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-        if (this.classList.contains('latest-user-message-sticky-overlay')) {
+      mockElementRects((element) => {
+        if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (element.classList.contains('latest-user-message-sticky-overlay')) {
           return new DOMRect(0, 0, 500, 80);
         }
-        const id = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        const id = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
         if (id === 'assistant-1') return new DOMRect(0, noticeTop - 200, 500, 200);
         if (id === 'notice-1') return new DOMRect(0, noticeTop, 500, 40);
         if (id === 'assistant-2') return new DOMRect(0, noticeTop + 40, 500, 300);
         return new DOMRect(0, -600, 500, 40);
       });
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
       const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 2_000 });
+      defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 2_000 });
       Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 600 });
       for (const top of [200, 20, -20, 20, 200]) {
         noticeTop = top;
         list.scrollTop = 800 - top;
         list.dispatchEvent(new Event('scroll'));
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
         await Promise.resolve();
         flushSolid();
         expect(container!.querySelector('.latest-user-message-sticky')?.textContent).toContain(
@@ -2763,41 +2596,33 @@ describe('MessageList sticky prompt preview', () => {
     );
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
 
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
       if (messageId === 'user-17') return new DOMRect(0, -100, 500, 52);
       if (messageId === 'assistant-17') return new DOMRect(0, 20, 500, 160);
-      if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
+      if (element.dataset.msgId) return new DOMRect(0, -600, 500, 160);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
+    defineLayoutMetrics(list!, { clientHeight: 500, scrollHeight: 9_600 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
 
     // Transfer ownership from initial bottom-follow to the reader before sampling geometry.
     list?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     flushSolid();
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2827,40 +2652,32 @@ describe('MessageList sticky prompt preview', () => {
     );
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
 
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
       if (messageId === 'user-20') return new DOMRect(0, 280, 500, 52);
-      if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
+      if (element.dataset.msgId) return new DOMRect(0, -600, 500, 160);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
+    defineLayoutMetrics(list!, { clientHeight: 500, scrollHeight: 9_600 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
 
     // Transfer ownership from initial bottom-follow to the reader before sampling geometry.
     list?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     flushSolid();
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2874,58 +2691,39 @@ describe('MessageList sticky prompt preview', () => {
   it('keeps the sticky prompt mounted while new assistant activity events arrive', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
+    const resizeCallbacks = captureResizeObserverCallbacks();
     let assistantTop = 20;
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-    ]);
+    replaceMessages(conversationTurns(1));
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.classList.contains('interactive-list-track')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 1_200);
       }
-      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+      if (element.classList.contains('latest-user-message-sticky-overlay')) {
         return new DOMRect(0, 10, 500, 74);
       }
 
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
       if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
       if (messageId === 'assistant-1') return new DOMRect(0, assistantTop, 500, 320);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_200 });
+    defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 1_200 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 700 });
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2937,9 +2735,7 @@ describe('MessageList sticky prompt preview', () => {
     assistantTop = -600;
     upsertPart(activity);
     flushSolid();
-    for (const callback of resizeCallbacks) {
-      callback([], fixture<ResizeObserver>({}));
-    }
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
     await Promise.resolve();
@@ -2957,9 +2753,7 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
 
     assistantTop = 20;
-    for (const callback of resizeCallbacks) {
-      callback([], fixture<ResizeObserver>({}));
-    }
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
     await Promise.resolve();
@@ -2977,9 +2771,7 @@ describe('MessageList sticky prompt preview', () => {
       },
     });
     flushSolid();
-    for (const callback of resizeCallbacks) {
-      callback([], fixture<ResizeObserver>({}));
-    }
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
     await Promise.resolve();
@@ -2998,29 +2790,22 @@ describe('MessageList sticky prompt preview', () => {
     let assistant1Top = -600;
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.classList.contains('latest-user-message-sticky-overlay')) {
         return new DOMRect(0, 10, 500, 74);
       }
-      if (this.classList.contains('latest-user-message-sticky')) {
+      if (element.classList.contains('latest-user-message-sticky')) {
         return new DOMRect(0, 18, 500, 50);
       }
-      if (this.classList.contains('latest-user-message-sticky-text')) {
+      if (element.classList.contains('latest-user-message-sticky-text')) {
         return new DOMRect(0, 22, 500, 18);
       }
 
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
       if (messageId === 'user-1') return new DOMRect(0, -700, 500, 52);
       if (messageId === 'assistant-1') return new DOMRect(0, assistant1Top, 500, 90);
       if (messageId === 'user-2') return new DOMRect(0, user2Top, 500, 52);
@@ -3028,8 +2813,7 @@ describe('MessageList sticky prompt preview', () => {
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3038,9 +2822,7 @@ describe('MessageList sticky prompt preview', () => {
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3053,9 +2835,7 @@ describe('MessageList sticky prompt preview', () => {
       'Prompt 2'
     );
     vi.advanceTimersByTime(181);
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3072,9 +2852,7 @@ describe('MessageList sticky prompt preview', () => {
     assistant1Top = 20;
     list.scrollTop = 1_180;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3087,9 +2865,7 @@ describe('MessageList sticky prompt preview', () => {
     user2Top = -50;
     list.scrollTop = 1_200;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3103,9 +2879,7 @@ describe('MessageList sticky prompt preview', () => {
     assistant1Top = 20;
     list.scrollTop = 1_180;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3116,9 +2890,7 @@ describe('MessageList sticky prompt preview', () => {
     user2Top = 120;
     list.scrollTop = 1_160;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3131,9 +2903,7 @@ describe('MessageList sticky prompt preview', () => {
     user2Top = 150;
     list.scrollTop = 1_140;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3150,26 +2920,19 @@ describe('MessageList sticky prompt preview', () => {
     let nextUserTop = 220;
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.classList.contains('latest-user-message-sticky-overlay')) {
         return new DOMRect(0, 10, 500, 74);
       }
-      if (this.classList.contains('latest-user-message-sticky')) {
+      if (element.classList.contains('latest-user-message-sticky')) {
         return new DOMRect(0, 10, 500, 50);
       }
 
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
       if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
       if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
       if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
@@ -3177,8 +2940,7 @@ describe('MessageList sticky prompt preview', () => {
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3189,9 +2951,7 @@ describe('MessageList sticky prompt preview', () => {
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
 
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
@@ -3215,52 +2975,24 @@ describe('MessageList sticky prompt preview', () => {
   it('hides the sticky when bottom-follow moves the next user row into its overlay', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     let nextUserTop = 220;
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.classList.contains('interactive-list-track')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 1_700);
       }
-      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+      if (element.classList.contains('latest-user-message-sticky-overlay')) {
         return new DOMRect(0, 10, 500, 74);
       }
 
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
       if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
       if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
       if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
@@ -3268,26 +3000,18 @@ describe('MessageList sticky prompt preview', () => {
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const list = mountList();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_700 });
+    defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 1_700 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
@@ -3313,43 +3037,39 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
   });
 
-  it('keeps the previous sticky when layout growth moves the next prompt below stale observer bounds', async () => {
+  /**
+   * Mounts two turns scrolled so `user-1` sits above the viewport and `user-2` starts at
+   * `geometry.nextUserTop`, with intersection callbacks under test control.
+   */
+  async function mountNextPromptBelowSticky() {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     const intersections = installControllableIntersectionObserver();
     flushSolid();
-    let nextUserTop = 220;
+    const geometry = { nextUserTop: 220 };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (element.classList.contains('latest-user-message-sticky-overlay')) {
         return new DOMRect(0, 10, 500, 74);
       }
-      if (this.classList.contains('latest-user-message-sticky')) {
+      if (element.classList.contains('latest-user-message-sticky')) {
         return new DOMRect(0, 10, 500, 50);
       }
 
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
       if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
       if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
-      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
-      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      if (messageId === 'user-2') return new DOMRect(0, geometry.nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, geometry.nextUserTop + 80, 500, 160);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3361,6 +3081,12 @@ describe('MessageList sticky prompt preview', () => {
     const user2 = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
+    return { animationFrames, intersections, geometry, list, assistant1, user2 };
+  }
+
+  it('keeps the previous sticky when layout growth moves the next prompt below stale observer bounds', async () => {
+    const { animationFrames, intersections, geometry, list, assistant1, user2 } =
+      await mountNextPromptBelowSticky();
 
     const emitVisibleBounds = (observedUserTop: number) =>
       intersections.emit([
@@ -3380,30 +3106,24 @@ describe('MessageList sticky prompt preview', () => {
 
     emitVisibleBounds(220);
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
 
-    nextUserTop = 70;
+    geometry.nextUserTop = 70;
     emitVisibleBounds(70);
     list.scrollTop = 1_350;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
 
-    nextUserTop = 360;
+    geometry.nextUserTop = 360;
     list.scrollTop = 1_210;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3414,53 +3134,8 @@ describe('MessageList sticky prompt preview', () => {
   });
 
   it('hides the previous sticky when the next prompt reaches it without a new observer callback', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const intersections = installControllableIntersectionObserver();
-    flushSolid();
-    let nextUserTop = 220;
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
-    flushSolid();
-
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
-      if (this.classList.contains('latest-user-message-sticky-overlay')) {
-        return new DOMRect(0, 10, 500, 74);
-      }
-      if (this.classList.contains('latest-user-message-sticky')) {
-        return new DOMRect(0, 10, 500, 50);
-      }
-
-      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
-      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
-      if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
-      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
-      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
-      return new DOMRect(0, -600, 500, 40);
-    });
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    await Promise.resolve();
-    flushSolid();
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const assistant1 = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const user2 = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
+    const { animationFrames, intersections, geometry, list, assistant1, user2 } =
+      await mountNextPromptBelowSticky();
 
     intersections.emit([
       {
@@ -3477,19 +3152,15 @@ describe('MessageList sticky prompt preview', () => {
       },
     ]);
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
 
-    nextUserTop = 70;
+    geometry.nextUserTop = 70;
     list.scrollTop = 1_350;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3503,7 +3174,7 @@ describe('MessageList sticky prompt preview', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     const messageTop = new Map<string, number>([
       ['user-1', 0],
       ['assistant-1', 80],
@@ -3512,50 +3183,34 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 500);
       }
-      const row = this.classList.contains('interactive-item-container')
-        ? this
-        : this.closest<HTMLElement>('[data-msg-id]');
+      const row = element.classList.contains('interactive-item-container')
+        ? element
+        : element.closest<HTMLElement>('[data-msg-id]');
       const top = row?.dataset.msgId ? messageTop.get(row.dataset.msgId) : undefined;
       const height = row?.dataset.msgId?.startsWith('user-') ? 80 : 420;
       return top === undefined
         ? new DOMRect(0, -600, 500, 40)
-        : new DOMRect(0, top - scrollTopValue, 500, height);
+        : new DOMRect(0, top - scrollTop.value, 500, height);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    backScrollTop(list, scrollTop);
 
-    scrollTopValue = 300;
+    scrollTop.value = 300;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(
@@ -3567,13 +3222,9 @@ describe('MessageList sticky prompt preview', () => {
     container
       ?.querySelector<HTMLButtonElement>('.turn-navigation-marker[aria-label^="Go to turn 2:"]')
       ?.click();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3587,18 +3238,14 @@ describe('MessageList sticky prompt preview', () => {
     ).toContain('turn-navigation-destination');
 
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
-    scrollTopValue = 0;
+    scrollTop.value = 0;
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
     flushSolid();
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3618,28 +3265,12 @@ describe('MessageList sticky prompt preview', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 60 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [
-            {
-              ...textPart(`text-${index}`, `Response ${index}`),
-              messageID: messageId,
-            },
-          ],
-        };
-      })
-    );
+    replaceMessages(assistantRows(60));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3647,8 +3278,7 @@ describe('MessageList sticky prompt preview', () => {
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 240 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 10_000 });
+    defineLayoutMetrics(list!, { clientHeight: 240, scrollHeight: 10_000 });
     Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 0 });
 
     list!.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 }));
@@ -3706,14 +3336,11 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    mockElementRects((element) => {
+      return rectMap.get(element) || new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3741,9 +3368,7 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
 
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3770,13 +3395,13 @@ describe('MessageList sticky prompt preview', () => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
       let list: HTMLDivElement | null = null;
-      let scrollTopValue = 1200;
+      const scrollTop = { value: 1200 };
       let outerScrollTop = 75;
       const rowDocumentTop = 1120;
       const cardDocumentTop = 1140;
       const stickyGap = 14;
       const scrollIntoView = vi.fn(() => {
-        scrollTopValue = rowDocumentTop;
+        scrollTop.value = rowDocumentTop;
         outerScrollTop = 0;
       });
       Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -3795,20 +3420,18 @@ describe('MessageList sticky prompt preview', () => {
       ]);
       flushSolid();
 
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this === list || this.classList.contains('interactive-list')) {
+      mockElementRects((element) => {
+        if (element === list || element.classList.contains('interactive-list')) {
           return new DOMRect(0, 100, 500, 500);
         }
-        const row = this.classList.contains('interactive-item-container')
-          ? this
-          : this.closest<HTMLElement>('[data-msg-id]');
+        const row = element.classList.contains('interactive-item-container')
+          ? element
+          : element.closest<HTMLElement>('[data-msg-id]');
         if (row?.dataset.msgId === 'user-2') {
-          const documentTop = this.classList.contains('user-message-card')
+          const documentTop = element.classList.contains('user-message-card')
             ? cardDocumentTop
             : rowDocumentTop;
-          return new DOMRect(0, 100 + documentTop - scrollTopValue, 500, 52);
+          return new DOMRect(0, 100 + documentTop - scrollTop.value, 500, 52);
         }
         if (row?.dataset.msgId === 'assistant-2') {
           return new DOMRect(0, 120, 500, 320);
@@ -3816,8 +3439,7 @@ describe('MessageList sticky prompt preview', () => {
         return new DOMRect(0, -600, 500, 40);
       });
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
@@ -3837,20 +3459,12 @@ describe('MessageList sticky prompt preview', () => {
         },
       });
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-      Object.defineProperty(list, 'scrollTop', {
-        configurable: true,
-        get: () => scrollTopValue,
-        set: (value: number) => {
-          scrollTopValue = value;
-        },
-      });
+      backScrollTop(list, scrollTop);
       track.style.setProperty('--latest-user-message-sticky-gap', `${stickyGap}px`);
       flushSolid();
 
       list.dispatchEvent(new Event('scroll'));
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -3888,23 +3502,15 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
     startLoading(1);
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    mockElementRects((element) => {
+      return rectMap.get(element) || new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3930,9 +3536,7 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
 
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3959,31 +3563,25 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
     startLoading(1);
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Running response')] },
-    ]);
+    replaceMessages(promptAndResponse('First prompt', 'Running response'));
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 500);
       }
-      const row = this.classList.contains('interactive-item-container')
-        ? this
-        : this.closest<HTMLElement>('[data-msg-id]');
+      const row = element.classList.contains('interactive-item-container')
+        ? element
+        : element.closest<HTMLElement>('[data-msg-id]');
       if (row?.dataset.msgId === 'user-1') {
-        const documentTop = this.classList.contains('user-message-card') ? 4 : 0;
+        const documentTop = element.classList.contains('user-message-card') ? 4 : 0;
         return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
       }
       if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
       return new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3998,18 +3596,14 @@ describe('MessageList sticky prompt preview', () => {
       },
     });
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(sticky?.textContent).toContain('First prompt');
     sticky?.click();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4041,13 +3635,11 @@ describe('MessageList sticky prompt preview', () => {
     const targetIndex = 40;
     const targetScrollTop = targetIndex * 120;
     const stickyTopInset = 13;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list) return new DOMRect(0, 0, 500, 500);
-      const row = this.classList.contains('interactive-item-container')
-        ? this
-        : this.closest<HTMLElement>('.interactive-item-container');
+    mockElementRects((element) => {
+      if (element === list) return new DOMRect(0, 0, 500, 500);
+      const row = element.classList.contains('interactive-item-container')
+        ? element
+        : element.closest<HTMLElement>('.interactive-item-container');
       const messageIndex = Number(row?.dataset.msgId?.replace('message-', ''));
       if (Number.isFinite(messageIndex)) {
         const layoutShift = messageIndex === targetIndex ? targetLayoutShift : 0;
@@ -4089,10 +3681,7 @@ describe('MessageList sticky prompt preview', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = mountList();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     Object.defineProperty(container!, 'scrollTop', {
@@ -4102,8 +3691,7 @@ describe('MessageList sticky prompt preview', () => {
         outerScrollTop = value;
       },
     });
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 6000 });
+    defineLayoutMetrics(list, { clientHeight: 500, scrollHeight: 6000 });
     Object.defineProperty(list, 'scrollTop', {
       configurable: true,
       get: () => scrollTopValue,
@@ -4121,9 +3709,7 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4133,13 +3719,9 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
     scrollTopValue = 42 * 120;
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4176,16 +3758,13 @@ describe('MessageList sticky prompt preview', () => {
 
     const nestedScroller = document.createElement('div');
     nestedScroller.style.overflowY = 'auto';
-    Object.defineProperty(nestedScroller, 'clientHeight', { configurable: true, value: 100 });
-    Object.defineProperty(nestedScroller, 'scrollHeight', { configurable: true, value: 300 });
+    defineLayoutMetrics(nestedScroller, { clientHeight: 100, scrollHeight: 300 });
     Object.defineProperty(nestedScroller, 'scrollTop', { configurable: true, value: 50 });
     targetCard!.append(nestedScroller);
     const scrollTopBeforeNestedWheel = scrollTopValue;
     targetLayoutShift -= 40;
     nestedScroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(scrollTopValue).toBe(scrollTopBeforeNestedWheel);
@@ -4211,8 +3790,12 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
   });
 
-  it('restores image attachments when editing a message selected through its sticky preview', async () => {
-    // Sticky destination geometry is covered separately; this case owns edit-state restoration.
+  /**
+   * Mounts two turns whose second prompt has `user2Parts`, scrolls that prompt above the
+   * viewport so its sticky preview shows, and returns the preview with a way to select it.
+   * Sticky destination geometry is covered separately; callers own edit-state assertions.
+   */
+  async function showSecondPromptSticky(user2Parts: MessageEntry['parts']) {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     const scrollIntoView = vi.fn();
@@ -4226,26 +3809,17 @@ describe('MessageList sticky prompt preview', () => {
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
       { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      {
-        info: userMessage('user-2'),
-        parts: [
-          textPart('text-3', 'Still is shown as this. Before switching to [Image 2]'),
-          filePart('image-2', 'Image 2'),
-        ],
-      },
+      { info: userMessage('user-2'), parts: user2Parts },
       { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
     ]);
     flushSolid();
 
     const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
+    mockElementRects((element) => {
+      return rectMap.get(element) || new DOMRect(0, -600, 500, 40);
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4276,150 +3850,76 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
 
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(sticky).toBeInstanceOf(HTMLDivElement);
 
-    sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    /** Clicks the sticky preview, which must not edit, then the prompt card, which must. */
+    const selectThroughSticky = () => {
+      sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      flushSolid();
 
-    expect(editingMessage()).toBeNull();
-    expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(editingMessage()).toBeNull();
+      expect(scrollIntoView).not.toHaveBeenCalled();
 
-    user2Card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+      user2Card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      flushSolid();
+    };
+    return { animationFrames, sticky, selectThroughSticky };
+  }
+
+  const image2Context = {
+    files: [],
+    images: [
+      {
+        id: 'image-2',
+        url: 'https://example.test/image-2.png',
+        mime: 'image/png',
+        filename: 'Image 2',
+        size: 0,
+      },
+    ],
+    terminalSelection: null,
+  };
+
+  it('restores image attachments when editing a message selected through its sticky preview', async () => {
+    const scenario = await showSecondPromptSticky([
+      textPart('text-3', 'Still is shown as this. Before switching to [Image 2]'),
+      filePart('image-2', 'Image 2'),
+    ]);
+
+    scenario.selectThroughSticky();
 
     expect(editingMessage()).toEqual({
       messageId: 'user-2',
       sessionId: 'session-1',
       text: 'Still is shown as this. Before switching to [Image 2]',
-      context: {
-        files: [],
-        images: [
-          {
-            id: 'image-2',
-            url: 'https://example.test/image-2.png',
-            mime: 'image/png',
-            filename: 'Image 2',
-            size: 0,
-          },
-        ],
-        terminalSelection: null,
-      },
+      context: image2Context,
       model: { providerID: 'openai', modelID: 'gpt-5.4' },
     });
 
-    animationFrames.restore();
+    scenario.animationFrames.restore();
     flushSolid();
   });
 
   it('edits an image-only message after selecting it through the sticky preview', async () => {
-    // Sticky destination geometry is covered separately; this case owns image-only edit state.
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const scrollIntoView = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
-      configurable: true,
-      writable: true,
-      value: scrollIntoView,
-    });
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      {
-        info: userMessage('user-2'),
-        parts: [filePart('image-2', 'Image 2')],
-      },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
-    flushSolid();
+    const scenario = await showSecondPromptSticky([filePart('image-2', 'Image 2')]);
+    expect(scenario.sticky?.textContent).toContain('Attachment: Image 2');
 
-    const rectMap = new Map<Element, DOMRect>();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || new DOMRect(0, -600, 500, 40);
-    });
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    await Promise.resolve();
-    flushSolid();
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const user2Card = container?.querySelector(
-      '[data-msg-id="user-2"] .user-message-card'
-    ) as HTMLDivElement | null;
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const assistant2Row = container?.querySelector(
-      '[data-msg-id="assistant-2"]'
-    ) as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-    expect(user2Row).toBeInstanceOf(HTMLDivElement);
-    expect(user2Card).toBeInstanceOf(HTMLDivElement);
-    expect(assistant2Row).toBeInstanceOf(HTMLDivElement);
-
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
-    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1200 });
-    rectMap.set(list!, new DOMRect(0, 0, 500, 500));
-    flushSolid();
-    rectMap.set(user2Row!, new DOMRect(0, -80, 500, 52));
-    flushSolid();
-    rectMap.set(assistant2Row!, new DOMRect(0, 20, 500, 320));
-    flushSolid();
-
-    list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    await Promise.resolve();
-    flushSolid();
-
-    const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
-    expect(sticky).toBeInstanceOf(HTMLDivElement);
-    expect(sticky?.textContent).toContain('Attachment: Image 2');
-
-    sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-
-    expect(editingMessage()).toBeNull();
-    expect(scrollIntoView).not.toHaveBeenCalled();
-
-    user2Card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    scenario.selectThroughSticky();
 
     expect(editingMessage()).toEqual({
       messageId: 'user-2',
       sessionId: 'session-1',
       text: '',
-      context: {
-        files: [],
-        images: [
-          {
-            id: 'image-2',
-            url: 'https://example.test/image-2.png',
-            mime: 'image/png',
-            filename: 'Image 2',
-            size: 0,
-          },
-        ],
-        terminalSelection: null,
-      },
+      context: image2Context,
       model: { providerID: 'openai', modelID: 'gpt-5.4' },
     });
 
-    animationFrames.restore();
+    scenario.animationFrames.restore();
     flushSolid();
   });
 
@@ -4428,24 +3928,16 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-    ]);
+    replaceMessages(conversationTurns(2));
     flushSolid();
 
     const rectMap = new Map<Element, DOMRect>();
     const defaultRect = new DOMRect(0, -600, 500, 40);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return rectMap.get(this) || defaultRect;
+    mockElementRects((element) => {
+      return rectMap.get(element) || defaultRect;
     });
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4478,9 +3970,7 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
 
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4495,9 +3985,7 @@ describe('MessageList sticky prompt preview', () => {
     flushSolid();
     list!.scrollTop = 1210;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 

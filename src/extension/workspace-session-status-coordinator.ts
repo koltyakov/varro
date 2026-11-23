@@ -83,7 +83,7 @@ export class WorkspaceSessionStatusCoordinator {
   }
 }
 
-function raceAgainstAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+export function raceAgainstAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
   signal.throwIfAborted();
   return new Promise<T>((resolve, reject) => {

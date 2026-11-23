@@ -464,6 +464,32 @@ export function getForkBoundaryMessageId(
     ?.info.id;
 }
 
+function OpenAndImplementPlanButtons(props: {
+  onOpenPlan?: () => void;
+  onImplementPlan?: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        class="assistant-dialog-summary-action assistant-dialog-summary-action-open question-btn"
+        disabled={isLoading()}
+        onClick={() => props.onOpenPlan?.()}
+      >
+        <span>Open plan</span>
+      </button>
+      <button
+        type="button"
+        class="assistant-dialog-summary-action assistant-dialog-summary-action-implement question-btn"
+        disabled={isLoading()}
+        onClick={() => props.onImplementPlan?.()}
+      >
+        <span>Implement the plan</span>
+      </button>
+    </>
+  );
+}
+
 function AssistantDialogSummary(props: {
   summary: AssistantDialogSummaryInfo;
   pause?: SessionPause;
@@ -729,22 +755,10 @@ function AssistantDialogSummary(props: {
       </div>
       <Show when={props.showImplementPlanAction}>
         <div class="assistant-dialog-summary-actions">
-          <button
-            type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-open question-btn"
-            disabled={isLoading()}
-            onClick={() => props.onOpenPlan?.()}
-          >
-            <span>Open plan</span>
-          </button>
-          <button
-            type="button"
-            class="assistant-dialog-summary-action assistant-dialog-summary-action-implement question-btn"
-            disabled={isLoading()}
-            onClick={() => props.onImplementPlan?.()}
-          >
-            <span>Implement the plan</span>
-          </button>
+          <OpenAndImplementPlanButtons
+            onOpenPlan={props.onOpenPlan}
+            onImplementPlan={props.onImplementPlan}
+          />
           <button
             type="button"
             class="assistant-dialog-summary-action assistant-dialog-summary-action-skip question-btn"
@@ -765,22 +779,10 @@ function AssistantDialogSummary(props: {
           </span>
           <Show when={props.hasBuildAgent}>
             <div class="assistant-dialog-summary-plan-skipped-actions">
-              <button
-                type="button"
-                class="assistant-dialog-summary-action assistant-dialog-summary-action-open question-btn"
-                disabled={isLoading()}
-                onClick={() => props.onOpenPlan?.()}
-              >
-                <span>Open plan</span>
-              </button>
-              <button
-                type="button"
-                class="assistant-dialog-summary-action assistant-dialog-summary-action-implement question-btn"
-                disabled={isLoading()}
-                onClick={() => props.onImplementPlan?.()}
-              >
-                <span>Implement the plan</span>
-              </button>
+              <OpenAndImplementPlanButtons
+                onOpenPlan={props.onOpenPlan}
+                onImplementPlan={props.onImplementPlan}
+              />
             </div>
           </Show>
         </div>

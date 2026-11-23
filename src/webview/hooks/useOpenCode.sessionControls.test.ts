@@ -1,31 +1,18 @@
-import { flush as flushSolid, createRoot } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import type { ServerEventName } from '../../shared/protocol';
-import type { onMessage } from '../lib/bridge';
 import {
-  getBridgeMocks,
+  captureBridgeHandler,
+  captureServerEventHandlers,
   getClientMocks,
+  gpt4oProvider,
+  loadAndMountUseOpenCode,
   loadModules,
   provider,
   session,
 } from './useOpenCode.test-support';
 
-interface ServerEvent {
-  properties: unknown;
-}
-
 const clientMocks = getClientMocks();
-const bridgeMocks = getBridgeMocks();
-type BridgeOnMessage = typeof onMessage;
-type ServerEventsOn = (
-  event: ServerEventName | '*',
-  handler: (data: ServerEvent) => void
-) => () => void;
-const bridgeOnMessage = vi.fn<BridgeOnMessage>();
-const serverEventsOn = vi.fn<ServerEventsOn>();
-Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
-Object.assign(clientMocks, { serverEventsOn });
 
 describe('useOpenCode session control flows', () => {
   it('stops a captured child without using tree abort or modifying parent and sibling status', async () => {
@@ -67,13 +54,7 @@ describe('useOpenCode session control flows', () => {
     expect(clientMocks.questionList).toHaveBeenCalled();
   });
   it('handles a rejected abort requested by the command bridge', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
     clientMocks.agentList.mockResolvedValue([]);
@@ -83,13 +64,7 @@ describe('useOpenCode session control flows', () => {
     clientMocks.sessionStatus.mockResolvedValue({});
     clientMocks.sessionAbort.mockRejectedValue(new Error('abort failed'));
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -100,9 +75,7 @@ describe('useOpenCode session control flows', () => {
       flushSolid();
       stateModule.setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
       flushSolid();
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({ type: 'command/abort' });
+      bridge.send({ type: 'command/abort' });
       flushSolid();
 
       await vi.waitFor(() =>
@@ -117,57 +90,27 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('ignores stale retry status updates after aborting a retrying session', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
     clientMocks.agentList.mockResolvedValue([]);
     clientMocks.providerList.mockResolvedValue({
-      providers: [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ],
+      providers: [gpt4oProvider({ toolcall: true, vision: true })],
       default: { openai: 'gpt-4o' },
     });
     clientMocks.providerLimit.mockResolvedValue(null);
     clientMocks.questionList.mockResolvedValue([]);
     clientMocks.sessionAbort.mockResolvedValue(undefined);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
       flushSolid();
 
       stateModule.setState(
-        storePath('providers', [
-          provider('openai', {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true, vision: true },
-              cost: { input: 0, output: 0 },
-            },
-          }),
-        ])
+        storePath('providers', [gpt4oProvider({ toolcall: true, vision: true })])
       );
       flushSolid();
       stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
@@ -246,13 +189,7 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('aborts child sessions that appear after stop has already started', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -262,13 +199,7 @@ describe('useOpenCode session control flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
     clientMocks.sessionAbort.mockResolvedValue(true);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -314,13 +245,7 @@ describe('useOpenCode session control flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
     clientMocks.sessionAbort.mockResolvedValue(true);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -408,13 +333,7 @@ describe('useOpenCode session control flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
     clientMocks.sessionAbort.mockResolvedValue(true);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -459,13 +378,7 @@ describe('useOpenCode session control flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
     clientMocks.sessionAbort.mockResolvedValue(true);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -491,56 +404,26 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('records the originating session on usage-limit notices', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
     clientMocks.agentList.mockResolvedValue([]);
     clientMocks.providerList.mockResolvedValue({
-      providers: [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ],
+      providers: [gpt4oProvider({ toolcall: true, vision: true })],
       default: { openai: 'gpt-4o' },
     });
     clientMocks.providerLimit.mockResolvedValue(null);
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
       flushSolid();
 
       stateModule.setState(
-        storePath('providers', [
-          provider('openai', {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true, vision: true },
-              cost: { input: 0, output: 0 },
-            },
-          }),
-        ])
+        storePath('providers', [gpt4oProvider({ toolcall: true, vision: true })])
       );
       flushSolid();
       stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
@@ -573,27 +456,14 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('attaches retry usage-limit notices to the selected provider', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
     clientMocks.agentList.mockResolvedValue([]);
     clientMocks.providerList.mockResolvedValue({
       providers: [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
+        gpt4oProvider({ toolcall: true, vision: true }),
         provider('anthropic', {
           claude: {
             id: 'claude',
@@ -608,13 +478,7 @@ describe('useOpenCode session control flows', () => {
     clientMocks.providerLimit.mockResolvedValue(null);
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -622,14 +486,7 @@ describe('useOpenCode session control flows', () => {
 
       stateModule.setState(
         storePath('providers', [
-          provider('openai', {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true, vision: true },
-              cost: { input: 0, output: 0 },
-            },
-          }),
+          gpt4oProvider({ toolcall: true, vision: true }),
           provider('anthropic', {
             claude: {
               id: 'claude',

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 const sessionId = 'sticky-cold-open';
 const created = 1_780_000_000_000;
@@ -72,24 +73,17 @@ for (const width of [480, 1280]) {
     page,
   }) => {
     await page.setViewportSize({ width, height: 850 });
-    await page.addInitScript(
-      (capture) => {
-        // SAFETY: Only the isolated playback harness consumes this generated fixture.
-        (window as typeof window & { varroPlaybackCapture: typeof capture }).varroPlaybackCapture =
-          capture;
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionId,
+        projectID: 'test',
+        directory: '/workspace',
+        title: 'Cold-open sticky prompt',
+        version: '1',
+        time: { created, updated: created },
       },
-      {
-        session: {
-          id: sessionId,
-          projectID: 'test',
-          directory: '/workspace',
-          title: 'Cold-open sticky prompt',
-          version: '1',
-          time: { created, updated: created },
-        },
-        initialMessages: history(),
-      }
-    );
+      initialMessages: history(),
+    });
     await page.goto('/e2e/harness/index.html?scenario=session-playback&windowed=1');
     await expect(page.locator('[data-msg-id="message-450"]')).toBeVisible();
     const sticky = page.locator('[data-sticky-msg-id="message-0"]');

@@ -30,11 +30,9 @@ function applyPermissionModeSelection(
   sessionId: string | null | undefined,
   mode: PermissionMode
 ) {
-  (() => {
-    deps.setPermissionModeForSession(sessionId, mode);
-    deps.setDraftPermissionMode(mode);
-    deps.saveProjectPermissionMode(mode);
-  })();
+  deps.setPermissionModeForSession(sessionId, mode);
+  deps.setDraftPermissionMode(mode);
+  deps.saveProjectPermissionMode(mode);
 }
 
 export async function respondPermissionWithDependencies(
@@ -189,16 +187,14 @@ export async function updatePermissionModeForSessionWithDependencies(
     const draftCurrent = freshness.isDraftCurrent();
     if (!sessionCurrent && !draftCurrent) return;
     const confirmedMode = freshness.getConfirmedMode?.();
-    (() => {
-      if (sessionCurrent) {
-        deps.setPermissionModeForSession(sessionId, confirmedMode ?? previousMode);
-      }
-      if (draftCurrent) {
-        const rollbackMode = confirmedMode ?? previousDraft;
-        deps.setDraftPermissionMode(rollbackMode);
-        deps.saveProjectPermissionMode(rollbackMode);
-      }
-    })();
+    if (sessionCurrent) {
+      deps.setPermissionModeForSession(sessionId, confirmedMode ?? previousMode);
+    }
+    if (draftCurrent) {
+      const rollbackMode = confirmedMode ?? previousDraft;
+      deps.setDraftPermissionMode(rollbackMode);
+      deps.saveProjectPermissionMode(rollbackMode);
+    }
     deps.setError(err instanceof Error ? err.message : 'Failed to update permissions');
     return;
   }
@@ -307,28 +303,14 @@ export class SessionApprovalOperations {
     answers: QuestionAnswer,
     options?: { rethrow?: boolean }
   ) => {
-    await respondQuestionWithDependencies(
-      {
-        replyQuestion: this.deps.replyQuestion,
-        beginQuestionResponse: this.deps.beginQuestionResponse,
-        cancelQuestionResponse: this.deps.cancelQuestionResponse,
-        removeResolvedQuestion: this.deps.removeResolvedQuestion,
-        setError: this.deps.setError,
-      },
-      requestId,
-      answers,
-      options
-    );
+    await respondQuestionWithDependencies(this.deps, requestId, answers, options);
   };
 
   readonly rejectQuestion = async (requestId: string, options?: { rethrow?: boolean }) => {
     await rejectQuestionWithDependencies(
       {
+        ...this.deps,
         rejectQuestion: this.deps.rejectRemoteQuestion,
-        beginQuestionResponse: this.deps.beginQuestionResponse,
-        cancelQuestionResponse: this.deps.cancelQuestionResponse,
-        removeResolvedQuestion: this.deps.removeResolvedQuestion,
-        setError: this.deps.setError,
       },
       requestId,
       options
@@ -377,17 +359,8 @@ export class SessionApprovalOperations {
     const request = queue.tail.then(() =>
       updatePermissionModeForSessionWithDependencies(
         {
-          getPermissionModeForSession: this.deps.getPermissionModeForSession,
-          getDraftPermissionMode: this.deps.getDraftPermissionMode,
-          setPermissionModeForSession: this.deps.setPermissionModeForSession,
-          setDraftPermissionMode: this.deps.setDraftPermissionMode,
-          saveProjectPermissionMode: this.deps.saveProjectPermissionMode,
-          updateSessionPermission: this.deps.updateSessionPermission,
-          upsertSession: this.deps.upsertSession,
-          setError: this.deps.setError,
-          getPermissionsForSession: this.deps.getPermissionsForSession,
+          ...this.deps,
           autoApprovePermissionsForSession: this.autoApprovePermissionsForSession,
-          syncPendingPermissions: this.deps.syncPendingPermissions,
         },
         mode,
         permissionRules,

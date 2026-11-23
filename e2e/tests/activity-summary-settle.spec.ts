@@ -6,6 +6,7 @@ import type {
   ReasoningPart,
   Session,
 } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const finishTurn of [false, true]) {
   test(`keeps Exploring in place when reasoning settles with answer events${finishTurn ? ' and idle' : ''}`, async ({
@@ -64,14 +65,7 @@ for (const finishTurn of [false, true]) {
         ],
       },
     ];
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated E2E harness reads this synthetic fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages }
-    );
+    await installPlaybackCapture(page, { session, initialMessages });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await expect(page.locator('.user-message-card')).toContainText('Review the codebase');
     await page.evaluate(

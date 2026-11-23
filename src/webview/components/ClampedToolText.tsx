@@ -42,7 +42,7 @@ export function clampToolText(content: string) {
   return { clamped: true as const, preview: trimBlankEdges(capped), lineCount };
 }
 
-export function openToolText(payload: {
+function openToolText(payload: {
   content: string;
   title: string;
   language?: string;

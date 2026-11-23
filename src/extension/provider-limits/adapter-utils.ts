@@ -1,11 +1,13 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Provider adapters share runtime decoders for untrusted API values. */
 import type { ProviderLimitStatus } from '../../shared/protocol';
-import type { JsonValue } from '../../shared/type-utils';
+import { asRecord, getString, type JsonValue } from '../../shared/type-utils';
+import type { ProviderAuthRecord, ProviderMetadata } from '../util/provider-limit';
 
-export { asRecord, getString } from '../../shared/type-utils';
+export { asRecord, getString };
 
 export const PROVIDER_RESPONSE_MAX_BYTES = 1024 * 1024;
 export const VARRO_USER_AGENT = `Varro/${__VARRO_VERSION__}`;
+export const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 export async function readBoundedResponseText(
   response: Response,
@@ -59,6 +61,24 @@ export function parseFiniteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- Callers decode the untrusted payload before use.
+export function parseJsonBody(bodyText: string): unknown | null {
+  const trimmed = bodyText.trim();
+  if (!trimmed) return null;
+
+  try {
+    // SAFETY: Widening the parsed value to unknown forces callers to validate it.
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export function clampFraction(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
+
 export function clampPercent(value: number | null): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.round(Math.max(0, Math.min(100, value)) * 1000) / 1000;
@@ -103,4 +123,17 @@ export function providerErrorStatus(
     checkedAt,
     note,
   };
+}
+
+export function resolveProviderAuthToken(
+  provider: ProviderMetadata,
+  authStore: Record<string, ProviderAuthRecord>
+) {
+  const auth = authStore[provider.id];
+  if (auth?.type === 'oauth') return auth.access;
+  if (auth && 'key' in auth) return auth.key;
+
+  const apiKey = getString(asRecord(provider.options)?.apiKey);
+  if (!apiKey || apiKey === OPENCODE_OAUTH_DUMMY_KEY) return null;
+  return apiKey;
 }

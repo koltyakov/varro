@@ -5,6 +5,7 @@ import {
   createContextProvider,
   createServer,
   createSidebarProviderInstance,
+  createStoredWorkspaceState,
   createWorkspaceState,
   getVscodeMock,
 } from './sidebar-provider.test-support';
@@ -121,6 +122,59 @@ function createPanel() {
       for (const listener of viewStateListeners) listener({ webviewPanel: panel });
     },
   };
+}
+
+type TestProvider = Awaited<ReturnType<typeof createSidebarProviderInstance>>['provider'];
+
+async function openNewEditorPanel(provider: TestProvider) {
+  const editor = createPanel();
+  getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
+  await provider.openNewEditor();
+  return editor;
+}
+
+/** Restores `editor-first` and `editor-second` panels and waits for both editor surfaces. */
+async function restoreTwoEditors(provider: TestProvider, workspacePaths?: [string, string]) {
+  const first = createPanel();
+  const second = createPanel();
+  await provider.deserializeWebviewPanel(first.panel as never, {
+    'varro.editorViewId': 'editor-first',
+    ...(workspacePaths && { 'varro.workspacePath': workspacePaths[0] }),
+  });
+  await provider.deserializeWebviewPanel(second.panel as never, {
+    'varro.editorViewId': 'editor-second',
+    ...(workspacePaths && { 'varro.workspacePath': workspacePaths[1] }),
+  });
+  await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
+  await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+  return { first, second };
+}
+
+/** Restores two ready editors and waits until `editor-first` owns permission automation. */
+async function restoreTwoReadyEditors(provider: TestProvider) {
+  const editors = await restoreTwoEditors(provider);
+  editors.first.receive({ type: 'ready' });
+  editors.second.receive({ type: 'ready' });
+  await vi.waitFor(() =>
+    expect(editors.first.panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'permission-automation/update',
+      payload: expect.objectContaining({ owner: true }),
+    })
+  );
+  return editors;
+}
+
+function sessionStateOf(provider: TestProvider) {
+  return (provider as unknown as { sessionState: SessionStateManager }).sessionState;
+}
+
+function waitForEditorWorkspace(editor: ReturnType<typeof createPanel>, workspacePath: string) {
+  return vi.waitFor(() =>
+    expect(
+      lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
+        ?.workspacePath
+    ).toBe(workspacePath)
+  );
 }
 
 describe('SidebarProvider editor panels', () => {
@@ -706,9 +760,7 @@ describe('SidebarProvider editor panels', () => {
       contextProvider,
     });
     expect(workspace.workspaceState).not.toBe(folder.workspaceState);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await workspace.provider.openNewEditor();
+    const editor = await openNewEditorPanel(workspace.provider);
     expect(editor.panel.webview.html).toContain('"sessionReadState":{"project-chat":200}');
   });
 
@@ -717,9 +769,7 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'webview/focus', payload: { focused: true } });
     const targetViewId = provider.captureContextTarget();
     const sidebarFile = {
@@ -773,8 +823,7 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
 
     sessionState.handleServerEvent({
       type: 'session.created',
@@ -819,8 +868,7 @@ describe('SidebarProvider editor panels', () => {
     const { posted, view } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
     view.visible = false;
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
 
     sessionState.handleServerEvent({
       type: 'session.created',
@@ -884,8 +932,7 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'sibling', directory: '/repo-b' } },
@@ -918,8 +965,7 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'session-a', directory: '/repo-a' } },
@@ -958,9 +1004,7 @@ describe('SidebarProvider editor panels', () => {
       const contextProvider = createContextProvider();
       const { provider } = await createSidebarProviderInstance({ contextProvider });
       const { posted } = attachTestView(provider);
-      const editor = createPanel();
-      getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-      await provider.openNewEditor();
+      const editor = await openNewEditorPanel(provider);
       // Another endpoint already selected this global workspace, so no context event fires.
       contextProvider.context.workspacePath = '/repo-b';
       contextProvider.selectWorkspace.mockResolvedValueOnce(undefined);
@@ -1019,9 +1063,7 @@ describe('SidebarProvider editor panels', () => {
     const contextProvider = createContextProvider();
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
 
     await provider.handleMessage({
       type: 'workspace/select',
@@ -1041,12 +1083,7 @@ describe('SidebarProvider editor panels', () => {
     ).toMatchObject({ workspacePath: '/repo', activeFile: contextProvider.context.activeFile });
 
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-c', requestId: 2 } });
-    await vi.waitFor(() =>
-      expect(
-        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
-          ?.workspacePath
-      ).toBe('/repo-c')
-    );
+    await waitForEditorWorkspace(editor, '/repo-c');
     expect(contextProvider.selectWorkspace).not.toHaveBeenCalledWith('/repo-c');
     contextProvider.context.activeFile = null;
     provider.post({ type: 'context/update', payload: contextProvider.context });
@@ -1057,9 +1094,7 @@ describe('SidebarProvider editor panels', () => {
         ?.workspacePath
     ).toBe('/repo-c');
 
-    const secondEditor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(secondEditor.panel);
-    await provider.openNewEditor();
+    const secondEditor = await openNewEditorPanel(provider);
     provider.post({ type: 'context/update', payload: contextProvider.context });
 
     expect(
@@ -1072,9 +1107,7 @@ describe('SidebarProvider editor panels', () => {
   it('scopes editor API requests to the editor workspace', async () => {
     const { provider, server } = await createSidebarProviderInstance();
     attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
 
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     editor.receive({
@@ -1094,9 +1127,7 @@ describe('SidebarProvider editor panels', () => {
 
   it('keeps an API request in the workspace where dispatch started', async () => {
     const { provider, server } = await createSidebarProviderInstance();
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
 
     editor.receive({
       type: 'api/request',
@@ -1117,9 +1148,7 @@ describe('SidebarProvider editor panels', () => {
   it('opens relative editor paths from the editor workspace', async () => {
     const contextProvider = createContextProvider();
     const { provider } = await createSidebarProviderInstance({ contextProvider });
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
 
     editor.receive({ type: 'vscode/open', payload: { path: 'src/app.ts', kind: 'file' } });
@@ -1140,9 +1169,7 @@ describe('SidebarProvider editor panels', () => {
       path === '/repo' ? path : null
     );
     const { provider, server } = await createSidebarProviderInstance({ contextProvider });
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
 
     editor.receive({ type: 'workspace/select', payload: { path: '/outside', requestId: 1 } });
     editor.receive({
@@ -1170,19 +1197,11 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
-    await vi.waitFor(() =>
-      expect(
-        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
-          ?.workspacePath
-      ).toBe('/repo-b')
-    );
+    await waitForEditorWorkspace(editor, '/repo-b');
 
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'session-a', directory: '/repo-a' } },
@@ -1239,8 +1258,7 @@ describe('SidebarProvider editor panels', () => {
     );
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'ordinary-a', directory: '/repo-a' } },
@@ -1279,8 +1297,7 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'session-b', directory: '/repo-b' } },
@@ -1544,16 +1561,9 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
-    await vi.waitFor(() =>
-      expect(
-        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
-          ?.workspacePath
-      ).toBe('/repo-b')
-    );
+    await waitForEditorWorkspace(editor, '/repo-b');
     posted.length = 0;
     editor.panel.webview.postMessage.mockClear();
     const event = { type: 'catalog.updated' as const, workspaceDirectory: '/repo-b' };
@@ -1585,18 +1595,10 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspaceDirectory = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
-    await vi.waitFor(() =>
-      expect(
-        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
-          ?.workspacePath
-      ).toBe('/repo-b')
-    );
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    await waitForEditorWorkspace(editor, '/repo-b');
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'session-a', directory: '/repo-a' } },
@@ -1625,8 +1627,7 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'session-a', directory: '/repo-a' } },
@@ -1811,8 +1812,7 @@ describe('SidebarProvider editor panels', () => {
       queuedMessages: { update(messages: QueuedMessageSnapshot[]): Promise<void> };
       runSessionReconcile(): Promise<void>;
     };
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'session-b', directory: '/repo-b' } },
@@ -1947,9 +1947,7 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     editor.receive({ type: 'ready' });
 
@@ -1968,9 +1966,7 @@ describe('SidebarProvider editor panels', () => {
 
   it('advances the permission automation lease when an owner changes workspaces', async () => {
     const { provider } = await createSidebarProviderInstance();
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'ready' });
     await vi.waitFor(() =>
       expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
@@ -1995,9 +1991,7 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 2 } });
     editor.receive({ type: 'ready' });
 
@@ -2019,12 +2013,9 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider, server } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'session-a', directory: '/repo-a' } },
@@ -2050,9 +2041,7 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     posted.length = 0;
     editor.panel.webview.postMessage.mockClear();
@@ -2060,8 +2049,7 @@ describe('SidebarProvider editor panels', () => {
       type: 'permission.asked' as const,
       properties: { id: 'permission-unknown', sessionID: 'session-unknown', permission: 'bash' },
     };
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent(event);
 
     provider.post({ type: 'server/event', payload: event });
@@ -2098,9 +2086,7 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider, server } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     posted.length = 0;
     editor.panel.webview.postMessage.mockClear();
@@ -2112,8 +2098,7 @@ describe('SidebarProvider editor panels', () => {
         permission: 'bash',
       },
     };
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent(event);
     provider.post({ type: 'server/event', payload: event });
     server.request.mockImplementation(async (_method: string, path: string) => {
@@ -2169,12 +2154,9 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     const consumeRecoverySnapshot = vi.spyOn(sessionState, 'consumeRecoverySnapshot');
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     // Finish recovery before ready so its boot replay cannot race the reconciliation assertions.
     expect(consumeRecoverySnapshot).toHaveBeenCalledOnce();
     await consumeRecoverySnapshot.mock.results[0]!.value;
@@ -2234,9 +2216,7 @@ describe('SidebarProvider editor panels', () => {
     contextProvider.context.workspacePath = '/repo-a';
     const { provider } = await createSidebarProviderInstance({ contextProvider });
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 1 } });
     contextProvider.context.activeWorkspacePath = null;
     contextProvider.context.activeFile = {
@@ -2256,16 +2236,9 @@ describe('SidebarProvider editor panels', () => {
   it('runs editor terminal commands in the editor workspace', async () => {
     const { provider } = await createSidebarProviderInstance();
     attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
     editor.receive({ type: 'workspace/select', payload: { path: '/repo-b', requestId: 2 } });
-    await vi.waitFor(() =>
-      expect(
-        lastEditorContext(editor.panel.webview.postMessage.mock.calls.map(([message]) => message))
-          ?.workspacePath
-      ).toBe('/repo-b')
-    );
+    await waitForEditorWorkspace(editor, '/repo-b');
     editor.receive({
       type: 'terminal/run',
       payload: { command: 'opencode auth login', title: 'OpenCode' },
@@ -2293,21 +2266,13 @@ describe('SidebarProvider editor panels', () => {
     });
     restored.receive({ type: 'ready' });
 
-    await vi.waitFor(() =>
-      expect(
-        lastEditorContext(restored.panel.webview.postMessage.mock.calls.map(([message]) => message))
-          ?.workspacePath
-      ).toBe('/repo-b')
-    );
+    await waitForEditorWorkspace(restored, '/repo-b');
   });
 
   it('retains editor content and readiness across tab switches without another handshake', async () => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);
-    const editor = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-
-    await provider.openNewEditor();
+    const editor = await openNewEditorPanel(provider);
 
     expect(getVscodeMock().window.createWebviewPanel).toHaveBeenCalledWith(
       'varro.editor',
@@ -2925,8 +2890,7 @@ describe('SidebarProvider editor panels', () => {
     const { provider } = await createSidebarProviderInstance();
     const editor = createPanel();
     getVscodeMock().window.createWebviewPanel.mockReturnValue(editor.panel);
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
 
     await provider.openSessionInEditor('session-1');
     sessionState.handleServerEvent({
@@ -3007,8 +2971,7 @@ describe('SidebarProvider editor panels', () => {
     await provider.resolveWebviewView(sidebar.panel as never, {} as never, {} as never);
     await vi.waitFor(() => expect(sidebar.panel.webview.html).toContain('__initialWebviewState'));
     sidebar.receive({ type: 'ready' });
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     const statusItem = getVscodeMock().window.createStatusBarItem.mock.results.find(
       (result) => result.value.name === 'Varro Attention'
     )?.value;
@@ -3097,8 +3060,7 @@ describe('SidebarProvider editor panels', () => {
     const { view } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
     view.visible = false;
-    const sessionState = (provider as unknown as { sessionState: SessionStateManager })
-      .sessionState;
+    const sessionState = sessionStateOf(provider);
     sessionState.handleServerEvent({
       type: 'session.updated',
       properties: { info: { id: 'workspace-session', directory: '/workspaces' } },
@@ -3284,17 +3246,7 @@ describe('SidebarProvider editor panels', () => {
 
   it('transfers an editor queue to the next ready view when hidden', async () => {
     const { provider } = await createSidebarProviderInstance();
-    const first = createPanel();
-    const second = createPanel();
-
-    await provider.deserializeWebviewPanel(first.panel as never, {
-      'varro.editorViewId': 'editor-first',
-    });
-    await provider.deserializeWebviewPanel(second.panel as never, {
-      'varro.editorViewId': 'editor-second',
-    });
-    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
-    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    const { first, second } = await restoreTwoEditors(provider);
     first.receive({ type: 'ready' });
     second.receive({ type: 'ready' });
     await vi.waitFor(() =>
@@ -3344,24 +3296,7 @@ describe('SidebarProvider editor panels', () => {
 
   it('transfers an editor queue when delivery failure makes its endpoint unavailable', async () => {
     const { provider } = await createSidebarProviderInstance();
-    const first = createPanel();
-    const second = createPanel();
-    await provider.deserializeWebviewPanel(first.panel as never, {
-      'varro.editorViewId': 'editor-first',
-    });
-    await provider.deserializeWebviewPanel(second.panel as never, {
-      'varro.editorViewId': 'editor-second',
-    });
-    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
-    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
-    first.receive({ type: 'ready' });
-    second.receive({ type: 'ready' });
-    await vi.waitFor(() =>
-      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
-        type: 'permission-automation/update',
-        payload: expect.objectContaining({ owner: true }),
-      })
-    );
+    const { first, second } = await restoreTwoReadyEditors(provider);
     first.receive({
       type: 'queued-messages/update',
       payload: {
@@ -3401,24 +3336,7 @@ describe('SidebarProvider editor panels', () => {
 
   it('does not leave an optimistically transferred queue unclaimable after persistence fails', async () => {
     const { provider, workspaceState } = await createSidebarProviderInstance();
-    const first = createPanel();
-    const second = createPanel();
-    await provider.deserializeWebviewPanel(first.panel as never, {
-      'varro.editorViewId': 'editor-first',
-    });
-    await provider.deserializeWebviewPanel(second.panel as never, {
-      'varro.editorViewId': 'editor-second',
-    });
-    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
-    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
-    first.receive({ type: 'ready' });
-    second.receive({ type: 'ready' });
-    await vi.waitFor(() =>
-      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
-        type: 'permission-automation/update',
-        payload: expect.objectContaining({ owner: true }),
-      })
-    );
+    const { first, second } = await restoreTwoReadyEditors(provider);
     first.receive({
       type: 'queued-messages/update',
       payload: {
@@ -3502,24 +3420,7 @@ describe('SidebarProvider editor panels', () => {
 
   it('retries queue ownership after two persistence failures remove the durable owner', async () => {
     const { provider, workspaceState } = await createSidebarProviderInstance();
-    const first = createPanel();
-    const second = createPanel();
-    await provider.deserializeWebviewPanel(first.panel as never, {
-      'varro.editorViewId': 'editor-first',
-    });
-    await provider.deserializeWebviewPanel(second.panel as never, {
-      'varro.editorViewId': 'editor-second',
-    });
-    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
-    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
-    first.receive({ type: 'ready' });
-    second.receive({ type: 'ready' });
-    await vi.waitFor(() =>
-      expect(first.panel.webview.postMessage).toHaveBeenCalledWith({
-        type: 'permission-automation/update',
-        payload: expect.objectContaining({ owner: true }),
-      })
-    );
+    const { first, second } = await restoreTwoReadyEditors(provider);
     first.receive({
       type: 'queued-messages/update',
       payload: {
@@ -3578,27 +3479,9 @@ describe('SidebarProvider editor panels', () => {
         [{ id: 'session-1', title: 'Interrupted', directory: '/repo' }],
       ],
     ]);
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        storage.has(key) ? storage.get(key) : fallback
-      ),
-      update: vi.fn((key: string, value: unknown) => {
-        if (value === undefined) storage.delete(key);
-        else storage.set(key, value);
-        return Promise.resolve();
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(storage);
     const { provider } = await createSidebarProviderInstance({ workspaceState });
-    const first = createPanel();
-    const second = createPanel();
-    await provider.deserializeWebviewPanel(first.panel as never, {
-      'varro.editorViewId': 'editor-first',
-    });
-    await provider.deserializeWebviewPanel(second.panel as never, {
-      'varro.editorViewId': 'editor-second',
-    });
-    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
-    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    const { first, second } = await restoreTwoEditors(provider);
     expect(first.panel.webview.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'recovery/interrupted-sessions' })
     );
@@ -3639,9 +3522,7 @@ describe('SidebarProvider editor panels', () => {
     await provider.dispose();
 
     const restarted = await createSidebarProviderInstance({ workspaceState });
-    const third = createPanel();
-    getVscodeMock().window.createWebviewPanel.mockReturnValue(third.panel);
-    await restarted.provider.openNewEditor();
+    const third = await openNewEditorPanel(restarted.provider);
     await vi.waitFor(() => expect(third.panel.webview.html).toContain('varro-editor-surface'));
     third.receive({ type: 'ready' });
     await Promise.resolve();
@@ -3660,29 +3541,9 @@ describe('SidebarProvider editor panels', () => {
         ],
       ],
     ]);
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        storage.has(key) ? storage.get(key) : fallback
-      ),
-      update: vi.fn((key: string, value: unknown) => {
-        if (value === undefined) storage.delete(key);
-        else storage.set(key, value);
-        return Promise.resolve();
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(storage);
     const { provider } = await createSidebarProviderInstance({ workspaceState });
-    const first = createPanel();
-    const second = createPanel();
-    await provider.deserializeWebviewPanel(first.panel as never, {
-      'varro.editorViewId': 'editor-first',
-      'varro.workspacePath': '/repo-a',
-    });
-    await provider.deserializeWebviewPanel(second.panel as never, {
-      'varro.editorViewId': 'editor-second',
-      'varro.workspacePath': '/repo-b',
-    });
-    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
-    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    const { first, second } = await restoreTwoEditors(provider, ['/repo-a', '/repo-b']);
 
     first.receive({ type: 'ready' });
     second.receive({ type: 'ready' });
@@ -3724,29 +3585,9 @@ describe('SidebarProvider editor panels', () => {
         [{ id: 'session-a', title: 'Interrupted', directory: '/repo-a' }],
       ],
     ]);
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        storage.has(key) ? storage.get(key) : fallback
-      ),
-      update: vi.fn((key: string, value: unknown) => {
-        if (value === undefined) storage.delete(key);
-        else storage.set(key, value);
-        return Promise.resolve();
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(storage);
     const { provider } = await createSidebarProviderInstance({ workspaceState });
-    const first = createPanel();
-    const second = createPanel();
-    await provider.deserializeWebviewPanel(first.panel as never, {
-      'varro.editorViewId': 'editor-first',
-      'varro.workspacePath': '/repo-a',
-    });
-    await provider.deserializeWebviewPanel(second.panel as never, {
-      'varro.editorViewId': 'editor-second',
-      'varro.workspacePath': '/repo-a',
-    });
-    await vi.waitFor(() => expect(first.panel.webview.html).toContain('varro-editor-surface'));
-    await vi.waitFor(() => expect(second.panel.webview.html).toContain('varro-editor-surface'));
+    const { first, second } = await restoreTwoEditors(provider, ['/repo-a', '/repo-a']);
     first.receive({ type: 'ready' });
     second.receive({ type: 'ready' });
     await vi.waitFor(() =>
@@ -3770,16 +3611,7 @@ describe('SidebarProvider editor panels', () => {
     const storage = new Map<string, unknown>([
       ['varro.interruptedSessions', [{ id: 'session-legacy', title: 'Legacy' }]],
     ]);
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        storage.has(key) ? storage.get(key) : fallback
-      ),
-      update: vi.fn((key: string, value: unknown) => {
-        if (value === undefined) storage.delete(key);
-        else storage.set(key, value);
-        return Promise.resolve();
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(storage);
     const { provider, server } = await createSidebarProviderInstance({ workspaceState });
     const editor = createPanel();
     await provider.deserializeWebviewPanel(editor.panel as never, {
@@ -3822,16 +3654,7 @@ describe('SidebarProvider editor panels', () => {
         [{ id: 'session-1', title: 'Interrupted', directory: '/repo' }],
       ],
     ]);
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        storage.has(key) ? storage.get(key) : fallback
-      ),
-      update: vi.fn((key: string, value: unknown) => {
-        if (value === undefined) storage.delete(key);
-        else storage.set(key, value);
-        return Promise.resolve();
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(storage);
     const { provider } = await createSidebarProviderInstance({ workspaceState });
     const editor = createPanel();
     await provider.deserializeWebviewPanel(editor.panel as never, {
@@ -3877,16 +3700,7 @@ describe('SidebarProvider editor panels', () => {
         [{ id: 'session-1', title: 'Interrupted', directory: '/repo' }],
       ],
     ]);
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        storage.has(key) ? storage.get(key) : fallback
-      ),
-      update: vi.fn((key: string, value: unknown) => {
-        if (value === undefined) storage.delete(key);
-        else storage.set(key, value);
-        return Promise.resolve();
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(storage);
     const { provider } = await createSidebarProviderInstance({ workspaceState });
     const editor = createPanel();
     await provider.deserializeWebviewPanel(editor.panel as never, {

@@ -1,19 +1,7 @@
 import type { McpStatus } from '../../../shared/protocol';
 
-type SessionMcpDependencies = {
-  getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
-  getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
-  getSharedMcpNames?(): string[];
-  getMcpStatus(): Record<string, McpStatus>;
-  loadMcps(options?: { fresh?: boolean }): Promise<void | boolean | object>;
-  getAvailableMcpNames(): string[];
-  connectMcp(name: string): Promise<void | boolean | object>;
-  authenticateMcp(name: string): Promise<void | boolean | object>;
-  disconnectMcp(name: string): Promise<void | boolean | object>;
-  logError(context: string, cause: unknown): void;
-  setSelectedMcpsForSession(sessionId: string, names: string[]): void;
-  setDraftSelectedMcps(names: string[]): void;
-};
+type SessionMcpDependencies = Parameters<typeof syncSessionMcpsWithDependencies>[0] &
+  Omit<Parameters<typeof applySessionMcpsWithDependencies>[0], 'syncSessionMcps'>;
 
 export class SessionMcpOperations {
   private reconciliationGeneration = 0;
@@ -47,16 +35,8 @@ export class SessionMcpOperations {
       }
       await syncSessionMcpsWithDependencies(
         {
-          getSelectedMcpsForSession: this.deps.getSelectedMcpsForSession,
-          getRequiredMcpSessionIds: this.deps.getRequiredMcpSessionIds,
-          getSharedMcpNames: this.deps.getSharedMcpNames,
-          getMcpStatus: this.deps.getMcpStatus,
+          ...this.deps,
           loadMcps: this.loadMcps,
-          getAvailableMcpNames: this.deps.getAvailableMcpNames,
-          connectMcp: this.deps.connectMcp,
-          authenticateMcp: this.deps.authenticateMcp,
-          disconnectMcp: this.deps.disconnectMcp,
-          logError: this.deps.logError,
         },
         sessionId,
         () => generation === this.reconciliationGeneration

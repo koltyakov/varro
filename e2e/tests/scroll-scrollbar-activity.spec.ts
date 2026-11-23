@@ -3,9 +3,11 @@ import type { Locator, Page } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
 import {
+  getListDistanceFromBottom,
   getScrollMetrics,
   getVisibleMessageAnchor,
   sampleMessageTopAcrossFrames,
+  scrollToBottom,
   waitForAnimationFrames,
 } from './helpers';
 import { appendDeltaToRapidStreaming } from './scroll-helpers';
@@ -21,9 +23,7 @@ test('cold virtual measurements yield scroll writes to the held native thumb', a
   );
   const list = page.locator('.interactive-list');
   await expect(list).toBeVisible();
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await waitForAnimationFrames(page, 12);
   const initialIds = await list
     .locator('[data-msg-id]')
@@ -268,9 +268,7 @@ test('streaming yields to a held scrollbar, stays at the top, and follows a drag
   await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
   const list = page.locator('.interactive-list');
   await expect(list).toBeVisible();
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   const thumb = await getThumb(list);
   const bounds = await list.boundingBox();
   if (!bounds) throw new Error('Missing transcript viewport');
@@ -313,15 +311,11 @@ test('streaming yields to a held scrollbar, stays at the top, and follows a drag
   await page.mouse.move(topThumb.x, topThumb.y);
   await page.mouse.down();
   await page.mouse.move(topThumb.x, bounds.y + bounds.height + 40, { steps: 12 });
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await page.mouse.up();
   await appendDeltaToRapidStreaming(page, `\n\nResumed output: ${'Follow new text. '.repeat(30)}`);
   await expect(list).toContainText('Resumed output:');
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
 });
 
 for (const phase of ['bottom-event', 'retained', 'held-pointer'] as const) {
@@ -336,9 +330,7 @@ for (const phase of ['bottom-event', 'retained', 'held-pointer'] as const) {
     const items = page.locator('.assistant-active-activity-item');
     await expect(items).toHaveCount(1);
     await page.waitForTimeout(2_100);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     await page.evaluate(() => {
       // SAFETY: The isolated fixture installs this typed message store and event transport.
       const harness = (
@@ -385,10 +377,7 @@ for (const phase of ['bottom-event', 'retained', 'held-pointer'] as const) {
     if (phase === 'bottom-event') {
       // Reproduce a layout-driven bottom event after the pointer releases the exit
       // anchor, before native dragging moves away. It must not reclaim ownership.
-      await list.evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-        element.dispatchEvent(new Event('scroll'));
-      });
+      await scrollToBottom(list);
     }
     // Pointer ownership must survive the short keyboard/input-intent timeout.
     if (phase === 'held-pointer') await page.waitForTimeout(650);
@@ -449,14 +438,10 @@ for (const phase of ['bottom-event', 'retained', 'held-pointer'] as const) {
       .evaluate((element) => element.getBoundingClientRect().top);
     expect(Math.abs(summaryTop - samples[0]!.summaryTop)).toBeLessThanOrEqual(1);
     await page.getByRole('button', { name: 'Scroll to latest message', exact: true }).click();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     await appendText(30);
     await expect(list).toContainText('Continuation paragraph 29.');
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   });
 }
 
@@ -472,9 +457,7 @@ for (const completion of ['one tool groups', 'remaining tools complete'] as cons
     const list = page.locator('.interactive-list');
     await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
     await page.waitForTimeout(2_100);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
 
     await completeRunningTools(page, ['tool-active-0']);
     await expect(page.locator('[data-activity-part-id="tool-active-0"]')).toHaveCount(0);
@@ -482,9 +465,7 @@ for (const completion of ['one tool groups', 'remaining tools complete'] as cons
     if (!bounds) throw new Error('Missing transcript viewport');
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
     await page.mouse.wheel(0, -500);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeGreaterThan(400);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(400);
     await appendAssistantText(page, 'scrollbar-hidden-growth', 40);
     await expect(list).toContainText('Hidden growth paragraph 39.');
     await waitForAnimationFrames(page, 10);

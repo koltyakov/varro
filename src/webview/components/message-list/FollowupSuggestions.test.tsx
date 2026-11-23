@@ -1,4 +1,4 @@
-import { flush as flushSolid, createSignal, reconcile } from 'solid-js';
+import { flush as flushSolid, createSignal } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 /* oxlint-disable anti-slop/no-module-mocking -- Sending is isolated so these UI tests cannot execute an agent. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,13 @@ import type { FollowupSuggestionSet } from '../../../shared/followups';
 import { checkIcon, xmarkIcon } from '../../lib/ui-icons';
 import { error, replaceMessages, setError, setState, state } from '../../lib/state';
 import * as clipboard from '../../lib/write-clipboard';
-import { assistantMessage, session, textPart, userMessage } from '../MessageList.test-utils';
+import {
+  assistantMessage,
+  session,
+  setStateRecord,
+  textPart,
+  userMessage,
+} from '../MessageList.test-utils';
 import { FollowupSuggestions } from './FollowupSuggestions';
 
 const mocks = vi.hoisted(() => ({
@@ -56,13 +62,7 @@ beforeEach(() => {
   flushSolid();
   setState(storePath('selectedModel', { providerID: 'test', modelID: 'session', variant: 'high' }));
   flushSolid();
-  setState((draft) => {
-    const current = draft['sessionSelectedModels'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionSelectedModels'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setStateRecord('sessionSelectedModels', {});
   flushSolid();
   setState(storePath('messagesLoading', false));
   flushSolid();
@@ -72,13 +72,7 @@ beforeEach(() => {
   flushSolid();
   setState(storePath('queuedMessages', []));
   flushSolid();
-  setState((draft) => {
-    const current = draft['sessionStatus'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionStatus'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setStateRecord('sessionStatus', {});
   flushSolid();
   setState(storePath('failedSessionIds', []));
   flushSolid();
@@ -123,25 +117,13 @@ afterEach(() => {
   flushSolid();
   setState(storePath('selectedModel', null));
   flushSolid();
-  setState((draft) => {
-    const current = draft['sessionSelectedModels'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionSelectedModels'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setStateRecord('sessionSelectedModels', {});
   flushSolid();
   setState(storePath('messages', []));
   flushSolid();
   setState(storePath('queuedMessages', []));
   flushSolid();
-  setState((draft) => {
-    const current = draft['sessionStatus'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionStatus'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setStateRecord('sessionStatus', {});
   flushSolid();
   setState(storePath('failedSessionIds', []));
   flushSolid();

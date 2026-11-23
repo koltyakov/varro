@@ -1,4 +1,3 @@
-import type { PermissionMode } from '../../../shared/protocol';
 import {
   addPermission,
   beginPermissionReconciliation,
@@ -64,6 +63,3 @@ export const permissionsStore = {
   reconcilePermissions,
   getPermissionReconciliationMetadataSize,
 };
-
-export type PermissionsStore = typeof permissionsStore;
-export type PermissionModeValue = PermissionMode;

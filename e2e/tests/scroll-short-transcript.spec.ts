@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent, WebviewMessage } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, ToolPart } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const width of [480, 1280]) {
   test(`keeps first-send activity from creating empty-space overflow at ${width}px`, async ({
@@ -9,24 +10,17 @@ for (const width of [480, 1280]) {
     await page.setViewportSize({ width, height: 1272 });
     const firstSessionID = 'first-send-stream';
     const created = 1_780_000_000_000;
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated E2E harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
+    await installPlaybackCapture(page, {
+      session: {
+        id: firstSessionID,
+        projectID: 'test',
+        directory: '/workspace',
+        title: 'First-send stream',
+        version: '1.0.0',
+        time: { created, updated: created },
       },
-      {
-        session: {
-          id: firstSessionID,
-          projectID: 'test',
-          directory: '/workspace',
-          title: 'First-send stream',
-          version: '1.0.0',
-          time: { created, updated: created },
-        },
-        initialMessages: [],
-      }
-    );
+      initialMessages: [],
+    });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await page.addStyleTag({ content: '#root { width: 100vw; }' });
     await page.evaluate(() => {
@@ -296,24 +290,17 @@ for (const width of [480, 1280]) {
         ],
       },
     ];
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated E2E harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'test',
+        directory: '/workspace',
+        title: 'Short stream',
+        version: '1.0.0',
+        time: { created, updated: created },
       },
-      {
-        session: {
-          id: sessionID,
-          projectID: 'test',
-          directory: '/workspace',
-          title: 'Short stream',
-          version: '1.0.0',
-          time: { created, updated: created },
-        },
-        initialMessages,
-      }
-    );
+      initialMessages,
+    });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await expect(page.locator('[data-msg-id="short-assistant"] .rendered-markdown')).toBeVisible();
     const samples = await page.evaluate(

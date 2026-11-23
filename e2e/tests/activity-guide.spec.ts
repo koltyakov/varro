@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { AssistantMessage, MessageEntry, Session } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const virtualized of [false, true]) {
   test(`expanded activity guide joins fractional rows${virtualized ? ' in virtualized history' : ''}`, async ({
@@ -97,14 +98,7 @@ for (const virtualized of [false, true]) {
       initialMessages.push({ info: assistantInfo(`${id}-empty`), parts: [] });
     }
     await page.setViewportSize({ width: 496, height: 850 });
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated E2E harness reads this synthetic fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages }
-    );
+    await installPlaybackCapture(page, { session, initialMessages });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await page.addStyleTag({
       content: '.assistant-activity-details .file-read-card-header { font-size: 13.5px; }',

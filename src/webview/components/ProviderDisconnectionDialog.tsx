@@ -6,7 +6,8 @@ import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
 import { modalFocus } from '../lib/modal-focus';
 import { openProviderLogout } from '../lib/provider-setup';
-import { arrowLeftIcon, xmarkIcon } from '../lib/ui-icons';
+import { arrowLeftIcon } from '../lib/ui-icons';
+import { DialogCloseButton } from './DialogCloseButton';
 import { UiIcon } from './UiIcon';
 
 export function ProviderDisconnectionDialog(props: {
@@ -134,14 +135,7 @@ export function ProviderDisconnectionDialog(props: {
                 {(provider) => <div class="provider-connect-subtitle">{provider().name}</div>}
               </Show>
             </div>
-            <button
-              type="button"
-              class="provider-connect-close"
-              onClick={props.onClose}
-              aria-label="Close"
-            >
-              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
-            </button>
+            <DialogCloseButton onClick={props.onClose} />
           </div>
 
           <div class={['provider-connect-body', { 'is-provider-list': !selectedProviderID() }]}>

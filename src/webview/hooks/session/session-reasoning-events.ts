@@ -72,6 +72,21 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       .catch((err) => ctx.logError('syncSessionMessages', err));
   };
 
+  // Marks progress unless the event belongs to an assistant message that already finished.
+  const acceptSessionProgress = (sessionID: string, assistantMessageID: string | undefined) => {
+    if (
+      assistantMessageID &&
+      ctx.ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
+    ) {
+      return false;
+    }
+    if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) {
+      return false;
+    }
+    ctx.markSessionProgress(sessionID);
+    return true;
+  };
+
   const cleanups: Array<() => void> = [];
 
   cleanups.push(
@@ -80,15 +95,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       const sessionID = getEventString(p, 'sessionID');
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
-      if (!sessionID) return;
-      if (
-        assistantMessageID &&
-        ctx.ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
-      ) {
-        return;
-      }
-      if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
-      ctx.markSessionProgress(sessionID);
+      if (!sessionID || !acceptSessionProgress(sessionID, assistantMessageID)) return;
       if (!reasoningID || !ctx.isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
       withReasoningMessage(
@@ -107,15 +114,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
       const delta = getEventString(p, 'delta') || getEventString(p, 'text');
-      if (!sessionID) return;
-      if (
-        assistantMessageID &&
-        ctx.ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
-      ) {
-        return;
-      }
-      if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
-      ctx.markSessionProgress(sessionID);
+      if (!sessionID || !acceptSessionProgress(sessionID, assistantMessageID)) return;
       if (!reasoningID || !delta || !ctx.isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
       withReasoningMessage(
@@ -143,15 +142,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       const sessionID = getEventString(p, 'sessionID');
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
-      if (!sessionID) return;
-      if (
-        assistantMessageID &&
-        ctx.ignoreStaleProgressForCompletedMessage(sessionID, assistantMessageID)
-      ) {
-        return;
-      }
-      if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
-      ctx.markSessionProgress(sessionID);
+      if (!sessionID || !acceptSessionProgress(sessionID, assistantMessageID)) return;
       if (!reasoningID || !ctx.isSessionInActiveTree(sessionID)) return;
       uiStore.markLoadingActivity();
       const text = getEventString(p, 'text');

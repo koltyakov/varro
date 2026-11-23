@@ -78,6 +78,7 @@ import {
   xmarkIcon,
 } from '../lib/ui-icons';
 import { NavArrowLeftControlIcon } from './ControlIcons';
+import { DialogCloseButton } from './DialogCloseButton';
 import { UiIcon } from './UiIcon';
 
 type ModelProvider = (typeof state.providers)[number];
@@ -1329,14 +1330,7 @@ export function ModelsPanel() {
                     </div>
                     <div class="provider-connect-subtitle">{rename().originalName}</div>
                   </div>
-                  <button
-                    type="button"
-                    class="provider-connect-close"
-                    onClick={() => setRenameDialog(null)}
-                    aria-label="Close"
-                  >
-                    <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
-                  </button>
+                  <DialogCloseButton onClick={() => setRenameDialog(null)} />
                 </div>
                 <div class="provider-connect-body">
                   <div class="provider-connect-form">
@@ -1569,14 +1563,7 @@ function ModelCatalogDialog(props: { provider: ModelProvider; onClose: () => voi
                   : `Search ${allModels().length} available models. Added models appear in model pickers.`}
               </div>
             </div>
-            <button
-              type="button"
-              class="provider-connect-close"
-              onClick={props.onClose}
-              aria-label="Close"
-            >
-              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
-            </button>
+            <DialogCloseButton onClick={props.onClose} />
           </div>
           <div class="models-model-catalog-search">
             <input

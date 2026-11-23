@@ -177,8 +177,6 @@ export const ralphStore = {
   },
 };
 
-export type RalphStore = typeof ralphStore;
-
 function acknowledgeLegacyRuns(managerSessionIds: string[]): void {
   if (managerSessionIds.length === 0) return;
   const stored = readStored<RalphRunsRecord>(LEGACY_STORAGE_KEY);

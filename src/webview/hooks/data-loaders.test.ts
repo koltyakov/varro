@@ -32,6 +32,7 @@ import {
   loadWorkspaceStatusesWithDependencies,
   refreshProviderLimitWithDependencies,
 } from './data-loaders';
+import { deferred } from '../test-fixtures';
 
 const buildAgent = (name: string): Agent => ({
   name,
@@ -110,14 +111,6 @@ function createStateBoundLoader() {
       throw error;
     },
   });
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
 }
 
 describe('data loaders', () => {

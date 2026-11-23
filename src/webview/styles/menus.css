@@ -411,10 +411,7 @@
 }
 
 @media (min-width: 960px) {
-  .model-release-date {
-    display: inline;
-  }
-
+  .model-release-date,
   .model-default-label {
     display: inline;
   }
@@ -759,10 +756,7 @@
   background: transparent;
 }
 
-.model-picker-item.selected:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
-}
-
+.model-picker-item.selected:hover,
 .model-picker-menu .dropdown-item:hover,
 .model-picker-menu .dropdown-item.keyboard-focus {
   background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);

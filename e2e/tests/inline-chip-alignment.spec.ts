@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { formatSkillAttachment } from '../../src/shared/skill-reference';
 import type { MessageEntry, Part, Session } from '../../src/webview/types';
-import { waitForHarnessStartup } from './helpers';
+import { installPlaybackCapture, waitForHarnessStartup } from './helpers';
 
 for (const width of [360, 1100]) {
   for (const markdown of [false, true]) {
@@ -74,15 +74,7 @@ for (const width of [360, 1100]) {
           parts,
         };
       });
-      await page.addInitScript(
-        (capture) => {
-          // SAFETY: These fixtures are consumed only by the isolated browser harness.
-          (
-            window as typeof window & { varroPlaybackCapture: typeof capture }
-          ).varroPlaybackCapture = capture;
-        },
-        { session, initialMessages, goal: null }
-      );
+      await installPlaybackCapture(page, { session, initialMessages, goal: null });
       await page.goto('/e2e/harness/index.html?scenario=session-playback');
       await waitForHarnessStartup(page);
       const expectedChipAlignment = await page.evaluate(() =>

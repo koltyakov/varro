@@ -34,6 +34,7 @@ import {
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import { isNumber } from './runtime-values';
 import { readInitialWebviewState } from './state-stored-values';
+import { reconcileStoreField } from './store-reconcile';
 
 const EMPTY_SESSION_TREE_IDS: string[] = [];
 const markerStorage = { readStored, writeStored };
@@ -538,13 +539,7 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
     if (!failedSessionIds.has(sessionId)) delete failedSessionUpdatedAt[sessionId];
   }
 
-  setState((draft) => {
-    const current = draft['failedSessionUpdatedAt'];
-    const incoming = failedSessionUpdatedAt satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['failedSessionUpdatedAt'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setState((draft) => reconcileStoreField(draft, 'failedSessionUpdatedAt', failedSessionUpdatedAt));
   setState(
     storePath('failedSessionIds', [
       ...state.failedSessionIds.filter((sessionId) => !scopedSessionIds.has(sessionId)),

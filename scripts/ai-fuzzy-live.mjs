@@ -7,12 +7,21 @@ import { fileURLToPath } from 'node:url';
 
 import {
   createCdpRequestClient,
+  dispatchCdpClick,
   executeVscodeCommand,
+  isVscodeWorkbenchTarget,
+  listCdpTargets,
+  openCdpSocket,
   reloadVscodeWindow,
   resizeVscodeSidebar,
   verifyVscodeLaunchIdentity,
 } from './vscode-launch-process.mjs';
-import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
+import {
+  parseArgs,
+  parseModel,
+  requiredOption,
+  requireFixtureWorkspace,
+} from './ai-fuzzy-preconditions.mjs';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
 import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 import { normalizeCapturedEvents, savePlaybackCapture } from './ai-session-playback.mjs';
@@ -25,34 +34,6 @@ const DEFAULT_MODEL = 'openai/gpt-6-luna-fast';
 const DEFAULT_MAX_PROMPTS = 3;
 const DEFAULT_GATE_TIMEOUT_MS = 90_000;
 export const DEFAULT_AI18_FIXTURE_EDIT_PATH = 'packages/util/src/bom.ts';
-
-function parseArgs(argv) {
-  const [command, ...rest] = argv;
-  const options = {};
-  for (let index = 0; index < rest.length; index += 1) {
-    const argument = rest[index];
-    if (!argument.startsWith('--')) throw new Error(`Unexpected argument: ${argument}`);
-    const value = rest[index + 1];
-    if (!value || value.startsWith('--')) throw new Error(`Missing value for ${argument}`);
-    options[argument.slice(2)] = value;
-    index += 1;
-  }
-  return { command, options };
-}
-
-function required(options, name) {
-  const value = options[name]?.trim();
-  if (!value) throw new Error(`--${name} is required`);
-  return value;
-}
-
-function parseModel(value) {
-  const separator = value.indexOf('/');
-  if (separator <= 0 || separator === value.length - 1) {
-    throw new Error('--model must use provider/model format');
-  }
-  return { providerID: value.slice(0, separator), modelID: value.slice(separator + 1) };
-}
 
 export function modelDisplayName(value) {
   const { modelID } = parseModel(value);
@@ -500,11 +481,7 @@ function getContentFrameId(frameTree) {
 }
 
 async function inspectVarroTarget(port, target) {
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
+  const socket = await openCdpSocket(target.webSocketDebuggerUrl);
   const controller = new CdpController(port, socket, null, null, target.id);
   try {
     const tree = await controller.call('Page.getFrameTree');
@@ -624,9 +601,7 @@ export class CdpController {
     let lastError = null;
     while (Date.now() < deadline) {
       try {
-        const targets = await fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) =>
-          response.json()
-        );
+        const targets = await listCdpTargets(port);
         const matchingTargets = targets.filter(
           (item) => item.type === 'iframe' && item.url.includes('extensionId=koltyakov.varro')
         );
@@ -1024,36 +999,14 @@ export class CdpController {
   async click(selector, scope = null, edge = 'center') {
     const point = await this.point(selector, edge, scope);
     if (!point) return false;
-    for (const [type, buttons] of [
-      ['mousePressed', 1],
-      ['mouseReleased', 0],
-    ]) {
-      await this.call('Input.dispatchMouseEvent', {
-        type,
-        ...point,
-        button: 'left',
-        buttons,
-        clickCount: 1,
-      });
-    }
+    await dispatchCdpClick(this, point);
     return true;
   }
 
   async contextClick(selector, scope = null) {
     const point = await this.point(selector, 'center', scope);
     if (!point) return false;
-    for (const [type, buttons] of [
-      ['mousePressed', 2],
-      ['mouseReleased', 0],
-    ]) {
-      await this.call('Input.dispatchMouseEvent', {
-        type,
-        ...point,
-        button: 'right',
-        buttons,
-        clickCount: 1,
-      });
-    }
+    await dispatchCdpClick(this, point, { button: 'right', pressed: 2 });
     return true;
   }
 
@@ -1072,18 +1025,7 @@ export class CdpController {
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     })()`);
     if (!point) return false;
-    for (const [type, buttons] of [
-      ['mousePressed', 1],
-      ['mouseReleased', 0],
-    ]) {
-      await this.call('Input.dispatchMouseEvent', {
-        type,
-        ...point,
-        button: 'left',
-        buttons,
-        clickCount: 1,
-      });
-    }
+    await dispatchCdpClick(this, point);
     return true;
   }
 
@@ -1099,18 +1041,7 @@ export class CdpController {
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     })()`);
     if (!point) return false;
-    for (const [type, buttons] of [
-      ['mousePressed', 1],
-      ['mouseReleased', 0],
-    ]) {
-      await this.call('Input.dispatchMouseEvent', {
-        type,
-        ...point,
-        button: 'left',
-        buttons,
-        clickCount: 1,
-      });
-    }
+    await dispatchCdpClick(this, point);
     await new Promise((resolve) => setTimeout(resolve, 100));
     if ((await this.snapshot()).routeSessionId === sessionId) return true;
 
@@ -1143,19 +1074,7 @@ export class CdpController {
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     })()`);
     if (!point) return false;
-    for (const [type, buttons] of [
-      ['mousePressed', 1],
-      ['mouseReleased', 0],
-    ]) {
-      await this.call('Input.dispatchMouseEvent', {
-        type,
-        ...point,
-        button: 'left',
-        buttons,
-        modifiers: 1,
-        clickCount: 1,
-      });
-    }
+    await dispatchCdpClick(this, point, { modifiers: 1 });
     return true;
   }
 
@@ -1171,18 +1090,7 @@ export class CdpController {
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     })()`);
     if (!point) return false;
-    for (const [type, buttons] of [
-      ['mousePressed', 1],
-      ['mouseReleased', 0],
-    ]) {
-      await this.call('Input.dispatchMouseEvent', {
-        type,
-        ...point,
-        button: 'left',
-        buttons,
-        clickCount: 1,
-      });
-    }
+    await dispatchCdpClick(this, point);
     return true;
   }
 
@@ -1201,18 +1109,7 @@ export class CdpController {
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     })()`);
     if (!point) return false;
-    for (const [type, buttons] of [
-      ['mousePressed', 1],
-      ['mouseReleased', 0],
-    ]) {
-      await this.call('Input.dispatchMouseEvent', {
-        type,
-        ...point,
-        button: 'left',
-        buttons,
-        clickCount: 1,
-      });
-    }
+    await dispatchCdpClick(this, point);
     await new Promise((resolve) => setTimeout(resolve, 100));
     const remainsActionable = () =>
       this.evaluate(`(() => {
@@ -2107,18 +2004,7 @@ async function switchAwayAndBack(cdp, currentSessionId, currentTitle) {
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   })()`);
   if (!alternate) return { dispatched: false, switchedAway: false, returned: false };
-  for (const [type, buttons] of [
-    ['mousePressed', 1],
-    ['mouseReleased', 0],
-  ]) {
-    await cdp.call('Input.dispatchMouseEvent', {
-      type,
-      ...alternate,
-      button: 'left',
-      buttons,
-      clickCount: 1,
-    });
-  }
+  await dispatchCdpClick(cdp, alternate);
   await new Promise((resolve) => setTimeout(resolve, 250));
   const switchedAway = (await cdp.snapshot()).title !== currentTitle;
   await cdp.click('[aria-label="Back to sessions"]');
@@ -2803,18 +2689,10 @@ async function waitForTarget(port, requested, timeoutMs) {
 }
 
 async function readActiveVscodeTabTitle(port) {
-  const targets = await fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) =>
-    response.json()
-  );
-  const workbench = targets.find(
-    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-  );
+  const targets = await listCdpTargets(port);
+  const workbench = targets.find(isVscodeWorkbenchTarget);
   if (!workbench?.webSocketDebuggerUrl) return null;
-  const socket = new WebSocket(workbench.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
+  const socket = await openCdpSocket(workbench.webSocketDebuggerUrl);
   const requests = createCdpRequestClient(socket);
   try {
     const result = await requests.call('Runtime.evaluate', {
@@ -2845,9 +2723,7 @@ async function waitForSessionSnapshot(cdp, title, sessionId, port, timeoutMs = 1
 }
 
 async function varroEditorTargetIds(port) {
-  const targets = await fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) =>
-    response.json()
-  );
+  const targets = await listCdpTargets(port);
   return targets
     .filter(
       (target) =>
@@ -2859,20 +2735,12 @@ async function varroEditorTargetIds(port) {
 }
 
 async function closeVscodeSessionEditorTabs(port, titles) {
-  const targets = await fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) =>
-    response.json()
-  );
-  const workbenches = targets.filter(
-    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-  );
+  const targets = await listCdpTargets(port);
+  const workbenches = targets.filter(isVscodeWorkbenchTarget);
   if (workbenches.length !== 1 || !workbenches[0]?.webSocketDebuggerUrl) {
     throw new Error(`Expected one VS Code workbench target, found ${String(workbenches.length)}`);
   }
-  const socket = new WebSocket(workbenches[0].webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
+  const socket = await openCdpSocket(workbenches[0].webSocketDebuggerUrl);
   const requests = createCdpRequestClient(socket);
   let closed = 0;
   try {
@@ -2892,18 +2760,7 @@ async function closeVscodeSessionEditorTabs(port, titles) {
       });
       const value = point.result.value;
       if (!value) break;
-      for (const [type, buttons] of [
-        ['mousePressed', 1],
-        ['mouseReleased', 0],
-      ]) {
-        await requests.call('Input.dispatchMouseEvent', {
-          type,
-          ...value,
-          button: 'left',
-          buttons,
-          clickCount: 1,
-        });
-      }
+      await dispatchCdpClick(requests, value);
       closed += 1;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
@@ -3022,8 +2879,7 @@ export async function waitForTargetDisappearance(
   port,
   targetId,
   timeoutMs,
-  listTargets = () =>
-    fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) => response.json()),
+  listTargets = () => listCdpTargets(port),
   pollIntervalMs = 100
 ) {
   const deadline = Date.now() + timeoutMs;
@@ -3105,13 +2961,15 @@ async function runMultiWebviewScenario({
   const runSessionTitles = manifest.runSessions
     .filter((session) => !session.deleted)
     .map((session) => session.title);
-  await openAi18SidebarSession(
-    sidebar,
-    tracked.id,
-    tracked.title,
-    launch.remoteDebuggingPort,
-    runSessionTitles
-  );
+  const openTrackedSession = () =>
+    openAi18SidebarSession(
+      sidebar,
+      tracked.id,
+      tracked.title,
+      launch.remoteDebuggingPort,
+      runSessionTitles
+    );
+  await openTrackedSession();
   if (!(await waitForSessionQuiescence(client, sidebar, tracked.id, timeoutMs * 3))) {
     throw new Error('AI-18 root session and queue did not become quiescent before replay');
   }
@@ -3264,13 +3122,7 @@ async function runMultiWebviewScenario({
 
   let editor = null;
   try {
-    await openAi18SidebarSession(
-      sidebar,
-      tracked.id,
-      tracked.title,
-      launch.remoteDebuggingPort,
-      runSessionTitles
-    );
+    await openTrackedSession();
     await sidebar.selectPermissionMode(permissionMode);
     await sampleConfiguration(sidebar, 'sidebar-source');
     const streamPrompt = `${streamMarker} Produce 120 numbered paragraphs of 35-45 words each. Emit every paragraph in order and end with ${responseMarker}-STREAM-END. Do not use tools, spawn subagents, delegate work, or change files.`;
@@ -3317,13 +3169,7 @@ async function runMultiWebviewScenario({
     await sidebar.rebind();
     const hiddenCount = await waitForSessionQueueCount(sidebar, tracked.id, 2, 5_000);
     evidence.counts.samples.push({ phase: 'hidden', count: hiddenCount.count });
-    await openAi18SidebarSession(
-      sidebar,
-      tracked.id,
-      tracked.title,
-      launch.remoteDebuggingPort,
-      runSessionTitles
-    );
+    await openTrackedSession();
     const hiddenQueue = await sidebar.captureActionState();
     evidence.queues.hiddenHandoff = {
       displayedCount: hiddenCount.count,
@@ -3588,13 +3434,7 @@ async function runMultiWebviewScenario({
     await sidebar.rebind();
     const closedCount = await waitForSessionQueueCount(sidebar, tracked.id, 1, 5_000);
     evidence.counts.samples.push({ phase: 'closed', count: closedCount.count });
-    await openAi18SidebarSession(
-      sidebar,
-      tracked.id,
-      tracked.title,
-      launch.remoteDebuggingPort,
-      runSessionTitles
-    );
+    await openTrackedSession();
     const closedQueue = await sidebar.captureActionState();
     evidence.queues.closedHandoff = {
       displayedCount: closedCount.count,
@@ -3639,13 +3479,7 @@ async function runMultiWebviewScenario({
       finalQueue.queueItems.length === 0 &&
       JSON.stringify(evidence.counts.samples.map((sample) => sample.count)) ===
         JSON.stringify([2, 1, 0]);
-    await openAi18SidebarSession(
-      sidebar,
-      tracked.id,
-      tracked.title,
-      launch.remoteDebuggingPort,
-      runSessionTitles
-    );
+    await openTrackedSession();
     await sidebar.key('.interactive-list', 'End');
     const finalRowCounts = await sidebar.evaluate(`(() => {
       const ids = ${JSON.stringify([
@@ -4284,8 +4118,8 @@ export async function revealRetainedActivity(
 }
 
 async function runLive(options) {
-  const manifestPath = path.resolve(required(options, 'manifest'));
-  const launchPath = path.resolve(required(options, 'launch'));
+  const manifestPath = path.resolve(requiredOption(options, 'manifest'));
+  const launchPath = path.resolve(requiredOption(options, 'launch'));
   const scenario = options.scenario ?? 'AI-07';
   if (!['AI-07', 'AI-08', 'AI-17', 'AI-18', 'AI-19'].includes(scenario)) {
     throw new Error('--scenario must be AI-07, AI-08, AI-17, AI-18, or AI-19');

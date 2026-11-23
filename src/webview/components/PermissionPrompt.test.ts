@@ -31,6 +31,16 @@ import { PermissionPrompt } from './PermissionPrompt';
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
+function mountView(view: Parameters<typeof render>[0]) {
+  cleanup = render(view, container!);
+  flushSolid();
+}
+
+function applyState(setter: Parameters<typeof setState>[0]) {
+  setState(setter);
+  flushSolid();
+}
+
 function createPermission(overrides: Partial<Permission> = {}): Permission {
   return {
     id: 'permission-1',
@@ -55,12 +65,9 @@ beforeEach(() => {
   mocks.alwaysAllowPermissionForSession.mockResolvedValue(undefined);
   mocks.permissionMode = 'default';
   mocks.alwaysAllowPermissionForGlobal.mockReset();
-  setState(storePath('serverStatus', { state: 'running', apiVersion: 1 }));
-  flushSolid();
-  setState(storePath('sessions', []));
-  flushSolid();
-  setState(storePath('messages', []));
-  flushSolid();
+  applyState(storePath('serverStatus', { state: 'running', apiVersion: 1 }));
+  applyState(storePath('sessions', []));
+  applyState(storePath('messages', []));
 });
 
 afterEach(() => {
@@ -75,7 +82,7 @@ afterEach(() => {
 
 describe('PermissionPrompt', () => {
   it('shows the owning subagent and updates when its identity arrives', () => {
-    setState(
+    applyState(
       storePath('sessions', [
         {
           id: 'session-1',
@@ -88,13 +95,10 @@ describe('PermissionPrompt', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@subagent');
-    setState(storePath('sessions', 0, 'agent', 'explore'));
-    flushSolid();
+    applyState(storePath('sessions', 0, 'agent', 'explore'));
     expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@explore');
     expect(container?.querySelector('.permission-prompt-agent')?.getAttribute('title')).toBe(
       'Requested by @explore'
@@ -102,7 +106,7 @@ describe('PermissionPrompt', () => {
   });
 
   it('does not label a root session as a subagent', () => {
-    setState(
+    applyState(
       storePath('sessions', [
         {
           id: 'session-1',
@@ -115,9 +119,7 @@ describe('PermissionPrompt', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     expect(container?.querySelector('.permission-prompt-agent')).toBeNull();
   });
@@ -127,7 +129,7 @@ describe('PermissionPrompt', () => {
     { metadata: { sessionID: 'session-1' }, input: { subagent_type: 'explore' } },
     { metadata: {}, input: { subagent_type: 'explore', task_id: 'session-1' } },
   ])('uses the linked task before the child session is loaded: %j', ({ metadata, input }) => {
-    setState(
+    applyState(
       storePath('messages', [
         {
           info: {
@@ -163,14 +165,12 @@ describe('PermissionPrompt', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@explore');
 
     // The requesting message takes precedence over the task's original agent.
-    setState(
+    applyState(
       storePath('messages', (entries) => [
         ...entries,
         {
@@ -184,13 +184,11 @@ describe('PermissionPrompt', () => {
         },
       ])
     );
-    flushSolid();
     expect(container?.querySelector('.permission-prompt-agent')?.textContent).toBe('@reviewer');
   });
 
   it('renders all permission response buttons', () => {
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     const buttons = [...(container?.querySelectorAll('.permission-prompt-actions button') || [])];
 
@@ -214,14 +212,11 @@ describe('PermissionPrompt', () => {
   });
 
   it('allows only rejection when recovered details are incomplete', () => {
-    cleanup = render(
-      () =>
-        PermissionPrompt({
-          permission: createPermission({ recoveredIncomplete: true }),
-        }),
-      container!
+    mountView(() =>
+      PermissionPrompt({
+        permission: createPermission({ recoveredIncomplete: true }),
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector<HTMLButtonElement>('[aria-label="Allow once"]')?.disabled).toBe(
       true
@@ -237,8 +232,7 @@ describe('PermissionPrompt', () => {
 
   it('explains how always approval guides review in auto approve mode', () => {
     mocks.permissionMode = 'auto';
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     expect(container?.querySelector('.permission-prompt-scope-note')?.textContent).toContain(
       'guides AI review toward similar non-destructive actions'
@@ -246,21 +240,18 @@ describe('PermissionPrompt', () => {
   });
 
   it('explains the response scope for grouped requests', () => {
-    cleanup = render(
-      () =>
-        PermissionPrompt({
-          permission: createPermission({
-            groupMembers: [
-              { id: 'permission-1', sessionID: 'session-1', messageID: 'message-1' },
-              { id: 'permission-2', sessionID: 'session-1', messageID: 'message-2' },
-            ],
-          }),
-          queuePosition: 1,
-          queueTotal: 2,
+    mountView(() =>
+      PermissionPrompt({
+        permission: createPermission({
+          groupMembers: [
+            { id: 'permission-1', sessionID: 'session-1', messageID: 'message-1' },
+            { id: 'permission-2', sessionID: 'session-1', messageID: 'message-2' },
+          ],
         }),
-      container!
+        queuePosition: 1,
+        queueTotal: 2,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.permission-prompt-step')?.textContent).toContain('1 / 2');
     const count = container?.querySelector('.permission-prompt-count');
@@ -274,24 +265,20 @@ describe('PermissionPrompt', () => {
   });
 
   it('hides the group note for a single request', () => {
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     expect(container?.querySelector('.permission-prompt-count')).toBeNull();
     expect(container?.querySelector('.permission-prompt-group-note')).toBeNull();
   });
 
   it('shows why the auto-approve judge deferred the request', () => {
-    cleanup = render(
-      () =>
-        PermissionPrompt({
-          permission: createPermission({
-            autoApproveReason: 'The command needs manual confirmation.',
-          }),
+    mountView(() =>
+      PermissionPrompt({
+        permission: createPermission({
+          autoApproveReason: 'The command needs manual confirmation.',
         }),
-      container!
+      })
     );
-    flushSolid();
 
     const reason = container?.querySelector('.permission-prompt-auto-reason');
     expect(reason?.textContent).toContain('AI check');
@@ -304,18 +291,15 @@ describe('PermissionPrompt', () => {
     const command = 'x'.repeat(1_300);
     const title = `bash ${command}`;
 
-    cleanup = render(
-      () =>
-        PermissionPrompt({
-          permission: createPermission({
-            title,
-            actionSummary: 'Check installed tool versions',
-            metadata: { command },
-          }),
+    mountView(() =>
+      PermissionPrompt({
+        permission: createPermission({
+          title,
+          actionSummary: 'Check installed tool versions',
+          metadata: { command },
         }),
-      container!
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.permission-prompt-text')?.textContent).toBe(
       'Check installed tool versions'
@@ -336,14 +320,11 @@ describe('PermissionPrompt', () => {
   });
 
   it('uses a generic shell action name when no model summary is available', () => {
-    cleanup = render(
-      () =>
-        PermissionPrompt({
-          permission: createPermission({ metadata: { command: 'npm run test' } }),
-        }),
-      container!
+    mountView(() =>
+      PermissionPrompt({
+        permission: createPermission({ metadata: { command: 'npm run test' } }),
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.permission-prompt-text')?.textContent).toBe('Run command');
     expect(container?.querySelector('.permission-meta-value')?.textContent).toBe('npm run test');
@@ -353,8 +334,7 @@ describe('PermissionPrompt', () => {
     ['Reject', 'reject'],
     ['Allow once', 'once'],
   ] as const)('%s sends the %s response', (label, response) => {
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     const buttons = [...(container?.querySelectorAll('button') || [])];
     const button = buttons.find((candidate) => candidate.getAttribute('aria-label') === label);
@@ -367,8 +347,7 @@ describe('PermissionPrompt', () => {
   it.each(['session', 'server', 'project'] as const)(
     'approves only the chosen %s scope',
     async (scope) => {
-      cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-      flushSolid();
+      mountView(() => PermissionPrompt({ permission: createPermission() }));
 
       const trigger = container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]');
       trigger?.click();
@@ -416,13 +395,10 @@ describe('PermissionPrompt', () => {
   );
 
   it('reviews config-backed project approvals on V2 before submitting', async () => {
-    setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
-    flushSolid();
-    cleanup = render(
-      () => PermissionPrompt({ permission: createPermission({ always: ['git diff --stat'] }) }),
-      container!
+    applyState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    mountView(() =>
+      PermissionPrompt({ permission: createPermission({ always: ['git diff --stat'] }) })
     );
-    flushSolid();
     container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.click();
     flushSolid();
     await Promise.resolve();
@@ -475,8 +451,7 @@ describe('PermissionPrompt', () => {
   it.each(['session', 'project', 'global'] as const)(
     'prefills V2 WebFetch %s reviews with requested URLs instead of wildcard save suggestions',
     async (scope) => {
-      setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
-      flushSolid();
+      applyState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
       const url = 'https://example.com/requested?query=value';
       const permission = createPermission({
         type: 'webfetch',
@@ -484,8 +459,7 @@ describe('PermissionPrompt', () => {
         always: ['*'],
         metadata: { url: 'https://example.com/original#fragment' },
       });
-      cleanup = render(() => PermissionPrompt({ permission }), container!);
-      flushSolid();
+      mountView(() => PermissionPrompt({ permission }));
       container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
       flushSolid();
       await Promise.resolve();
@@ -514,21 +488,17 @@ describe('PermissionPrompt', () => {
   it.each([undefined, '*'])(
     'uses the WebFetch metadata URL when request resources are %s',
     async (pattern) => {
-      setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
-      flushSolid();
-      cleanup = render(
-        () =>
-          PermissionPrompt({
-            permission: createPermission({
-              type: 'webfetch',
-              pattern,
-              always: ['*'],
-              metadata: { url: 'https://example.com/exact' },
-            }),
+      applyState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+      mountView(() =>
+        PermissionPrompt({
+          permission: createPermission({
+            type: 'webfetch',
+            pattern,
+            always: ['*'],
+            metadata: { url: 'https://example.com/exact' },
           }),
-        container!
+        })
       );
-      flushSolid();
       container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
       flushSolid();
       await Promise.resolve();
@@ -542,24 +512,20 @@ describe('PermissionPrompt', () => {
   );
 
   it('preserves the review draft and expansion on same-ID refreshes and resets for a new ID', async () => {
-    setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
-    flushSolid();
+    applyState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
     const [permission, setPermission] = createSignal(
       createPermission({
         always: ['git *'],
         metadata: { command: 'git diff --stat' },
       })
     );
-    cleanup = render(
-      () =>
-        PermissionPrompt({
-          get permission() {
-            return permission();
-          },
-        }),
-      container!
+    mountView(() =>
+      PermissionPrompt({
+        get permission() {
+          return permission();
+        },
+      })
     );
-    flushSolid();
     container!.querySelector<HTMLButtonElement>('.permission-command-toggle')!.click();
     flushSolid();
     container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
@@ -603,13 +569,8 @@ describe('PermissionPrompt', () => {
   });
 
   it('cancels the review with Escape and restores the original actions and keyboard focus', async () => {
-    setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
-    flushSolid();
-    cleanup = render(
-      () => PermissionPrompt({ permission: createPermission({ always: ['git *'] }) }),
-      container!
-    );
-    flushSolid();
+    applyState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    mountView(() => PermissionPrompt({ permission: createPermission({ always: ['git *'] }) }));
     container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
     flushSolid();
     await Promise.resolve();
@@ -641,11 +602,7 @@ describe('PermissionPrompt', () => {
     const command = `git diff ${'some/long/path '.repeat(60)}\n--stat`;
     const writeText = vi.fn(async () => {});
     vi.stubGlobal('navigator', { clipboard: { writeText } });
-    cleanup = render(
-      () => PermissionPrompt({ permission: createPermission({ metadata: { command } }) }),
-      container!
-    );
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission({ metadata: { command } }) }));
     const toggle = container!.querySelector<HTMLButtonElement>('.permission-command-toggle')!;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     toggle.click();
@@ -695,8 +652,7 @@ describe('PermissionPrompt', () => {
       pattern: source === 'resources' ? [command] : undefined,
       metadata: {},
     });
-    cleanup = render(() => PermissionPrompt({ permission }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission }));
     expect(container!.querySelector('.permission-prompt-agent')?.textContent).toBe(
       child ? '@general' : undefined
     );
@@ -721,42 +677,35 @@ describe('PermissionPrompt', () => {
   });
 
   it('does not treat non-shell resource patterns as commands', () => {
-    cleanup = render(
-      () =>
-        PermissionPrompt({
-          permission: createPermission({
-            type: 'read',
-            title: 'read file',
-            pattern: ['src/file.ts'],
-          }),
+    mountView(() =>
+      PermissionPrompt({
+        permission: createPermission({
+          type: 'read',
+          title: 'read file',
+          pattern: ['src/file.ts'],
         }),
-      container!
+      })
     );
-    flushSolid();
     expect(container!.querySelector('.permission-command-toggle')).toBeNull();
   });
 
   it.each(['session', 'global'] as const)(
     'retains a failed reviewed %s draft and supports cancellation',
     async (scope) => {
-      setState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
-      flushSolid();
+      applyState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
       const approve =
         scope === 'session'
           ? mocks.alwaysAllowPermissionForSession
           : mocks.alwaysAllowPermissionForGlobal;
       approve.mockRejectedValueOnce(new Error('Save failed'));
-      cleanup = render(
-        () =>
-          PermissionPrompt({
-            permission: createPermission({
-              always: ['git *'],
-              metadata: { command: 'git diff --stat' },
-            }),
+      mountView(() =>
+        PermissionPrompt({
+          permission: createPermission({
+            always: ['git *'],
+            metadata: { command: 'git diff --stat' },
           }),
-        container!
+        })
       );
-      flushSolid();
       container!.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')!.click();
       flushSolid();
       await Promise.resolve();
@@ -814,8 +763,7 @@ describe('PermissionPrompt', () => {
           ? mocks.alwaysAllowPermissionForProject
           : mocks.alwaysAllowPermissionForSession;
       approve.mockRejectedValueOnce(new Error(message));
-      cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-      flushSolid();
+      mountView(() => PermissionPrompt({ permission: createPermission() }));
       container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.click();
       flushSolid();
       await Promise.resolve();
@@ -847,8 +795,7 @@ describe('PermissionPrompt', () => {
   it.each(['Escape', 'outside click', 'trigger click'])(
     'dismisses the scope menu with %s without responding',
     async (dismissal) => {
-      cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-      flushSolid();
+      mountView(() => PermissionPrompt({ permission: createPermission() }));
 
       const trigger = container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]');
       trigger?.click();
@@ -887,8 +834,7 @@ describe('PermissionPrompt', () => {
           resolveResponse = resolve;
         })
     );
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
 
     container
       ?.querySelector<HTMLButtonElement>('[aria-label="Allow once"]')
@@ -901,10 +847,9 @@ describe('PermissionPrompt', () => {
       ].every((button) => button.disabled)
     ).toBe(true);
 
-    cleanup();
+    cleanup!();
     flushSolid();
-    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
-    flushSolid();
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
     const remountedButtons = [
       ...(container?.querySelectorAll<HTMLButtonElement>('.permission-prompt-actions button') ||
         []),

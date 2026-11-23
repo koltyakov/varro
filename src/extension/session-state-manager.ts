@@ -488,13 +488,6 @@ export class SessionStateManager {
     return removed;
   }
 
-  clearCompleted(): void {
-    if (this.completedSessions.size === 0) return;
-    this.completedSessions.clear();
-    this.completedSessionMarkers.clear();
-    this.listener.onStatusChange();
-  }
-
   clearCompletedInWorkspace(workspacePath: string | null | undefined): void {
     let changed = false;
     for (const sessionID of this.completedSessions) {
@@ -937,18 +930,14 @@ export class SessionStateManager {
       }
       return {
         interruptedSessions: this.claimInterruptedSessions(),
-        blockingRequests: this.getLiveBlockingRequestSnapshots(),
+        blockingRequests: this.getBlockingRequestSnapshots(),
       };
     });
     this.recoverySnapshotPromise = operation;
-    void operation.then(
-      () => {
-        if (this.recoverySnapshotPromise === operation) this.recoverySnapshotPromise = undefined;
-      },
-      () => {
-        if (this.recoverySnapshotPromise === operation) this.recoverySnapshotPromise = undefined;
-      }
-    );
+    const clear = () => {
+      if (this.recoverySnapshotPromise === operation) this.recoverySnapshotPromise = undefined;
+    };
+    void operation.then(clear, clear);
     return operation;
   }
 
@@ -1289,28 +1278,6 @@ export class SessionStateManager {
   }
 
   private getBlockingRequestSnapshots(): BlockingRequestSnapshot[] {
-    return [...this.pendingAttention.entries()]
-      .map(([id, request]) => {
-        const snapshot: BlockingRequestSnapshot = {
-          id,
-          sessionID: request.sessionID,
-          kind: request.kind,
-          props: this.serializeBlockingRequestProps(request.kind, request.props),
-          directory: trimOptionalString(
-            request.directory || this.getSessionMetadata(this.sessionDirectories, request.sessionID)
-          ),
-        };
-        if (request.eventType) snapshot.eventType = request.eventType;
-        if (this.workspaceScopeFor(request.sessionID) === 'workspace') {
-          snapshot.workspaceScope = 'workspace';
-        }
-        return snapshot;
-      })
-      .toSorted((a, b) => a.id.localeCompare(b.id))
-      .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
-  }
-
-  private getLiveBlockingRequestSnapshots(): BlockingRequestSnapshot[] {
     return [...this.pendingAttention.entries()]
       .map(([id, request]) => {
         const snapshot: BlockingRequestSnapshot = {
@@ -2059,11 +2026,7 @@ export class SessionStateManager {
       kind === 'question' ? 'Varro is waiting for your input' : 'Varro needs permission approval';
     const message = `${prefix}${this.describeSessionSuffix(sessionID)}.`;
 
-    void vscode.window.showWarningMessage(message, 'Open Chat').then((action) => {
-      if (action === 'Open Chat') {
-        void vscode.commands.executeCommand('varro.chat.focusInput');
-      }
-    });
+    void vscode.window.showWarningMessage(message, 'Open Chat').then(focusChatOnOpenChat);
   }
 
   private showCompletionNotification(sessionID: string): void {
@@ -2071,11 +2034,7 @@ export class SessionStateManager {
     if (!this.notificationGate.shouldShow(sessionID)) return;
 
     const message = `Varro has a plan ready for review${this.describeSessionSuffix(sessionID)}.`;
-    void vscode.window.showInformationMessage(message, 'Open Chat').then((action) => {
-      if (action === 'Open Chat') {
-        void vscode.commands.executeCommand('varro.chat.focusInput');
-      }
-    });
+    void vscode.window.showInformationMessage(message, 'Open Chat').then(focusChatOnOpenChat);
   }
 
   private showFailureNotification(sessionID: string, detail: string | undefined): void {
@@ -2085,12 +2044,12 @@ export class SessionStateManager {
     const message = detail?.trim()
       ? `Varro hit an error${suffix}: ${detail.trim()}`
       : `Varro hit an error${suffix}.`;
-    void vscode.window.showErrorMessage(message, 'Open Chat').then((action) => {
-      if (action === 'Open Chat') {
-        void vscode.commands.executeCommand('varro.chat.focusInput');
-      }
-    });
+    void vscode.window.showErrorMessage(message, 'Open Chat').then(focusChatOnOpenChat);
   }
+}
+
+function focusChatOnOpenChat(action: string | undefined): void {
+  if (action === 'Open Chat') void vscode.commands.executeCommand('varro.chat.focusInput');
 }
 
 export function describeQuestionRequest(props: Record<string, unknown>): string {

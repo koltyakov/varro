@@ -674,6 +674,21 @@ export function DiffView(props: {
   );
 }
 
+function DiffStats(props: { additions: number; deletions: number }) {
+  return (
+    <Show when={props.additions > 0 || props.deletions > 0}>
+      <span class="diff-view-stats">
+        <Show when={props.additions > 0}>
+          <span class="diff-lines-added">+{props.additions}</span>
+        </Show>
+        <Show when={props.deletions > 0}>
+          <span class="diff-lines-removed">-{props.deletions}</span>
+        </Show>
+      </span>
+    </Show>
+  );
+}
+
 function DiffItem(props: {
   diff: DiffViewFile;
   preview: DiffPreviewResult | null;
@@ -1013,16 +1028,7 @@ function DiffItem(props: {
             {displayName()}
           </button>
         </span>
-        <Show when={props.diff.additions > 0 || props.diff.deletions > 0}>
-          <span class="diff-view-stats">
-            <Show when={props.diff.additions > 0}>
-              <span class="diff-lines-added">+{props.diff.additions}</span>
-            </Show>
-            <Show when={props.diff.deletions > 0}>
-              <span class="diff-lines-removed">-{props.diff.deletions}</span>
-            </Show>
-          </span>
-        </Show>
+        <DiffStats additions={props.diff.additions} deletions={props.diff.deletions} />
         <Show when={canExpand()}>
           <button
             ref={(element) => {
@@ -1146,16 +1152,7 @@ function DiffItem(props: {
                     >
                       {displayName()}
                     </button>
-                    <Show when={props.diff.additions > 0 || props.diff.deletions > 0}>
-                      <span class="diff-view-stats">
-                        <Show when={props.diff.additions > 0}>
-                          <span class="diff-lines-added">+{props.diff.additions}</span>
-                        </Show>
-                        <Show when={props.diff.deletions > 0}>
-                          <span class="diff-lines-removed">-{props.diff.deletions}</span>
-                        </Show>
-                      </span>
-                    </Show>
+                    <DiffStats additions={props.diff.additions} deletions={props.diff.deletions} />
                   </div>
                   <button
                     ref={(element) => {

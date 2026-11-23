@@ -1,12 +1,11 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- OpenCode responses are decoded into title and model domain values here. */
 import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
-import type { PermissionRule } from '../shared/opencode-types';
 import type { OpenCodeServer } from './server';
-import type { HiddenSessionManager } from './hidden-session-manager';
+import { DENY_ALL_PERMISSION_RULES, type HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
 import { parseModelRoute } from './sidebar-provider-utils';
-import { tryGenerateOneShot } from './one-shot-generation';
+import { parseJsonObject, tryGenerateOneShot } from './one-shot-generation';
 import { tracePrompt } from './prompt-trace';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'> &
@@ -50,35 +49,6 @@ type RenameAttempt = {
 const RENAME_TIMEOUT_MS = 30_000;
 const TITLE_SESSION_PREFIX = 'Varro session title fallback';
 const MAX_PROMPT_CHARS = 8_000;
-const DENY_ALL_PERMISSION_NAMES = [
-  'read',
-  'edit',
-  'glob',
-  'grep',
-  'list',
-  'bash',
-  'shell',
-  'task',
-  'external_directory',
-  'todowrite',
-  'question',
-  'webfetch',
-  'websearch',
-  'codesearch',
-  'lsp',
-  'doom_loop',
-  'skill',
-] as const;
-
-const DENY_ALL_PERMISSION_RULES: PermissionRule[] = [
-  ...DENY_ALL_PERMISSION_NAMES.map<PermissionRule>((permission) => ({
-    permission,
-    pattern: '*',
-    action: 'deny',
-  })),
-  { permission: '*', pattern: '*', action: 'deny' },
-  { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
-];
 
 export class SessionTitleFallback {
   private readonly inFlight = new Map<string, RenameAttempt>();
@@ -489,19 +459,6 @@ function parseTitle(value: unknown) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 80);
-}
-
-function parseJsonObject(text: string) {
-  const trimmed = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```$/i, '')
-    .trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
 }
 
 function sessionPath(sessionID: string) {

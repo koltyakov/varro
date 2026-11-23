@@ -25,6 +25,7 @@ import {
   textPart,
   toolPart,
   userMessage,
+  flushFrame,
 } from './MessageList.test-utils';
 
 let container: HTMLDivElement | null = null;
@@ -172,9 +173,7 @@ describe('MessageList text ownership', () => {
             ),
           }))
         );
-        flushSolid();
-        frames.flush();
-        flushSolid();
+        flushFrame(frames);
         await Promise.resolve();
         flushSolid();
         assertOwnership();

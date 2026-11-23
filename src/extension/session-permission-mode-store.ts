@@ -126,16 +126,6 @@ export class SessionPermissionModeStore {
     });
   }
 
-  clearSafeFallback(sessionId: string): Promise<void> {
-    return this.mutate(async () => {
-      if (!this.fallbackSessionIds.has(sessionId)) return;
-      await this.persistFallbacks(
-        [...this.fallbackSessionIds].filter((fallbackSessionId) => fallbackSessionId !== sessionId)
-      );
-      this.fallbackSessionIds.delete(sessionId);
-    });
-  }
-
   setIfAbsent(modes: Record<string, PermissionMode>): Promise<Record<string, PermissionMode>> {
     return this.mutate(async () => {
       const next = { ...this.modes };

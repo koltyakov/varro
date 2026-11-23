@@ -26,6 +26,11 @@ vi.mock('../hooks/useOpenCode', async () => {
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+
+function applyState(setter: Parameters<typeof setState>[0]) {
+  setState(setter);
+  flushSolid();
+}
 let consoleWarn: ReturnType<typeof vi.spyOn>;
 
 describe('native QuestionPrompt', () => {
@@ -136,8 +141,7 @@ describe('native QuestionPrompt', () => {
       ],
       true
     );
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     renderQuestionPrompt(active);
     flushSolid();
     const custom = container!.querySelector<HTMLTextAreaElement>(
@@ -256,8 +260,7 @@ describe('native QuestionPrompt', () => {
       ],
       true
     );
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     renderQuestionPrompt(active);
     flushSolid();
     expect(container!.querySelector('[role="radiogroup"]')).toBeNull();
@@ -302,8 +305,7 @@ describe('native QuestionPrompt', () => {
         when: [{ key: 'proxy', op: 'eq', value: true }],
       },
     ]);
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     renderQuestionPrompt(active);
     flushSolid();
     expect(container!.querySelector('[data-field-key="url"]')).toBeNull();
@@ -708,8 +710,7 @@ describe('native QuestionPrompt', () => {
   });
   it('retains typed values after server rejection and virtual remount', async () => {
     const active = nativeRequest([{ key: 'answer', type: 'string', required: true }]);
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     respondQuestionMock.mockRejectedValueOnce(
       new Error('400 Invalid option for form field: answer')
     );
@@ -736,8 +737,7 @@ describe('native QuestionPrompt', () => {
     const active = nativeRequest([
       { key: 'choices', type: 'multiselect', title: 'Selections', options: [], custom: true },
     ]);
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     renderQuestionPrompt(active);
     flushSolid();
     const custom = container!.querySelector<HTMLTextAreaElement>(
@@ -791,8 +791,7 @@ describe('native QuestionPrompt', () => {
       { key: 'answer', type: 'string', required: true },
       { key: 'choices', type: 'multiselect', title: 'Selections', options: [], custom: true },
     ]);
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     renderQuestionPrompt(active);
     flushSolid();
     change('answer', 'keep this');
@@ -803,15 +802,13 @@ describe('native QuestionPrompt', () => {
     custom.dispatchEvent(new Event('input', { bubbles: true }));
     flushSolid();
 
-    setState(storePath('questions', []));
-    flushSolid();
+    applyState(storePath('questions', []));
     cleanup?.();
     flushSolid();
     cleanup = undefined;
     await Promise.resolve();
     flushSolid();
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     renderQuestionPrompt(active);
     flushSolid();
 
@@ -826,8 +823,7 @@ describe('native QuestionPrompt', () => {
 
   it('claims a reply before a same-turn skip and retains the claim across remount until acknowledgment', async () => {
     const active = nativeRequest([{ key: 'answer', type: 'boolean', default: false }]);
-    setState(storePath('questions', [active]));
-    flushSolid();
+    applyState(storePath('questions', [active]));
     let resolve!: () => void;
     respondQuestionMock.mockImplementationOnce(
       () =>
@@ -927,8 +923,7 @@ beforeEach(() => {
   consoleWarn = vi.spyOn(console, 'warn');
   container = document.createElement('div');
   document.body.appendChild(container);
-  setState(storePath('questions', []));
-  flushSolid();
+  applyState(storePath('questions', []));
   rejectQuestionMock.mockReset();
   rejectQuestionMock.mockResolvedValue(undefined);
   respondQuestionMock.mockReset();
@@ -942,8 +937,7 @@ afterEach(() => {
   container?.remove();
   flushSolid();
   container = null;
-  setState(storePath('questions', []));
-  flushSolid();
+  applyState(storePath('questions', []));
   try {
     expect(consoleWarn).not.toHaveBeenCalledWith(
       'computations created outside a `createRoot` or `render` will never be disposed'
@@ -956,8 +950,7 @@ afterEach(() => {
 describe('QuestionPrompt draft retention', () => {
   it('keeps drafts while the question is still active', async () => {
     const activeRequest = request();
-    setState(storePath('questions', [activeRequest]));
-    flushSolid();
+    applyState(storePath('questions', [activeRequest]));
 
     renderQuestionPrompt(activeRequest);
     flushSolid();
@@ -985,8 +978,7 @@ describe('QuestionPrompt draft retention', () => {
 
   it('drops drafts once the question is no longer present', async () => {
     const activeRequest = request();
-    setState(storePath('questions', [activeRequest]));
-    flushSolid();
+    applyState(storePath('questions', [activeRequest]));
 
     renderQuestionPrompt(activeRequest);
     flushSolid();
@@ -998,8 +990,7 @@ describe('QuestionPrompt draft retention', () => {
     input!.dispatchEvent(new Event('input', { bubbles: true }));
     flushSolid();
 
-    setState(storePath('questions', []));
-    flushSolid();
+    applyState(storePath('questions', []));
     cleanup?.();
     flushSolid();
     cleanup = undefined;
@@ -1016,8 +1007,7 @@ describe('QuestionPrompt draft retention', () => {
     const activeRequests = Array.from({ length: 101 }, (_, index) =>
       request(`bounded-draft-${index}`)
     );
-    setState(storePath('questions', activeRequests));
-    flushSolid();
+    applyState(storePath('questions', activeRequests));
 
     for (const [index, activeRequest] of activeRequests.entries()) {
       renderQuestionPrompt(activeRequest);
@@ -1051,8 +1041,7 @@ describe('QuestionPrompt draft retention', () => {
 
   it('keeps the answer draft and restores controls when answering fails', async () => {
     const activeRequest = request('failed-answer');
-    setState(storePath('questions', [activeRequest]));
-    flushSolid();
+    applyState(storePath('questions', [activeRequest]));
     respondQuestionMock.mockRejectedValueOnce(new Error('answer failed'));
     renderQuestionPrompt(activeRequest);
     flushSolid();
@@ -1093,8 +1082,7 @@ describe('QuestionPrompt draft retention', () => {
 
   it('keeps the draft and restores controls when skipping fails', async () => {
     const activeRequest = request('failed-skip');
-    setState(storePath('questions', [activeRequest]));
-    flushSolid();
+    applyState(storePath('questions', [activeRequest]));
     rejectQuestionMock.mockRejectedValueOnce(new Error('skip failed'));
     renderQuestionPrompt(activeRequest);
     flushSolid();

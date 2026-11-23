@@ -1,5 +1,5 @@
 import { storePath } from '@solidjs/signals';
-import { createEffect, createSignal, onSettled, reconcile, untrack } from 'solid-js';
+import { createEffect, createSignal, onSettled, untrack } from 'solid-js';
 import type {
   QuestionAnswer,
   AutoApproveJudgeReference,
@@ -151,6 +151,7 @@ import { SessionStatusOperations } from '../session/session-status';
 import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
 import { createTodoSyncOperations } from '../todo-sync';
 import { asRecord, isString } from '../../lib/runtime-values';
+import { reconcileStoreField } from '../../lib/store-reconcile';
 
 const client = clientModule.client;
 
@@ -161,6 +162,31 @@ function getSessionDirectory(sessionId: string): string | undefined {
 function invalidateClientWorkspaceState() {
   clientModule.invalidateClientWorkspaceCaches();
 }
+
+export type SendMessageOptions = {
+  messageId?: string;
+  agent?: string;
+  noReply?: boolean;
+  delivery?: 'steer' | 'queue';
+  queuedAttachments?: QueuedAttachmentSnapshot;
+  queuedContext?: QueuedContextSnapshot;
+  preserveComposer?: boolean;
+  omitContext?: boolean;
+  followupTitle?: string;
+  targetSessionId?: string | null;
+  workspaceDirectory?: string;
+  newSessionWorkspace?: SessionWorkspaceTarget;
+  queuedMessageDispatch?: { itemId: string; lease: number };
+  onOptimisticPublish?: () => void;
+  validateBeforeSend?: () => Promise<boolean>;
+};
+
+export type EditMessageOptions = {
+  allowEmptyText?: boolean;
+  queuedAttachments?: QueuedAttachmentSnapshot;
+  selectedModel?: SelectedModel;
+  onOptimisticPublish?: () => void;
+};
 
 export interface OpenCodeRuntime {
   useOpenCode(): { client: typeof client };
@@ -192,36 +218,9 @@ export interface OpenCodeRuntime {
   emptyRecycleBin(): Promise<void>;
   reloadSessions(): Promise<void>;
   loadMoreSessions(): Promise<void>;
-  sendMessage(
-    text: string,
-    options?: {
-      messageId?: string;
-      agent?: string;
-      noReply?: boolean;
-      delivery?: 'steer' | 'queue';
-      queuedAttachments?: QueuedAttachmentSnapshot;
-      queuedContext?: QueuedContextSnapshot;
-      preserveComposer?: boolean;
-      omitContext?: boolean;
-      followupTitle?: string;
-      targetSessionId?: string | null;
-      newSessionWorkspace?: SessionWorkspaceTarget;
-      queuedMessageDispatch?: { itemId: string; lease: number };
-      onOptimisticPublish?: () => void;
-      validateBeforeSend?: () => Promise<boolean>;
-    }
-  ): Promise<boolean>;
+  sendMessage(text: string, options?: SendMessageOptions): Promise<boolean>;
   retryMessage(messageId: string, sessionId?: string | null): Promise<void>;
-  editMessage(
-    messageId: string,
-    text: string,
-    options?: {
-      allowEmptyText?: boolean;
-      queuedAttachments?: QueuedAttachmentSnapshot;
-      selectedModel?: SelectedModel;
-      onOptimisticPublish?: () => void;
-    }
-  ): Promise<boolean>;
+  editMessage(messageId: string, text: string, options?: EditMessageOptions): Promise<boolean>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
   abortSession(sessionId?: string): Promise<void>;
@@ -746,29 +745,27 @@ function setSessionMessagesIncremental(
               (!behavior.authoritativeSessionSnapshot || options?.preserveExtraParts))) &&
           entry.parts.some((part) => part.id === streamingPartId)
       );
-    (() => {
-      if (streamingBelongsToSession && !preserveStreamingState && !options?.preserveExtraParts) {
-        draft.streamingPartId = null;
-        draft.streamingText = '';
-      }
-      sessionStore.setMessagesIncremental(
-        mergeSessionMessages(current, sessionId, messages),
-        options
-      );
-      // Size the rows actually cached: reconciliation can materialize queued streaming text or keep
-      // optimistic rows and extra parts that the incoming copy lacks.
-      setCachedSessionMessages(
-        sessionId,
-        draft.messages.filter((entry) => entry.info.sessionID === sessionId)
-      );
-      if (
-        preserveStreamingState &&
-        draft.messages.some((entry) => entry.parts.some((part) => part.id === streamingPartId))
-      ) {
-        draft.streamingPartId = streamingPartId;
-        draft.streamingText = streamingText;
-      }
-    })();
+    if (streamingBelongsToSession && !preserveStreamingState && !options?.preserveExtraParts) {
+      draft.streamingPartId = null;
+      draft.streamingText = '';
+    }
+    sessionStore.setMessagesIncremental(
+      mergeSessionMessages(current, sessionId, messages),
+      options
+    );
+    // Size the rows actually cached: reconciliation can materialize queued streaming text or keep
+    // optimistic rows and extra parts that the incoming copy lacks.
+    setCachedSessionMessages(
+      sessionId,
+      draft.messages.filter((entry) => entry.info.sessionID === sessionId)
+    );
+    if (
+      preserveStreamingState &&
+      draft.messages.some((entry) => entry.parts.some((part) => part.id === streamingPartId))
+    ) {
+      draft.streamingPartId = streamingPartId;
+      draft.streamingText = streamingText;
+    }
   });
 }
 
@@ -1096,129 +1093,74 @@ export function resetWorkspaceDerivedState(options?: {
     )
   );
   permissionsStore.resetQuestionResolutionState();
-  (() => {
-    if (!options?.preserveTranscript) {
-      sessionStore.setActiveSessionId(null);
-      sessionStore.persistActiveSessionId(null);
-      sessionStore.clearMessages();
-    }
-    if (!preserveWorkspaceCatalog) {
-      appStore.setState(storePath('sessions', []));
-      appStore.setState(storePath('sessionsLoadError', null));
-      appStore.setState(storePath('sessionsHasMore', false));
-      appStore.setState(storePath('recycleBinEntries', []));
-      appStore.setState(storePath('recycleBinLoadError', null));
-      appStore.setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = queuedWorkingStatuses satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
-      appStore.setState(storePath('failedSessionIds', []));
-      appStore.setState(storePath('failedSessionUpdatedAt', {}));
-      appStore.setState((draft) => {
-        const current = draft['sessionMessageCounts'];
-        const incoming = {} satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionMessageCounts'] = incoming;
-        else reconcile(incoming)(current);
-      });
-      appStore.setState((draft) => {
-        const current = draft['sessionUsageLimits'];
-        const incoming = {} satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionUsageLimits'] = incoming;
-        else reconcile(incoming)(current);
-      });
-    }
-    appStore.setState(storePath('sessionsLoadingMore', false));
-    appStore.setState(storePath('sessionsPaginationError', null));
-    appStore.setState((draft) => {
-      draft.messagesLoading = draft.pendingSessionSelectionId !== null;
-    });
-    appStore.setState(storePath('permissions', []));
-    appStore.setState(storePath('questions', []));
-    appStore.setState(storePath('compactingSessionIds', []));
-    appStore.setState(storePath('queuedMessageDispatchingId', null));
-    setQueuedMessageEdit(null);
-    appStore.setState(storePath('interruptedSessionIds', []));
+  if (!options?.preserveTranscript) {
+    sessionStore.setActiveSessionId(null);
+    sessionStore.persistActiveSessionId(null);
+    sessionStore.clearMessages();
+  }
+  if (!preserveWorkspaceCatalog) {
+    appStore.setState(storePath('sessions', []));
+    appStore.setState(storePath('sessionsLoadError', null));
+    appStore.setState(storePath('sessionsHasMore', false));
+    appStore.setState(storePath('recycleBinEntries', []));
+    appStore.setState(storePath('recycleBinLoadError', null));
+    appStore.setState((draft) =>
+      reconcileStoreField(draft, 'sessionStatus', queuedWorkingStatuses)
+    );
+    appStore.setState(storePath('failedSessionIds', []));
+    appStore.setState(storePath('failedSessionUpdatedAt', {}));
+    appStore.setState((draft) => reconcileStoreField(draft, 'sessionMessageCounts', {}));
+    appStore.setState((draft) => reconcileStoreField(draft, 'sessionUsageLimits', {}));
+  }
+  appStore.setState(storePath('sessionsLoadingMore', false));
+  appStore.setState(storePath('sessionsPaginationError', null));
+  appStore.setState((draft) => {
+    draft.messagesLoading = draft.pendingSessionSelectionId !== null;
+  });
+  appStore.setState(storePath('permissions', []));
+  appStore.setState(storePath('questions', []));
+  appStore.setState(storePath('compactingSessionIds', []));
+  appStore.setState(storePath('queuedMessageDispatchingId', null));
+  setQueuedMessageEdit(null);
+  appStore.setState(storePath('interruptedSessionIds', []));
 
-    // Keep the toolbar presentation stable while the new catalogs load. Sending
-    // remains blocked by workspaceCatalogReloadPending until they are authoritative.
-    appStore.setState(storePath('providersLoaded', false));
-    appStore.setState(storePath('workspaceCatalogReloadPending', true));
-    appStore.setState(storePath('agentsLoaded', false));
-    appStore.setState(storePath('commandsLoaded', false));
-    appStore.setState(storePath('commands', []));
-    appStore.setState(storePath('lspStatus', []));
-    appStore.setState(storePath('mcpDefaults', null));
-    routingStore.resetDraftSelectedMcps();
-    appStore.setState((draft) => {
-      const current = draft['sessionAutoPermissionCounts'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionAutoPermissionCounts'] = incoming;
-      else reconcile(incoming)(current);
-    });
-    appStore.setState((draft) => {
-      const current = draft['sessionAutoPermissionActivity'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionAutoPermissionActivity'] = incoming;
-      else reconcile(incoming)(current);
-    });
-    appStore.setState(storePath('autoPermissionCountsSince', Date.now()));
-    appStore.setState((draft) => {
-      const current = draft['providerAuthMethods'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['providerAuthMethods'] = incoming;
-      else reconcile(incoming)(current);
-    });
-    appStore.setState(storePath('workspaceStatuses', []));
-    appStore.setState((draft) => {
-      const current = draft['workspaceStatusSummary'];
-      const incoming = { entries: [] } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['workspaceStatusSummary'] = incoming;
-      else reconcile(incoming)(current);
-    });
-    appStore.setState(storePath('draftSelectedMcps', null));
-    routingStore.setSelectedAgent(null, {
-      persistGlobal: false,
-    });
-    routingStore.setSelectedModel(routingStore.getPersistedSelectedModel(), {
-      persistGlobal: false,
-    });
+  // Keep the toolbar presentation stable while the new catalogs load. Sending
+  // remains blocked by workspaceCatalogReloadPending until they are authoritative.
+  appStore.setState(storePath('providersLoaded', false));
+  appStore.setState(storePath('workspaceCatalogReloadPending', true));
+  appStore.setState(storePath('agentsLoaded', false));
+  appStore.setState(storePath('commandsLoaded', false));
+  appStore.setState(storePath('commands', []));
+  appStore.setState(storePath('lspStatus', []));
+  appStore.setState(storePath('mcpDefaults', null));
+  routingStore.resetDraftSelectedMcps();
+  appStore.setState((draft) => reconcileStoreField(draft, 'sessionAutoPermissionCounts', {}));
+  appStore.setState((draft) => reconcileStoreField(draft, 'sessionAutoPermissionActivity', {}));
+  appStore.setState(storePath('autoPermissionCountsSince', Date.now()));
+  appStore.setState((draft) => reconcileStoreField(draft, 'providerAuthMethods', {}));
+  appStore.setState(storePath('workspaceStatuses', []));
+  appStore.setState((draft) =>
+    reconcileStoreField(draft, 'workspaceStatusSummary', { entries: [] })
+  );
+  appStore.setState(storePath('draftSelectedMcps', null));
+  routingStore.setSelectedAgent(null, {
+    persistGlobal: false,
+  });
+  routingStore.setSelectedModel(routingStore.getPersistedSelectedModel(), {
+    persistGlobal: false,
+  });
 
-    if (!options?.preserveTranscript) {
-      composerStore.clearContextFiles();
-      composerStore.clearClipboardImages();
-      composerStore.clearTerminalSelection();
-      composerStore.clearAttachedDiagnostics();
-      composerStore.resetPastedImageIndex();
-    }
-    uiStore.stopLoading();
-    uiStore.setError(null);
-    uiStore.setShowModelPicker(false);
-    uiStore.setShowModels(false);
-  })();
+  if (!options?.preserveTranscript) {
+    composerStore.clearContextFiles();
+    composerStore.clearClipboardImages();
+    composerStore.clearTerminalSelection();
+    composerStore.clearAttachedDiagnostics();
+    composerStore.resetPastedImageIndex();
+  }
+  uiStore.stopLoading();
+  uiStore.setError(null);
+  uiStore.setShowModelPicker(false);
+  uiStore.setShowModels(false);
 
   appStore.defaultAppState.sessionTreeIndex.invalidate();
   appStore.defaultAppState.setSessionUsageLimitVersion((version) => version + 1);
@@ -2337,15 +2279,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function removeUnavailableSession(sessionId: string) {
     // A missing record on another server is not a deletion of its saved drafts or settings.
-    (() => {
-      sessionStore.setSessions(
-        appStore.state.sessions.filter((session) => session.id !== sessionId)
-      );
-      if (appStore.state.activeSessionId === sessionId) {
-        sessionLifecycleOperations.clearActiveSessionState();
-        uiStore.setShowSessionPicker(true);
-      }
-    })();
+    sessionStore.setSessions(appStore.state.sessions.filter((session) => session.id !== sessionId));
+    if (appStore.state.activeSessionId === sessionId) {
+      sessionLifecycleOperations.clearActiveSessionState();
+      uiStore.setShowSessionPicker(true);
+    }
   }
 
   async function reconcileServerState() {
@@ -3161,10 +3099,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       !isSameWorkspacePath(targetDirectory, currentWorkspacePath)
     ) {
       sessionActivationDirectory = targetDirectory;
-      (() => {
-        appStore.setState(storePath('pendingSessionSelectionId', id));
-        appStore.setState(storePath('messagesLoading', true));
-      })();
+      appStore.setState(storePath('pendingSessionSelectionId', id));
+      appStore.setState(storePath('messagesLoading', true));
       try {
         const activatedSession = await client.session.activate(id, targetDirectory, {
           signal: activationController.signal,
@@ -3176,10 +3112,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           if (sessionActivationController === activationController) {
             sessionActivationController = null;
             sessionActivationDirectory = null;
-            (() => {
-              appStore.setState(storePath('pendingSessionSelectionId', null));
-              appStore.setState(storePath('messagesLoading', false));
-            })();
+            appStore.setState(storePath('pendingSessionSelectionId', null));
+            appStore.setState(storePath('messagesLoading', false));
           }
           return false;
         }
@@ -3196,10 +3130,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (sessionActivationController === activationController) {
           sessionActivationController = null;
           sessionActivationDirectory = null;
-          (() => {
-            appStore.setState(storePath('pendingSessionSelectionId', null));
-            appStore.setState(storePath('messagesLoading', false));
-          })();
+          appStore.setState(storePath('pendingSessionSelectionId', null));
+          appStore.setState(storePath('messagesLoading', false));
         }
         if (
           activation === sessionActivationGeneration &&
@@ -3439,26 +3371,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     );
   }
 
-  async function sendMessage(
-    text: string,
-    options?: {
-      messageId?: string;
-      agent?: string;
-      noReply?: boolean;
-      delivery?: 'steer' | 'queue';
-      queuedAttachments?: QueuedAttachmentSnapshot;
-      queuedContext?: QueuedContextSnapshot;
-      preserveComposer?: boolean;
-      omitContext?: boolean;
-      followupTitle?: string;
-      targetSessionId?: string | null;
-      workspaceDirectory?: string;
-      newSessionWorkspace?: SessionWorkspaceTarget;
-      queuedMessageDispatch?: { itemId: string; lease: number };
-      onOptimisticPublish?: () => void;
-      validateBeforeSend?: () => Promise<boolean>;
-    }
-  ): Promise<boolean> {
+  async function sendMessage(text: string, options?: SendMessageOptions): Promise<boolean> {
     return await sessionSendOperations.sendMessage(text, options);
   }
 
@@ -3466,16 +3379,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     await sessionSendOperations.retryMessage(messageId, sessionId);
   }
 
-  async function editMessage(
-    messageId: string,
-    text: string,
-    options?: {
-      allowEmptyText?: boolean;
-      queuedAttachments?: QueuedAttachmentSnapshot;
-      selectedModel?: SelectedModel;
-      onOptimisticPublish?: () => void;
-    }
-  ) {
+  async function editMessage(messageId: string, text: string, options?: EditMessageOptions) {
     return await sessionControlOperations.editMessage(messageId, text, options);
   }
 

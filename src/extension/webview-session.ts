@@ -54,6 +54,19 @@ function encodeLargeApiResponse(payload: ApiResponsePayload): ApiResponsePayload
   return encoded;
 }
 
+type QueuedCommand = Extract<
+  ExtensionMessage,
+  {
+    type:
+      | 'command/new-session'
+      | 'command/attach-problems'
+      | 'command/abort'
+      | 'command/switch-session'
+      | 'command/open-session'
+      | 'command/highlight-session';
+  }
+>;
+
 export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
   public blockingRequestsForWebview: BlockingRequestSnapshot[] = [];
@@ -63,20 +76,7 @@ export class WebviewSession {
   private pendingSearchSessions = false;
   private pendingOpenAttentionSessions = false;
   private pendingOpenCompletedSessions = false;
-  private pendingCommands: Array<
-    Extract<
-      ExtensionMessage,
-      {
-        type:
-          | 'command/new-session'
-          | 'command/attach-problems'
-          | 'command/abort'
-          | 'command/switch-session'
-          | 'command/open-session'
-          | 'command/highlight-session';
-      }
-    >
-  > = [];
+  private pendingCommands: QueuedCommand[] = [];
   private commandStateReady = false;
   private commandState: { canAbort: boolean; canSwitchSessions: boolean } | undefined;
   private webviewLoadGeneration = 0;
@@ -230,20 +230,7 @@ export class WebviewSession {
     this.flushPendingOpenCompletedSessions();
   }
 
-  queueCommand(
-    message: Extract<
-      ExtensionMessage,
-      {
-        type:
-          | 'command/new-session'
-          | 'command/attach-problems'
-          | 'command/abort'
-          | 'command/switch-session'
-          | 'command/open-session'
-          | 'command/highlight-session';
-      }
-    >
-  ) {
+  queueCommand(message: QueuedCommand) {
     this.pendingCommands.push(message);
     this.flushPendingCommands();
   }

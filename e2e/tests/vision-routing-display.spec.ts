@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry, Session } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const separator of ['\n', ' ']) {
   test(`hides vision routing joined with ${JSON.stringify(separator)} while keeping the image and edit draft`, async ({
@@ -44,14 +45,7 @@ for (const separator of ['\n', ' ']) {
         },
       ],
     };
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated playback harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages: [message] }
-    );
+    await installPlaybackCapture(page, { session, initialMessages: [message] });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
 
     const card = page.locator('[data-msg-id="prompt-vision"] .user-message-card');

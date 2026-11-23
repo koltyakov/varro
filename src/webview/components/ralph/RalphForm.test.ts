@@ -108,6 +108,11 @@ vi.mock('../../../shared/ralph-prompts', () => ({
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
+function mountView(view: Parameters<typeof render>[0]) {
+  cleanup = render(view, container!);
+  flushSolid();
+}
+
 async function flushMicrotasks(count = 4) {
   for (let i = 0; i < count; i += 1) {
     await Promise.resolve();
@@ -165,8 +170,7 @@ afterEach(() => {
 
 describe('RalphForm', () => {
   it('is a labelled modal and moves focus to its first control', async () => {
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
     await flushMicrotasks();
     flushSolid();
 
@@ -185,8 +189,7 @@ describe('RalphForm', () => {
     container!.tabIndex = -1;
     container!.focus();
     flushSolid();
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
     await flushMicrotasks();
     flushSolid();
 
@@ -216,8 +219,7 @@ describe('RalphForm', () => {
 
   it('makes the session UI inert until the modal closes', () => {
     container!.className = 'interactive-session';
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     expect(container?.hasAttribute('inert')).toBe(true);
 
@@ -228,8 +230,7 @@ describe('RalphForm', () => {
   });
 
   it('does not close when the backdrop is clicked', () => {
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const overlay = document.body.querySelector('.ralph-form-overlay');
     expect(overlay).toBeInstanceOf(HTMLDivElement);
@@ -245,8 +246,7 @@ describe('RalphForm', () => {
     container!.tabIndex = -1;
     container!.focus();
     flushSolid();
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
     await flushMicrotasks();
     flushSolid();
 
@@ -259,8 +259,7 @@ describe('RalphForm', () => {
   });
 
   it('closes a nested picker before closing the modal and resets it for the next open', async () => {
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
     await flushMicrotasks();
     flushSolid();
 
@@ -292,8 +291,7 @@ describe('RalphForm', () => {
   });
 
   it('still closes from the explicit cancel button', () => {
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const cancelButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Cancel'
@@ -320,8 +318,7 @@ describe('RalphForm', () => {
     openCodeMocks.deleteSessionImmediately
       .mockRejectedValueOnce(new Error('transient delete failure'))
       .mockResolvedValue(undefined);
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const startButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Start loop'
@@ -370,8 +367,7 @@ describe('RalphForm', () => {
       await selection.promise;
       stateMock.activeSessionId = 'orphaned-ralph-session';
     });
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const startButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Start loop'
@@ -409,8 +405,7 @@ describe('RalphForm', () => {
     stateMock.editorContext.workspacePath = '/repo';
     clientMocks.create.mockResolvedValue({ id: 'orphaned-ralph-session' });
     clientMocks.sendAsync.mockReturnValue(anchor.promise);
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const startButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Start loop'
@@ -446,8 +441,7 @@ describe('RalphForm', () => {
       path: 'docs/RALPH.md',
       workspaceDirectory: '/repo-b',
     });
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const pickButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Pick file'
@@ -474,8 +468,7 @@ describe('RalphForm', () => {
     });
     clientMocks.create.mockResolvedValue({ id: 'ralph-session' });
     clientMocks.sendAsync.mockResolvedValue(undefined);
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const pickButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Pick file'
@@ -515,8 +508,7 @@ describe('RalphForm', () => {
       language: 'markdown',
     };
 
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const input = document.body.querySelector('input[type="text"]');
     expect(input).toBeInstanceOf(HTMLInputElement);
@@ -550,8 +542,7 @@ describe('RalphForm', () => {
     stateMock.editorContext.workspacePath = '/repo/';
     clientMocks.create.mockResolvedValue({ id: 'ralph-session' });
     clientMocks.sendAsync.mockResolvedValue(undefined);
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const startButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Start loop'
@@ -593,8 +584,7 @@ describe('RalphForm', () => {
         },
       },
     ];
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     document.body.querySelector<HTMLButtonElement>('[aria-label="Thinking level"]')?.click();
     flushSolid();
@@ -611,8 +601,7 @@ describe('RalphForm', () => {
       relativePath: '/tmp/RALPH.md',
       language: 'markdown',
     };
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const startButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Start loop'
@@ -653,8 +642,7 @@ describe('RalphForm', () => {
     ];
     stateMock.providerDefaults = { 'github-copilot': 'gpt-5.4-mini' };
 
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const modelButton = document.body.querySelector<HTMLButtonElement>('.model-picker-btn');
     expect(modelButton?.textContent).toContain('GPT-5.4 Mini');
@@ -678,8 +666,7 @@ describe('RalphForm', () => {
     ];
     stateMock.selectedModel = { providerID: 'openai', modelID: 'gpt-5.4' };
 
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     const modelButton = document.body.querySelector<HTMLButtonElement>('.model-picker-btn');
     modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -691,8 +678,7 @@ describe('RalphForm', () => {
   });
 
   it('renders the model popup outside the scrolling form body', async () => {
-    cleanup = render(() => RalphForm(), container!);
-    flushSolid();
+    mountView(() => RalphForm());
 
     document.body.querySelector<HTMLButtonElement>('.ralph-form-card .model-picker-btn')?.click();
     flushSolid();

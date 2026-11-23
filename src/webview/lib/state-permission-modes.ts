@@ -19,6 +19,7 @@ import {
   readStoredPermissionModes,
   readWebviewInstanceContext,
 } from './state-stored-values';
+import { reconcileStoreField } from './store-reconcile';
 
 type PendingSessionPermissionMode = {
   generation: number;
@@ -122,13 +123,7 @@ export function applySessionPermissionModesSnapshot(
   for (const [sessionId, pending] of pendingSessionPermissionModes) {
     effectiveModes[sessionId] = pending.mode;
   }
-  setState((draft) => {
-    const current = draft['sessionPermissionModes'];
-    const incoming = effectiveModes satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionPermissionModes'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setState((draft) => reconcileStoreField(draft, 'sessionPermissionModes', effectiveModes));
   setState(storePath('permissionModeRecoverySessionIds', recoveringSessionIds));
   writeStored(STORAGE_KEYS.sessionPermissionModes, effectiveModes);
 }

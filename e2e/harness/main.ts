@@ -536,6 +536,19 @@ function makeSessionWithPermission(
   };
 }
 
+/** Lists `session` as the only session and opens it with `messages`. */
+function openOnlySession(
+  state: ScenarioState,
+  session: Session,
+  messages: MessageEntry[],
+  status: SessionStatus = { type: 'idle' }
+) {
+  state.sessions = [session];
+  state.sessionStatuses[session.id] = status;
+  state.messagesBySessionId[session.id] = messages;
+  state.persistedActiveSessionId = session.id;
+}
+
 function makeUserMessage(
   sessionId: string,
   id: string,
@@ -896,10 +909,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Refactor status looks good. The latest cleanup is ready for review.',
       BASE_TIME - 6_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 10;
     return state;
   }
@@ -923,10 +933,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'The previous response should stay visible while the stream reconnects.',
       BASE_TIME - 6_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.postReadyMessages.push(
       {
         __dispatchDelayMs: 200,
@@ -966,10 +973,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Startup completed without losing the restored session.',
       BASE_TIME - 6_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.readyStatus = { state: 'starting' };
     state.postReadyMessages.push({
       __dispatchDelayMs: 800,
@@ -997,10 +1001,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'The second startup attempt connected and restored the session state.',
       BASE_TIME - 6_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.readyStatus = { state: 'starting' };
     state.healthFailuresRemaining = 1;
     state.postReadyMessages.push(
@@ -1025,10 +1026,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
   if (name === 'pending-permission') {
     const session = makeSession('session-permission', 'Permission Request', BASE_TIME - 1_000);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.pendingPermissions = [
       {
         id: 'permission-run-tests',
@@ -1098,10 +1096,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         time: { start: BASE_TIME - 4_000 + index },
       },
     }));
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = [...history, user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [...history, user, assistant], { type: 'busy' });
     state.pendingPermissions = assistant.parts.map((part, index) => ({
       id: `permission-collapse-${index}`,
       permission: 'bash',
@@ -1247,10 +1242,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
     ];
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.pendingPermissions = [
       {
         id: 'permission-hidden-linked-1',
@@ -1302,10 +1294,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
     ];
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant], { type: 'busy' });
     state.initialPendingPermissions = [];
     state.pendingPermissions = [
       {
@@ -1458,10 +1447,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         BASE_TIME - 1_000
       )
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     return state;
   }
 
@@ -1489,10 +1475,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         '4. Exercise sticky prompt behavior with a long assistant reply and confirm the preview yields before overlap.',
       ].join('\n')
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 40;
     return state;
   }
@@ -1541,10 +1524,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       const text = assistant2.parts.find((part) => part.type === 'text');
       if (text) text.time = { start: BASE_TIME - 1_000, end: BASE_TIME };
     }
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user1, assistant1, user2, assistant2];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user1, assistant1, user2, assistant2]);
     addDenseSearchModels(state);
     state.nextSequence = 50;
     return state;
@@ -1573,10 +1553,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       ).join('\n\n'),
       BASE_TIME - 6_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 55;
     return state;
   }
@@ -1635,10 +1612,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       singleImage ? 'Received one image.' : 'Received ten images.',
       BASE_TIME - 1_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [...earlierMessages, user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [...earlierMessages, user, assistant]);
     state.nextSequence = 20;
     return state;
   }
@@ -1707,10 +1681,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         )
       );
     }
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     state.nextSequence = 50;
     return state;
   }
@@ -1857,10 +1828,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       messages.push(assistant);
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     state.nextSequence = 51;
     return state;
   }
@@ -1963,10 +1931,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       messages.push(assistant);
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     state.nextSequence = 70;
     return state;
   }
@@ -2093,10 +2058,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       );
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     state.nextSequence = 71;
     return state;
   }
@@ -2144,10 +2106,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       ]
     );
     markAssistantInProgress(assistant);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant], { type: 'busy' });
     if (new URLSearchParams(window.location.search).get('mcp') === '1') {
       state.mcpStatus = createDenseMcpStatus();
     }
@@ -2185,10 +2144,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         ]),
       ]
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 70;
     return state;
   }
@@ -2279,20 +2235,14 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500,
       DEFAULT_PERMISSION_RULES as unknown as Session['permission']
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.nextSequence = 80;
     return state;
   }
 
   if (name === 'transport-degraded') {
     const session = makeSession('session-transport', 'Reconnecting stream', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.readyStatus = { state: 'running', url: 'mock://opencode', eventStream: 'degraded' };
     state.nextSequence = 90;
     return state;
@@ -2339,10 +2289,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500,
       DEFAULT_PERMISSION_RULES as unknown as Session['permission']
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.mcpStatus = {
       chrome: { status: 'connected' },
       figma: { status: 'needs_auth', error: 'Login required' },
@@ -2384,10 +2331,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500,
       DEFAULT_PERMISSION_RULES as unknown as Session['permission']
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.mcpStatus = {
       chrome: { status: 'connected' },
       figma: { status: 'needs_auth', error: 'Login required' },
@@ -2405,10 +2349,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500,
       DEFAULT_PERMISSION_RULES as unknown as Session['permission']
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.mcpStatus = {
       chrome: { status: 'connected' },
       playwright: { status: 'disabled' },
@@ -2503,20 +2444,14 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 3_000
     );
     markAssistantInProgress(assistant);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant], { type: 'busy' });
     state.nextSequence = 150;
     return state;
   }
 
   if (name === 'new-session-command') {
     const session = makeSession('session-command-seed', 'Existing session', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.postReadyMessages.push({ type: 'command/new-session' });
     state.nextSequence = 160;
     return state;
@@ -2571,10 +2506,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
   if (name === 'model-search') {
     const session = makeSession('session-model-search', 'Model picker search', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     addDenseSearchModels(state);
     state.nextSequence = 180;
     return state;
@@ -2582,10 +2514,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
   if (name === 'mcp-search') {
     const session = makeSession('session-mcp-search', 'MCP picker search', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.mcpStatus = createDenseMcpStatus();
     state.storedState = {
       sessionSelectedMcps: {
@@ -2609,10 +2538,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         { permission: 'bash', pattern: '*', action: 'allow' },
       ] as unknown as Session['permission']
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.storedState = {
       sessionPermissionModes: {
         [session.id]: 'full',
@@ -2637,10 +2563,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'The task is still running.',
       BASE_TIME - 3_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant], { type: 'busy' });
     state.postReadyMessages.push({ type: 'command/abort' });
     state.nextSequence = 210;
     return state;
@@ -2731,10 +2654,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
   if (name === 'native-form-prompt') {
     const session = makeSession('session-native-form', 'Native form flow', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.questions = [
       {
         id: 'frm_native',
@@ -2781,10 +2701,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
   if (name === 'native-question-prompt' || name === 'native-question-inputs') {
     const session = makeSession('session-native-question', 'Native question flow', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.questions = [
       {
         id: 'frm_native_question',
@@ -2859,10 +2776,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
   if (name === 'question-prompt') {
     const session = makeSession('session-question-prompt', 'Question prompt flow', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.questions = [
       {
         id: 'question-prompt-1',
@@ -2926,20 +2840,14 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     };
     assistant.info.providerID = 'opencode';
     assistant.info.modelID = 'go-plan';
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 260;
     return state;
   }
 
   if (name === 'review-slash') {
     const session = makeSession('session-review-slash', 'Review slash flow', BASE_TIME - 500);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.nextSequence = 270;
     return state;
   }
@@ -2959,10 +2867,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Here is the first draft that can be reverted.',
       BASE_TIME - 4_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 280;
     return state;
   }
@@ -2999,10 +2904,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
     ];
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.questions = [
       {
         id: 'linked-tool-question-1',
@@ -3122,10 +3024,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
     ];
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 300;
     return state;
   }
@@ -3744,10 +3643,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
     ];
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 330;
     return state;
   }
@@ -3758,10 +3654,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Grouped permissions',
       BASE_TIME - 500
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.pendingPermissions = [
       {
         id: 'permission-group-1',
@@ -3796,10 +3689,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'Sequential permissions',
       BASE_TIME - 500
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.pendingPermissions = [
       {
         id: 'permission-sequence-1',
@@ -3875,10 +3765,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
     ];
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 350;
     return state;
   }
@@ -3936,20 +3823,14 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       ].join('\n'),
       BASE_TIME - 4_000
     );
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, [user, assistant]);
     state.nextSequence = 360;
     return state;
   }
 
   if (name === 'ralph-dashboard') {
     const session = makeSession('session-ralph-1', 'Ralph: PLAN.md', BASE_TIME - 2_000);
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [];
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, []);
     state.nextSequence = 370;
     state.storedState = {
       ralphRuns: {
@@ -4287,10 +4168,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       );
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     return state;
   }
 
@@ -4500,10 +4378,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       );
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     return state;
   }
 
@@ -4574,10 +4449,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       );
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     return state;
   }
 
@@ -4636,10 +4508,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       messages.push(user, assistant);
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     state.nextSequence = 395;
     return state;
   }
@@ -4804,10 +4673,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       }
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     state.nextSequence = 400;
     return state;
   }
@@ -4883,10 +4749,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       );
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     return state;
   }
 
@@ -4936,10 +4799,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       messages.push(user, assistant);
     }
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages);
     state.nextSequence = 405;
     return state;
   }
@@ -5084,10 +4944,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     };
     messages.push(streamingAssistant);
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages, { type: 'busy' });
     state.nextSequence = 500;
     return state;
   }
@@ -5161,10 +5018,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     };
     messages.push(streamingAssistant);
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages, { type: 'busy' });
     state.nextSequence = 600;
     if (new URLSearchParams(window.location.search).get('secondBusySession') === '1') {
       const second = makeSession('session-rapid-second', 'Second busy session', BASE_TIME);
@@ -5323,10 +5177,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     };
     messages.push(streamingAssistant);
 
-    state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'busy' };
-    state.messagesBySessionId[session.id] = messages;
-    state.persistedActiveSessionId = session.id;
+    openOnlySession(state, session, messages, { type: 'busy' });
     state.nextSequence = 700;
     return state;
   }

@@ -1,6 +1,6 @@
 import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, vi } from 'vitest';
-import { reconcile, untrack } from 'solid-js';
+import { flush as flushSolid, reconcile, untrack } from 'solid-js';
 import {
   setExpandThinking,
   setState,
@@ -11,6 +11,7 @@ import {
   state,
   stopLoading,
 } from '../lib/state';
+import type { AppState } from '../lib/state';
 import type {
   AssistantMessage,
   FilePart,
@@ -92,34 +93,10 @@ export function installMessageListTestEnvironment(
     setState(storePath('streamingText', ''));
     resetMessageWindowState();
     resetToolCallExpansionState();
-    setState((draft) => {
-      const current = draft['sessionSelectedAgents'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionSelectedAgents'] = incoming;
-      else reconcile(incoming)(current);
-    });
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
-    setState((draft) => {
-      const current = draft['sessionAutoPermissionCounts'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionAutoPermissionCounts'] = incoming;
-      else reconcile(incoming)(current);
-    });
-    setState((draft) => {
-      const current = draft['skippedPlanSessions'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['skippedPlanSessions'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionSelectedAgents', {});
+    setStateRecord('sessionStatus', {});
+    setStateRecord('sessionAutoPermissionCounts', {});
+    setStateRecord('skippedPlanSessions', {});
     setShowFileDiffs(false);
     setShowEmptyStateHistogram(false);
     setExpandThinking(false);
@@ -127,51 +104,11 @@ export function installMessageListTestEnvironment(
     stopLoading();
     resetMessageEditState();
     setExpandedDiffOverlay(testDiffOverlayOwner, false);
-    if (originalResizeObserver) {
-      globalThis.ResizeObserver = originalResizeObserver;
-    } else {
-      Object.defineProperty(globalThis, 'ResizeObserver', {
-        configurable: true,
-        value: undefined,
-        writable: true,
-      });
-    }
-    if (originalIntersectionObserver) {
-      globalThis.IntersectionObserver = originalIntersectionObserver;
-    } else {
-      Object.defineProperty(globalThis, 'IntersectionObserver', {
-        configurable: true,
-        value: undefined,
-        writable: true,
-      });
-    }
-    if (originalRequestAnimationFrame) {
-      globalThis.requestAnimationFrame = originalRequestAnimationFrame;
-    } else {
-      Object.defineProperty(globalThis, 'requestAnimationFrame', {
-        configurable: true,
-        value: undefined,
-        writable: true,
-      });
-    }
-    if (originalCancelAnimationFrame) {
-      globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
-    } else {
-      Object.defineProperty(globalThis, 'cancelAnimationFrame', {
-        configurable: true,
-        value: undefined,
-        writable: true,
-      });
-    }
-    if (originalScrollIntoView) {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    } else {
-      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
-        configurable: true,
-        value: undefined,
-        writable: true,
-      });
-    }
+    restoreProperty(globalThis, 'ResizeObserver', originalResizeObserver);
+    restoreProperty(globalThis, 'IntersectionObserver', originalIntersectionObserver);
+    restoreProperty(globalThis, 'requestAnimationFrame', originalRequestAnimationFrame);
+    restoreProperty(globalThis, 'cancelAnimationFrame', originalCancelAnimationFrame);
+    restoreProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView);
     vi.restoreAllMocks();
     // Queued frame fixtures replace window methods too, and assertions can skip restore().
     window.requestAnimationFrame = originalWindowRequestAnimationFrame;
@@ -180,6 +117,31 @@ export function installMessageListTestEnvironment(
 }
 
 export { testDiffOverlayOwner };
+
+function restoreProperty<T extends typeof globalThis | HTMLElement, K extends keyof T>(
+  target: T,
+  key: K,
+  original: T[K] | undefined
+): void {
+  if (original) target[key] = original;
+  else Object.defineProperty(target, key, { configurable: true, value: undefined, writable: true });
+}
+
+type RecordStateKey =
+  | 'sessionAutoPermissionCounts'
+  | 'sessionSelectedAgents'
+  | 'sessionSelectedModels'
+  | 'sessionStatus'
+  | 'skippedPlanSessions';
+
+/** Replaces one keyed state record the way production setters do, reconciling in place. */
+export function setStateRecord<K extends RecordStateKey>(key: K, incoming: AppState[K]): void {
+  setState((draft) => {
+    const current = draft[key];
+    if (current === null || current === undefined) draft[key] = incoming;
+    else reconcile(incoming)(current);
+  });
+}
 
 export function installQueuedAnimationFrameMocks() {
   const originalGlobalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -196,26 +158,24 @@ export function installQueuedAnimationFrameMocks() {
     pendingAnimationFrameCallbacks[id - 1] = null;
   });
 
-  Object.defineProperty(globalThis, 'requestAnimationFrame', {
-    configurable: true,
-    writable: true,
-    value: requestAnimationFrameMock,
-  });
-  Object.defineProperty(globalThis, 'cancelAnimationFrame', {
-    configurable: true,
-    writable: true,
-    value: cancelAnimationFrameMock,
-  });
-  Object.defineProperty(window, 'requestAnimationFrame', {
-    configurable: true,
-    writable: true,
-    value: requestAnimationFrameMock,
-  });
-  Object.defineProperty(window, 'cancelAnimationFrame', {
-    configurable: true,
-    writable: true,
-    value: cancelAnimationFrameMock,
-  });
+  const install = (
+    target: typeof globalThis | Window,
+    request: typeof requestAnimationFrame,
+    cancel: typeof cancelAnimationFrame
+  ) => {
+    Object.defineProperty(target, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: request,
+    });
+    Object.defineProperty(target, 'cancelAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: cancel,
+    });
+  };
+  install(globalThis, requestAnimationFrameMock, cancelAnimationFrameMock);
+  install(window, requestAnimationFrameMock, cancelAnimationFrameMock);
 
   return {
     flush(now = 0) {
@@ -223,28 +183,19 @@ export function installQueuedAnimationFrameMocks() {
       for (const callback of callbacks) callback?.(now);
     },
     restore() {
-      Object.defineProperty(globalThis, 'requestAnimationFrame', {
-        configurable: true,
-        writable: true,
-        value: originalGlobalRequestAnimationFrame,
-      });
-      Object.defineProperty(globalThis, 'cancelAnimationFrame', {
-        configurable: true,
-        writable: true,
-        value: originalGlobalCancelAnimationFrame,
-      });
-      Object.defineProperty(window, 'requestAnimationFrame', {
-        configurable: true,
-        writable: true,
-        value: originalWindowRequestAnimationFrame,
-      });
-      Object.defineProperty(window, 'cancelAnimationFrame', {
-        configurable: true,
-        writable: true,
-        value: originalWindowCancelAnimationFrame,
-      });
+      install(globalThis, originalGlobalRequestAnimationFrame, originalGlobalCancelAnimationFrame);
+      install(window, originalWindowRequestAnimationFrame, originalWindowCancelAnimationFrame);
     },
   };
+}
+
+type QueuedAnimationFrames = ReturnType<typeof installQueuedAnimationFrameMocks>;
+
+/** Runs one queued animation frame with Solid flushed on both sides of it. */
+export function flushFrame(animationFrames: Pick<QueuedAnimationFrames, 'flush'>): void {
+  flushSolid();
+  animationFrames.flush();
+  flushSolid();
 }
 
 export function settleBottomFollow(
@@ -279,6 +230,123 @@ export async function measureTranscriptRows(
   await Promise.resolve();
   settleBottomFollow(animationFrames, list);
   await Promise.resolve();
+}
+
+export interface TrackedResizeObserver {
+  readonly callback: ResizeObserverCallback;
+  readonly targets: Set<Element>;
+}
+
+/** Installs a ResizeObserver that records every instance with its currently observed targets. */
+export function installTrackedResizeObservers(): TrackedResizeObserver[] {
+  const observers: TrackedResizeObserver[] = [];
+  class TestResizeObserver {
+    readonly targets = new Set<Element>();
+
+    constructor(readonly callback: ResizeObserverCallback) {
+      observers.push(this);
+    }
+    observe(target: Element) {
+      this.targets.add(target);
+    }
+    unobserve(target: Element) {
+      this.targets.delete(target);
+    }
+    disconnect() {
+      this.targets.clear();
+    }
+  }
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+  return observers;
+}
+
+/** Installs a ResizeObserver that only records the callback of every instance. */
+export function captureResizeObserverCallbacks(): ResizeObserverCallback[] {
+  const resizeCallbacks: ResizeObserverCallback[] = [];
+  class TestResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      resizeCallbacks.push(callback);
+    }
+
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+  globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+  return resizeCallbacks;
+}
+
+/** Delivers one entry-less resize notification to every captured callback. */
+export function notifyResizeObservers(resizeCallbacks: readonly ResizeObserverCallback[]): void {
+  for (const callback of resizeCallbacks) {
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    callback([], {} as ResizeObserver);
+  }
+}
+
+/** Replaces element geometry with a per-element rectangle resolver. */
+export function mockElementRects(resolve: (element: HTMLElement) => DOMRect) {
+  return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement
+  ) {
+    return resolve(this);
+  });
+}
+
+/** Reports `trackHeight()` for the list track and a fixed viewport box for every other element. */
+export function mockTrackRects(trackHeight: () => number, viewportHeight = 400) {
+  return mockElementRects(
+    (element) =>
+      new DOMRect(
+        0,
+        0,
+        500,
+        element.classList.contains('interactive-list-track') ? trackHeight() : viewportHeight
+      )
+  );
+}
+
+type LayoutMetrics<T> = Partial<
+  Record<'clientHeight' | 'clientWidth' | 'offsetWidth' | 'scrollHeight', T>
+>;
+
+/**
+ * Overrides layout metrics that jsdom reports as zero: `fixed` entries become read-only
+ * values and `live` entries become getters evaluated on every read.
+ */
+export function defineLayoutMetrics(
+  element: Element,
+  fixed: LayoutMetrics<number>,
+  live: LayoutMetrics<() => number> = {}
+): void {
+  for (const [name, value] of Object.entries(fixed)) {
+    Object.defineProperty(element, name, { configurable: true, value });
+  }
+  for (const [name, get] of Object.entries(live)) {
+    Object.defineProperty(element, name, { configurable: true, get });
+  }
+}
+
+/**
+ * Backs `element.scrollTop` with a test-owned box, so tests can read every position the list
+ * assigns and force browser-style scroll positions by writing `scrollTop.value`.
+ * `onAssign` observes each assignment made through the element.
+ */
+export function backScrollTop(
+  element: Element,
+  scrollTop: { value: number },
+  onAssign?: (value: number) => void
+): void {
+  Object.defineProperty(element, 'scrollTop', {
+    configurable: true,
+    get: () => scrollTop.value,
+    set: (value: number) => {
+      scrollTop.value = value;
+      onAssign?.(value);
+    },
+  });
 }
 
 export function installControllableIntersectionObserver() {
@@ -400,6 +468,39 @@ export function assistantMessage(
     },
     variant: options?.variant,
   };
+}
+
+/** Builds `count` single-text assistant rows: `assistant-N` holding `text-N` ("Response N"). */
+export function assistantRows(count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const messageId = `assistant-${index}`;
+    return {
+      info: assistantMessage(messageId),
+      parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+    };
+  });
+}
+
+/** Builds one `user-1`/`assistant-1` turn with `text-1` and `text-2` parts. */
+export function promptAndResponse(prompt: string, response: string) {
+  return [
+    { info: userMessage('user-1'), parts: [textPart('text-1', prompt)] },
+    { info: assistantMessage('assistant-1'), parts: [textPart('text-2', response)] },
+  ];
+}
+
+/** Builds numbered turns: `user-N` ("Prompt N") then `assistant-N` ("Response N"), parts `text-1..`. */
+export function conversationTurns(count: number) {
+  return Array.from({ length: count }, (_, index) => [
+    {
+      info: userMessage(`user-${index + 1}`),
+      parts: [textPart(`text-${index * 2 + 1}`, `Prompt ${index + 1}`)],
+    },
+    {
+      info: assistantMessage(`assistant-${index + 1}`),
+      parts: [textPart(`text-${index * 2 + 2}`, `Response ${index + 1}`)],
+    },
+  ]).flat();
 }
 
 export function hasAssistantModelChangeBetween(previousId: string, currentId: string) {

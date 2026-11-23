@@ -15,5 +15,3 @@ export const appStore = {
   resetDefaultAppState,
   consumeInterruptedSessionIds,
 };
-
-export type AppStore = typeof appStore;

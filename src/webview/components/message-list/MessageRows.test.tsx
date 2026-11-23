@@ -8,7 +8,7 @@ import { setState, skipPlanSession, startLoading, stopLoading } from '../../lib/
 import { resetMessageEditState, startEditingMessage } from '../../lib/message-edit-state';
 import { registerMessageBlockRemovalHandler } from '../../lib/message-list-layout';
 import { copyIcon, gitForkIcon, xmarkCircleIcon } from '../../lib/ui-icons';
-import { assistantMessage, textPart, userMessage } from '../MessageList.test-utils';
+import { assistantMessage, session, textPart, userMessage } from '../MessageList.test-utils';
 import { toCssUrl } from '../UiIcon';
 import {
   AssistantDialogSummaryForMessage,
@@ -150,14 +150,7 @@ describe('AssistantDialogSummaryForMessage', () => {
   it('replaces skipped plan actions with a confirmation and clears stale skips', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Plan',
-          version: '1',
-          time: { created: 100, updated: 200 },
-        },
+        session('session-1', { title: 'Plan', time: { created: 100, updated: 200 } }),
       ])
     );
     flushSolid();
@@ -210,14 +203,7 @@ describe('AssistantDialogSummaryForMessage', () => {
     ({ agent, messageId }) => {
       setState(
         storePath('sessions', [
-          {
-            id: 'session-1',
-            projectID: 'project-1',
-            directory: '/workspace',
-            title: 'Plan',
-            version: '1',
-            time: { created: 100, updated: 200 },
-          },
+          session('session-1', { title: 'Plan', time: { created: 100, updated: 200 } }),
         ])
       );
       flushSolid();

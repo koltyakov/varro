@@ -444,53 +444,43 @@ export function RichComposerArea(props: {
       return true;
     }
 
-    for (const chip of props.chips) {
-      if (chip.type === 'external-link' || chip.type === 'mention-session') continue;
-      let markerStart = props.value.indexOf(chip.textMarker);
-      while (markerStart !== -1) {
-        const markerEnd = markerStart + chip.textMarker.length;
-        const shouldRemove =
-          (event.key === 'Backspace' && selection.start === markerEnd) ||
-          (event.key === 'Delete' && selection.start === markerStart);
-        if (shouldRemove) {
-          event.preventDefault();
-          props.onInput(
-            `${props.value.slice(0, markerStart)}${props.value.slice(markerEnd)}`,
-            markerStart
-          );
-          props.onRemoveChip?.(chip.id);
-          return true;
+    const removeChipMarkerAtSelection = (matches: (chip: RichComposerChip) => boolean) => {
+      for (const chip of props.chips) {
+        if (!matches(chip)) continue;
+        let markerStart = props.value.indexOf(chip.textMarker);
+        while (markerStart !== -1) {
+          const markerEnd = markerStart + chip.textMarker.length;
+          const shouldRemove =
+            (event.key === 'Backspace' && selection.start === markerEnd) ||
+            (event.key === 'Delete' && selection.start === markerStart);
+          if (shouldRemove) {
+            event.preventDefault();
+            props.onInput(
+              `${props.value.slice(0, markerStart)}${props.value.slice(markerEnd)}`,
+              markerStart
+            );
+            props.onRemoveChip?.(chip.id);
+            return true;
+          }
+          markerStart = props.value.indexOf(chip.textMarker, markerEnd);
         }
-        markerStart = props.value.indexOf(chip.textMarker, markerEnd);
       }
-    }
+      return false;
+    };
+
+    if (
+      removeChipMarkerAtSelection(
+        (chip) => chip.type !== 'external-link' && chip.type !== 'mention-session'
+      )
+    )
+      return true;
 
     if (removeSessionReferenceAtSelection()) {
       event.preventDefault();
       return true;
     }
 
-    for (const chip of props.chips) {
-      if (chip.type !== 'mention-session') continue;
-      let markerStart = props.value.indexOf(chip.textMarker);
-      while (markerStart !== -1) {
-        const markerEnd = markerStart + chip.textMarker.length;
-        const shouldRemove =
-          (event.key === 'Backspace' && selection.start === markerEnd) ||
-          (event.key === 'Delete' && selection.start === markerStart);
-        if (shouldRemove) {
-          event.preventDefault();
-          props.onInput(
-            `${props.value.slice(0, markerStart)}${props.value.slice(markerEnd)}`,
-            markerStart
-          );
-          props.onRemoveChip?.(chip.id);
-          return true;
-        }
-        markerStart = props.value.indexOf(chip.textMarker, markerEnd);
-      }
-    }
-    return false;
+    return removeChipMarkerAtSelection((chip) => chip.type === 'mention-session');
   }
 
   function removeTrailingLineBreak(): boolean {

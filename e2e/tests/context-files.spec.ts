@@ -1,7 +1,6 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- Playwright callbacks validate synthetic request bodies before inspecting prompt parts. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bridge controlled file-context requests to the shapes under test. */
 import { expect, test } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getFirstPromptParts } from './helpers';
 
 test('searches workspace files via @ mention and adds file to context', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=file-search');
@@ -125,24 +124,12 @@ test('message body includes attached file reference', async ({ page }) => {
   await page.keyboard.press('Enter');
 
   await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-          }
-        ).__varroE2E;
-        const promptReq = value?.requests.find(
-          (req) => req.method === 'POST' && req.path.includes('prompt_async')
-        );
-        if (!promptReq?.body || typeof promptReq.body !== 'object') return null;
-        const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
-        if (!body.parts) return null;
-        return body.parts.some(
+    .poll(
+      async () =>
+        (await getFirstPromptParts(page))?.some(
           (part) =>
             part.type === 'text' && typeof part.text === 'string' && part.text.includes('README.md')
-        );
-      })
+        ) ?? null
     )
     .toBe(true);
 });
@@ -180,25 +167,12 @@ test('message uses workspace-relative path for file references', async ({ page }
   await page.keyboard.press('Enter');
 
   await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-          }
-        ).__varroE2E;
-        const promptReq = value?.requests.find(
-          (req) => req.method === 'POST' && req.path.includes('prompt_async')
-        );
-        if (!promptReq?.body || typeof promptReq.body !== 'object') return null;
-        const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
-        if (!body.parts) return null;
-        const part = body.parts.find(
+    .poll(
+      async () =>
+        (await getFirstPromptParts(page))?.find(
           (p) =>
             p.type === 'text' && typeof p.text === 'string' && p.text.includes('session-filter')
-        );
-        return part?.text || null;
-      })
+        )?.text || null
     )
     .toContain('src/lib/session-filter.ts');
 });

@@ -1,4 +1,4 @@
-import { flush as flushSolid, reconcile } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -40,6 +40,11 @@ import {
   textPart,
   toolPart,
   userMessage,
+  setStateRecord,
+  flushFrame,
+  mockElementRects,
+  defineLayoutMetrics,
+  backScrollTop,
 } from './MessageList.test-utils';
 
 let container: HTMLDivElement | null = null;
@@ -55,6 +60,34 @@ installMessageListTestEnvironment({
     cleanup = nextCleanup;
   },
 });
+
+/** Mounts MessageList into the test container and returns its scroll container. */
+function mountList(): HTMLDivElement {
+  cleanup = render(() => MessageList(), container!);
+  flushSolid();
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+  return container?.querySelector('.interactive-list') as HTMLDivElement;
+}
+
+/** Builds a completed `read` of src/app.ts, the stock explored-file tool in these scenarios. */
+function completedReadPart(
+  id: string,
+  messageID: string,
+  callID: string,
+  time: { start: number; end: number }
+): ToolPart {
+  const read = toolPart(id, messageID, callID);
+  read.tool = 'read';
+  read.state = {
+    status: 'completed',
+    input: { filePath: 'src/app.ts' },
+    output: 'source',
+    title: 'src/app.ts',
+    metadata: {},
+    time,
+  };
+  return read;
+}
 
 describe('message entrance detection', () => {
   it('returns only messages appended at the end of the current transcript', () => {
@@ -105,8 +138,7 @@ describe.each(['history', 'live'] as const)('subagent result notifications (%s)'
           : []),
       ]);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
       const originalCard = container!.querySelector('.tool-invocation-task');
@@ -149,13 +181,7 @@ describe('manual compaction actions', () => {
     flushSolid();
     setState(storePath('sessions', [session('session-1')]));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Fix the layout')] },
@@ -184,8 +210,7 @@ describe('manual compaction actions', () => {
       },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -232,8 +257,7 @@ describe('session pause dividers', () => {
       { info: assistantMessage('paused', { time: { created: 1 } }), parts: [] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     const row = container!.querySelector('[data-msg-id="paused"]');
     const divider = row?.querySelector('.session-pause-divider');
     expect(divider?.textContent).toContain('Paused');
@@ -281,8 +305,7 @@ describe('session pause dividers', () => {
       },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     const divider = container!.querySelector(
       '.trailing-assistant-summary-row .session-pause-divider'
     );
@@ -316,12 +339,11 @@ describe('session pause dividers', () => {
     };
     expectHiddenResume();
     const history: MessageEntry[] = JSON.parse(JSON.stringify(state.messages));
-    cleanup();
+    cleanup!();
     flushSolid();
     replaceMessages(history);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     expectHiddenResume();
     frames.restore();
     flushSolid();
@@ -380,8 +402,7 @@ describe('final assistant markers', () => {
         );
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       upsertMessageInfo({
         ...assistantMessage('answer', {
           parentID: 'prompt',
@@ -411,18 +432,7 @@ describe('final assistant markers', () => {
         stopLoading();
         setState(storePath('streamingPartId', null));
         setState(storePath('streamingText', ''));
-        setState((draft) => {
-          const current = draft['sessionStatus'];
-          const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-          if (
-            incoming === null ||
-            incoming === undefined ||
-            current === null ||
-            current === undefined
-          )
-            draft['sessionStatus'] = incoming;
-          else reconcile(incoming)(current);
-        });
+        setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
       })();
       await vi.advanceTimersByTimeAsync(3_000);
       flushSolid();
@@ -453,8 +463,7 @@ describe('final assistant markers', () => {
       },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await vi.advanceTimersByTimeAsync(3_000);
     flushSolid();
     expect(container?.querySelector('.assistant-message-flow-item-final')).not.toBeNull();
@@ -531,8 +540,7 @@ describe('automatic retry notices', () => {
         },
       ]);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       expect(container!.querySelector('.assistant-message-flow-item-error-action')).not.toBeNull();
       upsertMessage({
         info: userMessage('user-2'),
@@ -584,8 +592,7 @@ describe('automatic retry notices', () => {
         },
       ]);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       expect(
         container!.querySelector('.assistant-message-flow-item-error-notice')?.textContent
       ).toContain('Retrying automatically');
@@ -622,8 +629,7 @@ describe('automatic retry notices', () => {
       { info: failed, parts: [] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     const notice = () => container!.querySelector('.assistant-message-flow-item-error-notice');
@@ -650,14 +656,13 @@ describe('automatic retry notices', () => {
       notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
     ).toContain('WebSocket closed with code 1006');
 
-    cleanup();
+    cleanup!();
     flushSolid();
     container!.replaceChildren();
     flushSolid();
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     expect(notice()?.textContent).toContain('Recovered after an automatic retry. Work continued.');
     expect(
       notice()?.querySelector('.assistant-message-flow-item-error-details')?.textContent
@@ -676,8 +681,7 @@ describe('MessageList keyboard navigation', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((container?.querySelector('.interactive-list') as HTMLElement | null)?.tabIndex).toBe(0);
@@ -690,10 +694,7 @@ describe('MessageList keyboard navigation', () => {
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Keyboard scrolling')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const list = mountList();
     Object.defineProperties(list, {
       clientHeight: { configurable: true, value: 400 },
       scrollHeight: { configurable: true, value: 2_000 },
@@ -722,8 +723,7 @@ describe('MessageList entrance animation', () => {
     replaceMessages([]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -751,8 +751,7 @@ describe('MessageList entrance animation', () => {
     replaceMessages([{ info, parts: [initialPart] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -782,8 +781,7 @@ describe('MessageList entrance animation', () => {
     replaceMessages([{ info, parts: [] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -803,8 +801,7 @@ describe('MessageList entrance animation', () => {
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     startLoading(1);
@@ -845,8 +842,7 @@ describe('MessageList entrance animation', () => {
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -878,8 +874,7 @@ describe('MessageList entrance animation', () => {
     replaceMessages(buildMessages(50));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -899,15 +894,13 @@ describe('MessageList entrance animation', () => {
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First')] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 7200 });
+    defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 7200 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
 
     requestMessageListScrollToBottom();
@@ -952,29 +945,13 @@ describe('MessageList entrance animation', () => {
       replaceMessages(buildMessages(60));
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+      const list = mountList();
       let rowCount = 60;
-      let scrollTopValue = 0;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', {
-        configurable: true,
-        get: () => rowCount * 120,
-      });
-      Object.defineProperty(list, 'scrollTop', {
-        configurable: true,
-        get: () => scrollTopValue,
-        set: (value: number) => {
-          scrollTopValue = value;
-        },
-      });
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this.classList.contains('interactive-item-container')) {
+      const scrollTop = { value: 0 };
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => rowCount * 120 });
+      backScrollTop(list, scrollTop);
+      mockElementRects((element) => {
+        if (element.classList.contains('interactive-item-container')) {
           return new DOMRect(0, 0, 500, 120);
         }
         return new DOMRect(0, 0, 500, 400);
@@ -983,9 +960,7 @@ describe('MessageList entrance animation', () => {
       await Promise.resolve();
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -995,11 +970,9 @@ describe('MessageList entrance animation', () => {
       // Scroll up: new appends must not be marked as entering.
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
       flushSolid();
-      scrollTopValue = 0;
+      scrollTop.value = 0;
       list.dispatchEvent(new Event('scroll'));
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -1007,24 +980,18 @@ describe('MessageList entrance animation', () => {
       replaceMessages(buildMessages(61));
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
       expect(container?.querySelector('[data-msg-id="user-60"]')).toBeNull();
 
       // Scroll back down: the row mounts now, without an entrance animation.
-      scrollTopValue = rowCount * 120 - 400;
+      scrollTop.value = rowCount * 120 - 400;
       list.dispatchEvent(new Event('scroll'));
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -1039,6 +1006,28 @@ describe('MessageList entrance animation', () => {
 });
 
 describe('MessageList loading states', () => {
+  /** Starts loading `session-1` with a pending bash permission linked to `message-1`. */
+  function loadSessionWithLinkedPermission(): void {
+    const permission: Permission = {
+      id: 'permission-1',
+      type: 'bash',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'Allow command',
+      metadata: { command: 'pwd' },
+      time: { created: 1 },
+    };
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setState(storePath('permissions', [permission]));
+    flushSolid();
+    setState(storePath('messagesLoading', true));
+    flushSolid();
+  }
+
   it('keeps loading visible through populated hydration on consecutive session openings', async () => {
     const frames = installQueuedAnimationFrameMocks();
     flushSolid();
@@ -1053,8 +1042,7 @@ describe('MessageList loading states', () => {
     flushSolid();
     replaceMessages([]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     const expectVisibleLoading = () => {
       const indicators = container!.querySelectorAll(
@@ -1108,9 +1096,7 @@ describe('MessageList loading states', () => {
       flushSolid();
       expectVisibleLoading();
       frames.flush();
-      flushSolid();
-      frames.flush();
-      flushSolid();
+      flushFrame(frames);
       expect(row!.closest('.is-session-hydrating')).toBeNull();
       flushSolid();
       expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
@@ -1134,13 +1120,10 @@ describe('MessageList loading states', () => {
       },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     expect(container!.querySelector('.is-session-hydrating')).not.toBeNull();
     await Promise.resolve();
-    flushSolid();
-    frames.flush();
-    flushSolid();
+    flushFrame(frames);
     expect(container!.querySelector('.is-session-hydrating')).toBeNull();
     expect(container!.querySelector('[aria-label="Loading messages"]')).toBeNull();
     frames.restore();
@@ -1162,8 +1145,7 @@ describe('MessageList loading states', () => {
       setState(storePath('messagesLoading', true));
     })();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1182,8 +1164,7 @@ describe('MessageList loading states', () => {
     replaceMessages([]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1209,8 +1190,7 @@ describe('MessageList loading states', () => {
     replaceMessages([]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1253,8 +1233,7 @@ describe('MessageList loading states', () => {
       replaceMessages([]);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
@@ -1305,8 +1284,7 @@ describe('MessageList loading states', () => {
     replaceMessages([]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1329,9 +1307,7 @@ describe('MessageList loading states', () => {
     const prompt = container?.querySelector('.question-prompt-card');
     expect(prompt).not.toBeNull();
     expect(prompt?.closest('.is-session-hydrating')).not.toBeNull();
-    flushSolid();
-    frames.flush();
-    flushSolid();
+    flushFrame(frames);
     frames.flush();
     flushSolid();
     expect(prompt?.closest('.is-session-hydrating')).toBeNull();
@@ -1355,8 +1331,7 @@ describe('MessageList loading states', () => {
       },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
@@ -1406,8 +1381,7 @@ describe('MessageList loading states', () => {
       replaceMessages([]);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
@@ -1425,29 +1399,11 @@ describe('MessageList loading states', () => {
   );
 
   it('waits to render a linked permission until its message finishes loading', async () => {
-    const permission: Permission = {
-      id: 'permission-1',
-      type: 'bash',
-      sessionID: 'session-1',
-      messageID: 'message-1',
-      callID: 'call-1',
-      title: 'Allow command',
-      metadata: { command: 'pwd' },
-      time: { created: 1 },
-    };
-    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('permissions', [permission]));
-    flushSolid();
-    setState(storePath('messagesLoading', true));
-    flushSolid();
+    loadSessionWithLinkedPermission();
     replaceMessages([]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1510,24 +1466,7 @@ describe('MessageList loading states', () => {
   it('waits for restored permissions before performing the initial bottom scroll', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const permission: Permission = {
-      id: 'permission-1',
-      type: 'bash',
-      sessionID: 'session-1',
-      messageID: 'message-1',
-      callID: 'call-1',
-      title: 'Allow command',
-      metadata: { command: 'pwd' },
-      time: { created: 1 },
-    };
-    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('permissions', [permission]));
-    flushSolid();
-    setState(storePath('messagesLoading', true));
-    flushSolid();
+    loadSessionWithLinkedPermission();
     replaceMessages([
       {
         info: assistantMessage('message-1'),
@@ -1536,14 +1475,12 @@ describe('MessageList loading states', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollTopValue = 0;
     let scrollWrites = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1200 });
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => 1200 });
     Object.defineProperty(list!, 'scrollTop', {
       configurable: true,
       get: () => scrollTopValue,
@@ -1554,9 +1491,7 @@ describe('MessageList loading states', () => {
     });
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     expect(container?.querySelector('.permission-prompt')).toBeNull();
     expect(list?.classList).toContain('is-session-hydrating');
@@ -1565,9 +1500,7 @@ describe('MessageList loading states', () => {
     setState(storePath('messagesLoading', false));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
     expect(list?.classList).not.toContain('is-session-hydrating');
@@ -1578,29 +1511,11 @@ describe('MessageList loading states', () => {
   });
 
   it('reveals a retained permission when message loading ends without content', async () => {
-    const permission: Permission = {
-      id: 'permission-1',
-      type: 'bash',
-      sessionID: 'session-1',
-      messageID: 'message-1',
-      callID: 'call-1',
-      title: 'Allow command',
-      metadata: { command: 'pwd' },
-      time: { created: 1 },
-    };
-    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('permissions', [permission]));
-    flushSolid();
-    setState(storePath('messagesLoading', true));
-    flushSolid();
+    loadSessionWithLinkedPermission();
     replaceMessages([]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1626,8 +1541,7 @@ describe('MessageList loading states', () => {
     markSessionHistoryLoadFailed('session-1', true);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1647,8 +1561,7 @@ describe('MessageList loading states', () => {
     setSessionHistoryCursor('session-1', 'cursor-1');
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1768,13 +1681,7 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
@@ -1798,8 +1705,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1829,8 +1735,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1839,16 +1744,7 @@ describe('MessageList compact activity', () => {
   });
 
   it('does not classify projected streaming text after Explored as render-empty', async () => {
-    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 1, end: 2 },
-    };
+    const read = completedReadPart('read-1', 'assistant-1', 'call-read-1', { start: 1, end: 2 });
     const streamedText: TextPart = {
       id: 'text-2',
       sessionID: 'session-1',
@@ -1875,8 +1771,7 @@ describe('MessageList compact activity', () => {
       setState(storePath('streamingText', 'I found the relevant implementation.'));
     })();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1937,8 +1832,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -1959,16 +1853,7 @@ describe('MessageList compact activity', () => {
   });
 
   it('shows running activity inline before moving it into Explored', async () => {
-    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 0, end: 1 },
-    };
+    const read = completedReadPart('read-1', 'assistant-1', 'call-read-1', { start: 0, end: 1 });
     const search = toolPart('search-1', 'assistant-1', 'call-search-1');
     search.tool = 'grep';
     search.state = {
@@ -1981,19 +1866,12 @@ describe('MessageList compact activity', () => {
     const info = assistantMessage('assistant-1', { parentID: 'user-1' });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, { info, parts: [read, search] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
@@ -2076,22 +1954,14 @@ describe('MessageList compact activity', () => {
       observers.push(observer);
       return observer;
     });
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return new DOMRect(0, 0, 500, this.dataset.activityPartId ? 24 : 0);
+    mockElementRects((element) => {
+      return new DOMRect(0, 0, 500, element.dataset.activityPartId ? 24 : 0);
     });
 
-    const read = toolPart('read-teardown', 'assistant-teardown', 'call-read-teardown');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 0, end: 1 },
-    };
+    const read = completedReadPart('read-teardown', 'assistant-teardown', 'call-read-teardown', {
+      start: 0,
+      end: 1,
+    });
     const thought: Part = {
       id: 'reasoning-teardown',
       messageID: 'assistant-teardown',
@@ -2107,19 +1977,12 @@ describe('MessageList compact activity', () => {
     const info = assistantMessage('assistant-teardown', { parentID: 'user-teardown' });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, { info, parts: [read, thought] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     // Exit anchoring is only needed when collapsing activity can clamp a scrolled viewport.
     const list = container!.querySelector<HTMLElement>('.interactive-list')!;
     Object.defineProperties(list, {
@@ -2155,7 +2018,7 @@ describe('MessageList compact activity', () => {
     expect(activityObserver).toBeDefined();
     expect(activityObserver?.disconnect).not.toHaveBeenCalled();
 
-    cleanup();
+    cleanup!();
     flushSolid();
     cleanup = undefined;
     expect(activityObserver?.disconnect).toHaveBeenCalledOnce();
@@ -2191,19 +2054,12 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, first]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -2268,19 +2124,12 @@ describe('MessageList compact activity', () => {
     const info = assistantMessage('assistant-1', { parentID: 'user-1' });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, { info, parts: [search] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -2307,16 +2156,10 @@ describe('MessageList compact activity', () => {
   });
 
   it('keeps active activity outside Explored while response text streams', async () => {
-    const read = toolPart('read-before-stream', 'assistant-1', 'call-read-before-stream');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 0, end: 1 },
-    };
+    const read = completedReadPart('read-before-stream', 'assistant-1', 'call-read-before-stream', {
+      start: 0,
+      end: 1,
+    });
     const running = toolPart('search-before-stream', 'assistant-1', 'call-search-before-stream');
     running.tool = 'grep';
     running.state = {
@@ -2343,13 +2186,7 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] },
@@ -2368,8 +2205,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -2483,13 +2319,7 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the file')] },
@@ -2504,8 +2334,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await vi.advanceTimersByTimeAsync(500);
     flushSolid();
     (() => {
@@ -2586,13 +2415,7 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] },
@@ -2607,8 +2430,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -2669,19 +2491,12 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, first, { info: secondInfo, parts: [running] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -2722,16 +2537,7 @@ describe('MessageList compact activity', () => {
   });
 
   it('previews tools that complete inside the collection interval before grouping them', async () => {
-    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 0, end: 1 },
-    };
+    const read = completedReadPart('read-1', 'assistant-1', 'call-read-1', { start: 0, end: 1 });
     const command = toolPart('command-fast', 'assistant-1', 'call-command-fast');
     command.state = {
       status: 'running',
@@ -2757,19 +2563,12 @@ describe('MessageList compact activity', () => {
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, { info, parts: [read] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     replaceMessages([user, { info, parts: [read, command] }]);
@@ -2822,19 +2621,12 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, reasoningMessage]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -2877,13 +2669,7 @@ describe('MessageList compact activity', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the old check')] },
@@ -2902,8 +2688,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -2938,13 +2723,7 @@ describe('MessageList compact activity', () => {
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run checks')] },
@@ -2963,8 +2742,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -3015,19 +2793,12 @@ describe('MessageList compact activity', () => {
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, { info, parts: [first, running, last] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -3086,19 +2857,12 @@ describe('MessageList compact activity', () => {
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([user, { info, parts: [command] }]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(500);
@@ -3195,8 +2959,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3270,27 +3033,15 @@ describe('MessageList compact activity', () => {
         },
       },
     };
-    const read = toolPart('read-current', 'assistant-1', 'call-read-current');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 0, end: 1 },
-    };
+    const read = completedReadPart('read-current', 'assistant-1', 'call-read-current', {
+      start: 0,
+      end: 1,
+    });
     setShowFileDiffs(true);
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier edit')] },
@@ -3310,8 +3061,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3355,13 +3105,7 @@ describe('MessageList compact activity', () => {
 
     setState(storePath('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     flushSolid();
     await Promise.resolve();
     flushSolid();
@@ -3431,13 +3175,7 @@ describe('MessageList compact activity', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier')] },
@@ -3453,8 +3191,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3529,13 +3266,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelector('.thinking-content')).toBeNull();
 
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     flushSolid();
     await Promise.resolve();
     flushSolid();
@@ -3607,30 +3338,17 @@ describe('MessageList compact activity', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages(transcript);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(1);
 
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     flushSolid();
     await Promise.resolve();
     flushSolid();
@@ -3664,27 +3382,12 @@ describe('MessageList compact activity', () => {
   it('omits unparsed edit tools from shared activity summaries when inline previews are enabled', async () => {
     const edit = toolPart('edit-pending', 'assistant-1', 'call-edit-pending');
     edit.tool = 'apply_patch';
-    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-    read.tool = 'read';
-    read.state = {
-      status: 'completed',
-      input: { filePath: 'src/app.ts' },
-      output: 'source',
-      title: 'src/app.ts',
-      metadata: {},
-      time: { start: 1, end: 2 },
-    };
+    const read = completedReadPart('read-1', 'assistant-1', 'call-read-1', { start: 1, end: 2 });
     setShowFileDiffs(true);
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
@@ -3695,8 +3398,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -3714,16 +3416,7 @@ describe('MessageList compact activity', () => {
       const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
       patch.tool = tool;
       patch.state = { status: 'pending', input: {}, raw: '' };
-      const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-      read.tool = 'read';
-      read.state = {
-        status: 'completed',
-        input: { filePath: 'src/app.ts' },
-        output: 'source',
-        title: 'src/app.ts',
-        metadata: {},
-        time: { start: 1, end: 2 },
-      };
+      const read = completedReadPart('read-1', 'assistant-1', 'call-read-1', { start: 1, end: 2 });
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
       replaceMessages([
@@ -3735,8 +3428,7 @@ describe('MessageList compact activity', () => {
       ]);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
@@ -3758,18 +3450,7 @@ describe('MessageList compact activity', () => {
       patch.state = { status: 'pending', input: {}, raw: '' };
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
       flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Update the files')] },
@@ -3787,8 +3468,7 @@ describe('MessageList compact activity', () => {
       ]);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
@@ -3805,30 +3485,10 @@ describe('MessageList compact activity', () => {
       const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
       patch.tool = '';
       patch.state = { status: 'pending', input: {}, raw: '' };
-      const read = toolPart('read-1', 'assistant-1', 'call-read-1');
-      read.tool = 'read';
-      read.state = {
-        status: 'completed',
-        input: { filePath: 'src/app.ts' },
-        output: 'source',
-        title: 'src/app.ts',
-        metadata: {},
-        time: { start: 1, end: 2 },
-      };
+      const read = completedReadPart('read-1', 'assistant-1', 'call-read-1', { start: 1, end: 2 });
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
       flushSolid();
       replaceMessages([
         { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
@@ -3839,8 +3499,7 @@ describe('MessageList compact activity', () => {
       ]);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await vi.advanceTimersByTimeAsync(500);
       flushSolid();
       container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
@@ -3889,8 +3548,7 @@ describe('MessageList compact activity', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
@@ -3921,8 +3579,7 @@ describe('MessageList empty state', () => {
   it('focuses the composer when the blank chat area is clicked', () => {
     const previousFocusKey = composerFocusKey();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     container?.querySelector<HTMLElement>('.interactive-list')?.click();
     flushSolid();
 
@@ -3932,14 +3589,7 @@ describe('MessageList empty state', () => {
   it('does not focus the composer for an existing chat whose messages have not loaded', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Existing session',
-          version: '1',
-          time: { created: 100, updated: 200 },
-        },
+        session('session-1', { title: 'Existing session', time: { created: 100, updated: 200 } }),
       ])
     );
     flushSolid();
@@ -3947,8 +3597,7 @@ describe('MessageList empty state', () => {
     flushSolid();
     const previousFocusKey = composerFocusKey();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     container?.querySelector<HTMLElement>('.interactive-list')?.click();
     flushSolid();
 
@@ -3958,14 +3607,7 @@ describe('MessageList empty state', () => {
   it('waits for equal-timestamp session hydration before enabling blank-area focus', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Hydrating session',
-          version: '1',
-          time: { created: 100, updated: 100 },
-        },
+        session('session-1', { title: 'Hydrating session', time: { created: 100, updated: 100 } }),
       ])
     );
     flushSolid();
@@ -3975,8 +3617,7 @@ describe('MessageList empty state', () => {
     flushSolid();
     const previousFocusKey = composerFocusKey();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     const list = container?.querySelector<HTMLElement>('.interactive-list');
     list?.click();
     flushSolid();
@@ -3998,22 +3639,14 @@ describe('MessageList empty state', () => {
     flushSolid();
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Blank session',
-          version: '1',
-          time: { created: 100, updated: 100 },
-        },
+        session('session-1', { title: 'Blank session', time: { created: 100, updated: 100 } }),
       ])
     );
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     const logo = container?.querySelector<HTMLImageElement>('.chat-empty-logo');
@@ -4041,8 +3674,7 @@ describe('MessageList empty state', () => {
   it('shows Cmd+V for pasting images on macOS', () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh; Intel Mac OS X 10_15_7');
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     expect(
       container?.querySelector('.chat-empty-hint-grid > .chat-empty-hint:nth-child(6)')?.textContent
@@ -4053,8 +3685,7 @@ describe('MessageList empty state', () => {
     const previousDismissal = readStored<unknown>(STORAGE_KEYS.starterHintsDismissed);
     try {
       writeStored(STORAGE_KEYS.starterHintsDismissed, null);
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       const hints = container?.querySelector<HTMLElement>('.chat-empty-hints');
       const previousFocusKey = composerFocusKey();
       expect(hints?.hidden).toBe(false);
@@ -4066,10 +3697,9 @@ describe('MessageList empty state', () => {
       expect(readStored<unknown>(STORAGE_KEYS.starterHintsDismissed)).toBe(true);
       expect(composerFocusKey()).toBe(previousFocusKey);
 
-      cleanup();
+      cleanup!();
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       expect(container?.querySelector<HTMLElement>('.chat-empty-hints')?.hidden).toBe(true);
     } finally {
       writeStored(STORAGE_KEYS.starterHintsDismissed, previousDismissal);
@@ -4083,22 +3713,14 @@ describe('MessageList empty state', () => {
     flushSolid();
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Blank session',
-          version: '1',
-          time: { created: 100, updated: 100 },
-        },
+        session('session-1', { title: 'Blank session', time: { created: 100, updated: 100 } }),
       ])
     );
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
@@ -4113,22 +3735,14 @@ describe('MessageList empty state', () => {
     flushSolid();
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Existing session',
-          version: '1',
-          time: { created: 100, updated: 200 },
-        },
+        session('session-1', { title: 'Existing session', time: { created: 100, updated: 200 } }),
       ])
     );
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
@@ -4136,8 +3750,7 @@ describe('MessageList empty state', () => {
   });
 
   it('mounts the starter histogram only while opted in', () => {
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
 
     setShowEmptyStateHistogram(true);
@@ -4159,8 +3772,7 @@ describe('MessageList empty state', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     expect(container?.querySelector('.chat-empty-histogram')).not.toBeNull();
 
     replaceMessages([
@@ -4183,8 +3795,7 @@ describe('MessageList empty state', () => {
         flushSolid();
       }
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       const first = container?.querySelector('.chat-empty-histogram');
       expect(first).not.toBeNull();
       startNewChatDraft();
@@ -4223,8 +3834,7 @@ describe('MessageList empty state', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     expect(container?.querySelector('[data-msg-id]')).toBeNull();
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
@@ -4260,8 +3870,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4279,23 +3888,12 @@ describe('MessageList session scoping', () => {
 
   it('hides child-session user prompts in the parent thread before subagent output arrives', () => {
     setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Root session',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/workspace',
+      session('session-1', { title: 'Root session', time: { created: 0, updated: 10 } }),
+      session('child-1', {
         title: 'Research child',
-        version: '1',
         parentID: 'session-1',
         time: { created: 1, updated: 11 },
-      },
+      }),
     ]);
     flushSolid();
 
@@ -4364,23 +3962,12 @@ describe('MessageList session scoping', () => {
 
   it('hides child-session assistant output in the parent thread filter', () => {
     setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Root session',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/workspace',
+      session('session-1', { title: 'Root session', time: { created: 0, updated: 10 } }),
+      session('child-1', {
         title: 'Research child',
-        version: '1',
         parentID: 'session-1',
         time: { created: 1, updated: 11 },
-      },
+      }),
     ]);
     flushSolid();
 
@@ -4416,23 +4003,12 @@ describe('MessageList session scoping', () => {
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
     setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Root session',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/workspace',
+      session('session-1', { title: 'Root session', time: { created: 0, updated: 10 } }),
+      session('child-1', {
         title: 'Explore Varro codebase structure',
-        version: '1',
         parentID: 'session-1',
         time: { created: 1, updated: 11 },
-      },
+      }),
     ]);
     flushSolid();
     replaceMessages([
@@ -4481,8 +4057,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4523,8 +4098,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4557,23 +4131,12 @@ describe('MessageList session scoping', () => {
     );
     flushSolid();
     setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Root session',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/workspace',
+      session('session-1', { title: 'Root session', time: { created: 0, updated: 10 } }),
+      session('child-1', {
         title: 'Explore Varro codebase structure',
-        version: '1',
         parentID: 'session-1',
         time: { created: 1, updated: 11 },
-      },
+      }),
     ]);
     flushSolid();
     replaceMessages([
@@ -4597,8 +4160,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4687,8 +4249,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4755,8 +4316,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4845,8 +4405,7 @@ describe('MessageList session scoping', () => {
       ]);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
@@ -4922,8 +4481,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4979,8 +4537,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -4999,23 +4556,12 @@ describe('MessageList session scoping', () => {
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
     setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Root session',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/workspace',
+      session('session-1', { title: 'Root session', time: { created: 0, updated: 10 } }),
+      session('child-1', {
         title: 'Explore Varro codebase structure',
-        version: '1',
         parentID: 'session-1',
         time: { created: 1, updated: 11 },
-      },
+      }),
     ]);
     flushSolid();
     replaceMessages([
@@ -5045,8 +4591,7 @@ describe('MessageList session scoping', () => {
     setState(storePath('streamingText', 'Partial subagent result that should stay hidden'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5059,23 +4604,12 @@ describe('MessageList session scoping', () => {
     setState(storePath('activeSessionId', 'child-1'));
     flushSolid();
     setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'Root session',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/workspace',
+      session('session-1', { title: 'Root session', time: { created: 0, updated: 10 } }),
+      session('child-1', {
         title: 'Explore Varro codebase structure',
-        version: '1',
         parentID: 'session-1',
         time: { created: 1, updated: 11 },
-      },
+      }),
     ]);
     flushSolid();
     replaceMessages([
@@ -5101,8 +4635,7 @@ describe('MessageList session scoping', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5119,18 +4652,7 @@ describe('MessageList loading row', () => {
       flushSolid();
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
       flushSolid();
       const part: Part = {
         id: 'done',
@@ -5169,8 +4691,7 @@ describe('MessageList loading row', () => {
       flushSolid();
       startLoading(50_000);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await vi.advanceTimersByTimeAsync(2_500);
       flushSolid();
       expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('22s');
@@ -5182,13 +4703,7 @@ describe('MessageList loading row', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     const tool = toolPart('tool-active', 'assistant-1');
     tool.state = {
@@ -5217,8 +4732,7 @@ describe('MessageList loading row', () => {
     flushSolid();
     startLoading(1);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('51s');
     await vi.advanceTimersByTimeAsync(1_000);
     flushSolid();
@@ -5244,18 +4758,7 @@ describe('MessageList loading row', () => {
       flushSolid();
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
       flushSolid();
       const tool = toolPart('finished', 'assistant-1');
       tool.state =
@@ -5286,8 +4789,7 @@ describe('MessageList loading row', () => {
       flushSolid();
       startLoading(50_000);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
       await vi.advanceTimersByTimeAsync(2_500);
@@ -5317,8 +4819,7 @@ describe('MessageList loading row', () => {
     startLoading(0);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5335,8 +4836,7 @@ describe('MessageList loading row', () => {
     replaceMessages([]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5379,8 +4879,7 @@ describe('MessageList loading row', () => {
     startLoading(0);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5410,8 +4909,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5434,8 +4932,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5445,17 +4942,10 @@ describe('MessageList loading row', () => {
   it('shows the loading row while the active session status is busy', async () => {
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5478,8 +4968,7 @@ describe('MessageList loading row', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5497,8 +4986,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5533,8 +5021,7 @@ describe('MessageList loading row', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5558,8 +5045,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5577,8 +5063,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5600,13 +5085,7 @@ describe('MessageList loading row', () => {
   it('re-shows the loading label when committed commentary remains genuinely busy', async () => {
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       {
@@ -5618,8 +5097,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5651,8 +5129,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await vi.advanceTimersByTimeAsync(599);
@@ -5683,8 +5160,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     setState(storePath('streamingPartId', 'text-2'));
@@ -5714,8 +5190,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5753,8 +5228,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5772,8 +5246,7 @@ describe('MessageList loading row', () => {
     flushSolid();
     requestMessageListScrollToBottom('user-1');
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5790,17 +5263,10 @@ describe('MessageList loading row', () => {
       { info: assistantMessage('message-1'), parts: [textPart('text-1', 'Final answer')] },
     ]);
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5820,17 +5286,10 @@ describe('MessageList loading row', () => {
       },
     ]);
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5855,13 +5314,7 @@ describe('MessageList loading row', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Apply the change')] },
@@ -5875,8 +5328,7 @@ describe('MessageList loading row', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5898,13 +5350,7 @@ describe('MessageList loading row', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] },
@@ -5917,8 +5363,7 @@ describe('MessageList loading row', () => {
     setState(storePath('streamingPartId', 'tool-active'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
@@ -5945,13 +5390,7 @@ describe('MessageList loading row', () => {
     };
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] },
@@ -5962,8 +5401,7 @@ describe('MessageList loading row', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
@@ -5994,8 +5432,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6053,8 +5490,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6097,8 +5533,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6149,8 +5584,7 @@ describe('MessageList loading row', () => {
     startLoading(11_000);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6193,8 +5627,7 @@ describe('MessageList loading row', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6225,8 +5658,7 @@ describe('MessageList loading row', () => {
       replaceMessages(completedDialog);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await Promise.resolve();
       flushSolid();
 
@@ -6291,18 +5723,7 @@ describe('MessageList loading row', () => {
         setState(storePath('streamingPartId', null));
         setState(storePath('streamingText', ''));
         stopLoading();
-        setState((draft) => {
-          const current = draft['sessionStatus'];
-          const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-          if (
-            incoming === null ||
-            incoming === undefined ||
-            current === null ||
-            current === undefined
-          )
-            draft['sessionStatus'] = incoming;
-          else reconcile(incoming)(current);
-        });
+        setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
         replaceMessages(completedDialog);
       })();
       await Promise.resolve();
@@ -6357,29 +5778,17 @@ describe('MessageList loading row', () => {
         },
       ]);
       flushSolid();
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = {
-          'session-1': { type: 'idle' },
-          'child-1': { type: 'busy' },
-          'child-2':
-            status === 'busy'
-              ? { type: 'busy' }
-              : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 },
-          unrelated: { type: 'busy' },
-        } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
+      setStateRecord('sessionStatus', {
+        'session-1': { type: 'idle' },
+        'child-1': { type: 'busy' },
+        'child-2':
+          status === 'busy'
+            ? { type: 'busy' }
+            : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 },
+        unrelated: { type: 'busy' },
       });
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await vi.advanceTimersByTimeAsync(700);
       flushSolid();
 
@@ -6453,8 +5862,7 @@ describe('MessageList loading row', () => {
       }
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       await vi.advanceTimersByTimeAsync(700);
       flushSolid();
 
@@ -6465,18 +5873,7 @@ describe('MessageList loading row', () => {
 
       (() => {
         stopLoading();
-        setState((draft) => {
-          const current = draft['sessionStatus'];
-          const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-          if (
-            incoming === null ||
-            incoming === undefined ||
-            current === null ||
-            current === undefined
-          )
-            draft['sessionStatus'] = incoming;
-          else reconcile(incoming)(current);
-        });
+        setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
         setState(storePath('streamingPartId', null));
         setState(storePath('streamingText', ''));
       })();
@@ -6507,24 +5904,17 @@ describe('MessageList loading row', () => {
     ];
     replaceMessages(entries);
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = {
-        'session-1': {
-          type: 'busy',
-          background: true,
-          backgroundCommand: 'python3 tools/serve.py 18765',
-        },
-      } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
+    setStateRecord('sessionStatus', {
+      'session-1': {
+        type: 'busy',
+        background: true,
+        backgroundCommand: 'python3 tools/serve.py 18765',
+      },
     });
     flushSolid();
     startLoading(1_000);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.background-process')?.textContent).toContain(
@@ -6534,13 +5924,7 @@ describe('MessageList loading row', () => {
 
     // The new execution can start before its first assistant message is hydrated.
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     await Promise.resolve();
     flushSolid();
@@ -6573,18 +5957,7 @@ describe('MessageList loading row', () => {
         ...entries,
         { info: final, parts: [textPart('text-assistant-2', 'All checks pass.')] },
       ]);
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
       stopLoading();
     })();
     await Promise.resolve();
@@ -6633,8 +6006,7 @@ describe('MessageList loading row', () => {
     startLoading(11_000);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6709,8 +6081,7 @@ describe('MessageList loading row', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6752,16 +6123,9 @@ describe('MessageList loading row', () => {
     replaceMessages(dialog);
     flushSolid();
     // Authoritative busy status must suffice even without local loading state.
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6773,25 +6137,13 @@ describe('MessageList loading row', () => {
       )?.textContent
     ).toBe(tool === 'bash' ? 'rejected' : 'Skipped');
 
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     flushSolid();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.assistant-dialog-summary')?.textContent).toContain(label);
 
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     await Promise.resolve();
     flushSolid();
@@ -6816,18 +6168,7 @@ describe('MessageList loading row', () => {
           ],
         },
       ]);
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     })();
     await vi.advanceTimersByTimeAsync(300);
     flushSolid();
@@ -6869,8 +6210,7 @@ describe('MessageList loading row', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -6896,8 +6236,7 @@ describe('MessageList loading row', () => {
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 

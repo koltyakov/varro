@@ -1,27 +1,17 @@
-import { flush as flushSolid, createRoot } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import type { ServerEventName } from '../../shared/protocol';
 import {
   assistantMessage,
+  captureServerEventHandlers,
   getClientMocks,
-  loadModules,
+  loadAndMountUseOpenCode,
   session,
   todoPart,
   userMessage,
 } from './useOpenCode.test-support';
 
-interface ServerEvent {
-  properties: unknown;
-}
-
 const clientMocks = getClientMocks();
-type ServerEventsOn = (
-  event: ServerEventName | '*',
-  handler: (data: ServerEvent) => void
-) => () => void;
-const serverEventsOn = vi.fn<ServerEventsOn>();
-Object.assign(clientMocks, { serverEventsOn });
 
 describe('useOpenCode todo synchronization', () => {
   it('loads persisted todos from the native session todo endpoint', async () => {
@@ -37,13 +27,7 @@ describe('useOpenCode todo synchronization', () => {
       { content: 'Native persisted todo', status: 'in_progress', priority: 'high' },
     ]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -71,13 +55,7 @@ describe('useOpenCode todo synchronization', () => {
   });
 
   it('rebuilds todos from refreshed messages after stale todo events', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -93,13 +71,7 @@ describe('useOpenCode todo synchronization', () => {
       },
     ]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -163,13 +135,7 @@ describe('useOpenCode todo synchronization', () => {
   });
 
   it('rebuilds todos from messages when the active assistant message completes', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -177,13 +143,7 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -251,13 +211,7 @@ describe('useOpenCode todo synchronization', () => {
   });
 
   it('clears stale event todos when the refreshed messages still have no todo parts', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -276,13 +230,7 @@ describe('useOpenCode todo synchronization', () => {
       },
     ]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -344,13 +292,7 @@ describe('useOpenCode todo synchronization', () => {
   });
 
   it('keeps visible todos during active progress when a newer assistant update has no todo parts yet', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -358,13 +300,7 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -423,13 +359,7 @@ describe('useOpenCode todo synchronization', () => {
   });
 
   it('ignores todo.updated payload contents while the active assistant reply is still running', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -437,13 +367,7 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -503,13 +427,7 @@ describe('useOpenCode todo synchronization', () => {
   });
 
   it('ignores stale todo events after the active assistant message completes', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -517,13 +435,7 @@ describe('useOpenCode todo synchronization', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();

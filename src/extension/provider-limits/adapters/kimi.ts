@@ -1,10 +1,6 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Kimi API payloads are decoded before quota extraction. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
-import {
-  parseRateLimitResetAt,
-  type ProviderAuthRecord,
-  type ProviderMetadata,
-} from '../../util/provider-limit';
+import { parseRateLimitResetAt } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
   asRecord,
@@ -14,12 +10,12 @@ import {
   readBoundedResponseJson,
   unsupportedProviderStatus,
   providerErrorStatus,
+  resolveProviderAuthToken,
   VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const KIMI_USAGE_ENDPOINT = 'https://api.kimi.com/coding/v1/usages';
 const KIMI_PROVIDER_ID = 'kimi-for-coding';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 type KimiPayloadResult =
   | { kind: 'available'; windows: ProviderLimitWindow[] }
@@ -30,10 +26,12 @@ export function createKimiAdapter(): ProviderLimitAdapter {
   return {
     id: 'kimi',
     matches(provider, authStore) {
-      return provider.id === KIMI_PROVIDER_ID && resolveKimiAuthToken(provider, authStore) != null;
+      return (
+        provider.id === KIMI_PROVIDER_ID && resolveProviderAuthToken(provider, authStore) != null
+      );
     },
     async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
-      const token = resolveKimiAuthToken(provider, authStore);
+      const token = resolveProviderAuthToken(provider, authStore);
       if (!token) {
         return unsupportedProviderStatus(
           provider.id,
@@ -187,17 +185,4 @@ function getKimiWindowPeriod(
   if (seconds === 5 * 3_600) return 'five_hour';
   if (seconds === 7 * 86_400) return 'seven_day';
   return null;
-}
-
-function resolveKimiAuthToken(
-  provider: ProviderMetadata,
-  authStore: Record<string, ProviderAuthRecord>
-) {
-  const auth = authStore[provider.id];
-  if (auth?.type === 'oauth') return auth.access;
-  if (auth && 'key' in auth) return auth.key;
-
-  const apiKey = getString(asRecord(provider.options)?.apiKey);
-  if (!apiKey || apiKey === OPENCODE_OAUTH_DUMMY_KEY) return null;
-  return apiKey;
 }

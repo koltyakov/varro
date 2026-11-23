@@ -3,11 +3,14 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { WebviewMessage } from '../../src/shared/protocol';
 import {
+  getListDistanceFromBottom,
   getScrollMetrics,
   getStickyMessageAlignment,
   getVisibleMessageAnchor,
   installOuterScrollSentinel,
+  postWebviewMessage,
   sampleMessageTopAcrossFrames,
+  scrollToBottom,
   waitForAnimationFrame,
   waitForAnimationFrames,
 } from './helpers';
@@ -33,6 +36,21 @@ type PartialDiffProbe = {
 };
 
 type PartialDiffWindow = typeof window & { partialDiffProbe: PartialDiffProbe };
+
+/** Posts the host configuration update that toggles inline file diff previews. */
+function setShowFileDiffs(page: Page, showFileDiffs: boolean) {
+  return postWebviewMessage(page, {
+    type: 'config/update',
+    payload: {
+      desktopSessionPaneSide: 'left',
+      defaultPermissionMode: 'default',
+      chatFontSize: 13,
+      chatEditorFontSize: 12,
+      chatFontFamily: 'default',
+      showFileDiffs,
+    },
+  });
+}
 
 async function updateDiffPreview(
   page: Page,
@@ -286,25 +304,7 @@ test.describe('diff preview anchoring', () => {
       page.locator('[data-msg-id="message-partial-diff-3"] .file-change-inline-diffs')
     ).toHaveCount(3);
     await waitForAnimationFrames(page, 30);
-    const toggle = (showFileDiffs: boolean) =>
-      page.evaluate(
-        (value) =>
-          window.postMessage(
-            {
-              type: 'config/update',
-              payload: {
-                desktopSessionPaneSide: 'left',
-                defaultPermissionMode: 'default',
-                chatFontSize: 13,
-                chatEditorFontSize: 12,
-                chatFontFamily: 'default',
-                showFileDiffs: value,
-              },
-            },
-            '*'
-          ),
-        showFileDiffs
-      );
+    const toggle = (showFileDiffs: boolean) => setShowFileDiffs(page, showFileDiffs);
     await toggle(false);
     await expect(page.locator('.file-change-inline-diffs')).toHaveCount(0);
     await waitForAnimationFrames(page, 30);
@@ -446,25 +446,7 @@ test.describe('diff preview anchoring', () => {
       }
       const before = await position();
       expect(Math.abs(before - 113)).toBeLessThanOrEqual(2);
-      const showDiffs = (showFileDiffs: boolean) =>
-        page.evaluate(
-          (value) =>
-            window.postMessage(
-              {
-                type: 'config/update',
-                payload: {
-                  desktopSessionPaneSide: 'left',
-                  defaultPermissionMode: 'default',
-                  chatFontSize: 13,
-                  chatEditorFontSize: 12,
-                  chatFontFamily: 'default',
-                  showFileDiffs: value,
-                },
-              },
-              '*'
-            ),
-          showFileDiffs
-        );
+      const showDiffs = (showFileDiffs: boolean) => setShowFileDiffs(page, showFileDiffs);
       await showDiffs(false);
       await waitForAnimationFrames(page, 30);
       expect(Math.abs((await position()) - before)).toBeLessThanOrEqual(2);
@@ -955,24 +937,7 @@ test.describe('diff preview anchoring', () => {
             (window as typeof window & { diffTailGate: boolean }).diffTailGate = true;
           });
         }
-        await page.evaluate(
-          (value) =>
-            window.postMessage(
-              {
-                type: 'config/update',
-                payload: {
-                  desktopSessionPaneSide: 'left',
-                  defaultPermissionMode: 'default',
-                  chatFontSize: 13,
-                  chatEditorFontSize: 12,
-                  chatFontFamily: 'default',
-                  showFileDiffs: value,
-                },
-              },
-              '*'
-            ),
-          showFileDiffs
-        );
+        await setShowFileDiffs(page, showFileDiffs);
         let expectedTop = before;
         let trackedMarker = marker;
         let wheelEvidence: string | undefined;
@@ -1058,25 +1023,7 @@ test.describe('diff preview anchoring', () => {
     const list = page.locator('.interactive-list');
     const row = list.locator('[data-msg-id="message-partial-diff-3"]');
     const previews = row.locator('.diff-view-file');
-    const setDiffs = (enabled: boolean) =>
-      page.evaluate(
-        (value) =>
-          window.postMessage(
-            {
-              type: 'config/update',
-              payload: {
-                desktopSessionPaneSide: 'left',
-                defaultPermissionMode: 'default',
-                chatFontSize: 13,
-                chatEditorFontSize: 12,
-                chatFontFamily: 'default',
-                showFileDiffs: value,
-              },
-            },
-            '*'
-          ),
-        enabled
-      );
+    const setDiffs = (enabled: boolean) => setShowFileDiffs(page, enabled);
     const geometry = () =>
       list.evaluate((el) => ({
         lastBottom:
@@ -1418,22 +1365,7 @@ test.describe('diff preview anchoring', () => {
       page.locator('[data-msg-id="message-wheel-diff-59"] .file-change-card')
     ).toHaveCount(4);
     await waitForAnimationFrames(page, 12);
-    await page.evaluate(() => {
-      window.postMessage(
-        {
-          type: 'config/update',
-          payload: {
-            desktopSessionPaneSide: 'left',
-            defaultPermissionMode: 'default',
-            chatFontSize: 13,
-            chatEditorFontSize: 12,
-            chatFontFamily: 'default',
-            showFileDiffs: true,
-          },
-        },
-        '*'
-      );
-    });
+    await setShowFileDiffs(page, true);
     await expect(page.locator('.diff-view-widget').first()).toBeAttached();
     await waitForAnimationFrames(page, 30);
     const tracker = await page.evaluateHandle(() => {
@@ -1485,22 +1417,7 @@ test.describe('diff preview anchoring', () => {
     expect(Math.abs(anchor.top)).toBeLessThanOrEqual(2);
     expect(await page.locator('.diff-view-widget').count()).toBeGreaterThan(0);
     const positions = sampleMessageTopAcrossFrames(list, anchor.id, 24);
-    await page.evaluate(() => {
-      window.postMessage(
-        {
-          type: 'config/update',
-          payload: {
-            desktopSessionPaneSide: 'left',
-            defaultPermissionMode: 'default',
-            chatFontSize: 13,
-            chatEditorFontSize: 12,
-            chatFontFamily: 'default',
-            showFileDiffs: false,
-          },
-        },
-        '*'
-      );
-    });
+    await setShowFileDiffs(page, false);
     await expect(page.locator('.diff-view-widget')).toHaveCount(0);
     const samples = await positions;
     expect(samples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1)).toBe(true);
@@ -1594,22 +1511,7 @@ test.describe('diff preview anchoring', () => {
     }, id);
     await expect(page.locator(`[data-msg-id="${id}"] .file-change-card`)).toHaveCount(12);
     await waitForAnimationFrames(page, 12);
-    await page.evaluate(() =>
-      window.postMessage(
-        {
-          type: 'config/update',
-          payload: {
-            desktopSessionPaneSide: 'left',
-            defaultPermissionMode: 'default',
-            chatFontSize: 13,
-            chatEditorFontSize: 12,
-            chatFontFamily: 'default',
-            showFileDiffs: true,
-          },
-        },
-        '*'
-      )
-    );
+    await setShowFileDiffs(page, true);
     // Outlast the old two-stable-frame/12-frame settle while the request is still pending.
     await page.waitForTimeout(350);
     const samples = await page.evaluate(async () => {
@@ -1675,23 +1577,7 @@ test.describe('diff preview anchoring', () => {
         await expect(page.locator(`[data-msg-id="${messageId}"] .file-change-card`)).toHaveCount(
           12
         );
-        const setDiffView = async (showFileDiffs: boolean) =>
-          page.evaluate((value) => {
-            window.postMessage(
-              {
-                type: 'config/update',
-                payload: {
-                  desktopSessionPaneSide: 'left',
-                  defaultPermissionMode: 'default',
-                  chatFontSize: 13,
-                  chatEditorFontSize: 12,
-                  chatFontFamily: 'default',
-                  showFileDiffs: value,
-                },
-              },
-              '*'
-            );
-          }, showFileDiffs);
+        const setDiffView = async (showFileDiffs: boolean) => setShowFileDiffs(page, showFileDiffs);
         await setDiffView(!enabled);
         const preview = page.locator(`[data-msg-id="${messageId}"] .file-change-inline-diffs`);
         await expect(preview).toHaveCount(enabled ? 0 : 1);
@@ -2193,10 +2079,7 @@ test.describe('diff preview anchoring', () => {
     ).toBe(true);
     expect(await list.locator('[data-msg-id]').count()).toBeLessThan(50);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 4);
     const summary = page.locator(`[data-msg-id="${editMessageId}"] .assistant-activity-summary`);
     await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
@@ -2208,9 +2091,7 @@ test.describe('diff preview anchoring', () => {
     await page.getByLabel('Send (Enter)').click();
 
     await expect(page.locator('.chat-turn-user').last()).toContainText('Make one more change');
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
     await expect(summary).toContainText('Explored: 1 file');
     await expect(summary).not.toContainText('edit');
     await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
@@ -2484,9 +2365,7 @@ test.describe('diff preview anchoring', () => {
 
     const header = page.locator(`[data-msg-id="${messageId}"] .diff-view-item`);
     // Wait for layout stability so bottom-follow cannot move the header away from the pointer.
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     await header.hover({ position: { x: 4, y: 4 } });
     await expect
       .poll(() => toggle.evaluate((button) => getComputedStyle(button).opacity))
@@ -2558,11 +2437,7 @@ test.describe('diff preview anchoring', () => {
     const jumpToLatest = page.locator('.jump-to-latest-button');
     await expect(jumpToLatest).toBeVisible();
     await jumpToLatest.click();
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(3);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(3);
 
     const focusPreview = page.locator(
       '[data-msg-id="message-diff-preview-assistant-58"] .diff-view-lines'
@@ -2583,11 +2458,7 @@ test.describe('diff preview anchoring', () => {
     expect(focusedMetrics.distanceFromBottom).toBeGreaterThan(200);
 
     await page.locator('[contenteditable="true"]').focus();
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(3);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(3);
   });
 
   test('keeps a focused diff header fixed when it is expanded after scrolling', async ({
@@ -2648,19 +2519,13 @@ test.describe('diff preview anchoring', () => {
     const toggle = page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`);
     await expect(toggle).toBeAttached();
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 3);
 
     await toggle.evaluate((button) => (button as HTMLButtonElement).click());
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await waitForAnimationFrames(page, 4);
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 3);
 
     await toggle.evaluate((button) => {
@@ -2716,11 +2581,7 @@ test.describe('diff preview anchoring', () => {
         )
       )
       .toBeGreaterThan(1_000);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(3);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(3);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -8, bubbles: true }));
@@ -2756,10 +2617,7 @@ test.describe('diff preview anchoring', () => {
     }
     await waitForAnimationFrames(page, 5);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 3);
 
     const box = await list.boundingBox();

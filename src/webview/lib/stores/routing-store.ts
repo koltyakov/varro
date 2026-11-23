@@ -168,5 +168,3 @@ export const routingStore = {
     return state.commands.some((command: Command) => command.name === name);
   },
 };
-
-export type RoutingStore = typeof routingStore;

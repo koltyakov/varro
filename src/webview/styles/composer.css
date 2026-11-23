@@ -1938,30 +1938,6 @@
   background: var(--color-vscode-button-hover);
 }
 
-.chat-stop-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-control);
-  border: none;
-  cursor: pointer;
-  color: var(--color-vscode-error);
-  background: color-mix(in srgb, var(--color-vscode-error) 12%, transparent);
-  transition:
-    background-color 0.12s,
-    transform 0.1s;
-}
-
-.chat-stop-button:hover {
-  background: color-mix(in srgb, var(--color-vscode-error) 22%, transparent);
-}
-
-.chat-stop-button:active {
-  transform: scale(0.92);
-}
-
 .todo-block {
   margin: 0 0 4px;
   padding: var(--space-3) var(--space-5);

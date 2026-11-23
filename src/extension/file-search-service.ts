@@ -114,6 +114,10 @@ export class FileSearchService {
   }
 
   dispose(): void {
+    this.resetSearchState();
+  }
+
+  private resetSearchState(): void {
     this.fileSearchCts?.cancel();
     this.fileSearchCts?.dispose();
     this.fileSearchCts = null;
@@ -144,16 +148,7 @@ export class FileSearchService {
 
     this.workspaceScope = scope;
     this.workspaceFolders = primaryFolder ? [...openFolders] : [];
-    this.fileSearchCts?.cancel();
-    this.fileSearchCts?.dispose();
-    this.fileSearchCts = null;
-    this.disposeWorkspaceWatcher();
-    if (this.cacheInvalidationDebounceTimer) {
-      clearTimeout(this.cacheInvalidationDebounceTimer);
-      this.cacheInvalidationDebounceTimer = null;
-    }
-    this.hasPendingWorkspaceFileCacheClear = false;
-    this.clearWorkspaceFileCache();
+    this.resetSearchState();
     return primaryFolder ? this.workspaceFolders : undefined;
   }
 

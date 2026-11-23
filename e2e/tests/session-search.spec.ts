@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { MessageEntry } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 const sessionId = 'session-search';
 const created = 1_780_000_000_000;
@@ -65,24 +66,17 @@ async function loadSession(
   initialMessages = history(),
   theme: 'dark' | 'light' = 'dark'
 ) {
-  await page.addInitScript(
-    (capture) => {
-      // SAFETY: Only the isolated playback harness consumes this generated history.
-      (window as typeof window & { varroPlaybackCapture: typeof capture }).varroPlaybackCapture =
-        capture;
+  await installPlaybackCapture(page, {
+    session: {
+      id: sessionId,
+      projectID: 'test',
+      directory: '/workspace',
+      title: 'Session search',
+      version: '1',
+      time: { created, updated: created },
     },
-    {
-      session: {
-        id: sessionId,
-        projectID: 'test',
-        directory: '/workspace',
-        title: 'Session search',
-        version: '1',
-        time: { created, updated: created },
-      },
-      initialMessages,
-    }
-  );
+    initialMessages,
+  });
   await page.goto(`/e2e/harness/index.html?scenario=session-playback&windowed=1&theme=${theme}`);
   await expect(page.locator(`[data-msg-id="${initialMessages.at(-1)!.info.id}"]`)).toBeVisible();
 }

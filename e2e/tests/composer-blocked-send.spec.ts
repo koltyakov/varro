@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { postWebviewMessage } from './helpers';
 
 for (const theme of ['dark', 'light', 'high-contrast', 'high-contrast-light']) {
   test(`busy-send menu matches other menu highlights in ${theme}`, async ({ page }) => {
@@ -103,9 +104,7 @@ test('a deferred provider refresh does not block the composer', async ({ page })
   await composer.pressSequentially('Send while refresh is deferred', { delay: 10 });
 
   // Active agents can defer a provider refresh. Existing routes remain usable.
-  await page.evaluate(() => {
-    window.postMessage({ type: 'providers/status', payload: { pending: true } }, '*');
-  });
+  await postWebviewMessage(page, { type: 'providers/status', payload: { pending: true } });
 
   await expect(page.locator('.chat-send-button')).toBeEnabled();
 
@@ -114,9 +113,7 @@ test('a deferred provider refresh does not block the composer', async ({ page })
 
 test('a deferred provider refresh still changes Stop to Add to queue', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=busy-stop-send');
-  await page.evaluate(() => {
-    window.postMessage({ type: 'providers/status', payload: { pending: true } }, '*');
-  });
+  await postWebviewMessage(page, { type: 'providers/status', payload: { pending: true } });
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Queue while refresh is deferred');

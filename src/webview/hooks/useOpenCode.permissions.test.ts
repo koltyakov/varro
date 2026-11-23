@@ -1,42 +1,23 @@
-import { flush as flushSolid, createRoot } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import { AUTO_APPROVE_JUDGE_TIMEOUT_MS, type ServerEventName } from '../../shared/protocol';
-import type { onMessage } from '../lib/bridge';
+import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../../shared/protocol';
 import type { Permission } from '../types';
 import {
+  captureBridgeHandler,
+  captureServerEventHandlers,
   getBridgeMocks,
   getClientMocks,
+  loadAndMountUseOpenCode,
   loadModules,
+  mountUseOpenCode,
   session,
   userMessage,
 } from './useOpenCode.test-support';
-
-interface ServerEvent {
-  properties?: unknown;
-}
+import { deferred } from '../test-fixtures';
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
-type BridgeOnMessage = typeof onMessage;
-type ServerEventsOn = (
-  event: ServerEventName | '*',
-  handler: (data: ServerEvent) => void
-) => () => void;
-const bridgeOnMessage = vi.fn<BridgeOnMessage>();
-const serverEventsOn = vi.fn<ServerEventsOn>();
-Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
-Object.assign(clientMocks, { serverEventsOn });
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: Error) => void;
-  const promise = new Promise<T>((next, fail) => {
-    resolve = next;
-    reject = fail;
-  });
-  return { promise, resolve, reject };
-}
 
 function permission(id = 'perm-1'): Permission {
   return {
@@ -65,23 +46,23 @@ function permissionListItem(id = 'perm-1') {
   };
 }
 
-function captureServerEventHandlers() {
-  const handlers = new Map<string, (data: ServerEvent) => void>();
-  serverEventsOn.mockImplementation((event, handler) => {
-    handlers.set(event, handler);
-    return () => {
-      handlers.delete(event);
-    };
-  });
-  return handlers;
-}
-
 function configureReconciliationMocks() {
   clientMocks.sessionList.mockResolvedValue([]);
   clientMocks.sessionStatus.mockResolvedValue({});
   clientMocks.agentList.mockResolvedValue([]);
   clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
   clientMocks.questionList.mockResolvedValue([]);
+}
+
+/** Loads fresh modules, puts session-1 in auto mode, and mounts the runtime. */
+async function mountRuntimeInAutoMode() {
+  const { stateModule, hookModule } = await loadModules();
+  flushSolid();
+  stateModule.setPermissionModeForSession('session-1', 'auto');
+  flushSolid();
+  const dispose = mountUseOpenCode(hookModule);
+  flushSolid();
+  return { stateModule, hookModule, dispose };
 }
 
 describe('useOpenCode permission and config flows', () => {
@@ -232,10 +213,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-stale'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -262,10 +240,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-restored'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -305,15 +280,7 @@ describe('useOpenCode permission and config flows', () => {
       actionSummary: 'Check installed tool versions',
     });
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
@@ -351,13 +318,7 @@ describe('useOpenCode permission and config flows', () => {
       sessionPermissionModes: { 'session-1': 'auto' },
     };
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -405,10 +366,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.setPermissionModeForSession('session-1', mode);
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -439,13 +397,7 @@ describe('useOpenCode permission and config flows', () => {
   it.each(['bash', 'todowrite', 'question'])(
     'recovers a full-access %s reply rejected during an ownership handoff without a popup',
     async (type) => {
-      let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-      bridgeOnMessage.mockImplementation((handler) => {
-        bridgeHandler = handler;
-        return () => {
-          bridgeHandler = undefined;
-        };
-      });
+      const bridge = captureBridgeHandler();
       const serverEventHandlers = captureServerEventHandlers();
       configureReconciliationMocks();
       const pending = { ...permissionListItem('perm-handoff'), permission: type };
@@ -457,10 +409,7 @@ describe('useOpenCode permission and config flows', () => {
       flushSolid();
       stateModule.setPermissionModeForSession('session-1', 'full');
       flushSolid();
-      const dispose = createRoot((cleanup) => {
-        hookModule.useOpenCode();
-        return cleanup;
-      });
+      const dispose = mountUseOpenCode(hookModule);
       flushSolid();
 
       try {
@@ -468,8 +417,7 @@ describe('useOpenCode permission and config flows', () => {
         flushSolid();
         await vi.waitFor(() => expect(clientMocks.sessionRespondPermission).toHaveBeenCalledOnce());
         flushSolid();
-        if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-        bridgeHandler({
+        bridge.send({
           type: 'permission-automation/update',
           payload: { owner: false, lease: 2 },
         });
@@ -490,7 +438,7 @@ describe('useOpenCode permission and config flows', () => {
         });
 
         clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
-        bridgeHandler({
+        bridge.send({
           type: 'permission-automation/update',
           payload: { owner: true, lease: 3 },
         });
@@ -516,13 +464,7 @@ describe('useOpenCode permission and config flows', () => {
   );
 
   it('reconciles visible prompts once when a non-owner acquires automation', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     const serverEventHandlers = captureServerEventHandlers();
     clientMocks.permissionList.mockResolvedValue([permissionListItem('perm-failover')]);
     clientMocks.varroJudgePermission.mockResolvedValue({
@@ -534,15 +476,7 @@ describe('useOpenCode permission and config flows', () => {
       permissionAutomation: { owner: false, lease: 1 },
     };
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -556,9 +490,7 @@ describe('useOpenCode permission and config flows', () => {
       );
       flushSolid();
       expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'permission-automation/update',
         payload: { owner: true, lease: 2 },
       });
@@ -576,7 +508,7 @@ describe('useOpenCode permission and config flows', () => {
       );
       flushSolid();
 
-      bridgeHandler({
+      bridge.send({
         type: 'permission-automation/update',
         payload: { owner: true, lease: 2 },
       });
@@ -600,15 +532,7 @@ describe('useOpenCode permission and config flows', () => {
     });
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -646,15 +570,7 @@ describe('useOpenCode permission and config flows', () => {
     configureReconciliationMocks();
     clientMocks.varroJudgePermission.mockRejectedValue(new Error('Judge model unavailable'));
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -694,10 +610,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-restored'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -752,10 +665,7 @@ describe('useOpenCode permission and config flows', () => {
       sessionID: 'child-1',
     });
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -794,15 +704,7 @@ describe('useOpenCode permission and config flows', () => {
     const judge = deferred<{ decision: 'ask'; reason: string }>();
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -839,15 +741,7 @@ describe('useOpenCode permission and config flows', () => {
     const judge = deferred<{ decision: 'ask'; reason: string }>();
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
@@ -900,10 +794,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-restored'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -949,10 +840,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-restored'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -987,10 +875,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-pending-full'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -1036,13 +921,7 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('restores a hidden prompt when a newer overlapping permission sync fails', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
     const firstList = deferred<ReturnType<typeof permissionListItem>[]>();
@@ -1057,10 +936,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-restored'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -1068,8 +944,7 @@ describe('useOpenCode permission and config flows', () => {
       flushSolid();
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
       flushSolid();
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'permission/actionable',
         payload: { permissionId: 'perm-restored' },
       });
@@ -1097,13 +972,7 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('does not restore a hidden permission after switching workspaces when sync fails', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
     clientMocks.permissionList.mockRejectedValue(new Error('Permission list failed'));
@@ -1120,18 +989,11 @@ describe('useOpenCode permission and config flows', () => {
       pendingPermissions: [permissionListItem('perm-restored-a')],
     };
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       expect(stateModule.state.permissions).toEqual([]);
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'context/update',
         payload: {
           workspacePath: '/repo-a',
@@ -1141,7 +1003,7 @@ describe('useOpenCode permission and config flows', () => {
         },
       });
       flushSolid();
-      bridgeHandler({
+      bridge.send({
         type: 'context/update',
         payload: {
           workspacePath: '/repo-b',
@@ -1167,7 +1029,7 @@ describe('useOpenCode permission and config flows', () => {
         payload: { permissionId: 'perm-restored-a' },
       });
 
-      bridgeHandler({
+      bridge.send({
         type: 'context/update',
         payload: {
           workspacePath: '/repo-a',
@@ -1177,7 +1039,7 @@ describe('useOpenCode permission and config flows', () => {
         },
       });
       flushSolid();
-      bridgeHandler({
+      bridge.send({
         type: 'permission/actionable',
         payload: { permissionId: 'perm-restored-a' },
       });
@@ -1209,15 +1071,7 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -1285,15 +1139,7 @@ describe('useOpenCode permission and config flows', () => {
     const judge = deferred<{ decision: 'ask'; reason: string }>();
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -1356,15 +1202,7 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
     clientMocks.sessionRespondPermission.mockReturnValue(response.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -1417,15 +1255,7 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
     clientMocks.sessionRespondPermission.mockReturnValue(userResponse.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -1480,15 +1310,7 @@ describe('useOpenCode permission and config flows', () => {
     const judge = deferred<{ decision: 'allow'; reason: string }>();
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -1530,15 +1352,7 @@ describe('useOpenCode permission and config flows', () => {
     const judge = deferred<{ decision: 'allow'; reason: string }>();
     clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -1589,10 +1403,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -1649,10 +1460,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -1705,10 +1513,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -1766,15 +1571,7 @@ describe('useOpenCode permission and config flows', () => {
       .mockRejectedValueOnce(new Error('Permission backend unavailable'))
       .mockResolvedValue(undefined);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('permission.asked')?.({
@@ -1838,10 +1635,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.setPermissionModeForSession('session-1', 'auto');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -1905,10 +1699,7 @@ describe('useOpenCode permission and config flows', () => {
       flushSolid();
       stateModule.setPermissionModeForSession('session-1', 'auto');
       flushSolid();
-      const dispose = createRoot((cleanup) => {
-        hookModule.useOpenCode();
-        return cleanup;
-      });
+      const dispose = mountUseOpenCode(hookModule);
       flushSolid();
 
       try {
@@ -2017,10 +1808,7 @@ describe('useOpenCode permission and config flows', () => {
       flushSolid();
       stateModule.setPermissionModeForSession('session-2', 'auto');
       flushSolid();
-      const dispose = createRoot((cleanup) => {
-        hookModule.useOpenCode();
-        return cleanup;
-      });
+      const dispose = mountUseOpenCode(hookModule);
       flushSolid();
 
       try {
@@ -2105,10 +1893,7 @@ describe('useOpenCode permission and config flows', () => {
       flushSolid();
       stateModule.setPermissionModeForSession('session-1', 'auto');
       flushSolid();
-      const dispose = createRoot((cleanup) => {
-        hookModule.useOpenCode();
-        return cleanup;
-      });
+      const dispose = mountUseOpenCode(hookModule);
       flushSolid();
 
       try {
@@ -2213,15 +1998,7 @@ describe('useOpenCode permission and config flows', () => {
       .mockResolvedValueOnce({ decision: 'ask', reason: 'second request needs review' })
       .mockReturnValueOnce(recheck.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
@@ -2313,15 +2090,7 @@ describe('useOpenCode permission and config flows', () => {
         })
     );
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    stateModule.setPermissionModeForSession('session-1', 'auto');
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await mountRuntimeInAutoMode();
 
     try {
       serverEventHandlers.get('server.connected')?.({});
@@ -2357,10 +2126,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission());
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -2395,10 +2161,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.setState(storePath('sessions', [session('session-1')]));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -2468,10 +2231,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.setPermissionModeForSession('grandchild-1', 'default');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -2509,10 +2269,7 @@ describe('useOpenCode permission and config flows', () => {
     flushSolid();
     stateModule.addPermission(permission('perm-answered'));
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -2542,13 +2299,7 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('applies desktop session pane side from config updates', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -2557,18 +2308,10 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'config/update',
         payload: {
           desktopSessionPaneSide: 'right',
@@ -2588,13 +2331,7 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('restores pending permission prompts from initial webview state after reload', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
@@ -2633,18 +2370,10 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -2671,13 +2400,7 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('restores pending permission prompts that use permissionID after reload', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
@@ -2716,18 +2439,10 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -2754,21 +2469,9 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('normalizes live permission events with nested tool metadata', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
-    const serverEventHandlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      serverEventHandlers.set(event, handler);
-      return () => {
-        serverEventHandlers.delete(event);
-      };
-    });
+    const serverEventHandlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([session('session-1')]);
@@ -2778,18 +2481,10 @@ describe('useOpenCode permission and config flows', () => {
     clientMocks.questionList.mockResolvedValue([]);
     clientMocks.sessionMessages.mockResolvedValue([{ info: userMessage('user-1'), parts: [] }]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });

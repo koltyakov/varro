@@ -93,6 +93,22 @@ export type SessionListPage = {
   unavailableDirectories?: string[];
 };
 export type McpAuthStart = { authorizationUrl: string; oauthState: string; paste?: true };
+export type SessionPromptBody = {
+  messageID?: string;
+  parts: Array<{
+    type: string;
+    text?: string;
+    mime?: string;
+    filename?: string;
+    url?: string;
+  }>;
+  model?: { providerID: string; modelID: string };
+  agent?: string;
+  noReply?: boolean;
+  delivery?: 'steer' | 'queue';
+  variant?: string;
+  queuedMessageDispatch?: { itemId: string; lease: number };
+};
 
 export const client = {
   async health(): Promise<HealthResponse> {
@@ -431,22 +447,7 @@ export const client = {
     },
     async sendAsync(
       id: string,
-      body: {
-        messageID?: string;
-        parts: Array<{
-          type: string;
-          text?: string;
-          mime?: string;
-          filename?: string;
-          url?: string;
-        }>;
-        model?: { providerID: string; modelID: string };
-        agent?: string;
-        noReply?: boolean;
-        delivery?: 'steer' | 'queue';
-        variant?: string;
-        queuedMessageDispatch?: { itemId: string; lease: number };
-      },
+      body: SessionPromptBody,
       options?: { directory?: string; interruptedRecovery?: true }
     ): Promise<void> {
       // `delivery` is a client-side timing concern, not a server one. "Steer" means

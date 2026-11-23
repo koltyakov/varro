@@ -33,6 +33,16 @@ vi.mock('../lib/client', () => ({
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+
+function mountView(view: Parameters<typeof render>[0]) {
+  cleanup = render(view, container!);
+  flushSolid();
+}
+
+function applyState(setter: Parameters<typeof setState>[0]) {
+  setState(setter);
+  flushSolid();
+}
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
 
 function setMcpStatuses(statuses: Record<string, McpStatus>) {
@@ -126,16 +136,11 @@ describe('McpPicker', () => {
     async (status) => {
       setMcpStatuses({ oauth: { status } });
       flushSolid();
-      setState(storePath('sessionSelectedMcps', { 'session-1': ['oauth'] }));
-      flushSolid();
+      applyState(storePath('sessionSelectedMcps', { 'session-1': ['oauth'] }));
       const onChange = vi.fn((names: string[]) =>
         setState(storePath('sessionSelectedMcps', 'session-1', names))
       );
-      cleanup = render(
-        () => McpPicker({ sessionId: 'session-1', onChange, onClose: vi.fn() }),
-        container!
-      );
-      flushSolid();
+      mountView(() => McpPicker({ sessionId: 'session-1', onChange, onClose: vi.fn() }));
       container!.querySelector<HTMLButtonElement>('.dropdown-item')!.click();
       flushSolid();
       expect(onChange).toHaveBeenLastCalledWith([]);
@@ -361,11 +366,9 @@ describe('McpPicker', () => {
       lightpanda: { status: 'disabled' },
     });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: null, initialQuery: 'at', onChange: vi.fn(), onClose: vi.fn() }),
-      container!
+    mountView(() =>
+      McpPicker({ sessionId: null, initialQuery: 'at', onChange: vi.fn(), onClose: vi.fn() })
     );
-    flushSolid();
     const search = container!.querySelector<HTMLInputElement>('[aria-label="Search MCPs"]')!;
     expect(search.value).toBe('at');
     expect(document.activeElement).toBe(search);
@@ -400,16 +403,13 @@ describe('McpPicker', () => {
     });
     flushSolid();
 
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange: vi.fn(),
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
     await flushMicrotasks();
     flushSolid();
 
@@ -443,16 +443,13 @@ describe('McpPicker', () => {
   });
 
   it('shows the empty fallback when no MCPs are available', () => {
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange: vi.fn(),
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.dropdown-header')?.textContent).toBe('MCPs');
     expect(container?.textContent).toContain('No MCPs found');
@@ -468,19 +465,15 @@ describe('McpPicker', () => {
       zeta: { status: 'disabled' },
     });
     flushSolid();
-    setState(storePath('sessionSelectedMcps', { 'session-1': ['zeta'] }));
-    flushSolid();
+    applyState(storePath('sessionSelectedMcps', { 'session-1': ['zeta'] }));
 
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange,
-          onClose,
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange,
+        onClose,
+      })
     );
-    flushSolid();
     await flushMicrotasks();
     flushSolid();
 
@@ -537,16 +530,13 @@ describe('McpPicker', () => {
     );
     flushSolid();
 
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange,
-          onClose,
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange,
+        onClose,
+      })
     );
-    flushSolid();
     await flushMicrotasks();
     flushSolid();
 
@@ -599,16 +589,13 @@ describe('McpPicker', () => {
     });
     flushSolid();
 
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange: vi.fn(),
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
     await flushMicrotasks();
     flushSolid();
 
@@ -620,7 +607,7 @@ describe('McpPicker', () => {
 
   it('toggles MCPs against the connected defaults in a new chat draft', async () => {
     const onChange = vi.fn();
-    setState(
+    applyState(
       storePath('mcpDefaults', {
         global: { alpha: true, 'browser-bridge': false },
         project: {},
@@ -628,23 +615,19 @@ describe('McpPicker', () => {
         editable: true,
       })
     );
-    flushSolid();
     setMcpStatuses({
       alpha: { status: 'connected' },
       'browser-bridge': { status: 'failed', error: 'Connection closed' },
     });
     flushSolid();
 
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: null,
-          onChange,
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: null,
+        onChange,
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
     await flushMicrotasks();
     flushSolid();
 
@@ -658,7 +641,7 @@ describe('McpPicker', () => {
 
   it('keeps on-demand MCPs visible without adopting shared connections as session selections', () => {
     const onChange = vi.fn();
-    setState(
+    applyState(
       storePath('mcpDefaults', {
         global: { rare: false, offline: false },
         project: {},
@@ -666,14 +649,9 @@ describe('McpPicker', () => {
         editable: true,
       })
     );
-    flushSolid();
     setMcpStatuses({ rare: { status: 'connected' } });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: 'fresh', onChange, onClose: vi.fn() }),
-      container!
-    );
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: 'fresh', onChange, onClose: vi.fn() }));
     const items = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('.dropdown-item[aria-pressed]')
     );
@@ -688,7 +666,7 @@ describe('McpPicker', () => {
   it('offers just one settings button beyond the session toggles', () => {
     const onChange = vi.fn();
     const onClose = vi.fn();
-    setState(
+    applyState(
       storePath('mcpDefaults', {
         global: { rare: false },
         project: {},
@@ -696,11 +674,8 @@ describe('McpPicker', () => {
         editable: true,
       })
     );
-    flushSolid();
-    setState(storePath('sessionSelectedMcps', { current: [] }));
-    flushSolid();
-    cleanup = render(() => McpPicker({ sessionId: 'current', onChange, onClose }), container!);
-    flushSolid();
+    applyState(storePath('sessionSelectedMcps', { current: [] }));
+    mountView(() => McpPicker({ sessionId: 'current', onChange, onClose }));
     expect(container!.querySelectorAll('button')).toHaveLength(2);
     expect(container!.querySelector('select')).toBeNull();
     expect(container!.textContent).not.toContain('Use defaults');
@@ -724,8 +699,7 @@ describe('McpPicker', () => {
     const onClose = vi.fn();
     setMcpStatuses({ alpha: { status: 'connected' } });
     flushSolid();
-    cleanup = render(() => McpPicker({ sessionId: null, onChange, onClose }), container!);
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: null, onChange, onClose }));
     const settings = container!.querySelector<HTMLButtonElement>('.dropdown-footer button')!;
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     settings.dispatchEvent(event);
@@ -744,16 +718,13 @@ describe('McpPicker', () => {
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
 
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange,
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange,
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
     await flushMicrotasks();
     flushSolid();
 
@@ -793,11 +764,7 @@ describe('McpPicker', () => {
       });
       setMcpStatuses({ oauth: { status: 'needs_auth' } });
       flushSolid();
-      cleanup = render(
-        () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
-        container!
-      );
-      flushSolid();
+      mountView(() => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }));
       container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
       flushSolid();
       await flushMicrotasks(6);
@@ -834,11 +801,7 @@ describe('McpPicker', () => {
     mocks.status.mockResolvedValue({ oauth: { status: 'connected' } });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
-      container!
-    );
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }));
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     flushSolid();
     await flushMicrotasks(6);
@@ -865,11 +828,7 @@ describe('McpPicker', () => {
     );
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
-      container!
-    );
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }));
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     flushSolid();
     await flushMicrotasks(6);
@@ -897,11 +856,7 @@ describe('McpPicker', () => {
       .mockResolvedValueOnce({ oauth: { status: 'connected' } });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
-      container!
-    );
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }));
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     flushSolid();
     await flushMicrotasks(4);
@@ -934,11 +889,7 @@ describe('McpPicker', () => {
     vi.useFakeTimers();
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
-      container!
-    );
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }));
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     flushSolid();
     await flushMicrotasks(4);
@@ -965,11 +916,7 @@ describe('McpPicker', () => {
     );
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
-      container!
-    );
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }));
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     flushSolid();
     await flushMicrotasks(4);
@@ -996,11 +943,7 @@ describe('McpPicker', () => {
     mocks.status.mockResolvedValue({ oauth: { status: 'needs_auth' } });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }),
-      container!
-    );
-    flushSolid();
+    mountView(() => McpPicker({ sessionId: null, onChange: vi.fn(), onClose: vi.fn() }));
     container!.querySelector<HTMLButtonElement>('.mcp-picker-action')!.click();
     flushSolid();
     await flushMicrotasks(4);
@@ -1046,16 +989,13 @@ describe('McpPicker', () => {
     );
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange: vi.fn(),
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     flushSolid();
@@ -1086,16 +1026,13 @@ describe('McpPicker', () => {
     });
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange: vi.fn(),
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     flushSolid();
@@ -1116,16 +1053,13 @@ describe('McpPicker', () => {
       },
     });
     flushSolid();
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange,
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange,
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
 
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     flushSolid();
@@ -1145,16 +1079,13 @@ describe('McpPicker', () => {
   it('removes credentials and starts a fresh authorization flow', async () => {
     setMcpStatuses({ oauth: { status: 'needs_auth' } });
     flushSolid();
-    cleanup = render(
-      () =>
-        McpPicker({
-          sessionId: 'session-1',
-          onChange: vi.fn(),
-          onClose: vi.fn(),
-        }),
-      container!
+    mountView(() =>
+      McpPicker({
+        sessionId: 'session-1',
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+      })
     );
-    flushSolid();
     container?.querySelector<HTMLButtonElement>('.mcp-picker-action')?.click();
     flushSolid();
     await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledTimes(1));

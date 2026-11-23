@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getListDistanceFromBottom, waitForAnimationFrames } from './helpers';
 
 type ModelChangeHarness = Window & {
   __varroE2E?: {
@@ -32,9 +32,7 @@ for (const width of [486, 900]) {
 
     const label = page.locator('[data-msg-id="model-change-assistant"] .model-change-label');
     await expect(label).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
     await waitForAnimationFrames(page, 2);
     await label.hover();
     const tooltip = page.getByRole('tooltip');

@@ -3,19 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { registerProviderLimitRefreshEffect } from '../hooks/session/session-effects';
 import { getActiveProviderSelection, isProviderWorking } from '../hooks/routing-state';
 import { createAppState } from '../lib/state';
-import type { AssistantMessage, Provider } from '../types';
+import type { Provider } from '../types';
 import type { ProviderLimitStatus } from '../../shared/protocol';
-import { createPerfRoot, expectEffectDependencyIsolation, settlePerfEffects } from './harness';
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: Error) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+import {
+  createPerfRoot,
+  expectEffectDependencyIsolation,
+  settlePerfEffects,
+  createAssistantMessage,
+} from './harness';
+import { deferred } from '../test-fixtures';
 
 function createProvider(): Provider {
   return {
@@ -29,27 +25,6 @@ function createProvider(): Provider {
         capabilities: { toolcall: true },
         cost: { input: 0, output: 0 },
       },
-    },
-  };
-}
-
-function createAssistantMessage(id: string): AssistantMessage {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'assistant',
-    time: { created: 1, completed: 2 },
-    parentID: 'parent-1',
-    modelID: 'gpt-4o',
-    providerID: 'openai',
-    mode: 'default',
-    path: { cwd: '/workspace', root: '/workspace' },
-    cost: 0,
-    tokens: {
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache: { read: 0, write: 0 },
     },
   };
 }

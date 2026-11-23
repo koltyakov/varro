@@ -479,26 +479,24 @@ export function finishMessageStreaming(messageId: string) {
 
 export function removeMessagePart(sessionId: string, messageId: string, partId: string) {
   flushPendingStreamingDeltas();
-  (() => {
-    setState(
-      storePath('messages', (msgs) => {
-        const idx = messageIndex.findMessageIndex(msgs, messageId);
-        if (idx !== -1 && msgs[idx]!.info.sessionID === sessionId) {
-          const location = messageIndex.findPartLocation(msgs, partId);
-          if (location && location.msgIdx === idx) {
-            msgs[idx]!.parts.splice(location.partIdx, 1);
-            messageIndex.removePart(msgs, partId, location);
-          }
+  setState(
+    storePath('messages', (msgs) => {
+      const idx = messageIndex.findMessageIndex(msgs, messageId);
+      if (idx !== -1 && msgs[idx]!.info.sessionID === sessionId) {
+        const location = messageIndex.findPartLocation(msgs, partId);
+        if (location && location.msgIdx === idx) {
+          msgs[idx]!.parts.splice(location.partIdx, 1);
+          messageIndex.removePart(msgs, partId, location);
         }
+      }
 
-        return msgs;
-      })
-    );
-    if (state.streamingPartId === partId) {
-      setState(storePath('streamingPartId', null));
-      setState(storePath('streamingText', ''));
-    }
-  })();
+      return msgs;
+    })
+  );
+  if (state.streamingPartId === partId) {
+    setState(storePath('streamingPartId', null));
+    setState(storePath('streamingText', ''));
+  }
 }
 
 export function removeMessage(sessionId: string, messageId: string) {
@@ -512,41 +510,35 @@ export function removeMessage(sessionId: string, messageId: string) {
     (part) => part.id === state.streamingPartId
   );
   if (removedStreamingPart) streamingDeltaQueue.reset();
-  (() => {
-    setState(
-      storePath('messages', (messages) => {
-        messages.splice(messageIndexToRemove, 1);
+  setState(
+    storePath('messages', (messages) => {
+      messages.splice(messageIndexToRemove, 1);
 
-        return messages;
-      })
-    );
-    if (removedStreamingPart) {
-      setState(storePath('streamingPartId', null));
-      setState(storePath('streamingText', ''));
-    }
-  })();
+      return messages;
+    })
+  );
+  if (removedStreamingPart) {
+    setState(storePath('streamingPartId', null));
+    setState(storePath('streamingText', ''));
+  }
   messageIndex.invalidate();
   recordSettledAssistantMarkers(state.messages);
 }
 
 export function clearStreamingState() {
   streamingDeltaQueue.reset();
-  (() => {
-    setState(storePath('streamingPartId', null));
-    setState(storePath('streamingText', ''));
-  })();
+  setState(storePath('streamingPartId', null));
+  setState(storePath('streamingText', ''));
 }
 
 export function clearMessages() {
   streamingDeltaQueue.reset();
   pendingOptimisticUserMessageKeys.clear();
-  (() => {
-    setState(storePath('messages', []));
-    setState(storePath('todos', []));
-    setState(storePath('diffs', []));
-    setState(storePath('streamingPartId', null));
-    setState(storePath('streamingText', ''));
-  })();
+  setState(storePath('messages', []));
+  setState(storePath('todos', []));
+  setState(storePath('diffs', []));
+  setState(storePath('streamingPartId', null));
+  setState(storePath('streamingText', ''));
   messageIndex.invalidate();
 }
 
@@ -590,13 +582,11 @@ export function pruneMessagesFrom(sessionId: string, messageId: string): (() => 
     entry.parts.some((part) => part.id === state.streamingPartId)
   );
   if (removedStreamingPart) streamingDeltaQueue.reset();
-  (() => {
-    setState(storePath('messages', retainedMessages));
-    if (removedStreamingPart) {
-      setState(storePath('streamingPartId', null));
-      setState(storePath('streamingText', ''));
-    }
-  })();
+  setState(storePath('messages', retainedMessages));
+  if (removedStreamingPart) {
+    setState(storePath('streamingPartId', null));
+    setState(storePath('streamingText', ''));
+  }
   messageIndex.invalidate();
   recordSettledAssistantMarkers(retainedMessages);
   return () => restorePrunedSessionMessages(previousMessages, removedMessageKeys);
@@ -649,13 +639,11 @@ export function removeMessagesForSessions(sessionIds: Iterable<string>) {
   const retainedMessages = state.messages.filter(
     (entry) => !removedSessionIds.has(entry.info.sessionID)
   );
-  (() => {
-    setState(storePath('messages', retainedMessages));
-    if (removedStreamingPart) {
-      setState(storePath('streamingPartId', null));
-      setState(storePath('streamingText', ''));
-    }
-  })();
+  setState(storePath('messages', retainedMessages));
+  if (removedStreamingPart) {
+    setState(storePath('streamingPartId', null));
+    setState(storePath('streamingText', ''));
+  }
   messageIndex.invalidate();
   recordSettledAssistantMarkers(retainedMessages);
 }
@@ -845,16 +833,14 @@ function recordSettledAssistantMarkers(messages: MessageEntry[]) {
 
   // A session and its history can be published in the same tick.
   const activeSessionId = readLatestActiveSessionId();
-  (() => {
-    for (const [sessionId, message] of settledMessages) {
-      if (message.error) continue;
-      if (activeSessionId === sessionId && !showSessionPicker()) {
-        markSessionSeen(sessionId, message.time.completed);
-      } else {
-        markSessionResponseCompleted(sessionId, message.time.completed);
-      }
+  for (const [sessionId, message] of settledMessages) {
+    if (message.error) continue;
+    if (activeSessionId === sessionId && !showSessionPicker()) {
+      markSessionSeen(sessionId, message.time.completed);
+    } else {
+      markSessionResponseCompleted(sessionId, message.time.completed);
     }
-  })();
+  }
 }
 
 function getSettledLatestAssistantMessages(messages: MessageEntry[]) {

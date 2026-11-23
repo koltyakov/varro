@@ -219,40 +219,15 @@ export class SessionActionOperations {
   constructor(private readonly deps: SessionActionDependencies) {}
 
   readonly implementPlan = async (prompt: string, sessionId: string | null) => {
-    await implementPlanWithDependencies(
-      {
-        getActiveSessionId: this.deps.getActiveSessionId,
-        getBuildAgent: this.deps.getBuildAgent,
-        setError: this.deps.setError,
-        clearSkippedPlanSession: this.deps.clearSkippedPlanSession,
-        applySelectedAgent: this.deps.applySelectedAgent,
-        sendMessage: this.deps.sendMessage,
-      },
-      prompt,
-      sessionId
-    );
+    await implementPlanWithDependencies(this.deps, prompt, sessionId);
   };
 
   readonly openPlan = async (markdown: string, sessionId: string | null) => {
-    await openPlanWithDependencies(
-      {
-        getActiveSessionId: this.deps.getActiveSessionId,
-        setError: this.deps.setError,
-        openPlan: this.deps.openPlan,
-      },
-      markdown,
-      sessionId
-    );
+    await openPlanWithDependencies(this.deps, markdown, sessionId);
   };
 
   readonly initSession = async () => {
-    await initSessionWithDependencies({
-      getActiveSessionId: this.deps.getActiveSessionId,
-      createSession: this.deps.createSession,
-      getMessageCount: this.deps.getMessageCount,
-      setError: this.deps.setError,
-      sendMessage: this.deps.sendMessage,
-    });
+    await initSessionWithDependencies(this.deps);
   };
 
   readonly runSlashCommandByName = async (
@@ -260,27 +235,6 @@ export class SessionActionOperations {
     args: string,
     options?: SessionCommandOptions
   ) => {
-    return runSlashCommandWithDependencies(
-      {
-        hasCommand: this.deps.hasCommand,
-        getCommandRouting: this.deps.getCommandRouting,
-        getActiveSessionId: this.deps.getActiveSessionId,
-        createSession: this.deps.createSession,
-        startLoading: this.deps.startLoading,
-        runSessionCommand: this.deps.runSessionCommand,
-        shouldApplyToActiveSession: this.deps.shouldApplyToActiveSession,
-        upsertMessageInfo: this.deps.upsertMessageInfo,
-        upsertPart: this.deps.upsertPart,
-        syncTodosFromMessages: this.deps.syncTodosFromMessages,
-        requestMessageListScrollToBottom: this.deps.requestMessageListScrollToBottom,
-        syncSession: this.deps.syncSession,
-        recheckSessionStatus: this.deps.recheckSessionStatus,
-        stopLoading: this.deps.stopLoading,
-        setError: this.deps.setError,
-      },
-      name,
-      args,
-      options
-    );
+    return runSlashCommandWithDependencies(this.deps, name, args, options);
   };
 }

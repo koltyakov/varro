@@ -764,6 +764,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const post = (message: ExtensionMessage) => bridge.post(message);
     const fileSearch =
       webviewContext.surface === 'sidebar' ? this.fileSearch : new FileSearchService();
+    const markEndpointNotReady = () => {
+      if (endpointRef.endpoint) {
+        endpointRef.endpoint.selectedProviderID = undefined;
+        this.setEndpointReady(endpointRef.endpoint, false);
+      }
+      this.updateProviderLimitExclusions();
+    };
 
     const webviewSession = new WebviewSession(
       bridge,
@@ -812,20 +819,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
         cancelApiRequestsBeforeGeneration: (generation) =>
           endpointRef.restProxy?.cancelRequestsBeforeGeneration(generation),
-        handleDisposedSideEffects: () => {
-          if (endpointRef.endpoint) {
-            endpointRef.endpoint.selectedProviderID = undefined;
-            this.setEndpointReady(endpointRef.endpoint, false);
-          }
-          this.updateProviderLimitExclusions();
-        },
-        handleUnavailableSideEffects: () => {
-          if (endpointRef.endpoint) {
-            endpointRef.endpoint.selectedProviderID = undefined;
-            this.setEndpointReady(endpointRef.endpoint, false);
-          }
-          this.updateProviderLimitExclusions();
-        },
+        handleDisposedSideEffects: markEndpointNotReady,
+        handleUnavailableSideEffects: markEndpointNotReady,
         editorContext: getEndpointContext,
       },
       webviewContext,
@@ -2910,87 +2905,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private updateConfirmedPermissionMode(
-    sessionID: string,
-    mode: PermissionMode,
-    directory?: string,
-    recoverFallback = false,
-    defaultPermission?: PermissionRule[]
-  ) {
+  /** Serializes session permission writes; a failed predecessor does not block the next one. */
+  private enqueuePermissionModeOperation<T>(sessionID: string, run: () => Promise<T>): Promise<T> {
     const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
-    const operation = previous
-      .catch(() => undefined)
-      .then(async () => {
-        if (
-          recoverFallback &&
-          !this.sessionPermissionModes.pendingSafeFallbackSessionIds().includes(sessionID)
-        ) {
-          return;
-        }
-        try {
-          await this.sessionPermissionModes.stageSafeFallback(sessionID);
-        } catch (err) {
-          this.postPermissionModes();
-          this.schedulePermissionModeFallbackRecovery();
-          throw err;
-        }
-        this.postPermissionModes();
-        let session: unknown;
-        try {
-          const permission =
-            mode === 'default'
-              ? (defaultPermission ?? getSafeDefaultPermissionRules())
-              : getSessionPermissionRulesForMode(mode, 'update');
-          session = await this.patchSessionPermissionMode(
-            sessionID,
-            mode,
-            directory,
-            permission,
-            recoverFallback
-          );
-        } catch (err) {
-          this.postPermissionModes();
-          this.schedulePermissionModeFallbackRecovery();
-          throw err;
-        }
-        try {
-          const modes = await this.sessionPermissionModes.set(
-            sessionID,
-            mode,
-            asRecord(session) ?? undefined
-          );
-          this.postPermissionModes(modes);
-        } catch (err) {
-          logger.warn(
-            `Failed to persist confirmed permission mode: ${err instanceof Error ? err.message : String(err)}`
-          );
-          this.postPermissionModes();
-          try {
-            const recovered = await this.patchSessionPermissionMode(
-              sessionID,
-              'default',
-              directory,
-              getSafeDefaultPermissionRules(),
-              recoverFallback
-            );
-            await this.sessionPermissionModes.set(
-              sessionID,
-              'default',
-              asRecord(recovered) ?? undefined
-            );
-            this.postPermissionModes();
-          } catch (recoveryError) {
-            logger.warn(
-              `Could not immediately restore safe permission rules: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`
-            );
-            this.schedulePermissionModeFallbackRecovery();
-          }
-          throw new Error('Permission mode was not saved; safe default recovery is in progress', {
-            cause: err,
-          });
-        }
-        return session;
-      });
+    const operation = previous.catch(() => undefined).then(run);
     this.permissionModeQueues.set(sessionID, operation);
     const clearQueue = () => {
       if (this.permissionModeQueues.get(sessionID) === operation) {
@@ -2999,6 +2917,86 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
     void operation.then(clearQueue, clearQueue);
     return operation;
+  }
+
+  private updateConfirmedPermissionMode(
+    sessionID: string,
+    mode: PermissionMode,
+    directory?: string,
+    recoverFallback = false,
+    defaultPermission?: PermissionRule[]
+  ) {
+    return this.enqueuePermissionModeOperation(sessionID, async () => {
+      if (
+        recoverFallback &&
+        !this.sessionPermissionModes.pendingSafeFallbackSessionIds().includes(sessionID)
+      ) {
+        return;
+      }
+      try {
+        await this.sessionPermissionModes.stageSafeFallback(sessionID);
+      } catch (err) {
+        this.postPermissionModes();
+        this.schedulePermissionModeFallbackRecovery();
+        throw err;
+      }
+      this.postPermissionModes();
+      let session: unknown;
+      try {
+        const permission =
+          mode === 'default'
+            ? (defaultPermission ?? getSafeDefaultPermissionRules())
+            : getSessionPermissionRulesForMode(mode, 'update');
+        session = await this.patchSessionPermissionMode(
+          sessionID,
+          mode,
+          directory,
+          permission,
+          recoverFallback
+        );
+      } catch (err) {
+        this.postPermissionModes();
+        this.schedulePermissionModeFallbackRecovery();
+        throw err;
+      }
+      try {
+        const modes = await this.sessionPermissionModes.set(
+          sessionID,
+          mode,
+          asRecord(session) ?? undefined
+        );
+        this.postPermissionModes(modes);
+      } catch (err) {
+        logger.warn(
+          `Failed to persist confirmed permission mode: ${err instanceof Error ? err.message : String(err)}`
+        );
+        this.postPermissionModes();
+        try {
+          const recovered = await this.patchSessionPermissionMode(
+            sessionID,
+            'default',
+            directory,
+            getSafeDefaultPermissionRules(),
+            recoverFallback
+          );
+          await this.sessionPermissionModes.set(
+            sessionID,
+            'default',
+            asRecord(recovered) ?? undefined
+          );
+          this.postPermissionModes();
+        } catch (recoveryError) {
+          logger.warn(
+            `Could not immediately restore safe permission rules: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`
+          );
+          this.schedulePermissionModeFallbackRecovery();
+        }
+        throw new Error('Permission mode was not saved; safe default recovery is in progress', {
+          cause: err,
+        });
+      }
+      return session;
+    });
   }
 
   private restoreSessionSelections(
@@ -3034,63 +3032,53 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     selectionId?: string
   ): Promise<void> {
     // Share the permission update queue so concurrent selections cannot overwrite each other's metadata.
-    const previous = this.permissionModeQueues.get(sessionId) ?? Promise.resolve();
-    const operation = previous
-      .catch(() => undefined)
-      .then(async () => {
-        const path = `/session/${encodeURIComponent(sessionId)}`;
-        const session = asRecord(await this.server.request('GET', path, undefined, { directory }));
-        if (session?.id !== sessionId) throw new Error('Cannot verify session selection metadata');
-        const metadata = mergeVarroSessionMetadata(session.metadata, selection);
-        const currentModel = readSessionModelMetadata(session.metadata);
-        const model = selection.model;
-        const modelChanged =
-          model &&
-          (currentModel?.providerID !== model.providerID ||
-            currentModel.modelID !== model.modelID ||
-            currentModel.variant !== model.variant);
-        const agentChanged =
-          selection.agent && readSessionAgentMetadata(session.metadata) !== selection.agent;
-        let updatedAt = asRecord(session.time)?.updated;
-        if (modelChanged || agentChanged) {
-          const updatedSession = asRecord(
-            await this.server.request('PATCH', path, { metadata }, { directory })
-          );
-          updatedAt = asRecord(updatedSession?.time)?.updated ?? updatedAt;
-        }
-        if (selection.model) {
-          await this.sessionSelectedModels.set(sessionId, selection.model);
-          this.post({
-            type: 'session-models/sync',
-            payload: {
-              models: this.sessionSelectedModels.list(),
-              acknowledgement: selectionId ? { sessionId, selectionId } : undefined,
-            },
-          });
-        }
-        if (selection.agent) {
-          await this.sessionPlanState.setAgent(sessionId, selection.agent);
-          this.sessionState.setSessionAgent(sessionId, selection.agent);
-          const update: Extract<ExtensionMessage, { type: 'session-plan-state/update' }> = {
-            type: 'session-plan-state/update',
-            payload: { sessionId, agent: selection.agent },
-          };
-          if (selectionId) update.payload.selectionId = selectionId;
-          this.post(update);
-        }
-        this.restoreSessionSelections(
-          sessionId,
-          metadata,
-          typeof updatedAt === 'number' ? updatedAt : undefined
+    return this.enqueuePermissionModeOperation(sessionId, async () => {
+      const path = `/session/${encodeURIComponent(sessionId)}`;
+      const session = asRecord(await this.server.request('GET', path, undefined, { directory }));
+      if (session?.id !== sessionId) throw new Error('Cannot verify session selection metadata');
+      const metadata = mergeVarroSessionMetadata(session.metadata, selection);
+      const currentModel = readSessionModelMetadata(session.metadata);
+      const model = selection.model;
+      const modelChanged =
+        model &&
+        (currentModel?.providerID !== model.providerID ||
+          currentModel.modelID !== model.modelID ||
+          currentModel.variant !== model.variant);
+      const agentChanged =
+        selection.agent && readSessionAgentMetadata(session.metadata) !== selection.agent;
+      let updatedAt = asRecord(session.time)?.updated;
+      if (modelChanged || agentChanged) {
+        const updatedSession = asRecord(
+          await this.server.request('PATCH', path, { metadata }, { directory })
         );
-      });
-    this.permissionModeQueues.set(sessionId, operation);
-    const clearQueue = () => {
-      if (this.permissionModeQueues.get(sessionId) === operation)
-        this.permissionModeQueues.delete(sessionId);
-    };
-    void operation.then(clearQueue, clearQueue);
-    return operation;
+        updatedAt = asRecord(updatedSession?.time)?.updated ?? updatedAt;
+      }
+      if (selection.model) {
+        await this.sessionSelectedModels.set(sessionId, selection.model);
+        this.post({
+          type: 'session-models/sync',
+          payload: {
+            models: this.sessionSelectedModels.list(),
+            acknowledgement: selectionId ? { sessionId, selectionId } : undefined,
+          },
+        });
+      }
+      if (selection.agent) {
+        await this.sessionPlanState.setAgent(sessionId, selection.agent);
+        this.sessionState.setSessionAgent(sessionId, selection.agent);
+        const update: Extract<ExtensionMessage, { type: 'session-plan-state/update' }> = {
+          type: 'session-plan-state/update',
+          payload: { sessionId, agent: selection.agent },
+        };
+        if (selectionId) update.payload.selectionId = selectionId;
+        this.post(update);
+      }
+      this.restoreSessionSelections(
+        sessionId,
+        metadata,
+        typeof updatedAt === 'number' ? updatedAt : undefined
+      );
+    });
   }
 
   private async patchSessionPermissionMode(
@@ -3136,45 +3124,34 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     patterns: string[],
     directory?: string
   ): Promise<void> {
-    const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
-    const operation = previous
-      .catch(() => undefined)
-      .then(async () => {
-        const session = asRecord(
-          await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
-            directory,
-          })
-        );
-        if (session?.id !== sessionID) throw new Error('404 Session not found');
-        const existing = Array.isArray(session.permission) ? session.permission : [];
-        const additions = patterns
-          .filter(
-            (pattern) =>
-              !existing.some((value) => {
-                const rule = asRecord(value);
-                return (
-                  rule?.permission === permission &&
-                  rule.pattern === pattern &&
-                  rule.action === 'allow'
-                );
-              })
-          )
-          .map((pattern) => ({ permission, pattern, action: 'allow' }));
-        await this.server.request(
-          'PATCH',
-          `/session/${encodeURIComponent(sessionID)}`,
-          { permission: [...existing, ...additions] },
-          { directory }
-        );
-      });
-    this.permissionModeQueues.set(sessionID, operation);
-    const clearQueue = () => {
-      if (this.permissionModeQueues.get(sessionID) === operation) {
-        this.permissionModeQueues.delete(sessionID);
-      }
-    };
-    void operation.then(clearQueue, clearQueue);
-    return operation;
+    return this.enqueuePermissionModeOperation(sessionID, async () => {
+      const session = asRecord(
+        await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+          directory,
+        })
+      );
+      if (session?.id !== sessionID) throw new Error('404 Session not found');
+      const existing = Array.isArray(session.permission) ? session.permission : [];
+      const additions = patterns
+        .filter(
+          (pattern) =>
+            !existing.some((value) => {
+              const rule = asRecord(value);
+              return (
+                rule?.permission === permission &&
+                rule.pattern === pattern &&
+                rule.action === 'allow'
+              );
+            })
+        )
+        .map((pattern) => ({ permission, pattern, action: 'allow' }));
+      await this.server.request(
+        'PATCH',
+        `/session/${encodeURIComponent(sessionID)}`,
+        { permission: [...existing, ...additions] },
+        { directory }
+      );
+    });
   }
 
   private updatePermissionRulesForSession(
@@ -3182,26 +3159,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     rules: PermissionRule[],
     directory?: string
   ): Promise<PermissionRule[]> {
-    const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
-    const operation = previous
-      .catch(() => undefined)
-      .then(async () => {
-        await this.server.request(
-          'PATCH',
-          `/session/${encodeURIComponent(sessionID)}`,
-          { permission: rules },
-          { directory }
-        );
-        return rules;
-      });
-    this.permissionModeQueues.set(sessionID, operation);
-    const clearQueue = () => {
-      if (this.permissionModeQueues.get(sessionID) === operation) {
-        this.permissionModeQueues.delete(sessionID);
-      }
-    };
-    void operation.then(clearQueue, clearQueue);
-    return operation;
+    return this.enqueuePermissionModeOperation(sessionID, async () => {
+      await this.server.request(
+        'PATCH',
+        `/session/${encodeURIComponent(sessionID)}`,
+        { permission: rules },
+        { directory }
+      );
+      return rules;
+    });
   }
 
   private persistPreconfiguredPermissionMode(
@@ -3210,71 +3176,56 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     directory?: string,
     ifAbsent = false
   ): Promise<void> {
-    const previous = this.permissionModeQueues.get(sessionID) ?? Promise.resolve();
-    const operation = previous
-      .catch(() => undefined)
-      .then(async () => {
-        if (ifAbsent && Object.hasOwn(this.sessionPermissionModes.list(), sessionID)) return;
-        if (ifAbsent) {
-          const session = asRecord(
-            await this.server.request(
-              'GET',
-              `/session/${encodeURIComponent(sessionID)}`,
-              undefined,
-              { directory }
-            )
-          );
-          if (session?.id !== sessionID)
-            throw new Error('Cannot verify session permission metadata');
-          if (this.sessionPermissionModes.restoreSessionMetadata(session)) {
-            this.postPermissionModes();
-            return;
-          }
-        }
-        try {
-          await this.sessionPermissionModes.stageSafeFallback(sessionID);
-        } catch (err) {
+    return this.enqueuePermissionModeOperation(sessionID, async () => {
+      if (ifAbsent && Object.hasOwn(this.sessionPermissionModes.list(), sessionID)) return;
+      if (ifAbsent) {
+        const session = asRecord(
+          await this.server.request('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+            directory,
+          })
+        );
+        if (session?.id !== sessionID) throw new Error('Cannot verify session permission metadata');
+        if (this.sessionPermissionModes.restoreSessionMetadata(session)) {
           this.postPermissionModes();
-          try {
-            await this.patchSessionPermissionMode(
-              sessionID,
-              'default',
-              directory,
-              getSafeDefaultPermissionRules()
-            );
-          } catch (recoveryError) {
-            logger.warn(
-              `Could not restore safe rules after fallback persistence failed: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`
-            );
-          }
-          this.schedulePermissionModeFallbackRecovery();
-          throw err;
+          return;
         }
+      }
+      try {
+        await this.sessionPermissionModes.stageSafeFallback(sessionID);
+      } catch (err) {
         this.postPermissionModes();
         try {
-          const session = await this.patchSessionPermissionMode(sessionID, mode, directory);
-          const modes = await this.sessionPermissionModes.set(
+          await this.patchSessionPermissionMode(
             sessionID,
-            mode,
-            asRecord(session) ?? undefined
+            'default',
+            directory,
+            getSafeDefaultPermissionRules()
           );
-          this.postPermissionModes(modes);
-        } catch (err) {
-          this.postPermissionModes();
-          this.schedulePermissionModeFallbackRecovery();
-          throw new Error('Permission mode was not saved; safe default recovery is in progress', {
-            cause: err,
-          });
+        } catch (recoveryError) {
+          logger.warn(
+            `Could not restore safe rules after fallback persistence failed: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`
+          );
         }
-      });
-    this.permissionModeQueues.set(sessionID, operation);
-    const clearQueue = () => {
-      if (this.permissionModeQueues.get(sessionID) === operation) {
-        this.permissionModeQueues.delete(sessionID);
+        this.schedulePermissionModeFallbackRecovery();
+        throw err;
       }
-    };
-    void operation.then(clearQueue, clearQueue);
-    return operation;
+      this.postPermissionModes();
+      try {
+        const session = await this.patchSessionPermissionMode(sessionID, mode, directory);
+        const modes = await this.sessionPermissionModes.set(
+          sessionID,
+          mode,
+          asRecord(session) ?? undefined
+        );
+        this.postPermissionModes(modes);
+      } catch (err) {
+        this.postPermissionModes();
+        this.schedulePermissionModeFallbackRecovery();
+        throw new Error('Permission mode was not saved; safe default recovery is in progress', {
+          cause: err,
+        });
+      }
+    });
   }
 
   private updateEditorPanelTitles() {

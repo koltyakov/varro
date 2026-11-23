@@ -2,9 +2,12 @@
 import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import {
+  getListDistanceFromBottom,
   getScrollMetrics,
   getVisibleMessageAnchor,
+  postWebviewMessage,
   sampleMessageTopAcrossFrames,
+  scrollToBottom,
   waitForAnimationFrame,
   waitForAnimationFrames,
 } from './helpers';
@@ -97,18 +100,12 @@ test.describe('auto-scroll', () => {
         await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
         const list = page.locator('.interactive-list');
         await expect(list).toBeVisible();
-        await expect
-          .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-          .toBeLessThan(1);
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
         await waitForAnimationFrames(page, 20);
         if (detached) {
           await list.hover();
           await page.mouse.wheel(0, -500);
-          await expect
-            .poll(() =>
-              getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom)
-            )
-            .toBeGreaterThan(100);
+          await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(100);
           await waitForAnimationFrames(page, 20);
         }
 
@@ -167,9 +164,7 @@ test.describe('auto-scroll', () => {
           '\n'
         )
       );
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThan(1);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
       await waitForAnimationFrames(page, 20);
       const before = await list.evaluate((element) => {
         const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].findLast(
@@ -182,9 +177,7 @@ test.describe('auto-scroll', () => {
       });
       await list.hover();
       await page.mouse.wheel(0, -900);
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeGreaterThan(200);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(200);
       await waitForAnimationFrames(page, 10);
       await page.evaluate((previousId) => {
         const harness = window as Window & {
@@ -265,9 +258,7 @@ test.describe('auto-scroll', () => {
         await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
         const list = page.locator('.interactive-list');
         await expect(list).toBeVisible();
-        await expect
-          .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-          .toBeLessThan(1);
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
         await waitForAnimationFrames(page, 20);
 
         const before = await getScrollMetrics(page, '.interactive-list');
@@ -334,9 +325,7 @@ test.describe('auto-scroll', () => {
       await page.goto('/e2e/harness/index.html?scenario=large-transcript');
       const composer = page.getByRole('textbox', { name: 'Message composer' });
       await expect(composer).toBeVisible();
-      await expect
-        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-        .toBeLessThan(1);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
       await waitForAnimationFrames(page, 4);
 
       await page.evaluate(() => {
@@ -359,19 +348,14 @@ test.describe('auto-scroll', () => {
       });
 
       if (growth === 'attachment') {
-        await page.evaluate(() =>
-          window.postMessage(
-            {
-              type: 'command/attach-problems',
-              payload: {
-                diagnostics: [
-                  { path: '/workspace/example.ts', line: 1, severity: 'error', message: 'Example' },
-                ],
-              },
-            },
-            '*'
-          )
-        );
+        await postWebviewMessage(page, {
+          type: 'command/attach-problems',
+          payload: {
+            diagnostics: [
+              { path: '/workspace/example.ts', line: 1, severity: 'error', message: 'Example' },
+            ],
+          },
+        });
         await expect(
           page.locator('.chat-attachments-container .chat-attachment-chip')
         ).toBeVisible();
@@ -401,9 +385,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('keeps approved waiting tools from shifting the newest transcript backward', async ({
@@ -416,11 +398,7 @@ test.describe('auto-scroll', () => {
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect(page.locator('.tool-call-wait-icon.tool-status-pending')).toHaveCount(8);
     await expect(page.locator('.permission-prompt-count')).toContainText('8');
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
     const assistantTop = await assistant.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list')!;
@@ -478,9 +456,7 @@ test.describe('auto-scroll', () => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
     const previousMessage = page.locator('[data-msg-id="message-large-assistant-238"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
     await waitForAnimationFrames(page, 4);
 
@@ -568,9 +544,7 @@ test.describe('auto-scroll', () => {
   test('keeps the transcript fixed when Thinking becomes Worked', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
     await page.evaluate(() => {
       const sessionID = 'session-large-transcript';
@@ -602,9 +576,7 @@ test.describe('auto-scroll', () => {
         '[data-msg-id="message-large-assistant-active"] .assistant-message-flow-item-streamed'
       )
     ).not.toHaveClass(/measured-entrance-active/);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
     await page.evaluate(() => {
       const sessionID = 'session-large-transcript';
@@ -692,9 +664,7 @@ test.describe('auto-scroll', () => {
   }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
     const prompt = 'Review large transcript section 239 and keep the UI responsive.';
     await page
@@ -861,9 +831,7 @@ test.describe('auto-scroll', () => {
     await expect(page.locator('[data-msg-id="message-large-user-239"]')).toHaveCount(0);
     await expect(page.locator('.interactive-list')).not.toHaveClass(/editing-message/);
     await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
   });
 
   test('retains a native wheel destination while edit deletion is pending and permits cancellation after refusal', async ({
@@ -944,11 +912,7 @@ test.describe('auto-scroll', () => {
     const anchor = page.locator('[data-msg-id="message-large-assistant-238"]');
     const activeReasoning = page.locator('[data-activity-part-id="reasoning-stream-to-text"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
     await page.evaluate(() => {
       const part = {
@@ -1009,11 +973,7 @@ test.describe('auto-scroll', () => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
     await waitForAnimationFrames(page, 35);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     const beforeTop = await anchor.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list')!;
       return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
@@ -1158,9 +1118,7 @@ test.describe('auto-scroll', () => {
     });
     await list.click({ position: { x: 8, y: 8 } });
     await page.keyboard.press('End');
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await expect(anchor).toBeVisible();
 
     const samples = await anchor.evaluate(async (element) => {
@@ -1281,39 +1239,26 @@ test.describe('auto-scroll', () => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
-    await page.evaluate(() => {
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'todo.updated',
-            properties: {
-              sessionID: 'session-large-transcript',
-              todos: [
-                {
-                  content: 'Completed work from the previous turn',
-                  status: 'completed',
-                  priority: 'medium',
-                },
-              ],
+    await postWebviewMessage(page, {
+      type: 'server/event',
+      payload: {
+        type: 'todo.updated',
+        properties: {
+          sessionID: 'session-large-transcript',
+          todos: [
+            {
+              content: 'Completed work from the previous turn',
+              status: 'completed',
+              priority: 'medium',
             },
-          },
+          ],
         },
-        '*'
-      );
+      },
     });
     await expect(page.getByRole('button', { name: /Todos/i })).toBeVisible();
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await waitForAnimationFrames(page, 6);
 
     await composer.fill(
@@ -1322,11 +1267,7 @@ test.describe('auto-scroll', () => {
         (_, index) => `Keep the full transcript stable while sending, line ${index + 1}.`
       ).join('\n')
     );
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await waitForAnimationFrames(page, 6);
     await page.evaluate(() => {
       const harness = window as Window & {
@@ -1419,11 +1360,7 @@ test.describe('auto-scroll', () => {
           )
       )
       .toBeLessThanOrEqual(1);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   for (const change of ['clear', 'complete'] as const) {
@@ -1431,31 +1368,22 @@ test.describe('auto-scroll', () => {
       await page.goto('/e2e/harness/index.html?scenario=large-transcript');
       const list = page.locator('.interactive-list');
       await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-      await page.evaluate(() => {
-        window.postMessage(
-          {
-            type: 'server/event',
-            payload: {
-              type: 'todo.updated',
-              properties: {
-                sessionID: 'session-large-transcript',
-                todos: Array.from({ length: 7 }, (_, index) => ({
-                  content: `Automatic work item ${index}`,
-                  status: index === 0 ? 'in_progress' : 'pending',
-                  priority: 'medium',
-                })),
-              },
-            },
+      await postWebviewMessage(page, {
+        type: 'server/event',
+        payload: {
+          type: 'todo.updated',
+          properties: {
+            sessionID: 'session-large-transcript',
+            todos: Array.from({ length: 7 }, (_, index) => ({
+              content: `Automatic work item ${index}`,
+              status: index === 0 ? 'in_progress' : 'pending',
+              priority: 'medium',
+            })),
           },
-          '*'
-        );
+        },
       });
       await expect(page.locator('.todo-block-list')).toBeVisible();
-      await expect
-        .poll(() =>
-          getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-        )
-        .toBeLessThan(2);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
       await waitForAnimationFrames(page, 6);
       const samples = await list.evaluate(async (element, finishTodos) => {
         const marker = element.querySelector<HTMLElement>(
@@ -1527,24 +1455,19 @@ test.describe('auto-scroll', () => {
     const previousMessage = page.locator('[data-msg-id="message-large-assistant-239"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
 
-    await page.evaluate(() => {
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'todo.updated',
-            properties: {
-              sessionID: 'session-large-transcript',
-              todos: Array.from({ length: 7 }, (_, index) => ({
-                content: `Remaining work item ${index + 1}`,
-                status: index === 0 ? 'in_progress' : 'pending',
-                priority: 'medium',
-              })),
-            },
-          },
+    await postWebviewMessage(page, {
+      type: 'server/event',
+      payload: {
+        type: 'todo.updated',
+        properties: {
+          sessionID: 'session-large-transcript',
+          todos: Array.from({ length: 7 }, (_, index) => ({
+            content: `Remaining work item ${index + 1}`,
+            status: index === 0 ? 'in_progress' : 'pending',
+            priority: 'medium',
+          })),
         },
-        '*'
-      );
+      },
     });
 
     const todoBlock = page.locator('.todo-block:not(.changed-files-block)');
@@ -1563,11 +1486,7 @@ test.describe('auto-scroll', () => {
     const initialTodoGeometry = await getTodoListGeometry();
     expect(initialTodoGeometry.scrollHeight).toBeGreaterThan(initialTodoGeometry.clientHeight);
     expect(initialTodoGeometry.rightInset).toBeCloseTo(2, 1);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await waitForAnimationFrames(page, 6);
 
     const previousTop = await previousMessage.evaluate(
@@ -1603,11 +1522,7 @@ test.describe('auto-scroll', () => {
       expansionSamples.every((sample) => sample !== null && Math.abs(sample - previousTop) <= 1)
     ).toBe(true);
     await expect(reserve).toHaveCount(0);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
     await todoToggle.click();
     await expect(todoToggle).toHaveAttribute('aria-expanded', 'false');
@@ -1657,24 +1572,19 @@ test.describe('auto-scroll', () => {
     await page.goto('/e2e/harness/index.html?scenario=restored-session');
     await expect(page.locator('[data-msg-id="message-restored-assistant"]')).toBeVisible();
 
-    await page.evaluate(() => {
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: {
-            type: 'todo.updated',
-            properties: {
-              sessionID: 'session-restored',
-              todos: Array.from({ length: 4 }, (_, index) => ({
-                content: `Remaining work item ${index + 1}`,
-                status: index === 0 ? 'in_progress' : 'pending',
-                priority: 'medium',
-              })),
-            },
-          },
+    await postWebviewMessage(page, {
+      type: 'server/event',
+      payload: {
+        type: 'todo.updated',
+        properties: {
+          sessionID: 'session-restored',
+          todos: Array.from({ length: 4 }, (_, index) => ({
+            content: `Remaining work item ${index + 1}`,
+            status: index === 0 ? 'in_progress' : 'pending',
+            priority: 'medium',
+          })),
         },
-        '*'
-      );
+      },
     });
 
     const todoToggle = page.getByRole('button', { name: /Todos/i });
@@ -1728,9 +1638,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const anchor = await getVisibleMessageAnchor(list);
 
@@ -1758,9 +1666,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     for (let index = 0; index < 60; index += 1) {
       const anchor = await getVisibleMessageAnchor(list);
@@ -1825,9 +1731,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const box = await list.boundingBox();
     expect(box).not.toBeNull();
@@ -1972,11 +1876,7 @@ test.describe('auto-scroll', () => {
     await activeItem.evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await page.waitForTimeout(1_250);
     // Establish the exact bottom before capturing a subpixel-stability baseline. Live events
     // otherwise finish the initial one-pixel follow offset before the exit has even started.
@@ -2194,11 +2094,7 @@ test.describe('auto-scroll', () => {
     await expect(
       page.getByText('Committed follow-up line 24 expands after activity settles.')
     ).toBeVisible();
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
   });
 
   for (const promptLines of [10, 30]) {
@@ -2354,11 +2250,7 @@ test.describe('auto-scroll', () => {
       await expect(
         page.locator(`[data-msg-id="${assistantText.id}"] .rendered-markdown`)
       ).toHaveText(assistantText.text);
-      await expect
-        .poll(() =>
-          getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-        )
-        .toBeLessThanOrEqual(1);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
       const before = await summary.evaluate((element) => {
         const container = element.closest<HTMLElement>('.interactive-list');
         if (!container) throw new Error('Explored container is missing');
@@ -2787,16 +2679,9 @@ test.describe('auto-scroll', () => {
     });
 
     await expect(activeItems).toHaveCount(1);
-    await expect
-      .poll(() =>
-        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-      )
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await page.waitForTimeout(1_250);
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 4);
     const anchor = await getVisibleMessageAnchor(list);
 
@@ -2972,9 +2857,7 @@ test.describe('auto-scroll', () => {
     await activeItem.evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
     const sourceGeometry = await follower.evaluate((element) => {
       const tray = element.querySelector<HTMLElement>('.assistant-active-activity-tray');
@@ -3058,9 +2941,7 @@ test.describe('auto-scroll', () => {
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect(summary).toContainText('Explored');
     await expect(summary).toHaveAttribute('aria-expanded', 'false');
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
 
     const topBefore = await summary.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list')!;
@@ -3176,9 +3057,7 @@ test.describe('auto-scroll', () => {
     );
     const list = page.locator('.interactive-list');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
     await expect
       .poll(() =>
         page.evaluate(() => {
@@ -3563,10 +3442,7 @@ test.describe('auto-scroll', () => {
     await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
     const list = page.locator('.interactive-list');
     const sticky = page.locator('.latest-user-message-sticky');
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await expect(sticky).toBeVisible();
 
     const positions = await list.evaluate((element) => {
@@ -4105,9 +3981,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const box = await list.boundingBox();
     expect(box).not.toBeNull();
@@ -4186,14 +4060,9 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let index = 0; index < 6; index += 1) {
@@ -4207,9 +4076,7 @@ test.describe('auto-scroll', () => {
     await expect(page.locator('.chat-turn-assistant').last()).toContainText(
       'Streaming bottom follow chunk 5'
     );
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('keeps follow disabled after manual scroll and re-enables at bottom', async ({ page }) => {
@@ -4217,9 +4084,7 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, bubbles: true }));
@@ -4243,10 +4108,7 @@ test.describe('auto-scroll', () => {
       200
     );
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 2);
 
     await appendDeltaToLastLargeAssistant(
@@ -4254,9 +4116,7 @@ test.describe('auto-scroll', () => {
       `\n\nReattached streaming chunk: ${'follow again '.repeat(24)}`
     );
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 });
 
@@ -4266,9 +4126,7 @@ test.describe('auto-scroll re-engage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, bubbles: true }));
@@ -4293,9 +4151,7 @@ test.describe('auto-scroll re-engage', () => {
     );
     await waitForAnimationFrames(page, 4);
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('scroll up during streaming disables follow without snap-back', async ({ page }) => {
@@ -4303,9 +4159,7 @@ test.describe('auto-scroll re-engage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     for (let i = 0; i < 3; i += 1) {
       await appendDeltaToRapidStreaming(
@@ -4341,9 +4195,7 @@ test.describe('auto-scroll re-engage', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, bubbles: true }));
@@ -4362,10 +4214,7 @@ test.describe('auto-scroll re-engage', () => {
     );
     await waitForAnimationFrames(page, 3);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrames(page, 3);
 
     for (let i = 0; i < 4; i += 1) {
@@ -4376,8 +4225,6 @@ test.describe('auto-scroll re-engage', () => {
       await waitForAnimationFrames(page, 2);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 });

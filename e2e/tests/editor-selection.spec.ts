@@ -1,7 +1,6 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- Playwright callbacks validate synthetic request bodies before inspecting prompt parts. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bridge controlled harness requests to the shapes under test. */
 import { expect, test } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getFirstPromptParts, postWebviewMessage } from './helpers';
 
 test('context bar keeps a selected line range on one line beside another attachment', async ({
   page,
@@ -10,35 +9,23 @@ test('context bar keeps a selected line range on one line beside another attachm
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
   await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'context/update',
-        payload: {
-          workspacePath: '/workspace/varro',
-          activeFile: {
-            path: '/workspace/varro/src/veryLongProductStatusesConfigurationFilename.ts',
-            relativePath: 'src/veryLongProductStatusesConfigurationFilename.ts',
-            language: 'typescript',
-          },
-          selection: { startLine: 9, endLine: 113 },
-          diagnostics: [],
-        },
+  await postWebviewMessage(page, {
+    type: 'context/update',
+    payload: {
+      workspacePath: '/workspace/varro',
+      activeFile: {
+        path: '/workspace/varro/src/veryLongProductStatusesConfigurationFilename.ts',
+        relativePath: 'src/veryLongProductStatusesConfigurationFilename.ts',
+        language: 'typescript',
       },
-      '*'
-    );
+      selection: { startLine: 9, endLine: 113 },
+      diagnostics: [],
+    },
   });
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'files/dropped',
-        payload: [
-          { path: '/workspace/varro/image.png', relativePath: 'image.png', type: 'file' },
-        ],
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'files/dropped',
+    payload: [{ path: '/workspace/varro/image.png', relativePath: 'image.png', type: 'file' }],
   });
 
   const contextChip = page.locator('.chat-attachment-chip[title*="L9-113"]');
@@ -59,23 +46,18 @@ test('prompt body includes selection reference from active editor', async ({ pag
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
   await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'context/update',
-        payload: {
-          workspacePath: '/workspace/varro',
-          activeFile: {
-            path: '/workspace/varro/src/shared/context-files.ts',
-            relativePath: 'src/shared/context-files.ts',
-            language: 'typescript',
-          },
-          selection: { startLine: 42, endLine: 58 },
-          diagnostics: [],
-        },
+  await postWebviewMessage(page, {
+    type: 'context/update',
+    payload: {
+      workspacePath: '/workspace/varro',
+      activeFile: {
+        path: '/workspace/varro/src/shared/context-files.ts',
+        relativePath: 'src/shared/context-files.ts',
+        language: 'typescript',
       },
-      '*'
-    );
+      selection: { startLine: 42, endLine: 58 },
+      diagnostics: [],
+    },
   });
 
   await expect(page.locator('[title*="L42-58"]')).toBeVisible();
@@ -86,27 +68,15 @@ test('prompt body includes selection reference from active editor', async ({ pag
   await page.keyboard.press('Enter');
 
   await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-          }
-        ).__varroE2E;
-        const promptReq = value?.requests.find(
-          (req) => req.method === 'POST' && req.path.includes('prompt_async')
-        );
-        if (!promptReq?.body || typeof promptReq.body !== 'object') return null;
-        const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
-        if (!body.parts) return null;
-        return body.parts.some(
+    .poll(
+      async () =>
+        (await getFirstPromptParts(page))?.some(
           (part) =>
             part.type === 'text' &&
             typeof part.text === 'string' &&
             part.text.includes('context-files.ts') &&
             part.text.includes('lines 42-58')
-        );
-      })
+        ) ?? null
     )
     .toBe(true);
 });
@@ -115,14 +85,9 @@ test('prompt body includes terminal selection context', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
   await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'terminal-selection/update',
-        payload: { terminalName: 'zsh', text: 'npm test -- --runInBand' },
-      },
-      '*'
-    );
+  await postWebviewMessage(page, {
+    type: 'terminal-selection/update',
+    payload: { terminalName: 'zsh', text: 'npm test -- --runInBand' },
   });
 
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'zsh' })).toBeVisible();
@@ -133,26 +98,15 @@ test('prompt body includes terminal selection context', async ({ page }) => {
   await page.keyboard.press('Enter');
 
   await expect
-    .poll(() =>
-      getE2EState(page, () => {
-        const value = (
-          window as Window & {
-            __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-          }
-        ).__varroE2E;
-        const promptReq = value?.requests.find(
-          (req) => req.method === 'POST' && req.path.includes('prompt_async')
-        );
-        if (!promptReq?.body || typeof promptReq.body !== 'object') return false;
-        const body = promptReq.body as { parts?: Array<{ type: string; text?: string }> };
-        return !!body.parts?.some(
+    .poll(
+      async () =>
+        !!(await getFirstPromptParts(page))?.some(
           (part) =>
             part.type === 'text' &&
             typeof part.text === 'string' &&
             part.text.includes('[Selection from terminal zsh]') &&
             part.text.includes('npm test -- --runInBand')
-        );
-      })
+        )
     )
     .toBe(true);
 });
@@ -161,44 +115,34 @@ test('updating selection range updates the context bar display', async ({ page }
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
   await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'context/update',
-        payload: {
-          workspacePath: '/workspace/varro',
-          activeFile: {
-            path: '/workspace/varro/src/webview/lib/state.ts',
-            relativePath: 'src/webview/lib/state.ts',
-            language: 'typescript',
-          },
-          selection: { startLine: 5, endLine: 8 },
-          diagnostics: [],
-        },
+  await postWebviewMessage(page, {
+    type: 'context/update',
+    payload: {
+      workspacePath: '/workspace/varro',
+      activeFile: {
+        path: '/workspace/varro/src/webview/lib/state.ts',
+        relativePath: 'src/webview/lib/state.ts',
+        language: 'typescript',
       },
-      '*'
-    );
+      selection: { startLine: 5, endLine: 8 },
+      diagnostics: [],
+    },
   });
 
   await expect(page.locator('[title*="L5-8"]')).toBeVisible();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'context/update',
-        payload: {
-          workspacePath: '/workspace/varro',
-          activeFile: {
-            path: '/workspace/varro/src/webview/lib/state.ts',
-            relativePath: 'src/webview/lib/state.ts',
-            language: 'typescript',
-          },
-          selection: { startLine: 100, endLine: 120 },
-          diagnostics: [],
-        },
+  await postWebviewMessage(page, {
+    type: 'context/update',
+    payload: {
+      workspacePath: '/workspace/varro',
+      activeFile: {
+        path: '/workspace/varro/src/webview/lib/state.ts',
+        relativePath: 'src/webview/lib/state.ts',
+        language: 'typescript',
       },
-      '*'
-    );
+      selection: { startLine: 100, endLine: 120 },
+      diagnostics: [],
+    },
   });
 
   await expect(page.locator('[title*="L100-120"]')).toBeVisible();
@@ -209,44 +153,34 @@ test('clearing selection shows active file without line range', async ({ page })
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
   await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'context/update',
-        payload: {
-          workspacePath: '/workspace/varro',
-          activeFile: {
-            path: '/workspace/varro/src/webview/lib/state.ts',
-            relativePath: 'src/webview/lib/state.ts',
-            language: 'typescript',
-          },
-          selection: { startLine: 10, endLine: 15 },
-          diagnostics: [],
-        },
+  await postWebviewMessage(page, {
+    type: 'context/update',
+    payload: {
+      workspacePath: '/workspace/varro',
+      activeFile: {
+        path: '/workspace/varro/src/webview/lib/state.ts',
+        relativePath: 'src/webview/lib/state.ts',
+        language: 'typescript',
       },
-      '*'
-    );
+      selection: { startLine: 10, endLine: 15 },
+      diagnostics: [],
+    },
   });
 
   await expect(page.locator('[title*="L10-15"]')).toBeVisible();
 
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'context/update',
-        payload: {
-          workspacePath: '/workspace/varro',
-          activeFile: {
-            path: '/workspace/varro/src/webview/lib/state.ts',
-            relativePath: 'src/webview/lib/state.ts',
-            language: 'typescript',
-          },
-          selection: null,
-          diagnostics: [],
-        },
+  await postWebviewMessage(page, {
+    type: 'context/update',
+    payload: {
+      workspacePath: '/workspace/varro',
+      activeFile: {
+        path: '/workspace/varro/src/webview/lib/state.ts',
+        relativePath: 'src/webview/lib/state.ts',
+        language: 'typescript',
       },
-      '*'
-    );
+      selection: null,
+      diagnostics: [],
+    },
   });
 
   await expect(page.getByText('state.ts')).toBeVisible();

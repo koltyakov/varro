@@ -21,12 +21,12 @@ import {
   unsupportedProviderStatus,
   providerErrorStatus,
   VARRO_USER_AGENT,
+  OPENCODE_OAUTH_DUMMY_KEY,
 } from '../adapter-utils';
 
 const ZAI_QUOTA_ENDPOINT = 'https://api.z.ai/api/monitor/usage/quota/limit';
 const ZAI_RESET_CARDS_ENDPOINT =
   'https://api.z.ai/api/biz/customer-package-reset/list?targetType=PERSONAL';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 const ZAI_PROVIDER_IDS = new Set(['zai', 'zai-coding-plan']);
 const ZAI_MCP_MODELS = new Set(['search-prime', 'web-reader', 'zread']);
 
@@ -212,7 +212,7 @@ function extractZaiPayload(payload: unknown, checkedAt: number): ZaiPayloadResul
   if (code === 401 || code === 403) {
     return {
       kind: 'authentication',
-      note: `Z.ai quota endpoint rejected credentials (${formatNumeric(code)})`,
+      note: `Z.ai quota endpoint rejected credentials (${String(code)})`,
     };
   }
 
@@ -371,13 +371,9 @@ function getZaiWindowDescriptor(type: string, limitRecord: Record<string, unknow
 
 function buildZaiApiErrorNote(code: number | null, message: string) {
   const parts = ['Z.ai quota endpoint returned an API error'];
-  if (code != null) parts.push(formatNumeric(code));
+  if (code != null) parts.push(String(code));
   if (message) parts.push(`(${message})`);
   return parts.join(' ');
-}
-
-function formatNumeric(value: number) {
-  return Number.isInteger(value) ? String(value) : String(value);
 }
 
 function buildZaiQuotaId(prefix: string, unit: number | null, number: number | null) {

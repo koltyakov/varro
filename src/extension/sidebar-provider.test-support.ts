@@ -198,6 +198,19 @@ export function createWorkspaceState() {
   };
 }
 
+export function createStoredWorkspaceState(storage: Map<string, unknown>) {
+  return {
+    get: vi.fn((key: string, fallback?: unknown) =>
+      storage.has(key) ? storage.get(key) : fallback
+    ),
+    update: vi.fn((key: string, value: unknown) => {
+      if (value === undefined) storage.delete(key);
+      else storage.set(key, value);
+      return Promise.resolve();
+    }),
+  };
+}
+
 export function createContextProvider() {
   const context: EditorContext = {
     workspacePath: '/repo',

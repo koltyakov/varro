@@ -1,6 +1,6 @@
 import { storePath } from '@solidjs/signals';
 
-import { flush, reconcile } from 'solid-js';
+import { flush } from 'solid-js';
 import { clearRemoteImagePreviews } from '../lib/remote-image-previews';
 import { syncWindowChatTheme } from '../lib/window-chat-theme';
 import type {
@@ -35,6 +35,7 @@ import {
   applyQueuedMessagesSnapshot,
 } from '../lib/state-queued-messages';
 import { normalizeProjectPath } from './session/session-lifecycle';
+import { reconcileStoreField } from '../lib/store-reconcile';
 
 export function createMountBridgeOperations(deps: {
   ensureConnectionInitialized(): void;
@@ -67,6 +68,7 @@ export function createMountBridgeOperations(deps: {
   const handleExtensionMessage = (msg: ExtensionMessage) => {
     handleExtensionMessageWithDependencies(
       {
+        ...deps,
         setServerStatus: (payload) => appStore.setState(storePath('serverStatus', payload)),
         setServerReconnecting: (reconnecting) =>
           appStore.setState(storePath('serverReconnecting', reconnecting)),
@@ -75,8 +77,6 @@ export function createMountBridgeOperations(deps: {
           appStore.setState(storePath('restartBlocked', payload));
         },
         clearError: () => uiStore.setError(null),
-        ensureConnectionInitialized: deps.ensureConnectionInitialized,
-        reloadSessionCatalog: deps.reloadSessionCatalog,
         sessionTransferred: ({ sessionId, directory, available }) => {
           appStore.setState((draft) => {
             const session = draft.sessions.find((entry) => entry.id === sessionId);
@@ -100,22 +100,9 @@ export function createMountBridgeOperations(deps: {
           uiStore.setError(null);
           deps.openSession?.(sessionId, directory, true);
         },
-        getServerState: deps.getServerState,
-        invalidateConnection: deps.invalidateConnection,
         clearProvidersState: () => {
           appStore.setState(storePath('providersLoaded', false));
-          appStore.setState((draft) => {
-            const current = draft['providerLimits'];
-            const incoming = {} satisfies typeof current;
-            if (
-              incoming === null ||
-              incoming === undefined ||
-              current === null ||
-              current === undefined
-            )
-              draft['providerLimits'] = incoming;
-            else reconcile(incoming)(current);
-          });
+          appStore.setState((draft) => reconcileStoreField(draft, 'providerLimits', {}));
         },
         setTheme: (payload) => {
           const theme = syncWindowChatTheme(payload);
@@ -168,9 +155,7 @@ export function createMountBridgeOperations(deps: {
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
         },
         getPreviousActiveFilePath: () => appStore.state.editorContext.activeFile?.path ?? null,
-        getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
         getCurrentWorkspaceFolders: () => appStore.state.editorContext.workspaceFolders ?? [],
-        setCurrentWorkspacePath: deps.setCurrentWorkspacePath,
         persistWorkspacePath: (path) => writeStored(STORAGE_KEYS.workspacePath, path),
         setEditorContext: composerStore.setEditorContext,
         workspaceSelectionFailed: handleWorkspaceSelectionFailure,
@@ -189,26 +174,16 @@ export function createMountBridgeOperations(deps: {
             (appStore.state.editorContext.workspaceFolders ?? []).map((folder) => folder.path)
           );
         },
-        resetWorkspaceForChange: deps.resetWorkspaceForChange,
-        reloadWorkspaceAfterChange: deps.reloadWorkspaceAfterChange,
-        isInitialized: deps.isInitialized,
         setTerminalSelection: composerStore.setTerminalSelection,
         syncClipboardImages: composerStore.syncClipboardImages,
         addContextFiles: composerStore.addContextFiles,
         removeContextFile: composerStore.removeContextFile,
-        createSession: deps.createSession,
-        openSession: deps.openSession,
         requestComposerFocus: uiStore.requestComposerFocus,
         requestOpenAttentionSessions: uiStore.requestOpenAttentionSessions,
         requestOpenCompletedSessions: uiStore.requestOpenCompletedSessions,
         requestSessionSearchFocus: uiStore.requestSessionSearchFocus,
-        abortSession: deps.abortSession,
-        refreshMcps: deps.refreshMcps,
-        refreshLsps: deps.refreshLsps,
-        refreshProviders: deps.refreshProviders,
         setProviderRefreshPending: (pending) =>
           appStore.setState(storePath('providerRefreshPending', pending)),
-        revalidateProviderAuth: deps.revalidateProviderAuth,
         openExternal: (url) => postMessage({ type: 'vscode/open-external', payload: { url } }),
         setWorkspaceStatusSummary: (summary) =>
           appStore.setState(storePath('workspaceStatusSummary', summary)),
@@ -228,10 +203,6 @@ export function createMountBridgeOperations(deps: {
         },
         setSiblingWorkspaceAlerts: (alerts) =>
           appStore.setState(storePath('siblingWorkspaceAlerts', alerts)),
-        setPermissionAutomation: deps.setPermissionAutomation,
-        permissionModesSynced: deps.permissionModesSynced,
-        revealPermission: deps.revealPermission,
-        queueInterruptedSessionRecovery: deps.queueInterruptedSessionRecovery,
       },
       msg
     );

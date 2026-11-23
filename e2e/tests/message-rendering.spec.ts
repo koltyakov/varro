@@ -1,7 +1,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These E2E callbacks mutate protocol-shaped messages owned by the controlled harness fixture. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getE2EState, postWebviewMessage } from './helpers';
 
 async function expectSelectionEdgeContinuity(
   page: Page,
@@ -35,37 +35,32 @@ test('fenced code overrides unlayered host defaults without changing inline code
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
   const markdown = page.locator('[data-msg-id="message-rendering-assistant"] .rendered-markdown');
   await expect(markdown.locator('pre code')).toBeVisible();
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'server/event',
-        payload: {
-          type: 'message.part.updated',
-          properties: {
-            part: {
-              id: 'message-rendering-assistant-part-1',
-              sessionID: 'session-message-rendering',
-              messageID: 'message-rendering-assistant',
-              type: 'text',
-              text: [
-                'Inline `sample value`.',
-                '',
-                '```text',
-                'CPS audio testing',
-                '│',
-                '└── Check the environment',
-                '```',
-                '',
-                '```ts',
-                'const blockValue = 1;',
-                '```',
-              ].join('\n'),
-            },
-          },
+  await postWebviewMessage(page, {
+    type: 'server/event',
+    payload: {
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'message-rendering-assistant-part-1',
+          sessionID: 'session-message-rendering',
+          messageID: 'message-rendering-assistant',
+          type: 'text',
+          text: [
+            'Inline `sample value`.',
+            '',
+            '```text',
+            'CPS audio testing',
+            '│',
+            '└── Check the environment',
+            '```',
+            '',
+            '```ts',
+            'const blockValue = 1;',
+            '```',
+          ].join('\n'),
         },
       },
-      '*'
-    );
+    },
   });
   const inlineCode = markdown.locator('p > code');
   await expect(inlineCode).toHaveText('sample value');
@@ -565,25 +560,20 @@ test('delayed citation validation preserves wrapping and row height', async ({ p
 test('keeps PDF icons visible before and after exact-path validation', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering&citationCheckDelayMs=1500');
   await expect(page.getByRole('link', { name: 'README.md', exact: true })).toBeVisible();
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'server/event',
-        payload: {
-          type: 'message.part.updated',
-          properties: {
-            part: {
-              id: 'message-rendering-assistant-part-1',
-              sessionID: 'session-message-rendering',
-              messageID: 'message-rendering-assistant',
-              type: 'text',
-              text: "I'll copy `pdf-source/65129.pdf` to `pdf-source/__65129.pdf`.\n\nCopied to dev `pdf-source/__65129.pdf`.",
-            },
-          },
+  await postWebviewMessage(page, {
+    type: 'server/event',
+    payload: {
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'message-rendering-assistant-part-1',
+          sessionID: 'session-message-rendering',
+          messageID: 'message-rendering-assistant',
+          type: 'text',
+          text: "I'll copy `pdf-source/65129.pdf` to `pdf-source/__65129.pdf`.\n\nCopied to dev `pdf-source/__65129.pdf`.",
         },
       },
-      '*'
-    );
+    },
   });
   const pendingIcons = page.locator('code.citation-path img.file-path-icon');
   await expect(pendingIcons).toHaveCount(3);
@@ -612,26 +602,21 @@ for (const [kind, selector, label] of [
     await page.goto('/e2e/harness/index.html?scenario=message-rendering');
     if (kind === 'PDF') {
       await expect(page.getByRole('link', { name: 'README.md', exact: true })).toBeVisible();
-      await page.evaluate(() =>
-        window.postMessage(
-          {
-            type: 'server/event',
-            payload: {
-              type: 'message.part.updated',
-              properties: {
-                part: {
-                  id: 'message-rendering-assistant-part-1',
-                  sessionID: 'session-message-rendering',
-                  messageID: 'message-rendering-assistant',
-                  type: 'text',
-                  text: 'Copied to dev `pdf-source/__65129.pdf` using the server credentials. Verified its SHA-256 matches the original.\n\nThe scheduled sync may delete it on the next run.',
-                },
-              },
+      await postWebviewMessage(page, {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'message-rendering-assistant-part-1',
+              sessionID: 'session-message-rendering',
+              messageID: 'message-rendering-assistant',
+              type: 'text',
+              text: 'Copied to dev `pdf-source/__65129.pdf` using the server credentials. Verified its SHA-256 matches the original.\n\nThe scheduled sync may delete it on the next run.',
             },
           },
-          '*'
-        )
-      );
+        },
+      });
     }
     const reference = page.locator(selector).filter({ hasText: label });
     await expect(reference).toBeVisible();

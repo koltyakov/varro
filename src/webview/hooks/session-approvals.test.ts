@@ -10,16 +10,7 @@ import {
   SessionApprovalOperations,
   updatePermissionModeForSessionWithDependencies,
 } from './session/session-approvals';
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: Error) => void;
-  const promise = new Promise<T>((next, fail) => {
-    resolve = next;
-    reject = fail;
-  });
-  return { promise, resolve, reject };
-}
+import { deferred } from '../test-fixtures';
 
 function permission(
   id: string,

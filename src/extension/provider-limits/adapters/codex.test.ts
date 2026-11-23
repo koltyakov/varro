@@ -25,6 +25,15 @@ const oauthProvider: ProviderMetadata = {
   models: {},
 };
 
+const fetchStatus = (overrides: Partial<Parameters<typeof adapter.fetch>[0]> = {}) =>
+  adapter.fetch({
+    provider: oauthProvider,
+    authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
+    modelID: null,
+    checkedAt: 1_000,
+    ...overrides,
+  });
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -71,10 +80,8 @@ describe('createCodexAdapter', () => {
         });
       });
     });
-    const request = adapter.fetch({
-      provider: oauthProvider,
+    const request = fetchStatus({
       authStore: { openai: { type: 'oauth', access: 'token-1' } },
-      modelID: null,
       checkedAt: 1000,
       signal: controller.signal,
     });
@@ -219,13 +226,7 @@ describe('createCodexAdapter', () => {
         resolveCredentials = resolve;
       })
     );
-    const request = adapter.fetch({
-      provider: oauthProvider,
-      authStore: {},
-      modelID: null,
-      checkedAt: 1000,
-      signal: controller.signal,
-    });
+    const request = fetchStatus({ authStore: {}, checkedAt: 1000, signal: controller.signal });
     const result = expect(request).rejects.toThrow('Quota deadline');
     controller.abort(new Error('Quota deadline'));
     resolveCredentials?.(JSON.stringify({ tokens: { access_token: 'late-token' } }));
@@ -357,12 +358,7 @@ describe('createCodexAdapter', () => {
         })
       );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: {},
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ authStore: {}, modelID: 'gpt-5.4' });
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -463,12 +459,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.4' });
 
     expect(status).toMatchObject({
       status: 'available',
@@ -494,12 +485,7 @@ describe('createCodexAdapter', () => {
       )
       .mockResolvedValueOnce(new Response('', { status: 503 }));
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.4' });
 
     expect(fetch).toHaveBeenNthCalledWith(
       2,
@@ -531,12 +517,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.4' });
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(status).not.toHaveProperty('usageLimitResets');
@@ -573,12 +554,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.3-codex-spark',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.3-codex-spark' });
 
     expect(status).toMatchObject({
       providerID: 'openai',
@@ -639,12 +615,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.3-codex-spark',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.3-codex-spark' });
 
     expect(status).toMatchObject({ status: 'available' });
     expect(status.status === 'available' ? status.windows : []).toEqual(
@@ -689,12 +660,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.3-codex-spark',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.3-codex-spark' });
 
     expect(status.status === 'available' ? status.windows : []).toEqual(
       expect.arrayContaining([
@@ -737,12 +703,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.3-codex-spark',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.3-codex-spark' });
 
     expect(status.status === 'available' ? status.windows : []).toEqual(
       expect.arrayContaining([
@@ -777,12 +738,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.3-codex',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.3-codex' });
 
     expect(status).toMatchObject({ status: 'available' });
     expect(status.status === 'available' ? status.windows : []).toEqual(
@@ -823,12 +779,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'openai',
@@ -886,12 +837,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.4' });
 
     expect(status).toEqual({
       providerID: 'openai',
@@ -930,12 +876,7 @@ describe('createCodexAdapter', () => {
     async (balance) => {
       vi.mocked(fetch).mockResolvedValue(jsonResponse({ credits: { balance } }));
 
-      const status = await adapter.fetch({
-        provider: oauthProvider,
-        authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-        modelID: null,
-        checkedAt: 1_000,
-      });
+      const status = await fetchStatus();
 
       expect(status).toMatchObject({
         status: 'available',
@@ -956,12 +897,7 @@ describe('createCodexAdapter', () => {
         })
       );
 
-      const status = await adapter.fetch({
-        provider: oauthProvider,
-        authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-        modelID: null,
-        checkedAt: 1_000,
-      });
+      const status = await fetchStatus();
 
       expect(status.status).toBe('available');
       expect(status).not.toHaveProperty('creditBalance');
@@ -971,12 +907,7 @@ describe('createCodexAdapter', () => {
   it('treats auth failures as unsupported', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 401 }));
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'openai',
@@ -991,12 +922,7 @@ describe('createCodexAdapter', () => {
   it('returns unsupported when no Codex credentials can be resolved', async () => {
     vi.mocked(readFile).mockResolvedValue('not-json');
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: {},
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ authStore: {} });
 
     expect(fetch).not.toHaveBeenCalled();
     expect(status).toEqual({
@@ -1014,12 +940,7 @@ describe('createCodexAdapter', () => {
     vi.mocked(readFile).mockRejectedValue(new Error('missing auth file'));
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 429 }));
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: {},
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ authStore: {}, modelID: 'gpt-5.4' });
 
     expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({
       headers: {
@@ -1043,12 +964,7 @@ describe('createCodexAdapter', () => {
       .mockResolvedValueOnce(new Response('', { status: 404 }))
       .mockResolvedValueOnce(new Response('', { status: 404 }));
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.4' });
 
     expect(status).toEqual({
       providerID: 'openai',
@@ -1073,12 +989,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'openai',
@@ -1111,12 +1022,7 @@ describe('createCodexAdapter', () => {
       })
     );
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: 'gpt-5.4',
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus({ modelID: 'gpt-5.4' });
 
     expect(status).toEqual({
       providerID: 'openai',
@@ -1152,12 +1058,7 @@ describe('createCodexAdapter', () => {
   it('reports fetch failures as provider errors', async () => {
     vi.mocked(fetch).mockRejectedValue(new Error('network down'));
 
-    const status = await adapter.fetch({
-      provider: oauthProvider,
-      authStore: { openai: { type: 'oauth', access: 'codex-auth-store-token' } },
-      modelID: null,
-      checkedAt: 1_000,
-    });
+    const status = await fetchStatus();
 
     expect(status).toEqual({
       providerID: 'openai',

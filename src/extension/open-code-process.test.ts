@@ -177,6 +177,24 @@ const originalPath = process.env.PATH;
 const MOCK_LINUX_PID = 1_073_000_000 + process.pid;
 const MOCK_WINDOWS_PID = 100_000 + process.pid;
 
+function fakeChild<T extends object>(extra?: T) {
+  return Object.assign(
+    new EventEmitter(),
+    { stdout: new EventEmitter(), stderr: new EventEmitter() },
+    extra
+  );
+}
+
+function launchCallbacks(workspaceCwd?: string) {
+  return {
+    getWorkspaceCwd: () => workspaceCwd,
+    onStdout: vi.fn(),
+    onStderr: vi.fn(),
+    onExit: vi.fn(),
+    onError: vi.fn(),
+  };
+}
+
 describe('appendBoundedCliOutput', () => {
   it('retains normal output and bounds noisy diagnostics to the latest mebibyte', () => {
     expect(appendBoundedCliOutput('first', ' second')).toBe('first second');
@@ -439,22 +457,11 @@ describe('v2 shared service routing', () => {
       vi.stubEnv('XDG_CONFIG_HOME', '/fixture/config');
       vi.stubEnv('XDG_DATA_HOME', '/fixture/data');
       vi.stubEnv('OPENCODE_DB', '/fixture/data/opencode.db');
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        exitCode: null,
-        signalCode: null,
-      });
+      const child = fakeChild({ exitCode: null, signalCode: null });
       spawnMock.mockReturnValue(child);
       const manager = new OpenCodeProcess(4096, true, 'opencode2');
       manager.rememberInstalledCliVersion('2.0.6');
-      manager.launchServer({
-        getWorkspaceCwd: () => '/repo',
-        onStdout: vi.fn(),
-        onStderr: vi.fn(),
-        onExit: vi.fn(),
-        onError: vi.fn(),
-      });
+      manager.launchServer(launchCallbacks('/repo'));
       expect(spawnMock).toHaveBeenCalledWith(
         manager.resolveCommand(),
         ['serve', '--service', '--port', '4096'],
@@ -472,23 +479,10 @@ describe('v2 shared service routing', () => {
   );
 
   it('keeps v1 launches in their original state directory', () => {
-    spawnMock.mockReturnValue(
-      Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        exitCode: null,
-        signalCode: null,
-      })
-    );
+    spawnMock.mockReturnValue(fakeChild({ exitCode: null, signalCode: null }));
     const manager = new OpenCodeProcess(4096, true, 'opencode');
     manager.rememberInstalledCliVersion('1.18.34');
-    manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('/repo'));
     expect(spawnMock).toHaveBeenCalledWith(
       manager.resolveCommand(),
       ['serve', '--port', '4096'],
@@ -566,23 +560,10 @@ describe('v2 shared service routing', () => {
             auth: { type: 'basic', username: 'opencode', password: 'desktop-password' },
           }
     );
-    spawnMock.mockReturnValue(
-      Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        exitCode: null,
-        signalCode: null,
-      })
-    );
+    spawnMock.mockReturnValue(fakeChild({ exitCode: null, signalCode: null }));
     const manager = new OpenCodeProcess(4096, true, 'opencode2');
     manager.rememberInstalledCliVersion('2.0.26');
-    const child = manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    const child = manager.launchServer(launchCallbacks('/repo'));
     const authorization = manager.serverAuthorization;
     try {
       expect(await manager.prepareManagedServerHealth(child)).toBe(false);
@@ -604,21 +585,8 @@ describe('v2 shared service routing', () => {
       vi.mocked(Service.discover).mockResolvedValue(undefined);
       const manager = new OpenCodeProcess(4096, true, 'opencode2');
       manager.rememberInstalledCliVersion('2.0.20');
-      spawnMock.mockReturnValue(
-        Object.assign(new EventEmitter(), {
-          stdout: new EventEmitter(),
-          stderr: new EventEmitter(),
-          exitCode: null,
-          signalCode: null,
-        })
-      );
-      const child = manager.launchServer({
-        getWorkspaceCwd: () => '/repo',
-        onStdout: vi.fn(),
-        onStderr: vi.fn(),
-        onExit: vi.fn(),
-        onError: vi.fn(),
-      });
+      spawnMock.mockReturnValue(fakeChild({ exitCode: null, signalCode: null }));
+      const child = manager.launchServer(launchCallbacks('/repo'));
       expect(await manager.prepareManagedServerHealth(child)).toBe(false);
       const authorization = manager.serverAuthorization;
       const controller = new AbortController();
@@ -703,11 +671,7 @@ function mockLinuxLeaseProcess(options?: {
   const pid = options?.pid ?? MOCK_LINUX_PID;
   const port = options?.port ?? 4096;
   spawnMock.mockImplementation((command: string, args: string[]) => {
-    const result = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill: vi.fn(),
-    });
+    const result = fakeChild({ kill: vi.fn() });
     queueMicrotask(() => {
       if (command === 'lsof' && options?.lsofMissing) {
         result.emit('error', Object.assign(new Error('spawn lsof ENOENT'), { code: 'ENOENT' }));
@@ -739,6 +703,29 @@ function mockLinuxLeaseProcess(options?: {
   });
 }
 
+/** Builds a lease whose process identity matches the `mockLinuxLeaseProcess` defaults. */
+function linuxLease({
+  owner,
+  host,
+  state,
+  ...fields
+}: Pick<ManagedServerOwnershipLease, 'owner' | 'host' | 'state'> &
+  Partial<ManagedServerOwnershipLease>): ManagedServerOwnershipLease {
+  // Overridden keys keep their position, so serialized leases keep the hand-written key order.
+  return {
+    version: 1,
+    pid: MOCK_LINUX_PID,
+    port: 4096,
+    executable: '/usr/bin/opencode',
+    birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+    owner,
+    host,
+    state,
+    createdAt: Date.now(),
+    ...fields,
+  };
+}
+
 async function setAdoptedOwnership(
   manager: OpenCodeProcess,
   leasePath: string,
@@ -746,19 +733,14 @@ async function setAdoptedOwnership(
 ) {
   const api = manager as unknown as {
     hostOwner: string;
-    ownershipLease: Record<string, unknown> | null;
+    ownershipLease: ManagedServerOwnershipLease | null;
   };
-  const lease = {
-    version: 1,
-    pid: MOCK_LINUX_PID,
-    port: 4096,
-    executable: '/usr/bin/opencode',
-    birthIdentity,
+  const lease = linuxLease({
     owner: 'adopted-owner',
     host: api.hostOwner,
     state: 'active',
-    createdAt: Date.now(),
-  };
+    birthIdentity,
+  });
   await writeFile(leasePath, JSON.stringify(lease), 'utf-8');
   api.ownershipLease = lease;
   manager.managedProcess = true;
@@ -792,11 +774,7 @@ describe('OpenCodeProcess Windows termination', () => {
     waitForProcessExitMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     let listenerQueries = 0;
     spawnMock.mockImplementation((command: string) => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const child = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'netstat.exe') {
           listenerQueries += 1;
@@ -811,14 +789,7 @@ describe('OpenCodeProcess Windows termination', () => {
     });
     const manager = new OpenCodeProcess(4096, true);
     const kill = vi.fn();
-    const proc = Object.assign(new EventEmitter(), {
-      pid: 123,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill,
-      exitCode: null,
-      signalCode: null,
-    });
+    const proc = fakeChild({ pid: 123, kill, exitCode: null, signalCode: null });
 
     await (
       manager as unknown as { terminateManagedProcess(proc: ChildProcess): Promise<void> }
@@ -842,21 +813,15 @@ describe('OpenCodeProcess Windows termination', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     waitForProcessExitMock.mockResolvedValue(true);
     let listening = true;
-    const wrapper = Object.assign(new EventEmitter(), {
+    const wrapper = fakeChild({
       pid: 123,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null as number | null,
       signalCode: null as NodeJS.Signals | null,
     });
     spawnMock.mockImplementation((command: string, args: string[]) => {
       if (command === 'C:\\OpenCode\\opencode.cmd') return wrapper;
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const child = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         const script = args.at(-1) || '';
         if (command === 'netstat.exe') {
@@ -872,13 +837,7 @@ describe('OpenCodeProcess Windows termination', () => {
       return child;
     });
     const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.cmd');
-    manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('/repo'));
 
     wrapper.exitCode = 0;
     wrapper.emit('exit', 0, null);
@@ -901,11 +860,7 @@ describe('OpenCodeProcess Windows termination', () => {
   it('reports an unmanaged occupied port without terminating its listener', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     spawnMock.mockImplementation((command: string) => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const child = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'netstat.exe') {
           child.stdout.emit('data', Buffer.from('TCP 127.0.0.1:4096 0.0.0.0:0 LISTENING 777\n'));
@@ -1116,21 +1071,15 @@ describe('OpenCodeProcess startup termination', () => {
     const listenerPid = MOCK_LINUX_PID + 2;
     let groupAlive = true;
     let listening = true;
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: wrapperPid,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null as number | null,
       signalCode: null as NodeJS.Signals | null,
     });
     spawnMock.mockImplementation((command: string, args: string[]) => {
       if (command === '/usr/bin/opencode-wrapper') return child;
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'lsof' && listening) {
           result.stdout.emit('data', Buffer.from(`${listenerPid}\n`));
@@ -1154,13 +1103,7 @@ describe('OpenCodeProcess startup termination', () => {
       return true;
     });
     const manager = new OpenCodeProcess(4096, true, '/usr/bin/opencode-wrapper');
-    manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('/repo'));
 
     child.exitCode = 0;
     child.emit('exit', 0, null);
@@ -1181,23 +1124,15 @@ describe('OpenCodeProcess startup termination', () => {
 
   it('allows a later cleanup attempt after bounded termination fails', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: 124,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null as number | null,
       signalCode: null as NodeJS.Signals | null,
     });
     spawnMock.mockReturnValue(child);
     const manager = new OpenCodeProcess(4096, true, 'opencode');
-    manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('/repo'));
     const terminateManagedProcess = vi
       .fn()
       .mockRejectedValueOnce(new Error('process tree survived'))
@@ -1632,22 +1567,9 @@ describe('OpenCodeProcess server ownership leases', () => {
           vi.stubEnv('OPENCODE_SERVER_USERNAME', lease.username);
           const manager = new OpenCodeProcess('auto', true, 'fixture-opencode');
           manager.port = lease.port;
-          const child = Object.assign(new EventEmitter(), {
-            pid: 42424,
-            stdout: new EventEmitter(),
-            stderr: new EventEmitter(),
-            exitCode: null,
-            signalCode: null,
-            kill: vi.fn(),
-          });
+          const child = fakeChild({ pid: 42424, exitCode: null, signalCode: null, kill: vi.fn() });
           spawnMock.mockReturnValue(child);
-          const proc = manager.launchServer({
-            getWorkspaceCwd: () => undefined,
-            onStdout: vi.fn(),
-            onStderr: vi.fn(),
-            onExit: vi.fn(),
-            onError: vi.fn(),
-          });
+          const proc = manager.launchServer(launchCallbacks());
           const confirm = vi.spyOn(manager, 'confirmManagedServerOwnership');
           if (inspection === 'throws')
             confirm.mockRejectedValue(
@@ -2082,11 +2004,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         });
       if (platform === 'win32') {
         spawnMock.mockImplementation((command: string) => {
-          const child = Object.assign(new EventEmitter(), {
-            stdout: new EventEmitter(),
-            stderr: new EventEmitter(),
-            kill: vi.fn(),
-          });
+          const child = fakeChild({ kill: vi.fn() });
           queueMicrotask(() => {
             if (command === 'netstat.exe') {
               child.stdout.emit(
@@ -2331,19 +2249,16 @@ describe('OpenCodeProcess server ownership leases', () => {
       const directory = join(root, 'servers');
       await mkdir(directory, { recursive: true, mode: 0o700 });
       const path = join(directory, `varro-opencode-server-${automaticKey ? 4096 : 4196}.json`);
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID + 1,
-        port: 4196,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      const lease = linuxLease({
         owner: 'original-launch',
         host: 'original-editor',
         state: 'relinquished',
+        pid: MOCK_LINUX_PID + 1,
+        port: 4196,
         createdAt: Date.now() - 1000,
         password: 'fixture-varro-password',
         configPath: join(root, 'retired-config/opencode.json'),
-      };
+      });
       await writeFile(path, JSON.stringify(lease), { mode: 0o600 });
       await writeFile(`${path}.managed`, JSON.stringify(lease), { mode: 0o600 });
       mockLinuxLeaseProcess({ port: 49374 });
@@ -2727,18 +2642,13 @@ describe('OpenCodeProcess server ownership leases', () => {
       const directory = location === 'legacy' ? tmpdir() : join(root, 'varro', 'servers');
       await mkdir(directory, { recursive: true, mode: 0o700 });
       const path = join(directory, 'varro-opencode-server-4194.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID,
-        port: 49374,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      const lease = linuxLease({
         owner: 'original-launch',
         host: 'original-editor',
         state: 'active',
-        createdAt: Date.now(),
+        port: 49374,
         password: 'unchanged-password',
-      };
+      });
       const raw = JSON.stringify(lease);
       await writeFile(path, raw, { mode: 0o600 });
       mockLinuxLeaseProcess({ port: lease.port });
@@ -2772,18 +2682,13 @@ describe('OpenCodeProcess server ownership leases', () => {
       const root = await mkdtemp(join(tmpdir(), 'varro-discovered-ownership-'));
       const automaticPath = join(root, 'varro-opencode-server-4096.json');
       const discoveredLeasePath = join(root, 'varro-opencode-server-4196.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID,
-        port: 49374,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      const lease = linuxLease({
         owner: 'original-varro-launch',
         host: 'another-editor',
         state: record === 'relinquished-lease' ? 'relinquished' : 'active',
-        createdAt: Date.now(),
+        port: 49374,
         password: 'original-password',
-      };
+      });
       const marker = {
         pid: lease.pid,
         port: lease.port,
@@ -2843,18 +2748,16 @@ describe('OpenCodeProcess server ownership leases', () => {
       const directory = join(root, 'servers');
       await mkdir(directory, { recursive: true, mode: 0o700 });
       const discoveredLeasePath = join(directory, 'varro-opencode-server-4196.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
+      const lease = linuxLease({
+        owner: 'existing-launch',
+        host: 'another-editor',
+        state: 'active',
         pid: mismatch === 'pid' ? MOCK_LINUX_PID + 1 : MOCK_LINUX_PID,
         port: 49374,
         executable: mismatch === 'executable' ? '/other/opencode' : '/usr/bin/opencode',
         birthIdentity:
           mismatch === 'birth' ? 'linux:another-start' : 'linux:Fri Jul 10 12:00:00 2026',
-        owner: 'existing-launch',
-        host: 'another-editor',
-        state: 'active',
-        createdAt: Date.now(),
-      };
+      });
       const raw = JSON.stringify(lease);
       await writeFile(discoveredLeasePath, raw, { mode: 0o600 });
       if (mismatch === 'public') await chmod(discoveredLeasePath, 0o644);
@@ -2891,17 +2794,12 @@ describe('OpenCodeProcess server ownership leases', () => {
     const root = await mkdtemp(join(tmpdir(), 'varro-discovery-isolation-'));
     vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
     const path = join(tmpdir(), 'varro-opencode-server-49374.json');
-    const lease: ManagedServerOwnershipLease = {
-      version: 1,
-      pid: MOCK_LINUX_PID,
-      port: 49374,
-      executable: '/usr/bin/opencode',
-      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+    const lease = linuxLease({
       owner: 'normal-editor',
       host: 'normal-host',
       state: 'active',
-      createdAt: Date.now(),
-    };
+      port: 49374,
+    });
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess({ port: lease.port });
     const manager = new OpenCodeProcess('auto', true);
@@ -2944,19 +2842,14 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'varro-managed-secrets-'));
     const path = join(root, 'lease.json');
-    const lease: ManagedServerOwnershipLease = {
-      version: 1,
-      pid: MOCK_LINUX_PID,
-      port: 50001,
-      executable: '/usr/bin/opencode',
-      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+    const lease = linuxLease({
       owner: 'existing-launch',
       host: 'old-window',
       state: 'relinquished',
-      createdAt: Date.now(),
+      port: 50001,
       password: 'existing-password',
       username: 'custom-user',
-    };
+    });
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess({ port: lease.port });
     const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
@@ -2987,17 +2880,12 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'varro-managed-secrets-fallback-'));
     const path = join(root, 'lease.json');
-    const lease: ManagedServerOwnershipLease = {
-      version: 1,
-      pid: MOCK_LINUX_PID,
-      port: 50001,
-      executable: '/usr/bin/opencode',
-      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+    const lease = linuxLease({
       owner: 'existing-launch',
       host: 'old-window',
       state: 'relinquished',
-      createdAt: Date.now(),
-    };
+      port: 50001,
+    });
     try {
       await writeFile(path, JSON.stringify(lease));
       mockLinuxLeaseProcess({ port: lease.port });
@@ -3052,18 +2940,13 @@ describe('OpenCodeProcess server ownership leases', () => {
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'varro-port-migration-'));
       const path = join(root, 'lease.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID,
-        port: 50001,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      const lease = linuxLease({
         owner: 'legacy',
         host: 'old-window',
         state: 'active',
-        createdAt: Date.now(),
+        port: 50001,
         password: 'existing-password',
-      };
+      });
       const raw = JSON.stringify(lease);
       await writeFile(path, raw);
       mockLinuxLeaseProcess({ port: lease.port });
@@ -3095,17 +2978,12 @@ describe('OpenCodeProcess server ownership leases', () => {
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'varro-retired-cache-'));
       const path = join(root, 'lease.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID,
-        port: 50001,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      const lease = linuxLease({
         owner: 'previous-server',
         host: 'previous-window',
         state: cache === 'owned' ? 'relinquished' : 'active',
-        createdAt: Date.now(),
-      };
+        port: 50001,
+      });
       await writeFile(path, JSON.stringify(lease));
       mockLinuxLeaseProcess({ port: lease.port });
       const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
@@ -3153,17 +3031,12 @@ describe('OpenCodeProcess server ownership leases', () => {
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'varro-live-cache-'));
       const path = join(root, 'lease.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID,
-        port: 50001,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      const lease = linuxLease({
         owner: 'live-server',
         host: 'other-window',
         state: 'active',
-        createdAt: Date.now(),
-      };
+        port: 50001,
+      });
       await writeFile(path, JSON.stringify(lease));
       mockLinuxLeaseProcess({ port: lease.port });
       const manager = new OpenCodeProcess('auto', true, '', false, path, join(root, 'proc'));
@@ -3198,17 +3071,12 @@ describe('OpenCodeProcess server ownership leases', () => {
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'varro-retired-registration-'));
       const path = join(root, 'varro-opencode-server-4096.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID,
-        port: 4096,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:retired',
+      const lease = linuxLease({
         owner: 'legacy',
         host: 'old-window',
         state: 'active',
-        createdAt: Date.now(),
-      };
+        birthIdentity: 'linux:retired',
+      });
       const raw = JSON.stringify(lease);
       await writeFile(path, raw);
       const manager = new OpenCodeProcess(port, true, '', false, path);
@@ -3333,18 +3201,13 @@ describe('OpenCodeProcess server ownership leases', () => {
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'varro-ownership-diagnostics-'));
       const path = join(root, 'lease.json');
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid: MOCK_LINUX_PID,
-        port: 50001,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      const lease = linuxLease({
         owner: 'existing-launch',
         host: 'old-window',
         state: 'active',
-        createdAt: Date.now(),
+        port: 50001,
         password: 'private-password',
-      };
+      });
       const recordPath = record === 'marker' ? `${path}.managed` : path;
       const raw = JSON.stringify(lease);
       await writeFile(recordPath, raw);
@@ -3633,17 +3496,13 @@ describe('OpenCodeProcess server ownership leases', () => {
   it('keeps an existing legacy lease as the coordination point', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const path = join(tmpdir(), 'varro-opencode-server-49877.json');
-    const lease: ManagedServerOwnershipLease = {
-      version: 1,
-      pid: MOCK_LINUX_PID,
-      port: 49877,
-      executable: '/usr/bin/opencode',
-      birthIdentity: 'linux:123',
+    const lease = linuxLease({
       owner: 'legacy-server',
       host: 'legacy-host',
       state: 'active',
-      createdAt: Date.now(),
-    };
+      port: 49877,
+      birthIdentity: 'linux:123',
+    });
     await writeFile(path, JSON.stringify(lease));
     try {
       const manager = new OpenCodeProcess(49877, true);
@@ -3672,11 +3531,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await writeFile(`${path}.managed`, JSON.stringify(marker));
     let birthIdentity = 'original-start';
     spawnMock.mockImplementation((tool: string, args: string[]) => {
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         const output =
           tool === 'lsof'
@@ -3735,11 +3590,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
       });
       spawnMock.mockImplementation((command: string, args: string[]) => {
-        const result = Object.assign(new EventEmitter(), {
-          stdout: new EventEmitter(),
-          stderr: new EventEmitter(),
-          kill: vi.fn(),
-        });
+        const result = fakeChild({ kill: vi.fn() });
         queueMicrotask(() => {
           const script = args.at(-1) ?? '';
           let output = '';
@@ -3799,10 +3650,8 @@ describe('OpenCodeProcess server ownership leases', () => {
     const path = join(root, 'lease.json');
     mockLinuxLeaseProcess();
     const inspect = spawnMock.getMockImplementation()!;
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: MOCK_LINUX_PID,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
@@ -3818,13 +3667,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       path,
       join(root, 'proc')
     );
-    first.launchServer({
-      getWorkspaceCwd: () => root,
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    first.launchServer(launchCallbacks(root));
     try {
       await expect(first.confirmManagedServerOwnership()).resolves.toBe(true);
       await rm(path);
@@ -3902,17 +3745,12 @@ describe('OpenCodeProcess server ownership leases', () => {
   it('atomically writes complete leases from two managers in the same extension host', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ownership-writes-'));
     const path = join(root, 'state', 'lease.json');
-    const lease: ManagedServerOwnershipLease = {
-      version: 1,
-      pid: MOCK_LINUX_PID,
-      port: 4096,
-      executable: '/usr/bin/opencode',
-      birthIdentity: 'linux:123',
+    const lease = linuxLease({
       owner: 'same-server',
       host: 'first',
       state: 'active',
-      createdAt: Date.now(),
-    };
+      birthIdentity: 'linux:123',
+    });
     const first = new OpenCodeProcess(4096, true, '', false, path);
     const second = new OpenCodeProcess(4096, true, '', false, path);
     const write = (manager: OpenCodeProcess, host: string) =>
@@ -3937,17 +3775,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'ownership-inspection-'));
     const path = join(root, 'lease.json');
-    const lease: ManagedServerOwnershipLease = {
-      version: 1,
-      pid: MOCK_LINUX_PID,
-      port: 4096,
-      executable: '/usr/bin/opencode',
-      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
-      owner: 'same-server',
-      host: 'old-host',
-      state: 'relinquished',
-      createdAt: Date.now(),
-    };
+    const lease = linuxLease({ owner: 'same-server', host: 'old-host', state: 'relinquished' });
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess({ birthIdentity: () => '' });
     try {
@@ -3968,18 +3796,13 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const root = await mkdtemp(join(tmpdir(), 'ownership-reload-inspection-'));
     const path = join(root, 'lease.json');
-    const lease: ManagedServerOwnershipLease = {
-      version: 1,
-      pid: MOCK_LINUX_PID,
-      port: 4097,
-      executable: '/usr/bin/opencode',
-      birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+    const lease = linuxLease({
       owner: 'same-server',
       host: 'old-host',
       state: 'relinquished',
-      createdAt: Date.now(),
+      port: 4097,
       password: 'reload-password',
-    };
+    });
     await writeFile(path, JSON.stringify(lease));
     mockLinuxLeaseProcess({ port: lease.port });
     const manager = new OpenCodeProcess(4097, true, '', false, path, join(root, 'proc'));
@@ -4028,11 +3851,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       await writeFile(path, JSON.stringify(lease));
       let inspections = 0;
       spawnMock.mockImplementation((command: string) => {
-        const child = Object.assign(new EventEmitter(), {
-          stdout: new EventEmitter(),
-          stderr: new EventEmitter(),
-          kill: vi.fn(),
-        });
+        const child = fakeChild({ kill: vi.fn() });
         queueMicrotask(() => {
           if (command === 'netstat.exe') {
             child.stdout.emit(
@@ -4102,11 +3921,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const manager = new OpenCodeProcess(4096, true, 'opencode', false, leasePath);
     await setAdoptedOwnership(manager, leasePath);
     spawnMock.mockImplementation(() => {
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => result.emit('close', 0));
       return result;
     });
@@ -4151,14 +3966,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const wrapperPid = MOCK_WINDOWS_PID;
     const listenerPid = MOCK_WINDOWS_PID + 1;
     const socketInode = '987654';
-    const child = Object.assign(new EventEmitter(), {
-      pid: wrapperPid,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill: vi.fn(),
-      exitCode: null,
-      signalCode: null,
-    });
+    const child = fakeChild({ pid: wrapperPid, kill: vi.fn(), exitCode: null, signalCode: null });
     const statFields = Array.from({ length: 20 }, () => '0');
     statFields[0] = 'S';
     statFields[1] = String(wrapperPid);
@@ -4185,11 +3993,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const procExecutable = await readlink(join(procRoot, String(listenerPid), 'exe'));
     spawnMock.mockImplementation((command: string) => {
       if (command === '/usr/bin/opencode') return child;
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() =>
         result.emit(
           'error',
@@ -4206,13 +4010,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       leasePath,
       procRoot
     );
-    manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('/repo'));
 
     await expect(manager.confirmManagedServerOwnership()).resolves.toBe(true);
 
@@ -4252,10 +4050,8 @@ describe('OpenCodeProcess server ownership leases', () => {
     const procRoot = join(directory, 'proc');
     let listening = true;
     let serverEnv: NodeJS.ProcessEnv | undefined;
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: MOCK_WINDOWS_PID,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
@@ -4266,11 +4062,7 @@ describe('OpenCodeProcess server ownership leases', () => {
           serverEnv = options?.env;
           return child;
         }
-        const result = Object.assign(new EventEmitter(), {
-          stdout: new EventEmitter(),
-          stderr: new EventEmitter(),
-          kill: vi.fn(),
-        });
+        const result = fakeChild({ kill: vi.fn() });
         queueMicrotask(() => {
           if (command === 'lsof' && listening) {
             result.stdout.emit('data', Buffer.from(`${MOCK_WINDOWS_PID}\n`));
@@ -4285,13 +4077,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       }
     );
     const first = new OpenCodeProcess(4096, true, 'opencode', false, leasePath, procRoot);
-    first.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    first.launchServer(launchCallbacks('/repo'));
 
     await expect(first.confirmManagedServerOwnership()).resolves.toBe(true);
     const lease = JSON.parse(await readFile(leasePath, 'utf-8')) as {
@@ -4438,11 +4224,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       'utf-8'
     );
     spawnMock.mockImplementation((command: string, args: string[]) => {
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'lsof') {
           result.stdout.emit('data', Buffer.from('777\n'));
@@ -4472,10 +4254,8 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: MOCK_WINDOWS_PID,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
@@ -4483,11 +4263,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     let listenerQueries = 0;
     spawnMock.mockImplementation((command: string, _args: string[]) => {
       if (command === 'C:\\OpenCode\\opencode.exe') return child;
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'netstat.exe') {
           listenerQueries += 1;
@@ -4515,13 +4291,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       return result;
     });
     const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
-    manager.launchServer({
-      getWorkspaceCwd: () => undefined,
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks());
 
     await expect(manager.confirmManagedServerOwnership()).resolves.toBe(true);
 
@@ -4539,21 +4309,10 @@ describe('OpenCodeProcess server ownership leases', () => {
     const leasePath = join(directory, 'lease.json');
     const wrapperPid = MOCK_WINDOWS_PID;
     const listenerPid = MOCK_WINDOWS_PID + 1;
-    const child = Object.assign(new EventEmitter(), {
-      pid: wrapperPid,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill: vi.fn(),
-      exitCode: null,
-      signalCode: null,
-    });
+    const child = fakeChild({ pid: wrapperPid, kill: vi.fn(), exitCode: null, signalCode: null });
     spawnMock.mockImplementation((command: string, _args: string[]) => {
       if (command === 'C:\\OpenCode\\opencode.exe') return child;
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'netstat.exe') {
           result.stdout.emit(
@@ -4584,13 +4343,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       return result;
     });
     const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
-    manager.launchServer({
-      getWorkspaceCwd: () => undefined,
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks());
 
     await expect(manager.confirmManagedServerOwnership()).resolves.toBe(true);
 
@@ -4614,21 +4367,10 @@ describe('OpenCodeProcess server ownership leases', () => {
     const leasePath = join(directory, 'lease.json');
     const wrapperPid = MOCK_WINDOWS_PID;
     const listenerPid = MOCK_WINDOWS_PID + 1;
-    const child = Object.assign(new EventEmitter(), {
-      pid: wrapperPid,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill: vi.fn(),
-      exitCode: null,
-      signalCode: null,
-    });
+    const child = fakeChild({ pid: wrapperPid, kill: vi.fn(), exitCode: null, signalCode: null });
     spawnMock.mockImplementation((command: string, _args: string[]) => {
       if (command === 'C:\\OpenCode\\opencode.exe') return child;
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'netstat.exe') {
           result.stdout.emit(
@@ -4641,13 +4383,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       return result;
     });
     const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
-    manager.launchServer({
-      getWorkspaceCwd: () => undefined,
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks());
 
     await expect(manager.confirmManagedServerOwnership()).resolves.toBe(false);
 
@@ -4663,10 +4399,8 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: MOCK_WINDOWS_PID,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
@@ -4676,11 +4410,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       if (command === 'C:\\OpenCode\\opencode.exe') return child;
       const kill = vi.fn();
       if (command === 'powershell.exe') inspectionKills.push(kill);
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill,
-      });
+      const result = fakeChild({ kill });
       if (command === 'netstat.exe') {
         queueMicrotask(() => {
           result.stdout.emit(
@@ -4708,13 +4438,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       return result;
     });
     const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.exe', false, leasePath);
-    manager.launchServer({
-      getWorkspaceCwd: () => undefined,
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks());
 
     const confirmation = manager.confirmManagedServerOwnership();
     await vi.advanceTimersByTimeAsync(3_000);
@@ -4746,11 +4470,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     );
     let listening = true;
     spawnMock.mockImplementation((command: string, args: string[]) => {
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         const script = args.at(-1) || '';
         if (command === 'netstat.exe') {
@@ -4806,11 +4526,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       'utf-8'
     );
     spawnMock.mockImplementation(() => {
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => result.emit('close', 0));
       return result;
     });
@@ -5399,11 +5115,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       ),
     ]);
     spawnMock.mockImplementation((command: string, args: string[]) => {
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         if (command === 'lsof' && args.some((arg) => arg.includes('-tiTCP:4096'))) {
           result.stdout.emit('data', Buffer.from(`${pid}\n`));
@@ -5464,11 +5176,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       ),
     ]);
     spawnMock.mockImplementation((command: string, args: string[]) => {
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const result = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         const script = args.at(-1) || '';
         if (command === 'netstat.exe') {
@@ -6427,22 +6135,8 @@ describe('OpenCodeProcess config ownership', () => {
   });
 
   it('binds exit cleanup to the config owned by that process', async () => {
-    const first = Object.assign(new EventEmitter(), {
-      pid: 101,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill: vi.fn(),
-      exitCode: null,
-      signalCode: null,
-    });
-    const second = Object.assign(new EventEmitter(), {
-      pid: 102,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill: vi.fn(),
-      exitCode: null,
-      signalCode: null,
-    });
+    const first = fakeChild({ pid: 101, kill: vi.fn(), exitCode: null, signalCode: null });
+    const second = fakeChild({ pid: 102, kill: vi.fn(), exitCode: null, signalCode: null });
     spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
     const manager = new OpenCodeProcess(4096, true, 'opencode', false);
     const callbacks = {
@@ -6481,10 +6175,8 @@ describe('OpenCodeProcess config ownership', () => {
   });
 
   it('refuses to overwrite a live tracked child', () => {
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: 101,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null as number | null,
       signalCode: null as NodeJS.Signals | null,
@@ -6516,25 +6208,12 @@ describe('OpenCodeProcess config ownership', () => {
 
   it('passes a special-character Windows shim path directly to cross-spawn', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    const child = Object.assign(new EventEmitter(), {
-      pid: 101,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-      kill: vi.fn(),
-      exitCode: null,
-      signalCode: null,
-    });
+    const child = fakeChild({ pid: 101, kill: vi.fn(), exitCode: null, signalCode: null });
     spawnMock.mockReturnValue(child);
     const command = 'C:\\Tools & More (x86)\\open^code%20!.cmd';
     const manager = new OpenCodeProcess(4096, true, command);
 
-    manager.launchServer({
-      getWorkspaceCwd: () => 'C:\\work & trees',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('C:\\work & trees'));
 
     expect(spawnMock).toHaveBeenCalledWith(
       command,
@@ -6545,11 +6224,7 @@ describe('OpenCodeProcess config ownership', () => {
 
   it('coalesces and caches installed CLI version reads', async () => {
     spawnMock.mockImplementation(() => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const child = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         child.stdout.emit('data', Buffer.from('1.18.26\n'));
         child.emit('exit', 0, null);
@@ -6583,11 +6258,7 @@ describe('OpenCodeProcess config ownership', () => {
   it.each([0, 1])(
     'drains late CLI output after exit code %s before settling on close',
     async (code) => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const child = fakeChild({ kill: vi.fn() });
       spawnMock.mockReturnValue(child);
       const manager = new OpenCodeProcess(4096, true, 'opencode');
       const api = manager as unknown as {
@@ -6620,23 +6291,15 @@ describe('OpenCodeProcess config ownership', () => {
   it('taskkills a timed-out Windows CLI shim process tree', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     vi.useFakeTimers();
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: MOCK_WINDOWS_PID,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
     });
     spawnMock.mockImplementation((command: string) => {
       if (command === 'C:\\OpenCode\\opencode.cmd') return child;
-      const result = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-        exitCode: null,
-        signalCode: null,
-      });
+      const result = fakeChild({ kill: vi.fn(), exitCode: null, signalCode: null });
       queueMicrotask(() => result.emit('close', 0));
       return result;
     });
@@ -6656,10 +6319,8 @@ describe('OpenCodeProcess config ownership', () => {
   });
 
   it('preserves a child-owned config when disconnect leaves the child alive', async () => {
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: MOCK_WINDOWS_PID,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
@@ -6667,13 +6328,7 @@ describe('OpenCodeProcess config ownership', () => {
     spawnMock.mockReturnValueOnce(child);
     const manager = new OpenCodeProcess(4096, true, 'opencode', false);
     await manager.syncInjectedConfigFile();
-    manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('/repo'));
     const configPath = (
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }
     ).buildServerEnv().OPENCODE_CONFIG!;
@@ -6689,10 +6344,8 @@ describe('OpenCodeProcess config ownership', () => {
   });
 
   it('cleans a disconnected child-owned config when that child exits', async () => {
-    const child = Object.assign(new EventEmitter(), {
+    const child = fakeChild({
       pid: MOCK_WINDOWS_PID + 1,
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
       kill: vi.fn(),
       exitCode: null,
       signalCode: null,
@@ -6700,13 +6353,7 @@ describe('OpenCodeProcess config ownership', () => {
     spawnMock.mockReturnValueOnce(child);
     const manager = new OpenCodeProcess(4096, true, 'opencode', false);
     await manager.syncInjectedConfigFile();
-    manager.launchServer({
-      getWorkspaceCwd: () => '/repo',
-      onStdout: vi.fn(),
-      onStderr: vi.fn(),
-      onExit: vi.fn(),
-      onError: vi.fn(),
-    });
+    manager.launchServer(launchCallbacks('/repo'));
     const configPath = (
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }
     ).buildServerEnv().OPENCODE_CONFIG!;
@@ -6807,15 +6454,7 @@ describe('OpenCodeProcess config ownership', () => {
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }
     ).buildServerEnv().OPENCODE_CONFIG!;
 
-    expect(() =>
-      manager.launchServer({
-        getWorkspaceCwd: () => '/repo',
-        onStdout: vi.fn(),
-        onStderr: vi.fn(),
-        onExit: vi.fn(),
-        onError: vi.fn(),
-      })
-    ).toThrow('spawn failed');
+    expect(() => manager.launchServer(launchCallbacks('/repo'))).toThrow('spawn failed');
     await (manager as unknown as { injectedConfigOperation: Promise<void> })
       .injectedConfigOperation;
 
@@ -6915,11 +6554,7 @@ describe('OpenCodeProcess install resolution', () => {
         'serverPathEntries'
       ).mockReturnValue([early, later]);
       spawnMock.mockImplementation((command: string) => {
-        const child = Object.assign(new EventEmitter(), {
-          stdout: new EventEmitter(),
-          stderr: new EventEmitter(),
-          kill: vi.fn(),
-        });
+        const child = fakeChild({ kill: vi.fn() });
         queueMicrotask(() => {
           if (command === wrapper && brokenWrapper) {
             child.stderr.emit('data', Buffer.from('wrapper failed'));
@@ -6964,11 +6599,7 @@ describe('OpenCodeProcess install resolution', () => {
       'serverPathEntries'
     ).mockReturnValue([directory]);
     spawnMock.mockImplementation((command: string) => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        kill: vi.fn(),
-      });
+      const child = fakeChild({ kill: vi.fn() });
       queueMicrotask(() => {
         child.stdout.emit('data', Buffer.from(command === v2 ? '2.0.6\n' : '1.18.26\n'));
         child.emit('close', 0, null);

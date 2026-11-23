@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { postWebviewMessage } from './helpers';
 
 for (const themeId of ['Dark+', 'Default Dark+', 'Dark Modern', 'Visual Studio Dark']) {
   test(`${themeId} darkens the composer and toolbar controls`, async ({ page }) => {
@@ -191,21 +192,16 @@ for (const [platform, userAgent, offset] of [
       await expect(markdown).toHaveCSS('font-size', `${13 + offset}px`);
 
       for (const chatFontSize of [17, 15.5]) {
-        await page.evaluate((size) => {
-          window.postMessage(
-            {
-              type: 'config/update',
-              payload: {
-                desktopSessionPaneSide: 'left',
-                defaultPermissionMode: 'default',
-                chatFontSize: size,
-                chatEditorFontSize: 12,
-                chatFontFamily: 'default',
-              },
-            },
-            '*'
-          );
-        }, chatFontSize);
+        await postWebviewMessage(page, {
+          type: 'config/update',
+          payload: {
+            desktopSessionPaneSide: 'left',
+            defaultPermissionMode: 'default',
+            chatFontSize,
+            chatEditorFontSize: 12,
+            chatFontFamily: 'default',
+          },
+        });
         await expect(session).toHaveCSS('font-size', `${chatFontSize}px`);
         await expect(markdown).toHaveCSS('font-size', `${chatFontSize + offset}px`);
       }
@@ -269,9 +265,7 @@ test('theme/update message switches body to light theme', async ({ page }) => {
 
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
-  await page.evaluate(() => {
-    window.postMessage({ type: 'theme/update', payload: { theme: 'light' } }, '*');
-  });
+  await postWebviewMessage(page, { type: 'theme/update', payload: { theme: 'light' } });
 
   await expect(page.locator('body')).toHaveClass(/\bvscode-light\b/);
   await expect(page.locator('body')).not.toHaveClass(/\bvscode-dark\b/);

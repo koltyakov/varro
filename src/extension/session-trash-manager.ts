@@ -106,28 +106,21 @@ export class SessionTrashManager {
   }
 
   async restore(rootID: string, workspaceDirectory?: string) {
-    return this.mutate(async () => {
-      const entry = this.entries.get(rootID) || null;
-      if (
-        !entry ||
-        (workspaceDirectory !== undefined &&
-          !isSameWorkspacePath(entry.root.directory, workspaceDirectory))
-      ) {
-        return null;
-      }
-      const next = new Map(this.entries);
-      next.delete(rootID);
-      await this.persist(next);
-      this.entries = next;
-      this.hiddenIds = collectHiddenSessionIds(next);
-      return entry;
-    });
+    return this.removeEntry(rootID, workspaceDirectory);
   }
 
   async deletePermanently(
     rootID: string,
     deleteSession: (target: SessionDeleteTarget) => Promise<unknown>,
     workspaceDirectory?: string
+  ) {
+    return this.removeEntry(rootID, workspaceDirectory, deleteSession);
+  }
+
+  private removeEntry(
+    rootID: string,
+    workspaceDirectory: string | undefined,
+    deleteSession?: (target: SessionDeleteTarget) => Promise<unknown>
   ) {
     return this.mutate(async () => {
       const entry = this.entries.get(rootID) || null;
@@ -138,7 +131,7 @@ export class SessionTrashManager {
       ) {
         return null;
       }
-      await deleteEntrySessions(entry, deleteSession);
+      if (deleteSession) await deleteEntrySessions(entry, deleteSession);
       const next = new Map(this.entries);
       next.delete(rootID);
       await this.persist(next);

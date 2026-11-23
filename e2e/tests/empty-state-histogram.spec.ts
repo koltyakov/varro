@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Locator } from '@playwright/test';
+import { postWebviewMessage } from './helpers';
 
 const HISTOGRAM_URL = '/e2e/harness/index.html?scenario=blank&showEmptyStateHistogram=true';
 
@@ -545,22 +546,17 @@ test('the histogram is disabled by default and follows live configuration change
   await expect(page.locator('.chat-empty-histogram')).toHaveCount(0);
 
   for (const enabled of [true, false]) {
-    await page.evaluate((showEmptyStateHistogram) => {
-      window.postMessage(
-        {
-          type: 'config/update',
-          payload: {
-            showEmptyStateHistogram,
-            desktopSessionPaneSide: 'left',
-            defaultPermissionMode: 'default',
-            chatFontSize: 13,
-            chatEditorFontSize: 12,
-            chatFontFamily: 'default',
-          },
-        },
-        '*'
-      );
-    }, enabled);
+    await postWebviewMessage(page, {
+      type: 'config/update',
+      payload: {
+        showEmptyStateHistogram: enabled,
+        desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'default',
+        chatFontSize: 13,
+        chatEditorFontSize: 12,
+        chatFontFamily: 'default',
+      },
+    });
     await expect(page.locator('.chat-empty-histogram')).toHaveCount(enabled ? 1 : 0);
   }
 });

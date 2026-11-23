@@ -1,41 +1,21 @@
 import { flush as flushSolid, createEffect, createRoot } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import type { ServerEventName } from '../../shared/protocol';
-import type { onMessage } from '../lib/bridge';
 import type { MessageEntry, Part } from '../types';
 import {
   assistantMessage,
-  getBridgeMocks,
+  captureBridgeHandler,
+  captureServerEventHandlers,
   getClientMocks,
+  loadAndMountUseOpenCode,
   loadModules,
+  mountUseOpenCode,
   session,
   userMessage,
 } from './useOpenCode.test-support';
-
-interface ServerEvent {
-  properties: unknown;
-}
+import { deferred } from '../test-fixtures';
 
 const clientMocks = getClientMocks();
-const bridgeMocks = getBridgeMocks();
-type BridgeOnMessage = typeof onMessage;
-type ServerEventsOn = (
-  event: ServerEventName | '*',
-  handler: (data: ServerEvent) => void
-) => () => void;
-const bridgeOnMessage = vi.fn<BridgeOnMessage>();
-const serverEventsOn = vi.fn<ServerEventsOn>();
-Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
-Object.assign(clientMocks, { serverEventsOn });
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
 
 function userEntry(id: string, sessionId = 'session-1') {
   const info = userMessage(id);
@@ -71,17 +51,6 @@ function taskAnchorEntry(
   return { info, parts: [part] };
 }
 
-function installServerEventHandlers() {
-  const handlers = new Map<ServerEventName | '*', (data: ServerEvent) => void>();
-  serverEventsOn.mockImplementation((event, handler) => {
-    handlers.set(event, handler);
-    return () => {
-      handlers.delete(event);
-    };
-  });
-  return handlers;
-}
-
 function mockRuntimeBootstrap() {
   clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
   clientMocks.sessionList.mockResolvedValue([]);
@@ -93,13 +62,7 @@ function mockRuntimeBootstrap() {
 
 describe('useOpenCode session state flows', () => {
   it('follows an active worktree chat back to the project without reopening it manually', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     mockRuntimeBootstrap();
     const moved = {
       ...session(),
@@ -123,13 +86,7 @@ describe('useOpenCode session state flows', () => {
         diagnostics: [],
       },
     };
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
     try {
       stateModule.setState(storePath('sessions', [moved]));
       flushSolid();
@@ -152,8 +109,7 @@ describe('useOpenCode session state flows', () => {
         return messages;
       });
       clientMocks.sessionList.mockResolvedValue([returned]);
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'session/transferred',
         payload: { sessionId: moved.id, directory: '/repo', available: true },
       });
@@ -178,13 +134,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps an active chat moved to a closed worktree read-only', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     mockRuntimeBootstrap();
     const current = { ...session(), version: '2', directory: '/repo' };
     const moved = {
@@ -206,13 +156,7 @@ describe('useOpenCode session state flows', () => {
         diagnostics: [],
       },
     };
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
     try {
       stateModule.setState(storePath('sessions', [current]));
       stateModule.setState(storePath('activeSessionId', current.id));
@@ -220,8 +164,7 @@ describe('useOpenCode session state flows', () => {
       flushSolid();
       clientMocks.sessionActivate.mockClear();
       clientMocks.sessionList.mockResolvedValue([moved]);
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'session/transferred',
         payload: { sessionId: current.id, directory: '/worktrees/feature', available: false },
       });
@@ -260,31 +203,18 @@ describe('useOpenCode session state flows', () => {
     expect(stateModule.state.messages[0]?.info.id).toBe('old-prompt');
   });
   it('closes the session picker when the host opens a session', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     mockRuntimeBootstrap();
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
       stateModule.setShowSessionPicker(true);
       flushSolid();
 
-      bridgeHandler({
+      bridge.send({
         type: 'command/open-session',
         payload: { sessionId: 'session-1' },
       });
@@ -299,21 +229,14 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps a cross-root selection alive through its activation context update', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     mockRuntimeBootstrap();
     const siblingSession = { ...session('session-b'), directory: '/repo-b' };
     const siblingMessage = userEntry('message-b', 'session-b');
     clientMocks.sessionGet.mockResolvedValue(siblingSession);
     clientMocks.sessionMessages.mockResolvedValue([siblingMessage]);
     clientMocks.sessionActivate.mockImplementation(async () => {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'context/update',
         payload: {
           workspacePath: '/repo-b',
@@ -342,13 +265,7 @@ describe('useOpenCode session state flows', () => {
       },
     };
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       stateModule.setState(storePath('sessions', [siblingSession]));
@@ -479,13 +396,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('preserves the active chat when only workspace folder membership changes', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     mockRuntimeBootstrap();
     const siblingSession = { ...session('session-b'), directory: '/repo-b' };
     const siblingMessage = userEntry('message-b', 'session-b');
@@ -506,13 +417,7 @@ describe('useOpenCode session state flows', () => {
       },
     };
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       stateModule.setState(storePath('sessions', [siblingSession]));
@@ -520,9 +425,7 @@ describe('useOpenCode session state flows', () => {
       await hookModule.selectSession('session-b', { directory: '/repo-b' });
       flushSolid();
       clientMocks.sessionList.mockResolvedValue([siblingSession]);
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'context/update',
         payload: {
           workspacePath: '/repo-a',
@@ -547,13 +450,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps the chat connected when the event stream is degraded', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -561,18 +458,10 @@ describe('useOpenCode session state flows', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096', eventStream: 'degraded' },
       });
@@ -594,13 +483,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('does not resync active session messages on idle when local messages already look settled', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -613,13 +496,7 @@ describe('useOpenCode session state flows', () => {
       { info: assistantMessage('assistant-1', 'user-1'), parts: [] },
     ]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -661,13 +538,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('applies a fallback title when refetching the session fails', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -680,13 +551,7 @@ describe('useOpenCode session state flows', () => {
       title: 'Test Message',
     });
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -711,13 +576,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps the active session marked seen when a later session update arrives', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -728,10 +587,7 @@ describe('useOpenCode session state flows', () => {
     const { stateModule, hookModule } = await loadModules();
     flushSolid();
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -763,13 +619,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps an active completion unread when session metadata updates with the list open', async () => {
-    const handlers = new Map<string, (data: ServerEvent) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event, handler);
-      return () => {
-        handlers.delete(event);
-      };
-    });
+    const handlers = captureServerEventHandlers();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -780,10 +630,7 @@ describe('useOpenCode session state flows', () => {
     const { stateModule, hookModule } = await loadModules();
     flushSolid();
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -1764,7 +1611,7 @@ describe('useOpenCode session state flows', () => {
   );
 
   it('restarts boundary prefetch after an active message invalidates its revision', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const staleBoundary = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -1814,10 +1661,7 @@ describe('useOpenCode session state flows', () => {
     flushSolid();
     const messageWindow = await import('../lib/message-window');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -2091,7 +1935,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('preserves append and removal events that beat a stale latest response', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2102,13 +1946,7 @@ describe('useOpenCode session state flows', () => {
       .mockReturnValueOnce(staleLatest.promise)
       .mockResolvedValueOnce(canonical);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
@@ -2149,7 +1987,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('preserves an append without relying on a later removal invalidation', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2157,13 +1995,7 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
@@ -2201,7 +2033,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('preserves a same-part SSE update that beats a stale latest response', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2221,13 +2053,7 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
@@ -2267,7 +2093,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('hydrates a selected busy session when an unprojectable stream event races the initial snapshot', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const initialSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2281,13 +2107,7 @@ describe('useOpenCode session state flows', () => {
       .mockReturnValueOnce(initialSnapshot.promise)
       .mockReturnValue(followUpSnapshot.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.next.text.delta')).toBe(true));
@@ -2365,7 +2185,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('preserves child-session messages during active-parent latest-message resync', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const parentMessage = userEntry('parent-message');
@@ -2373,13 +2193,7 @@ describe('useOpenCode session state flows', () => {
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockResolvedValue([parentMessage]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
@@ -2418,7 +2232,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('reconciles repeated native child result events through history without selecting the child or duplicating results', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const parent = session('session-1');
@@ -2439,13 +2253,7 @@ describe('useOpenCode session state flows', () => {
     };
     clientMocks.sessionGet.mockImplementation(async (id) => (id === child.id ? child : parent));
     clientMocks.sessionMessages.mockResolvedValue([result]);
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
     try {
       await vi.waitFor(() => expect(handlers.has('session.next.synthetic')).toBe(true));
       flushSolid();
@@ -2495,7 +2303,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('inserts a child idle sync after its parent task anchor', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const childMessage = userEntry('child-message', 'child-1');
@@ -2506,13 +2314,7 @@ describe('useOpenCode session state flows', () => {
     );
     clientMocks.sessionMessages.mockResolvedValue([childMessage]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
@@ -2564,7 +2366,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('clears child streaming state when the child snapshot completes that stream', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const childInfo = assistantMessage('child-assistant', 'child-user');
@@ -2584,13 +2386,7 @@ describe('useOpenCode session state flows', () => {
     );
     clientMocks.sessionMessages.mockResolvedValue([{ info: childInfo, parts: [childPart] }]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
@@ -2636,7 +2432,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('reorders an early child recovery after its anchor when the parent snapshot arrives', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const parentSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2650,13 +2446,7 @@ describe('useOpenCode session state flows', () => {
       id === 'session-1' ? parentSnapshot.promise : [childMessage]
     );
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
@@ -2703,7 +2493,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('orders a grandchild recovered before its child when the parent snapshot arrives', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const parentSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2732,13 +2522,7 @@ describe('useOpenCode session state flows', () => {
       return childMessages;
     });
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, hookModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
@@ -2811,7 +2595,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('rejects a stale child snapshot after a newer child mutation', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const childSnapshot = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2822,13 +2606,7 @@ describe('useOpenCode session state flows', () => {
     );
     clientMocks.sessionMessages.mockReturnValue(childSnapshot.promise);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await vi.waitFor(() => expect(handlers.has('session.idle')).toBe(true));
@@ -2910,7 +2688,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('does not reintroduce a removed message from an in-flight older page', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2929,10 +2707,7 @@ describe('useOpenCode session state flows', () => {
     flushSolid();
     const messageWindow = await import('../lib/message-window');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -2971,7 +2746,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps a newer selection load when an inactive sync resolves late', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     const staleBackground = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -2996,10 +2771,7 @@ describe('useOpenCode session state flows', () => {
     flushSolid();
     const messageWindow = await import('../lib/message-window');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -3037,7 +2809,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('clears every old history store after empty and disjoint resyncs', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     // SAFETY: The fixture provides the string fields read by this statement.
@@ -3051,10 +2823,7 @@ describe('useOpenCode session state flows', () => {
     flushSolid();
     const messageWindow = await import('../lib/message-window');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
     const seedOldHistory = (suffix: string) => {
       messageWindow.setSessionHistoryCursor('session-1', `history-${suffix}`);
@@ -3222,7 +2991,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('canonically resyncs and resets history after a committed revert', async () => {
-    const handlers = installServerEventHandlers();
+    const handlers = captureServerEventHandlers();
     flushSolid();
     mockRuntimeBootstrap();
     // SAFETY: The fixture provides the string fields read by this statement.
@@ -3233,10 +3002,7 @@ describe('useOpenCode session state flows', () => {
     flushSolid();
     const messageWindow = await import('../lib/message-window');
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {

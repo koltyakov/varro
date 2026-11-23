@@ -117,17 +117,22 @@ async function waitForServer() {
   throw new Error(`server startup timed out: ${lastError}`);
 }
 
+/** Sends one directory-scoped request with an optional JSON body and reads its text. */
+async function sendScoped(method, path, body) {
+  const headers = { 'x-opencode-directory': DIRECTORY };
+  const init = { method, headers };
+  if (body !== undefined) {
+    headers['content-type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetchWithTimeout(scopedUrl(path), init);
+  return { response, text: await response.text() };
+}
+
 async function request(name, method, path, options = {}) {
   const startedAt = Date.now();
   try {
-    const headers = { 'x-opencode-directory': DIRECTORY };
-    const init = { method, headers };
-    if (options.body !== undefined) {
-      headers['content-type'] = 'application/json';
-      init.body = JSON.stringify(options.body);
-    }
-    const response = await fetchWithTimeout(scopedUrl(path), init);
-    const text = await response.text();
+    const { response, text } = await sendScoped(method, path, options.body);
     let data = text;
     try {
       data = text ? JSON.parse(text) : null;
@@ -180,14 +185,7 @@ async function requestExpectedMissingRequest(
 ) {
   const startedAt = Date.now();
   try {
-    const headers = { 'x-opencode-directory': DIRECTORY };
-    const init = { method, headers };
-    if (options.body !== undefined) {
-      headers['content-type'] = 'application/json';
-      init.body = JSON.stringify(options.body);
-    }
-    const response = await fetchWithTimeout(scopedUrl(path), init);
-    const text = await response.text();
+    const { response, text } = await sendScoped(method, path, options.body);
     if (response.ok) {
       let data;
       try {

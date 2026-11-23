@@ -179,6 +179,69 @@ function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTran
   target.dispatchEvent(event);
 }
 
+function applyState(setter: Parameters<typeof setState>[0]) {
+  setState(setter);
+  flushSolid();
+}
+
+function clearStateRecord(key: 'providerLimitPins' | 'providerLimits' | 'providerAuthMethods') {
+  applyState((draft) => {
+    const current = draft[key];
+    if (current === null || current === undefined) draft[key] = {};
+    else reconcile({})(current);
+  });
+}
+
+function renderPanel() {
+  cleanup = render(() => ModelsPanel(), container!);
+  flushSolid();
+}
+
+function click(target: HTMLElement | null | undefined) {
+  target?.click();
+  flushSolid();
+}
+
+function openContextMenu(target: Element | null | undefined) {
+  target?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  flushSolid();
+}
+
+/** Clears model and provider preferences in both the store and their persisted copies. */
+function resetModelPreferenceState() {
+  applyState(storePath('hiddenProviders', []));
+  applyState(storePath('hiddenModels', []));
+  applyState(storePath('removedModels', []));
+  applyState(storePath('providerOrder', []));
+  clearStateRecord('providerLimitPins');
+  clearStateRecord('providerLimits');
+  window.localStorage.removeItem(STORAGE_KEYS.providerLimitPins);
+  flushSolid();
+  applyState(storePath('modelOrder', []));
+  applyState(storePath('addedModels', []));
+  applyState(storePath('pinnedModels', []));
+  applyState(storePath('modelDisplayNames', {}));
+  window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  flushSolid();
+  window.localStorage.removeItem(STORAGE_KEYS.addedModels);
+  flushSolid();
+  window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
+  flushSolid();
+  window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
+  flushSolid();
+  window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
+  flushSolid();
+  window.localStorage.removeItem(STORAGE_KEYS.removedModels);
+  flushSolid();
+  window.localStorage.removeItem(STORAGE_KEYS.providerOrder);
+  flushSolid();
+  window.localStorage.removeItem(STORAGE_KEYS.modelOrder);
+  flushSolid();
+  clearStateRecord('providerAuthMethods');
+  resetProviderConnectionState();
+  flushSolid();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   flushSolid();
@@ -250,7 +313,7 @@ beforeEach(() => {
     );
     setState(storePath('workspaceStatuses', [{ workspaceID: 'ws-1', status: 'connected' }]));
   });
-  setState(
+  applyState(
     storePath('providers', [
       {
         id: 'openai',
@@ -276,20 +339,13 @@ beforeEach(() => {
       },
     ])
   );
-  flushSolid();
-  setState(storePath('providerDefaults', { openai: 'gpt-5' }));
-  flushSolid();
-  setState(storePath('providersLoaded', true));
-  flushSolid();
-  setState(storePath('providersRefreshing', false));
-  flushSolid();
-  setState(storePath('providerRefreshPending', false));
-  flushSolid();
-  setState(storePath('sessions', []));
-  flushSolid();
-  setState(storePath('sessionStatus', {}));
-  flushSolid();
-  setState(
+  applyState(storePath('providerDefaults', { openai: 'gpt-5' }));
+  applyState(storePath('providersLoaded', true));
+  applyState(storePath('providersRefreshing', false));
+  applyState(storePath('providerRefreshPending', false));
+  applyState(storePath('sessions', []));
+  applyState(storePath('sessionStatus', {}));
+  applyState(
     storePath('agents', [
       {
         name: 'build',
@@ -301,8 +357,7 @@ beforeEach(() => {
       },
     ])
   );
-  flushSolid();
-  setState(
+  applyState(
     storePath('allAgents', [
       {
         name: 'build',
@@ -322,67 +377,7 @@ beforeEach(() => {
       },
     ])
   );
-  flushSolid();
-  setState(storePath('hiddenProviders', []));
-  flushSolid();
-  setState(storePath('hiddenModels', []));
-  flushSolid();
-  setState(storePath('removedModels', []));
-  flushSolid();
-  setState(storePath('providerOrder', []));
-  flushSolid();
-  setState((draft) => {
-    const current = draft['providerLimitPins'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerLimitPins'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  flushSolid();
-  setState((draft) => {
-    const current = draft['providerLimits'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerLimits'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.providerLimitPins);
-  flushSolid();
-  setState(storePath('modelOrder', []));
-  flushSolid();
-  setState(storePath('addedModels', []));
-  flushSolid();
-  setState(storePath('pinnedModels', []));
-  flushSolid();
-  setState(storePath('modelDisplayNames', {}));
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.addedModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.removedModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.providerOrder);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.modelOrder);
-  flushSolid();
-  setState((draft) => {
-    const current = draft['providerAuthMethods'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerAuthMethods'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  flushSolid();
-  resetProviderConnectionState();
-  flushSolid();
+  resetModelPreferenceState();
 });
 
 afterEach(() => {
@@ -394,86 +389,17 @@ afterEach(() => {
   flushSolid();
   container = null;
   delete window.__sendToExtension;
-  setState(storePath('providers', []));
-  flushSolid();
-  setState(storePath('providerDefaults', {}));
-  flushSolid();
-  setState(storePath('providersLoaded', false));
-  flushSolid();
-  setState(storePath('providerRefreshPending', false));
-  flushSolid();
-  setState(storePath('sessions', []));
-  flushSolid();
-  setState(storePath('sessionStatus', {}));
-  flushSolid();
-  setState(storePath('agents', []));
-  flushSolid();
-  setState(storePath('allAgents', []));
-  flushSolid();
-  setState(storePath('providerAuthMethods', {}));
-  flushSolid();
-  setState(storePath('workspaceStatuses', []));
-  flushSolid();
-  setState(storePath('hiddenProviders', []));
-  flushSolid();
-  setState(storePath('hiddenModels', []));
-  flushSolid();
-  setState(storePath('removedModels', []));
-  flushSolid();
-  setState(storePath('providerOrder', []));
-  flushSolid();
-  setState((draft) => {
-    const current = draft['providerLimitPins'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerLimitPins'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  flushSolid();
-  setState((draft) => {
-    const current = draft['providerLimits'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerLimits'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.providerLimitPins);
-  flushSolid();
-  setState(storePath('modelOrder', []));
-  flushSolid();
-  setState(storePath('addedModels', []));
-  flushSolid();
-  setState(storePath('pinnedModels', []));
-  flushSolid();
-  setState(storePath('modelDisplayNames', {}));
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.addedModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.hiddenProviders);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.hiddenModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.removedModels);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.providerOrder);
-  flushSolid();
-  window.localStorage.removeItem(STORAGE_KEYS.modelOrder);
-  flushSolid();
-  setState((draft) => {
-    const current = draft['providerAuthMethods'];
-    const incoming = {} satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerAuthMethods'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  flushSolid();
-  resetProviderConnectionState();
-  flushSolid();
+  applyState(storePath('providers', []));
+  applyState(storePath('providerDefaults', {}));
+  applyState(storePath('providersLoaded', false));
+  applyState(storePath('providerRefreshPending', false));
+  applyState(storePath('sessions', []));
+  applyState(storePath('sessionStatus', {}));
+  applyState(storePath('agents', []));
+  applyState(storePath('allAgents', []));
+  applyState(storePath('providerAuthMethods', {}));
+  applyState(storePath('workspaceStatuses', []));
+  resetModelPreferenceState();
   if (originalResizeObserver) {
     globalThis.ResizeObserver = originalResizeObserver;
   }
@@ -485,22 +411,19 @@ describe('ModelsPanel', () => {
   it('pins provider limits with a status-bar-only name, renames, and unpins', async () => {
     const post = vi.fn();
     window.__sendToExtension = post;
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
     const header = container?.querySelector<HTMLElement>('.models-provider-header');
     expect(header).toBeTruthy();
     const originalHeaderMarkup = header?.innerHTML;
     expect(header?.querySelector('.models-provider-limit-pin, .chat-header-btn')).toBeNull();
-    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(header);
     await vi.waitFor(() =>
       expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
     );
     flushSolid();
-    findButton(document, 'Pin limits to status bar')?.click();
-    flushSolid();
+    click(findButton(document, 'Pin limits to status bar'));
     await Promise.resolve();
     flushSolid();
     let input = document.querySelector<HTMLInputElement>('[aria-label="Status-bar provider name"]');
@@ -523,10 +446,8 @@ describe('ModelsPanel', () => {
       })
     );
 
-    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document, 'Rename status-bar provider')?.click();
-    flushSolid();
+    openContextMenu(header);
+    click(findButton(document, 'Rename status-bar provider'));
     await Promise.resolve();
     flushSolid();
     input = document.querySelector<HTMLInputElement>('[aria-label="Status-bar provider name"]');
@@ -536,29 +457,22 @@ describe('ModelsPanel', () => {
     flushSolid();
     expect(state.providerLimitPins).toEqual({ openai: '' });
 
-    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document, 'Unpin limits from status bar')?.click();
-    flushSolid();
+    openContextMenu(header);
+    click(findButton(document, 'Unpin limits from status bar'));
     expect(state.providerLimitPins).toEqual({});
     expect(header?.innerHTML).toBe(originalHeaderMarkup);
   });
 
   it('does not pin limits when the name dialog is cancelled', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
     await vi.waitFor(() =>
       expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
     );
     flushSolid();
-    findButton(document, 'Pin limits to status bar')?.click();
-    flushSolid();
+    click(findButton(document, 'Pin limits to status bar'));
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     findButton(document.querySelector('[role="dialog"]'), 'Cancel')?.click();
     flushSolid();
@@ -573,20 +487,15 @@ describe('ModelsPanel', () => {
           ? { ...availableLimit(), status: 'available', windows: [] }
           : { providerID: 'openai', status, source: 'provider', checkedAt: 1, note: 'No quotas' }
       );
-      cleanup = render(() => ModelsPanel(), container!);
-      flushSolid();
-      container
-        ?.querySelector<HTMLElement>('.models-provider-header')
-        ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-      flushSolid();
+      renderPanel();
+      openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
       await Promise.resolve();
       flushSolid();
       expect(clientMocks.providerLimit).toHaveBeenCalledWith('openai', null);
       const pin = findButton(document, 'Pin limits to status bar');
       expect(pin).toBeInstanceOf(HTMLButtonElement);
       expect(pin?.disabled).toBe(true);
-      pin?.click();
-      flushSolid();
+      click(pin);
       expect(document.querySelector('[role="dialog"]')).toBeNull();
       setProviderLimitPin('openai', 'Work');
       flushSolid();
@@ -604,12 +513,8 @@ describe('ModelsPanel', () => {
     );
     setProviderLimit('openai', 'gpt-5', { ...availableLimit(), modelID: 'gpt-5' });
     flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    renderPanel();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
     expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(true);
     setProviderLimitPin('openai', 'Work');
     flushSolid();
@@ -620,22 +525,20 @@ describe('ModelsPanel', () => {
       expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
     );
     flushSolid();
-    findButton(document, 'Pin limits to status bar')?.click();
-    flushSolid();
+    click(findButton(document, 'Pin limits to status bar'));
     findButton(document.querySelector('[role="dialog"]'), 'Save')?.click();
     flushSolid();
     expect(state.providerLimitPins).toEqual({ openai: '' });
   });
 
   it('allows renaming and removing existing pins when limits become unavailable', async () => {
-    setState((draft) => {
+    applyState((draft) => {
       const current = draft['providerLimitPins'];
       const incoming = { openai: 'Work' } satisfies typeof current;
       if (incoming === null || incoming === undefined || current === null || current === undefined)
         draft['providerLimitPins'] = incoming;
       else reconcile(incoming)(current);
     });
-    flushSolid();
     setProviderLimit('openai', null, {
       providerID: 'openai',
       status: 'unsupported',
@@ -644,14 +547,11 @@ describe('ModelsPanel', () => {
       note: 'No quotas',
     });
     flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     const header = container?.querySelector<HTMLElement>('.models-provider-header');
-    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(header);
     expect(findButton(document, 'Unpin limits from status bar')?.disabled).toBe(false);
-    findButton(document, 'Rename status-bar provider')?.click();
-    flushSolid();
+    click(findButton(document, 'Rename status-bar provider'));
     const input = document.querySelector<HTMLInputElement>(
       '[aria-label="Status-bar provider name"]'
     );
@@ -659,27 +559,20 @@ describe('ModelsPanel', () => {
     findButton(document.querySelector('[role="dialog"]'), 'Save')?.click();
     flushSolid();
     expect(state.providerLimitPins).toEqual({ openai: 'Personal' });
-    header?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document, 'Unpin limits from status bar')?.click();
-    flushSolid();
+    openContextMenu(header);
+    click(findButton(document, 'Unpin limits from status bar'));
     expect(state.providerLimitPins).toEqual({});
     expect(clientMocks.providerLimit).not.toHaveBeenCalled();
   });
 
   it('does not save a new pin if limits become unavailable while its name dialog is open', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    renderPanel();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
     await vi.waitFor(() =>
       expect(findButton(document, 'Pin limits to status bar')?.disabled).toBe(false)
     );
     flushSolid();
-    findButton(document, 'Pin limits to status bar')?.click();
-    flushSolid();
+    click(findButton(document, 'Pin limits to status bar'));
     setProviderLimit('openai', null, {
       providerID: 'openai',
       status: 'error',
@@ -710,15 +603,13 @@ describe('ModelsPanel', () => {
       checkedAt: 1,
       note: 'No quotas',
     });
-    setState(
+    applyState(
       storePath('providers', (providers) => [
         ...providers,
         { ...providers[0]!, id: 'unsupported', name: 'Unsupported' },
       ])
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     const headers = container?.querySelectorAll<HTMLElement>('.models-provider-header');
     headers?.[0]?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     flushSolid();
@@ -738,10 +629,7 @@ describe('ModelsPanel', () => {
     clientMocks.providerLimit.mockRejectedValueOnce(new Error('API call timed out'));
     cleanup = render(() => [ModelsPanel(), SessionActionFeedback()], container!);
     flushSolid();
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
     await vi.waitFor(() =>
       expect(document.querySelector('.session-action-feedback.is-warning')?.textContent).toContain(
         'Could not check provider limits: API call timed out'
@@ -780,8 +668,7 @@ describe('ModelsPanel', () => {
           resolve = done;
         })
     );
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await vi.waitFor(() => expect(clientMocks.promptCompletionModels).toHaveBeenCalled());
     flushSolid();
     await Promise.resolve();
@@ -821,8 +708,7 @@ describe('ModelsPanel', () => {
   });
 
   it('hides the completion group for an unsupported model', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await vi.waitFor(() => expect(clientMocks.promptCompletionModels).toHaveBeenCalled());
     flushSolid();
     await Promise.resolve();
@@ -846,8 +732,7 @@ describe('ModelsPanel', () => {
           reject = fail;
         })
     );
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await vi.waitFor(() => expect(clientMocks.promptCompletionModels).toHaveBeenCalled());
     flushSolid();
     await Promise.resolve();
@@ -879,7 +764,7 @@ describe('ModelsPanel', () => {
       capabilities: { toolcall: true },
       cost: { input: 1, output: 1 },
     };
-    setState(
+    applyState(
       storePath('providers', [
         {
           id: 'openrouter',
@@ -894,19 +779,15 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    setState(storePath('providerDefaults', {}));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('providerDefaults', {}));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
     expect(container?.querySelectorAll('.models-model-row')).toHaveLength(0);
     expect(container?.querySelector('.models-provider-count')?.textContent).toBe('0 added');
 
-    findButton(container, 'Add models')?.click();
-    flushSolid();
+    click(findButton(container, 'Add models'));
     const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
     expect(dialog?.textContent).toContain('Refreshing model catalog...');
     expect(
@@ -931,16 +812,14 @@ describe('ModelsPanel', () => {
     flushSolid();
     const result = dialog?.querySelector<HTMLElement>('.models-model-catalog-row');
     expect(result?.textContent).toContain('Model 100');
-    result?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
-    flushSolid();
+    click(result?.querySelector<HTMLInputElement>('.models-checkbox'));
     await Promise.resolve();
     flushSolid();
 
     expect(container?.querySelector('.models-provider-count')?.textContent).toBe('0 added');
     expect(window.localStorage.getItem(STORAGE_KEYS.addedModels)).toBeNull();
     expect(dialog?.textContent).toContain('1 unsaved change');
-    findButton(dialog, 'Save changes')?.click();
-    flushSolid();
+    click(findButton(dialog, 'Save changes'));
     await Promise.resolve();
     flushSolid();
 
@@ -954,12 +833,8 @@ describe('ModelsPanel', () => {
     expect(container?.querySelectorAll('.models-model-row')).toHaveLength(1);
     expect(container?.querySelector('.models-model-row')?.textContent).toContain('Model 100');
 
-    container
-      ?.querySelector<HTMLElement>('.models-model-row')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document, 'Hide model')?.click();
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-model-row'));
+    click(findButton(document, 'Hide model'));
     await Promise.resolve();
     flushSolid();
 
@@ -971,11 +846,9 @@ describe('ModelsPanel', () => {
     'keeps a %i-model catalog in its opening order until saved and reopened',
     async (count) => {
       const models = createModels(count);
-      setState(storePath('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models }]));
-      flushSolid();
-      setState(storePath('addedModels', ['openai:*', 'openai:model-1']));
-      flushSolid();
-      setState(
+      applyState(storePath('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models }]));
+      applyState(storePath('addedModels', ['openai:*', 'openai:model-1']));
+      applyState(
         storePath(
           'removedModels',
           Object.keys(models)
@@ -983,13 +856,10 @@ describe('ModelsPanel', () => {
             .map((id) => `openai:${id}`)
         )
       );
-      flushSolid();
-      cleanup = render(() => ModelsPanel(), container!);
-      flushSolid();
+      renderPanel();
 
       const openCatalog = async () => {
-        findButton(container, 'Add models')?.click();
-        flushSolid();
+        click(findButton(container, 'Add models'));
         const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog')!;
         await vi.waitFor(() =>
           expect(dialog.querySelector('.models-model-catalog-row')).not.toBeNull()
@@ -1028,8 +898,7 @@ describe('ModelsPanel', () => {
       expect(checkbox(dialog, 'model-2').checked).toBe(true);
       expect(dialog.textContent).toContain('2 unsaved changes');
 
-      findButton(dialog, 'Save changes')?.click();
-      flushSolid();
+      click(findButton(dialog, 'Save changes'));
       expect(document.body.querySelector('.models-model-catalog-dialog')).toBeNull();
       const reopenedDialog = await openCatalog();
       flushSolid();
@@ -1047,7 +916,7 @@ describe('ModelsPanel', () => {
       capabilities: { toolcall: true },
       cost: { input: 1, output: 1 },
     };
-    setState(
+    applyState(
       storePath('providers', [
         {
           id: 'openrouter',
@@ -1062,12 +931,9 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    findButton(container, 'Add models')?.click();
-    flushSolid();
+    click(findButton(container, 'Add models'));
     const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
     await Promise.resolve();
     flushSolid();
@@ -1082,10 +948,8 @@ describe('ModelsPanel', () => {
       flushSolid();
     }
     flushSolid();
-    dialog?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
-    flushSolid();
-    findButton(dialog, 'Cancel')?.click();
-    flushSolid();
+    click(dialog?.querySelector<HTMLInputElement>('.models-checkbox'));
+    click(findButton(dialog, 'Cancel'));
 
     expect(document.body.querySelector('.models-model-catalog-dialog')).toBeNull();
     expect(container?.querySelector('.models-provider-count')?.textContent).toBe('0 added');
@@ -1093,12 +957,11 @@ describe('ModelsPanel', () => {
   });
 
   it('replaces a cached large catalog with the freshly loaded models', async () => {
-    setState(
+    applyState(
       storePath('providers', [
         { id: 'openrouter', name: 'OpenRouter', source: 'api', models: createModels(360) },
       ])
     );
-    flushSolid();
     clientMocks.providers.mockResolvedValue({
       providers: [
         { id: 'openrouter', name: 'OpenRouter', source: 'api', models: createModels(541) },
@@ -1106,11 +969,9 @@ describe('ModelsPanel', () => {
       default: {},
       defaultModel: null,
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    findButton(container, 'Add models')?.click();
-    flushSolid();
+    click(findButton(container, 'Add models'));
     const dialog = document.body.querySelector<HTMLElement>('.models-model-catalog-dialog');
     expect(dialog?.textContent).toContain('Refreshing available models...');
 
@@ -1125,10 +986,8 @@ describe('ModelsPanel', () => {
 
   it('selects newly published models when refreshing a managed provider catalog', async () => {
     const provider = state.providers[0]!;
-    setState(storePath('addedModels', ['openai:*', 'openai:gpt-5']));
-    flushSolid();
-    setState(storePath('removedModels', ['openai:gpt-5-mini']));
-    flushSolid();
+    applyState(storePath('addedModels', ['openai:*', 'openai:gpt-5']));
+    applyState(storePath('removedModels', ['openai:gpt-5-mini']));
     clientMocks.providers.mockResolvedValue({
       providers: [
         {
@@ -1142,10 +1001,8 @@ describe('ModelsPanel', () => {
       default: {},
       defaultModel: null,
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
-    findButton(container, 'Add models')?.click();
-    flushSolid();
+    renderPanel();
+    click(findButton(container, 'Add models'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1178,8 +1035,7 @@ describe('ModelsPanel', () => {
           models: [{ providerID: 'fixture', modelID: 'reviewer', name: 'Reviewer' }],
         },
       });
-      cleanup = render(() => ModelsPanel(), container!);
-      flushSolid();
+      renderPanel();
       await vi.waitFor(() => expect(clientMocks.decisionProviderStatus).toHaveBeenCalled());
       flushSolid();
       await Promise.resolve();
@@ -1205,8 +1061,7 @@ describe('ModelsPanel', () => {
       .mockResolvedValueOnce(connected)
       .mockResolvedValueOnce({ jev: { ...connected.jev, autoApprove: true } })
       .mockResolvedValueOnce(disconnected);
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await vi.waitFor(() => expect(clientMocks.decisionProviderStatus).toHaveBeenCalled());
     flushSolid();
     expect(container?.querySelector('.decision-provider')).toBeNull();
@@ -1248,8 +1103,7 @@ describe('ModelsPanel', () => {
       autoApprove: true,
     });
 
-    findButton(container, 'Disconnect')?.click();
-    flushSolid();
+    click(findButton(container, 'Disconnect'));
     await vi.waitFor(() => expect(container?.querySelector('.decision-provider')).toBeNull());
     flushSolid();
   });
@@ -1270,8 +1124,7 @@ describe('ModelsPanel', () => {
           autoApprove: reviewer === 'Jev',
         },
       });
-      cleanup = render(() => ModelsPanel(), container!);
-      flushSolid();
+      renderPanel();
 
       await vi.waitFor(() =>
         expect(container?.querySelector('.models-route-tag-approve')?.classList).toContain(
@@ -1286,10 +1139,8 @@ describe('ModelsPanel', () => {
   );
 
   it.each(['Fast', 'Ultrafast'])('shows a dimmed %s label after the flash icons', async (speed) => {
-    setState(storePath('providers', 0, 'models', 'gpt-5', 'name', `Claude Opus 5 ${speed}`));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('providers', 0, 'models', 'gpt-5', 'name', `Claude Opus 5 ${speed}`));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -1304,7 +1155,7 @@ describe('ModelsPanel', () => {
   });
 
   it('hides providers without matching search results', async () => {
-    setState(
+    applyState(
       storePath('providers', [
         ...state.providers,
         {
@@ -1322,9 +1173,7 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -1349,8 +1198,7 @@ describe('ModelsPanel', () => {
   it('opens provider actions and requests a list refresh', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
     const actionsButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Provider actions"]'
@@ -1359,15 +1207,13 @@ describe('ModelsPanel', () => {
     expect(actionsButton?.querySelector('.models-provider-actions-icon')).toBeInstanceOf(
       HTMLSpanElement
     );
-    actionsButton?.click();
-    flushSolid();
+    click(actionsButton);
     const menu = container?.querySelector('[role="menu"]');
     expect(
       Array.from(menu?.querySelectorAll('[role="menuitem"]') ?? []).map((item) => item.textContent)
     ).toEqual(['Add provider', 'Disconnect provider', 'Refresh list', 'Reset provider order']);
     expect(findButton(menu, 'Reset provider order')?.disabled).toBe(true);
-    findButton(menu, 'Refresh list')?.click();
-    flushSolid();
+    click(findButton(menu, 'Refresh list'));
 
     expect(actionsButton).toBeInstanceOf(HTMLButtonElement);
     expect(actionsButton?.getAttribute('aria-expanded')).toBe('false');
@@ -1375,10 +1221,8 @@ describe('ModelsPanel', () => {
   });
 
   it('resets a custom provider order from provider actions', () => {
-    setState(storePath('providerOrder', ['openai']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('providerOrder', ['openai']));
+    renderPanel();
 
     container?.querySelector<HTMLButtonElement>('[aria-label="Provider actions"]')?.click();
     flushSolid();
@@ -1387,8 +1231,7 @@ describe('ModelsPanel', () => {
 
     expect(resetButton?.disabled).toBe(false);
     expect(menu?.querySelector('[role="menuitem"]:last-child')).toBe(resetButton);
-    resetButton?.click();
-    flushSolid();
+    click(resetButton);
 
     expect(resetButton).toBeInstanceOf(HTMLButtonElement);
     expect(state.providerOrder).toEqual([]);
@@ -1397,14 +1240,12 @@ describe('ModelsPanel', () => {
   });
 
   it('opens the embedded disconnect dialog from provider actions', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
     container?.querySelector<HTMLButtonElement>('[aria-label="Provider actions"]')?.click();
     flushSolid();
     const logoutButton = findButton(container, 'Disconnect provider');
-    logoutButton?.click();
-    flushSolid();
+    click(logoutButton);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1430,19 +1271,14 @@ describe('ModelsPanel', () => {
       default: {},
       connected: ['openai'],
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
     const deleteButton = findButton(document.body, 'Disconnect provider');
     const resetButton = findButton(document.body, 'Reset model order');
-    deleteButton?.click();
-    flushSolid();
+    click(deleteButton);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1455,8 +1291,7 @@ describe('ModelsPanel', () => {
     expect(dialog?.textContent).toContain('Remove the saved credential for OpenAI?');
     expect(dialog?.textContent).toContain('configured in OpenCode config');
     expect(dialog?.querySelector('.provider-connect-options')).toBeNull();
-    findButton(dialog, 'Open opencode.json in VS Code')?.click();
-    flushSolid();
+    click(findButton(dialog, 'Open opencode.json in VS Code'));
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
@@ -1468,20 +1303,14 @@ describe('ModelsPanel', () => {
 
   it('hides and shows a provider from its context menu', async () => {
     clientMocks.openCodeConfig.mockResolvedValue({});
-    setState(storePath('hiddenModels', ['openai:gpt-5-mini']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenModels', ['openai:gpt-5-mini']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
     const providerHeader = container?.querySelector<HTMLElement>('.models-provider-header');
-    providerHeader?.dispatchEvent(
-      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    findButton(document.body, 'Hide provider')?.click();
-    flushSolid();
+    openContextMenu(providerHeader);
+    click(findButton(document.body, 'Hide provider'));
 
     expect(state.hiddenProviders).toEqual(['openai']);
     expect(state.hiddenModels).toEqual(['openai:gpt-5-mini']);
@@ -1495,20 +1324,15 @@ describe('ModelsPanel', () => {
       'openai',
     ]);
 
-    providerHeader?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
-    flushSolid();
+    click(providerHeader?.querySelector<HTMLButtonElement>('.models-provider-toggle'));
     expect(
       Array.from(
         container?.querySelectorAll<HTMLInputElement>('.models-model-row input') ?? []
       ).map((input) => input.checked)
     ).toEqual([true, false]);
 
-    providerHeader?.dispatchEvent(
-      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    findButton(document.body, 'Show provider')?.click();
-    flushSolid();
+    openContextMenu(providerHeader);
+    click(findButton(document.body, 'Show provider'));
 
     expect(state.hiddenProviders).toEqual([]);
     expect(state.hiddenModels).toEqual(['openai:gpt-5-mini']);
@@ -1517,8 +1341,7 @@ describe('ModelsPanel', () => {
   });
 
   it('deselects all models without hiding or collapsing the provider', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -1527,8 +1350,7 @@ describe('ModelsPanel', () => {
       '.models-provider-header .models-checkbox'
     );
     expect(checkbox?.checked).toBe(true);
-    checkbox?.click();
-    flushSolid();
+    click(checkbox);
     await Promise.resolve();
     flushSolid();
 
@@ -1540,8 +1362,7 @@ describe('ModelsPanel', () => {
     expect(section?.querySelectorAll('.models-model-row')).toHaveLength(2);
     expect(checkbox?.checked).toBe(false);
 
-    checkbox?.click();
-    flushSolid();
+    click(checkbox);
     await Promise.resolve();
     flushSolid();
 
@@ -1551,17 +1372,13 @@ describe('ModelsPanel', () => {
   });
 
   it('keeps an explicitly hidden provider hidden when selecting all models', async () => {
-    setState(storePath('hiddenProviders', ['openai']));
-    flushSolid();
-    setState(storePath('hiddenModels', ['openai:gpt-5', 'openai:gpt-5-mini']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['openai']));
+    applyState(storePath('hiddenModels', ['openai:gpt-5', 'openai:gpt-5-mini']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
-    container?.querySelector<HTMLInputElement>('.models-provider-header .models-checkbox')?.click();
-    flushSolid();
+    click(container?.querySelector<HTMLInputElement>('.models-provider-header .models-checkbox'));
     await Promise.resolve();
     flushSolid();
 
@@ -1571,10 +1388,8 @@ describe('ModelsPanel', () => {
   });
 
   it('resets a provider model order from its context menu', async () => {
-    setState(storePath('modelOrder', ['openai:gpt-5-mini', 'openai:gpt-5']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('modelOrder', ['openai:gpt-5-mini', 'openai:gpt-5']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -1583,17 +1398,13 @@ describe('ModelsPanel', () => {
         (item) => item.textContent
       )
     ).toEqual(['GPT-5 mini', 'GPT-5']);
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
     const menu = document.body.querySelector('.models-provider-context-menu');
     const resetButton = findButton(document.body, 'Reset model order');
 
     expect(resetButton?.disabled).toBe(false);
     expect(menu?.querySelector('button:last-child')).toBe(resetButton);
-    resetButton?.click();
-    flushSolid();
+    click(resetButton);
 
     expect(resetButton).toBeInstanceOf(HTMLButtonElement);
     expect(state.modelOrder).toEqual([]);
@@ -1606,7 +1417,7 @@ describe('ModelsPanel', () => {
   });
 
   it('shows but disables provider deletion for OpenCode Zen', () => {
-    setState(
+    applyState(
       storePath('providers', [
         {
           id: 'opencode',
@@ -1623,20 +1434,14 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
     const deleteButton = findButton(document.body, 'Disconnect provider');
 
     expect(deleteButton).toBeInstanceOf(HTMLButtonElement);
     expect(deleteButton?.disabled).toBe(true);
-    deleteButton?.click();
-    flushSolid();
+    click(deleteButton);
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
@@ -1659,7 +1464,7 @@ describe('ModelsPanel', () => {
         default: {},
         connected: [],
       });
-      setState(
+      applyState(
         storePath('providers', [
           {
             id: 'custom',
@@ -1676,18 +1481,12 @@ describe('ModelsPanel', () => {
           },
         ])
       );
-      flushSolid();
-      cleanup = render(() => ModelsPanel(), container!);
-      flushSolid();
+      renderPanel();
       await Promise.resolve();
       flushSolid();
 
-      container
-        ?.querySelector<HTMLElement>('.models-provider-header')
-        ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-      flushSolid();
-      findButton(document.body, 'Disconnect provider')?.click();
-      flushSolid();
+      openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
+      click(findButton(document.body, 'Disconnect provider'));
       await Promise.resolve();
       flushSolid();
       await Promise.resolve();
@@ -1698,8 +1497,7 @@ describe('ModelsPanel', () => {
       const openConfig = findButton(dialog, 'Open opencode.jsonc in VS Code');
       if (knownProviderPath) {
         expect(openConfig).toBeInstanceOf(HTMLButtonElement);
-        openConfig?.click();
-        flushSolid();
+        click(openConfig);
         expect(send).toHaveBeenCalledWith({
           type: 'vscode/open',
           payload: { path: '/repo/opencode.jsonc', kind: 'file' },
@@ -1727,7 +1525,7 @@ describe('ModelsPanel', () => {
       default: {},
       connected: ['amazon-bedrock'],
     });
-    setState(
+    applyState(
       storePath('providers', [
         {
           id: 'amazon-bedrock',
@@ -1745,16 +1543,10 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document.body, 'Disconnect provider')?.click();
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
+    click(findButton(document.body, 'Disconnect provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1766,19 +1558,16 @@ describe('ModelsPanel', () => {
   });
 
   it('uses terminal provider actions on Option-click', () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
     const actionsButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Provider actions"]'
     );
-    actionsButton?.click();
-    flushSolid();
+    click(actionsButton);
     const addButton = findButton(container, 'Add provider');
     addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
     flushSolid();
-    actionsButton?.click();
-    flushSolid();
+    click(actionsButton);
     const removeButton = findButton(container, 'Disconnect provider');
     removeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
     flushSolid();
@@ -1801,11 +1590,9 @@ describe('ModelsPanel', () => {
       default: {},
       connected: ['anthropic', 'opencode'],
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    openProviderAction(container, 'Disconnect provider')?.click();
-    flushSolid();
+    click(openProviderAction(container, 'Disconnect provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1814,11 +1601,9 @@ describe('ModelsPanel', () => {
     expect(dialog?.textContent).toContain('Anthropic');
     expect(dialog?.textContent).not.toContain('OpenAI');
     expect(dialog?.textContent).not.toContain('OpenCode Zen');
-    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
-    flushSolid();
+    click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-option'));
     expect(dialog?.textContent).toContain('Remove the saved credential');
-    findButton(dialog, 'Disconnect')?.click();
-    flushSolid();
+    click(findButton(dialog, 'Disconnect'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1844,21 +1629,17 @@ describe('ModelsPanel', () => {
       if (fails)
         clientMocks.disableProvider.mockRejectedValueOnce(new Error('Config is read-only'));
       else clientMocks.disableProvider.mockResolvedValueOnce(true);
-      cleanup = render(() => ModelsPanel(), container!);
-      flushSolid();
-      openProviderAction(container, 'Disconnect provider')?.click();
-      flushSolid();
+      renderPanel();
+      click(openProviderAction(container, 'Disconnect provider'));
       await Promise.resolve();
       flushSolid();
       await Promise.resolve();
       flushSolid();
       const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-      dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
-      flushSolid();
+      click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-option'));
       expect(dialog?.textContent).toContain('discovers this local provider automatically');
       expect(dialog?.textContent).not.toContain('Remove the saved credential');
-      findButton(dialog, 'Disable in this workspace')?.click();
-      flushSolid();
+      click(findButton(dialog, 'Disable in this workspace'));
       await Promise.resolve();
       flushSolid();
       await Promise.resolve();
@@ -1888,13 +1669,11 @@ describe('ModelsPanel', () => {
         resolveCatalog = resolve;
       })
     );
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
     const button = openProviderAction(container, 'Add provider');
     flushSolid();
-    button?.click();
-    flushSolid();
+    click(button);
 
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog).toBeInstanceOf(HTMLElement);
@@ -1923,8 +1702,7 @@ describe('ModelsPanel', () => {
   it('hides fallback models while a provider requires re-authentication', async () => {
     markProviderAuthFailure('openai', 'failed-message');
     flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -1938,20 +1716,16 @@ describe('ModelsPanel', () => {
   it('connects an API provider from the embedded dialog', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    openProviderAction(container, 'Add provider')?.click();
-    flushSolid();
+    click(openProviderAction(container, 'Add provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
     flushSolid();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
-    flushSolid();
-    dialog?.querySelector<HTMLButtonElement>('.provider-connect-method')?.click();
-    flushSolid();
+    click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-option'));
+    click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-method'));
     const keyInput = dialog?.querySelector<HTMLInputElement>('input[type="password"]');
     if (keyInput) {
       keyInput.value = 'sk-test';
@@ -1959,8 +1733,7 @@ describe('ModelsPanel', () => {
       flushSolid();
     }
     flushSolid();
-    findButton(dialog, 'Connect')?.click();
-    flushSolid();
+    click(findButton(dialog, 'Connect'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1979,24 +1752,19 @@ describe('ModelsPanel', () => {
   });
 
   it('returns to auth methods when credential entry is cancelled', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    openProviderAction(container, 'Add provider')?.click();
-    flushSolid();
+    click(openProviderAction(container, 'Add provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
     flushSolid();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
-    flushSolid();
-    dialog?.querySelector<HTMLButtonElement>('.provider-connect-method')?.click();
-    flushSolid();
+    click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-option'));
+    click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-method'));
     expect(dialog?.querySelector('input[type="password"]')).toBeInstanceOf(HTMLInputElement);
 
-    findButton(dialog, 'Cancel')?.click();
-    flushSolid();
+    click(findButton(dialog, 'Cancel'));
 
     expect(document.body.querySelector('[role="dialog"]')).toBe(dialog);
     expect(dialog?.querySelector('input[type="password"]')).toBeNull();
@@ -2014,17 +1782,14 @@ describe('ModelsPanel', () => {
       default: {},
       connected: [],
     });
-    setState(
+    applyState(
       storePath('providerAuthMethods', {
         anthropic: [{ type: 'oauth', label: 'Claude subscription' }],
       })
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    openProviderAction(container, 'Add provider')?.click();
-    flushSolid();
+    click(openProviderAction(container, 'Add provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -2048,8 +1813,7 @@ describe('ModelsPanel', () => {
 
     expect(options()).toHaveLength(1);
     expect(options()[0]?.textContent).toContain('Custom Cloud');
-    options()[0]?.click();
-    flushSolid();
+    click(options()[0]);
     expect(dialog?.textContent).toContain('API key');
   });
 
@@ -2064,11 +1828,9 @@ describe('ModelsPanel', () => {
       default: {},
       connected: [],
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    openProviderAction(container, 'Add provider')?.click();
-    flushSolid();
+    click(openProviderAction(container, 'Add provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -2096,7 +1858,7 @@ describe('ModelsPanel', () => {
       default: {},
       connected: [],
     });
-    setState(
+    applyState(
       storePath('providerAuthMethods', {
         gitlab: [
           {
@@ -2117,12 +1879,9 @@ describe('ModelsPanel', () => {
         ],
       })
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    openProviderAction(container, 'Add provider')?.click();
-    flushSolid();
+    click(openProviderAction(container, 'Add provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -2134,18 +1893,15 @@ describe('ModelsPanel', () => {
       dialog?.querySelectorAll<HTMLButtonElement>('.provider-connect-option') ?? []
     ).find((option) => option.textContent?.includes('GitLab'));
     expect(providerOption?.textContent).toContain('GitLab');
-    providerOption?.click();
-    flushSolid();
+    click(providerOption);
     const methodOption = dialog?.querySelector<HTMLButtonElement>('.provider-connect-method');
     expect(methodOption?.textContent).toContain('GitLab Copilot');
-    methodOption?.click();
-    flushSolid();
+    click(methodOption);
 
     expect(dialog?.querySelector('select')).toBeNull();
     const trigger = dialog?.querySelector<HTMLButtonElement>('.provider-connect-select-trigger');
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
-    trigger?.click();
-    flushSolid();
+    click(trigger);
     expect(trigger?.getAttribute('aria-expanded')).toBe('true');
     expect(dialog?.querySelector('.provider-connect-body')?.classList).toContain('has-open-select');
     expect(dialog?.querySelector('[role="listbox"]')).toBeInstanceOf(HTMLElement);
@@ -2168,12 +1924,11 @@ describe('ModelsPanel', () => {
       default: {},
       connected: [],
     });
-    setState(
+    applyState(
       storePath('providerAuthMethods', {
         'github-copilot': [{ type: 'oauth', label: 'GitHub Copilot' }],
       })
     );
-    flushSolid();
     clientMocks.authorizeProvider.mockResolvedValue({
       url: 'https://github.com/login/device',
       method: 'auto',
@@ -2188,22 +1943,17 @@ describe('ModelsPanel', () => {
         });
       }
     );
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    openProviderAction(container, 'Add provider')?.click();
-    flushSolid();
+    click(openProviderAction(container, 'Add provider'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
     flushSolid();
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
-    flushSolid();
-    dialog?.querySelector<HTMLButtonElement>('.provider-connect-method')?.click();
-    flushSolid();
-    findButton(dialog, 'Continue')?.click();
-    flushSolid();
+    click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-option'));
+    click(dialog?.querySelector<HTMLButtonElement>('.provider-connect-method'));
+    click(findButton(dialog, 'Continue'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -2225,27 +1975,21 @@ describe('ModelsPanel', () => {
     vi.useFakeTimers();
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
-    setState(storePath('providersRefreshing', true));
-    flushSolid();
+    applyState(storePath('providersRefreshing', true));
     expect(container?.querySelector('.models-list-refreshed')).toBeNull();
-    setState(storePath('providersRefreshing', false));
-    flushSolid();
+    applyState(storePath('providersRefreshing', false));
 
     const actionsButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Provider actions"]'
     );
-    actionsButton?.click();
-    flushSolid();
-    findButton(container, 'Refresh list')?.click();
-    flushSolid();
+    click(actionsButton);
+    click(findButton(container, 'Refresh list'));
 
     expect(actionsButton?.getAttribute('aria-busy')).toBe('true');
 
-    setState(storePath('providersRefreshing', false));
-    flushSolid();
+    applyState(storePath('providersRefreshing', false));
 
     await vi.advanceTimersByTimeAsync(499);
     flushSolid();
@@ -2260,18 +2004,14 @@ describe('ModelsPanel', () => {
     vi.useFakeTimers();
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
     const actionsButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Provider actions"]'
     );
-    actionsButton?.click();
-    flushSolid();
-    findButton(container, 'Refresh list')?.click();
-    flushSolid();
-    setState(storePath('providersLoaded', false));
-    flushSolid();
+    click(actionsButton);
+    click(findButton(container, 'Refresh list'));
+    applyState(storePath('providersLoaded', false));
 
     await vi.advanceTimersByTimeAsync(500);
     flushSolid();
@@ -2289,8 +2029,7 @@ describe('ModelsPanel', () => {
     expect(container?.querySelector('.models-list-refreshed')).not.toBeNull();
 
     // A failed refresh finishes too, even though providersLoaded stays false.
-    setState(storePath('providersRefreshing', false));
-    flushSolid();
+    applyState(storePath('providersRefreshing', false));
     expect(actionsButton?.getAttribute('aria-busy')).toBe('false');
     expect(container?.querySelector('.models-list-refreshed')).not.toBeNull();
     container?.querySelector('.models-panel')?.dispatchEvent(
@@ -2300,18 +2039,14 @@ describe('ModelsPanel', () => {
     );
     flushSolid();
     expect(container?.querySelector('.models-list-refreshed')).toBeNull();
-    actionsButton?.click();
-    flushSolid();
-    findButton(container, 'Refresh list')?.click();
-    flushSolid();
+    click(actionsButton);
+    click(findButton(container, 'Refresh list'));
     expect(send).toHaveBeenCalledTimes(2);
   });
 
   it('shows provider refresh progress without running sessions', () => {
-    setState(storePath('providerRefreshPending', true));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('providerRefreshPending', true));
+    renderPanel();
 
     expect(container?.querySelector('.models-provider-refresh-notice')?.textContent).toContain(
       'Synchronizing providers with OpenCode.'
@@ -2319,9 +2054,8 @@ describe('ModelsPanel', () => {
   });
 
   it('counts only running parent sessions in the queued provider notice', () => {
-    setState(storePath('providerRefreshPending', true));
-    flushSolid();
-    setState(
+    applyState(storePath('providerRefreshPending', true));
+    applyState(
       storePath('sessions', [
         session('session-1'),
         session('session-2'),
@@ -2329,8 +2063,7 @@ describe('ModelsPanel', () => {
         session('child-1', 'session-1'),
       ])
     );
-    flushSolid();
-    setState(
+    applyState(
       storePath('sessionStatus', {
         'session-1': { type: 'busy' },
         'session-2': { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() },
@@ -2338,25 +2071,20 @@ describe('ModelsPanel', () => {
         'child-1': { type: 'busy' },
       })
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
 
     const notice = container?.querySelector<HTMLElement>('.models-provider-refresh-notice');
     expect(notice?.getAttribute('role')).toBe('status');
     expect(notice?.textContent).toContain('Provider synchronization queued.');
     expect(notice?.textContent).toContain('when 2 running agents finish.');
 
-    setState(storePath('sessionStatus', 'session-2', { type: 'idle' }));
-    flushSolid();
+    applyState(storePath('sessionStatus', 'session-2', { type: 'idle' }));
     expect(notice?.textContent).toContain('when 1 running agent finishes.');
   });
 
   it('labels old and new queued small-model assignments in the model list', async () => {
-    setState(storePath('sessions', [session('session-1')]));
-    flushSolid();
-    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
-    flushSolid();
+    applyState(storePath('sessions', [session('session-1')]));
+    applyState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
     clientMocks.saveModelRouting.mockImplementation(async () => {
       setState(storePath('providerRefreshPending', true));
       return {
@@ -2366,8 +2094,7 @@ describe('ModelsPanel', () => {
         autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
       };
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2380,8 +2107,7 @@ describe('ModelsPanel', () => {
     const assignButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === 'Use as small model');
-    assignButton?.click();
-    flushSolid();
+    click(assignButton);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -2397,8 +2123,7 @@ describe('ModelsPanel', () => {
       'Old and new assignments are labeled in the model list.'
     );
 
-    setState(storePath('providerRefreshPending', false));
-    flushSolid();
+    applyState(storePath('providerRefreshPending', false));
     expect(container?.querySelector('[aria-label="Small model (old)"]')).toBeNull();
     expect(container?.querySelector('[aria-label="Small model"]')?.textContent).toBe('small');
   });
@@ -2410,10 +2135,8 @@ describe('ModelsPanel', () => {
       commitMessageModel: null,
       autoApproveModel: null,
     });
-    setState(storePath('sessions', [session('session-1')]));
-    flushSolid();
-    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
-    flushSolid();
+    applyState(storePath('sessions', [session('session-1')]));
+    applyState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
     clientMocks.saveModelRouting.mockImplementation(async () => {
       setState(storePath('providerRefreshPending', true));
       return {
@@ -2423,8 +2146,7 @@ describe('ModelsPanel', () => {
         autoApproveModel: null,
       };
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2437,8 +2159,7 @@ describe('ModelsPanel', () => {
     const assignButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === 'Use for review agent');
-    assignButton?.click();
-    flushSolid();
+    click(assignButton);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -2453,10 +2174,8 @@ describe('ModelsPanel', () => {
   });
 
   it('strikes through a queued assignment removal instead of labeling it old', async () => {
-    setState(storePath('sessions', [session('session-1')]));
-    flushSolid();
-    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
-    flushSolid();
+    applyState(storePath('sessions', [session('session-1')]));
+    applyState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
     clientMocks.saveModelRouting.mockImplementation(async () => {
       setState(storePath('providerRefreshPending', true));
       return {
@@ -2466,8 +2185,7 @@ describe('ModelsPanel', () => {
         autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
       };
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2480,8 +2198,7 @@ describe('ModelsPanel', () => {
     const removeButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === "Don't use as small model");
-    removeButton?.click();
-    flushSolid();
+    click(removeButton);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -2494,8 +2211,7 @@ describe('ModelsPanel', () => {
   });
 
   it('renders an inline release date for desktop layouts', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2531,25 +2247,22 @@ describe('ModelsPanel', () => {
   });
 
   it('shows compact capability icons without hiding universally supported features', async () => {
-    setState(
+    applyState(
       storePath('providers', 0, 'models', 'gpt-5', 'capabilities', {
         toolcall: true,
         vision: true,
         input: ['text', 'image', 'pdf', 'audio', 'video'],
       })
     );
-    flushSolid();
-    setState(
+    applyState(
       storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', {
         toolcall: true,
         vision: true,
         input: ['text', 'image'],
       })
     );
-    flushSolid();
 
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2584,13 +2297,10 @@ describe('ModelsPanel', () => {
   });
 
   it('shows proxy vision with a separate tooltip and keeps native vision unchanged', async () => {
-    setState(storePath('providers', 0, 'models', 'gpt-5', 'capabilities', 'vision', true));
-    flushSolid();
-    setState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false));
-    flushSolid();
-    setState(storePath('providers', 0, 'models', 'gpt-5-mini', 'variants', { high: {} }));
-    flushSolid();
-    setState(
+    applyState(storePath('providers', 0, 'models', 'gpt-5', 'capabilities', 'vision', true));
+    applyState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false));
+    applyState(storePath('providers', 0, 'models', 'gpt-5-mini', 'variants', { high: {} }));
+    applyState(
       storePath('allAgents', [
         {
           name: 'vision',
@@ -2600,9 +2310,7 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2643,20 +2351,17 @@ describe('ModelsPanel', () => {
     flushSolid();
     vi.useRealTimers();
 
-    setState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', true));
-    flushSolid();
+    applyState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', true));
     expect(proxyRow?.querySelector('.models-capability-proxy-marker')).toBeNull();
     expect(
       proxyRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')
     ).toBe('Vision');
-    setState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false));
-    flushSolid();
+    applyState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false));
     expect(proxyRow?.querySelector('.models-capability-proxy-marker')?.textContent?.trim()).toBe(
       '*'
     );
 
-    setState(storePath('allAgents', []));
-    flushSolid();
+    applyState(storePath('allAgents', []));
     expect(proxyRow?.querySelector('.model-capability-tag-vision')).toBeNull();
     expect(
       nativeRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')
@@ -2676,11 +2381,9 @@ describe('ModelsPanel', () => {
     { model: { providerID: 'openai', modelID: 'gpt-5-mini' } },
     { model: { providerID: 'missing', modelID: 'missing' } },
   ])('shows proxy vision only for an available vision helper: %j', async (overrides) => {
-    setState(storePath('providers', 0, 'models', 'gpt-5', 'capabilities', 'vision', true));
-    flushSolid();
-    setState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false));
-    flushSolid();
-    setState(
+    applyState(storePath('providers', 0, 'models', 'gpt-5', 'capabilities', 'vision', true));
+    applyState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', false));
+    applyState(
       storePath('allAgents', [
         {
           name: 'vision',
@@ -2691,23 +2394,21 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
     expect(container?.querySelectorAll('.model-capability-tag-vision-proxy')).toHaveLength(
       Object.keys(overrides).length === 0 ? 1 : 0
     );
-    setState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'toolcall', false));
-    flushSolid();
+    applyState(
+      storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'toolcall', false)
+    );
     expect(container?.querySelector('.model-capability-tag-vision-proxy')).toBeNull();
   });
 
   it('shows routing tags loaded from opencode config and agents', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2748,8 +2449,7 @@ describe('ModelsPanel', () => {
       agent: { review: { model: 'openai/gpt-5' } },
     });
 
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2758,8 +2458,7 @@ describe('ModelsPanel', () => {
   });
 
   it('opens the model context menu and saves a routing assignment', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -2813,27 +2512,22 @@ describe('ModelsPanel', () => {
   it.each([false, true])(
     'offers a global vision assignment before the agent exists (image support: %s)',
     async (supportsVision) => {
-      setState(storePath('allAgents', []));
-      flushSolid();
-      setState(
+      applyState(storePath('allAgents', []));
+      applyState(
         storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', supportsVision)
       );
-      flushSolid();
-      cleanup = render(() => ModelsPanel(), container!);
-      flushSolid();
+      renderPanel();
       await Promise.resolve();
       flushSolid();
       const row = Array.from(
         container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
       ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
-      row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-      flushSolid();
+      openContextMenu(row);
       const button = findButton(document, 'Use for vision agent');
       expect(button).not.toBeNull();
       expect(button?.title).toBe('Global vision agent model');
       expect(button?.disabled).toBe(!supportsVision);
-      button?.click();
-      flushSolid();
+      click(button);
       await Promise.resolve();
       flushSolid();
       if (supportsVision)
@@ -2849,8 +2543,7 @@ describe('ModelsPanel', () => {
   );
 
   it('refreshes inherited model tags after another window changes global configuration', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('[aria-label="Agent model: vision"]')).toBeNull();
@@ -2870,8 +2563,7 @@ describe('ModelsPanel', () => {
   });
 
   it('offers a global assignment even when the project already assigns that vision model', async () => {
-    setState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', true));
-    flushSolid();
+    applyState(storePath('providers', 0, 'models', 'gpt-5-mini', 'capabilities', 'vision', true));
     clientMocks.openCodeConfig.mockResolvedValue({
       smallModel: null,
       agentModels: { vision: { providerID: 'openai', modelID: 'gpt-5-mini' } },
@@ -2879,19 +2571,16 @@ describe('ModelsPanel', () => {
       commitMessageModel: null,
       autoApproveModel: null,
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
     const row = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
     ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(row);
     const button = findButton(document, 'Use for vision agent');
     expect(button).not.toBeNull();
-    button?.click();
-    flushSolid();
+    click(button);
     await Promise.resolve();
     flushSolid();
     expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
@@ -2917,8 +2606,7 @@ describe('ModelsPanel', () => {
           finishOldRead = resolve;
         })
     );
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     clientMocks.openCodeConfig.mockResolvedValue({
       ...oldRouting,
       agentModels: { vision: { providerID: 'openai', modelID: 'gpt-5' } },
@@ -2948,15 +2636,13 @@ describe('ModelsPanel', () => {
     ],
   ])('hides prompt completion actions for unsupported connections: %j', async (support) => {
     clientMocks.promptCompletionModels.mockResolvedValue({ 'openai/gpt-5-mini': support });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
     const row = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
     ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(row);
     const button = findButton(document, 'Use for prompt completion');
     expect(button).toBeUndefined();
     expect(findButton(document, 'Test prompt completion')).toBeUndefined();
@@ -2973,20 +2659,17 @@ describe('ModelsPanel', () => {
       agentModels: {},
       promptCompletionModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
     const row = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
     ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(row);
     const button = findButton(document, "Don't use for prompt completion");
     expect(button?.disabled).toBe(false);
     expect(findButton(document, 'Test prompt completion')).toBeUndefined();
-    button?.click();
-    flushSolid();
+    click(button);
     expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
       target: 'prompt_completion',
       providerID: 'openai',
@@ -2997,13 +2680,11 @@ describe('ModelsPanel', () => {
 
   it('fails closed while API support is loading or verification fails', async () => {
     clientMocks.promptCompletionModels.mockRejectedValue(new Error('Disconnected'));
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     const row = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
     ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(row);
     const button = findButton(document, 'Use for prompt completion');
     expect(button).toBeUndefined();
     await Promise.resolve();
@@ -3020,8 +2701,7 @@ describe('ModelsPanel', () => {
           finishOldRead = resolve;
         })
     );
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     clientMocks.promptCompletionModels.mockResolvedValue({
       'openai/gpt-5-mini': { available: false, reason: 'Requires an API key' },
     });
@@ -3035,8 +2715,7 @@ describe('ModelsPanel', () => {
     const row = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-model-row') ?? []
     ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(row);
     expect(findButton(document, 'Use for prompt completion')).toBeUndefined();
   });
 
@@ -3064,16 +2743,14 @@ describe('ModelsPanel', () => {
       agentModels: route ? { review: route } : {},
     };
     clientMocks.openCodeConfig.mockResolvedValue(savedRouting);
-    setState(
+    applyState(
       storePath('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 })
     );
-    flushSolid();
     let resolveSave!: (value: typeof savedRouting) => void;
     clientMocks.saveModelRouting.mockImplementation(
       () => new Promise<typeof savedRouting>((resolve) => (resolveSave = resolve))
     );
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3082,12 +2759,10 @@ describe('ModelsPanel', () => {
     ).find((item) => item.querySelector('.models-model-name')?.textContent === 'GPT-5 mini');
     expect(row).toBeTruthy();
 
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(row);
     const button = findButton(document, label);
     expect(button).toBeTruthy();
-    button?.click();
-    flushSolid();
+    click(button);
 
     expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
       target,
@@ -3098,8 +2773,7 @@ describe('ModelsPanel', () => {
     });
     expect(document.querySelector('.models-context-menu')).toBeNull();
 
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
+    openContextMenu(row);
     const reopenedMenu = document.querySelector('.models-context-menu');
     expect(reopenedMenu).not.toBeNull();
     resolveSave(savedRouting);
@@ -3120,8 +2794,7 @@ describe('ModelsPanel', () => {
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(240);
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(500);
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(300);
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3144,10 +2817,8 @@ describe('ModelsPanel', () => {
   });
 
   it('shows pinned models and pins or unpins them from the context menu', async () => {
-    setState(storePath('pinnedModels', ['openai:gpt-5']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('pinnedModels', ['openai:gpt-5']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3170,8 +2841,7 @@ describe('ModelsPanel', () => {
     expect(menu.children[2]?.textContent).toBe('Hide model');
     expect(menu.children[3]?.getAttribute('role')).toBe('separator');
 
-    unpinButton?.click();
-    flushSolid();
+    click(unpinButton);
     await Promise.resolve();
     flushSolid();
     expect(row.querySelector('[aria-label="Pinned model"]')).toBeNull();
@@ -3183,8 +2853,7 @@ describe('ModelsPanel', () => {
     const pinButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.models-context-menu-item')
     ).find((item) => item.textContent === 'Pin model');
-    pinButton?.click();
-    flushSolid();
+    click(pinButton);
     await Promise.resolve();
     flushSolid();
 
@@ -3195,8 +2864,7 @@ describe('ModelsPanel', () => {
   });
 
   it('hides a model behind the model catalog and restores it', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3205,10 +2873,8 @@ describe('ModelsPanel', () => {
     const gpt5Row = modelRows().find(
       (row) => row.querySelector('.models-model-name')?.textContent === 'GPT-5'
     );
-    gpt5Row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document, 'Hide model')?.click();
-    flushSolid();
+    openContextMenu(gpt5Row);
+    click(findButton(document, 'Hide model'));
     await Promise.resolve();
     flushSolid();
 
@@ -3219,8 +2885,7 @@ describe('ModelsPanel', () => {
       'openai:gpt-5-mini',
     ]);
 
-    findButton(container, 'Add models')?.click();
-    flushSolid();
+    click(findButton(container, 'Add models'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -3233,10 +2898,8 @@ describe('ModelsPanel', () => {
     ).find((row) => row.querySelector('.models-model-catalog-id')?.textContent === '(gpt-5)');
     const hiddenModelCheckbox = hiddenModelRow?.querySelector<HTMLInputElement>('.models-checkbox');
     expect(hiddenModelCheckbox?.checked).toBe(false);
-    hiddenModelCheckbox?.click();
-    flushSolid();
-    findButton(dialog, 'Save changes')?.click();
-    flushSolid();
+    click(hiddenModelCheckbox);
+    click(findButton(dialog, 'Save changes'));
     await Promise.resolve();
     flushSolid();
 
@@ -3249,10 +2912,8 @@ describe('ModelsPanel', () => {
   });
 
   it('preserves untoggled models when hiding another model', async () => {
-    setState(storePath('hiddenModels', ['openai:gpt-5-mini']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenModels', ['openai:gpt-5-mini']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3261,10 +2922,8 @@ describe('ModelsPanel', () => {
     const gpt5Row = modelRows().find(
       (row) => row.querySelector('.models-model-name')?.textContent === 'GPT-5'
     );
-    gpt5Row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document, 'Hide model')?.click();
-    flushSolid();
+    openContextMenu(gpt5Row);
+    click(findButton(document, 'Hide model'));
     await Promise.resolve();
     flushSolid();
 
@@ -3276,8 +2935,7 @@ describe('ModelsPanel', () => {
   });
 
   it('renames and resets a model display name without changing its ID', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3287,8 +2945,7 @@ describe('ModelsPanel', () => {
     ) as HTMLElement;
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     flushSolid();
-    findButton(document, 'Rename model')?.click();
-    flushSolid();
+    click(findButton(document, 'Rename model'));
     await Promise.resolve();
     flushSolid();
 
@@ -3299,8 +2956,7 @@ describe('ModelsPanel', () => {
     if (nameInput) {
       nameInput.value = 'Primary coder';
     }
-    findButton(dialog, 'Save')?.click();
-    flushSolid();
+    click(findButton(dialog, 'Save'));
     await Promise.resolve();
     flushSolid();
 
@@ -3321,8 +2977,7 @@ describe('ModelsPanel', () => {
 
     renamedRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     flushSolid();
-    findButton(document, 'Reset model name')?.click();
-    flushSolid();
+    click(findButton(document, 'Reset model name'));
     await Promise.resolve();
     flushSolid();
 
@@ -3338,8 +2993,7 @@ describe('ModelsPanel', () => {
       commitMessageModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
       autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
     });
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3378,8 +3032,7 @@ describe('ModelsPanel', () => {
   });
 
   it('shows workspace status', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -3393,11 +3046,9 @@ describe('ModelsPanel', () => {
 
   it('collapses hidden providers without routing tags by default', async () => {
     clientMocks.openCodeConfig.mockResolvedValue({});
-    setState(storePath('hiddenProviders', ['openai']));
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['openai']));
 
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3420,12 +3071,9 @@ describe('ModelsPanel', () => {
     clientMocks.openCodeConfig.mockResolvedValue({
       [target]: target === 'agentModels' ? { vision: route } : route,
     });
-    setState(storePath('hiddenProviders', ['openai']));
-    flushSolid();
-    setState(storePath('hiddenModels', ['openai:gpt-5', 'openai:gpt-5-mini']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['openai']));
+    applyState(storePath('hiddenModels', ['openai:gpt-5', 'openai:gpt-5-mini']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3440,8 +3088,7 @@ describe('ModelsPanel', () => {
     expect(state.hiddenProviders).toEqual(['openai']);
     expect(state.hiddenModels).toEqual(['openai:gpt-5', 'openai:gpt-5-mini']);
 
-    section?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
-    flushSolid();
+    click(section?.querySelector<HTMLButtonElement>('.models-provider-toggle'));
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'providers/refresh' } }));
     flushSolid();
     await Promise.resolve();
@@ -3454,10 +3101,8 @@ describe('ModelsPanel', () => {
 
   it('expands a hidden provider when a routing tag is added after loading', async () => {
     clientMocks.openCodeConfig.mockResolvedValue({});
-    setState(storePath('hiddenProviders', ['openai']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['openai']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.models-model-row')).toBeNull();
@@ -3476,17 +3121,12 @@ describe('ModelsPanel', () => {
   });
 
   it('keeps a tagged provider expanded when it is hidden', async () => {
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
-    container
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document.body, 'Hide provider')?.click();
-    flushSolid();
+    openContextMenu(container?.querySelector<HTMLElement>('.models-provider-header'));
+    click(findButton(document.body, 'Hide provider'));
 
     expect(state.hiddenProviders).toEqual(['openai']);
     expect(container?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
@@ -3495,23 +3135,18 @@ describe('ModelsPanel', () => {
 
   it('keeps a hidden provider expanded and hidden when a model is enabled', async () => {
     clientMocks.openCodeConfig.mockResolvedValue({});
-    setState(storePath('hiddenProviders', ['openai']));
-    flushSolid();
-    setState(storePath('hiddenModels', ['openai:gpt-5-mini']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['openai']));
+    applyState(storePath('hiddenModels', ['openai:gpt-5-mini']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
     const section = container?.querySelector<HTMLElement>('.models-provider');
-    section?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
-    flushSolid();
+    click(section?.querySelector<HTMLButtonElement>('.models-provider-toggle'));
     const modelCheckbox = Array.from(
       section?.querySelectorAll<HTMLInputElement>('.models-model-row .models-checkbox') ?? []
     ).find((checkbox) => !checkbox.checked);
-    modelCheckbox?.click();
-    flushSolid();
+    click(modelCheckbox);
     await Promise.resolve();
     flushSolid();
 
@@ -3525,20 +3160,15 @@ describe('ModelsPanel', () => {
 
   it('keeps a hidden provider expanded when its managed model set changes', async () => {
     clientMocks.openCodeConfig.mockResolvedValue({});
-    setState(storePath('hiddenProviders', ['openai']));
-    flushSolid();
-    setState(storePath('addedModels', ['openai:*', 'openai:gpt-5', 'openai:gpt-5-mini']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['openai']));
+    applyState(storePath('addedModels', ['openai:*', 'openai:gpt-5', 'openai:gpt-5-mini']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
     const section = container?.querySelector<HTMLElement>('.models-provider');
-    section?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
-    flushSolid();
-    findButton(section, 'Add models')?.click();
-    flushSolid();
+    click(section?.querySelector<HTMLButtonElement>('.models-provider-toggle'));
+    click(findButton(section, 'Add models'));
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -3552,10 +3182,8 @@ describe('ModelsPanel', () => {
     expect(container?.querySelector('.models-provider')).toBe(section);
     expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
 
-    removedModelRow?.querySelector<HTMLInputElement>('.models-checkbox')?.click();
-    flushSolid();
-    findButton(dialog, 'Save changes')?.click();
-    flushSolid();
+    click(removedModelRow?.querySelector<HTMLInputElement>('.models-checkbox'));
+    click(findButton(dialog, 'Save changes'));
     await Promise.resolve();
     flushSolid();
 
@@ -3567,7 +3195,7 @@ describe('ModelsPanel', () => {
   });
 
   it('sorts hidden and fully disabled providers after enabled providers', async () => {
-    setState(
+    applyState(
       storePath('providers', [
         {
           id: 'openai',
@@ -3610,13 +3238,9 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    setState(storePath('hiddenProviders', ['openai']));
-    flushSolid();
-    setState(storePath('hiddenModels', ['beta:beta']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['openai']));
+    applyState(storePath('hiddenModels', ['beta:beta']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3629,12 +3253,8 @@ describe('ModelsPanel', () => {
     const openAISection = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
     ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'OpenAI');
-    openAISection
-      ?.querySelector<HTMLElement>('.models-provider-header')
-      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    flushSolid();
-    findButton(document.body, 'Show provider')?.click();
-    flushSolid();
+    openContextMenu(openAISection?.querySelector<HTMLElement>('.models-provider-header'));
+    click(findButton(document.body, 'Show provider'));
     await Promise.resolve();
     flushSolid();
 
@@ -3643,8 +3263,7 @@ describe('ModelsPanel', () => {
     const disabledSection = Array.from(
       container?.querySelectorAll<HTMLElement>('.models-provider') ?? []
     ).find((section) => section.querySelector('.models-provider-name')?.textContent === 'Aardvark');
-    disabledSection?.querySelector<HTMLButtonElement>('.models-provider-toggle')?.click();
-    flushSolid();
+    click(disabledSection?.querySelector<HTMLButtonElement>('.models-provider-toggle'));
     disabledSection
       ?.querySelector<HTMLInputElement>('.models-provider-header .models-checkbox')
       ?.click();
@@ -3663,7 +3282,7 @@ describe('ModelsPanel', () => {
   });
 
   it('reorders active providers by dragging and persists their order', async () => {
-    setState(
+    applyState(
       storePath('providers', [
         ...state.providers,
         {
@@ -3694,11 +3313,8 @@ describe('ModelsPanel', () => {
         },
       ])
     );
-    flushSolid();
-    setState(storePath('hiddenProviders', ['hidden']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenProviders', ['hidden']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 
@@ -3741,10 +3357,8 @@ describe('ModelsPanel', () => {
   });
 
   it('reorders models by dragging and persists their provider-scoped order', async () => {
-    setState(storePath('hiddenModels', ['openai:gpt-5-mini']));
-    flushSolid();
-    cleanup = render(() => ModelsPanel(), container!);
-    flushSolid();
+    applyState(storePath('hiddenModels', ['openai:gpt-5-mini']));
+    renderPanel();
     await Promise.resolve();
     flushSolid();
 

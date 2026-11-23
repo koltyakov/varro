@@ -308,7 +308,7 @@ export type SessionIndicatorSets = {
   newlyCompletedIds: Set<string>;
 };
 
-export const SESSION_STATUS_INDICATOR_SETTLE_DELAY_MS = 1200;
+const SESSION_STATUS_INDICATOR_SETTLE_DELAY_MS = 1200;
 
 export function createStableSessionIndicators(
   getIndicators: () => SessionIndicatorSets,
@@ -579,7 +579,7 @@ export function getSessionStatusIndicatorKind(input: {
   return null;
 }
 
-export function getSessionStatusIndicatorClass(kind: SessionStatusIndicatorKind) {
+function getSessionStatusIndicatorClass(kind: SessionStatusIndicatorKind) {
   switch (kind) {
     case 'failed':
       return 'is-failed';
@@ -598,7 +598,7 @@ export function getSessionStatusIndicatorClass(kind: SessionStatusIndicatorKind)
   }
 }
 
-export function getSessionStatusIndicatorTitle(
+function getSessionStatusIndicatorTitle(
   kind: SessionStatusIndicatorKind,
   options?: { retrying?: boolean }
 ) {

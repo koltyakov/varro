@@ -20,6 +20,7 @@ import {
   toLabel,
   unsupportedProviderStatus,
   providerErrorStatus,
+  OPENCODE_OAUTH_DUMMY_KEY,
 } from '../adapter-utils';
 
 const CODEX_USAGE_ENDPOINTS = [
@@ -34,7 +35,6 @@ const CODEX_USAGE_ENDPOINTS = [
 ] as const;
 const CODEX_AUTH_FILE_NAME = 'auth.json';
 const CODEX_USER_AGENT = 'codex-cli/1.0.0';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 const FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const SEVEN_DAY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 

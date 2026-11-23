@@ -13,6 +13,7 @@ import {
   setClipboardImageContextFile,
 } from '../lib/state';
 import type * as BridgeModule from '../lib/bridge';
+import { deferred } from '../test-fixtures';
 
 const { postMessage } = vi.hoisted(() => ({
   postMessage: vi.fn(),
@@ -35,16 +36,6 @@ import { SessionSendOperations } from './session/session-send';
 import { parseInlineProblem, problemReferenceMarker } from '../lib/editor-problems';
 
 type SendAsync = ConstructorParameters<typeof SessionSendOperations>[0]['sendAsync'];
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: Error) => void;
-  const promise = new Promise<T>((next, fail) => {
-    resolve = next;
-    reject = fail;
-  });
-  return { promise, resolve, reject };
-}
 
 function createOperations(
   sendAsync: SendAsync,

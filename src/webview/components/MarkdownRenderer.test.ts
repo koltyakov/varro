@@ -135,10 +135,26 @@ function expectUiIcon(element: Element | null | undefined, source: string, size:
   expect(element.style.getPropertyValue('--ui-icon-height')).toBe(`${size}px`);
 }
 
+function applyState(setter: Parameters<typeof setState>[0]) {
+  setState(setter);
+  flushSolid();
+}
+
+function mount(view: Parameters<typeof render>[0]) {
+  cleanup = render(view, container!);
+  flushSolid();
+}
+
+function unmount() {
+  if (!cleanup) throw new Error('Expected a mounted MarkdownRenderer');
+  cleanup();
+  cleanup = undefined;
+  flushSolid();
+}
+
 beforeEach(() => {
   __resetMarkdownCachesForTests();
-  setState(storePath('remoteImages', 'off'));
-  flushSolid();
+  applyState(storePath('remoteImages', 'off'));
   document.body.className = '';
   showSessionActionFeedbackMock.mockReset();
   mermaidMock.initialize.mockReset();
@@ -152,13 +168,10 @@ beforeEach(() => {
   selectSessionMock.mockReset();
   clearDirectSessionReturn();
   flushSolid();
-  setState(storePath('sessions', []));
-  flushSolid();
-  setState(storePath('serverStatus', { state: 'stopped' }));
-  flushSolid();
-  setState(storePath('activeSessionId', null));
-  flushSolid();
-  setState(
+  applyState(storePath('sessions', []));
+  applyState(storePath('serverStatus', { state: 'stopped' }));
+  applyState(storePath('activeSessionId', null));
+  applyState(
     storePath('editorContext', {
       workspacePath: null,
       workspaceFolders: [],
@@ -167,7 +180,6 @@ beforeEach(() => {
       diagnostics: [],
     })
   );
-  flushSolid();
 });
 
 afterEach(() => {
@@ -249,19 +261,16 @@ describe('MarkdownRenderer', () => {
       const complete = `${initial} and '${marker}'.`;
       const [content, setContent] = createSignal(initial);
       const [streaming, setStreaming] = createSignal(true);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            get forceStreaming() {
-              return streaming();
-            },
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          get forceStreaming() {
+            return streaming();
+          },
+        })
       );
-      flushSolid();
 
       for (const next of [initial, complete, `${complete}\n\nDone.`]) {
         setContent(next);
@@ -302,20 +311,17 @@ describe('MarkdownRenderer', () => {
     'preserves full inferred paths across lightweight transitions starting at %s',
     async (initialLightweight) => {
       const [lightweight, setLightweight] = createSignal(initialLightweight);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            content:
-              'See `/repo/src/webview/components/MarkdownRenderer.tsx:100-120`.\n\n' +
-              'Also /repo/src/webview/components/MessageList.tsx:200-220.',
-            cacheByContent: true,
-            get lightweight() {
-              return lightweight();
-            },
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          content:
+            'See `/repo/src/webview/components/MarkdownRenderer.tsx:100-120`.\n\n' +
+            'Also /repo/src/webview/components/MessageList.tsx:200-220.',
+          cacheByContent: true,
+          get lightweight() {
+            return lightweight();
+          },
+        })
       );
-      flushSolid();
       for (const value of [initialLightweight, !initialLightweight, initialLightweight]) {
         setLightweight(value);
         flushSolid();
@@ -337,31 +343,26 @@ describe('MarkdownRenderer', () => {
     const mounted = vi.fn();
     const effect = vi.fn();
     const disposed = vi.fn();
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: 'SLOTMARKER',
-          inlineSlots: [
-            {
-              marker: 'SLOTMARKER',
-              render: () => {
-                mounted();
-                createEffect(value, (current) => {
-                  effect(current);
-                });
-                onCleanup(disposed);
-                return document.createElement('button');
-              },
+    mount(() =>
+      MarkdownRenderer({
+        content: 'SLOTMARKER',
+        inlineSlots: [
+          {
+            marker: 'SLOTMARKER',
+            render: () => {
+              mounted();
+              createEffect(value, (current) => {
+                effect(current);
+              });
+              onCleanup(disposed);
+              return document.createElement('button');
             },
-          ],
-        }),
-      container!
+          },
+        ],
+      })
     );
-    flushSolid();
     expect(mounted).toHaveBeenCalledOnce();
-    cleanup();
-    flushSolid();
-    cleanup = undefined;
+    unmount();
     expect(disposed).toHaveBeenCalledOnce();
     const effectCount = effect.mock.calls.length;
     await Promise.resolve();
@@ -396,17 +397,14 @@ describe('MarkdownRenderer', () => {
         return button;
       },
     }));
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          inlineSlots,
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        inlineSlots,
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
     mounted.mockClear();
@@ -448,9 +446,7 @@ describe('MarkdownRenderer', () => {
       { type: 'vscode/open-external', payload: { url: 'https://example.test/one' } },
       { type: 'vscode/open-external', payload: { url: 'https://example.test/two' } },
     ]);
-    cleanup();
-    flushSolid();
-    cleanup = undefined;
+    unmount();
     expect(disposed.mock.calls.map(([marker]) => marker).toSorted()).toEqual([
       'SLOTONE',
       'SLOTTWO',
@@ -461,19 +457,16 @@ describe('MarkdownRenderer', () => {
     vi.useFakeTimers();
     const [content, setContent] = createSignal('First &amp; prose\n\nTail');
     const [complete, setComplete] = createSignal(false);
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          get cacheByContent() {
-            return complete();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        get cacheByContent() {
+          return complete();
+        },
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
     const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
@@ -514,16 +507,13 @@ describe('MarkdownRenderer', () => {
     vi.useFakeTimers();
     const initial = _label === 'formatted prefix' ? '**First**\n\nTail' : 'First\n\nTail';
     const [content, setContent] = createSignal(initial);
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
     const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
@@ -545,23 +535,19 @@ describe('MarkdownRenderer', () => {
     'replaces appended stable DOM after a %s change',
     async (change) => {
       vi.useFakeTimers();
-      setState(storePath('editorContext', 'workspacePath', '/old'));
-      flushSolid();
+      applyState(storePath('editorContext', 'workspacePath', '/old'));
       const [content, setContent] = createSignal('See src/first.ts\n\nTail');
       const [disablePathLinkify, setDisablePathLinkify] = createSignal(false);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            get disablePathLinkify() {
-              return disablePathLinkify();
-            },
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          get disablePathLinkify() {
+            return disablePathLinkify();
+          },
+        })
       );
-      flushSolid();
       await vi.advanceTimersByTimeAsync(16);
       flushSolid();
       const stable = container!.querySelector('[data-markdown-segment="stable"]')!;
@@ -611,19 +597,16 @@ describe('MarkdownRenderer', () => {
     });
     const [slots, setSlots] = createSignal([makeSlot('old')]);
     const [content, setContent] = createSignal('SLOTMARKER\n\nTail');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          get inlineSlots() {
-            return slots();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        get inlineSlots() {
+          return slots();
+        },
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
     setContent('SLOTMARKER\n\nMore prose\n\nTail');
@@ -651,17 +634,14 @@ describe('MarkdownRenderer', () => {
     vi.useFakeTimers();
     const mounted = vi.fn(() => document.createElement('button'));
     const [content, setContent] = createSignal('Initial');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          inlineSlots: [{ marker: 'SLOTMARKER', render: mounted }],
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        inlineSlots: [{ marker: 'SLOTMARKER', render: mounted }],
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
     setContent('SLOTMARKER');
@@ -669,9 +649,7 @@ describe('MarkdownRenderer', () => {
     vi.advanceTimersByTime(16);
     flushSolid();
     expect(container!.textContent).toContain('SLOTMARKER');
-    cleanup();
-    flushSolid();
-    cleanup = undefined;
+    unmount();
     await Promise.resolve();
     flushSolid();
     expect(mounted).not.toHaveBeenCalled();
@@ -857,11 +835,7 @@ $$`,
   it.each(['$$\nx^2\n\ny^2\n$$', '$$\\left[x\\right)$$', '$\\left[x\\right)$'])(
     'preserves complete math %j during streaming',
     async (math) => {
-      cleanup = render(
-        () => createComponent(MarkdownRenderer, { content: math, forceStreaming: true }),
-        container!
-      );
-      flushSolid();
+      mount(() => createComponent(MarkdownRenderer, { content: math, forceStreaming: true }));
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       flushSolid();
 
@@ -875,17 +849,14 @@ $$`,
     vi.useFakeTimers();
     const prefix = 'Stable paragraph.\n\n';
     const [content, setContent] = createSignal(`${prefix}$$x^2`);
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          forceStreaming: true,
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        forceStreaming: true,
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
     const stableParagraph = container?.querySelector('p');
@@ -938,17 +909,14 @@ $$`,
     async ({ prefix, chunks, closer }) => {
       vi.useFakeTimers();
       const [content, setContent] = createSignal(prefix);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            forceStreaming: true,
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          forceStreaming: true,
+        })
       );
-      flushSolid();
 
       for (const chunk of chunks) {
         setContent(content() + chunk);
@@ -983,11 +951,7 @@ $$`,
     '中文`$x^2`',
     'An identifier foo$x$。',
   ])('keeps non-math dollar content visible while streaming: %s', async (content) => {
-    cleanup = render(
-      () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
-      container!
-    );
-    flushSolid();
+    mount(() => createComponent(MarkdownRenderer, { content, forceStreaming: true }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
@@ -1003,17 +967,14 @@ $$`,
   ])('reveals unmatched math as literal text when streaming ends: %s', async (content) => {
     vi.useFakeTimers();
     const [completed, setCompleted] = createSignal(false);
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          content,
-          get cacheByContent() {
-            return completed();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        content,
+        get cacheByContent() {
+          return completed();
+        },
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
     expectStreamingIndicator(container!);
@@ -1223,11 +1184,7 @@ $$`,
           })
       )
       .mockResolvedValueOnce({ svg: '<svg><text>new theme</text></svg>' });
-    cleanup = render(
-      () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }));
     await vi.waitFor(() => expect(mermaidMock.render).toHaveBeenCalledOnce());
     flushSolid();
 
@@ -1305,11 +1262,7 @@ $$`,
     mermaidMock.render.mockResolvedValueOnce({
       svg: '<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"></path></svg>',
     });
-    cleanup = render(
-      () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }));
     await vi.waitFor(() =>
       expect(container?.querySelector('.mermaid-diagram-toolbar')).not.toBeNull()
     );
@@ -1420,9 +1373,7 @@ $$`,
     await Promise.resolve();
     flushSolid();
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Close diagram preview');
-    cleanup();
-    flushSolid();
-    cleanup = undefined;
+    unmount();
     expect(Array.from(document.body.children)).toEqual(bodyChildren);
     expect(document.activeElement).toBe(outsideButton);
     const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
@@ -1442,11 +1393,7 @@ $$`,
     mermaidMock.render.mockResolvedValueOnce({
       svg: `<svg onload="alert(1)"><script>alert(1)</script><foreignObject><div onclick="alert(1)">unsafe</div></foreignObject><path d="M0 0h10v10z"></path></svg>`,
     });
-    cleanup = render(
-      () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }));
     await vi.waitFor(() =>
       expect(container?.querySelector('.mermaid-diagram-output > svg path')).not.toBeNull()
     );
@@ -1481,17 +1428,14 @@ $$`,
     'keeps loose and nested lists in one streaming block with %j newlines',
     async (newline) => {
       const [content, setContent] = createSignal(`Introduction.${newline}${newline}1. First item.`);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            cacheByContent: false,
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          cacheByContent: false,
+        })
       );
-      flushSolid();
       for (const delta of [
         `${newline}${newline}2`,
         '.',
@@ -1522,15 +1466,12 @@ $$`,
     const send = vi.fn();
     window.__sendToExtension = send;
 
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            'Safe <strong>text</strong><script>alert(1)</script><img src="https://example.test/x.png" onerror="alert(1)" /> [Docs](https://opencode.ai) [Bad](javascript:alert(1))',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          'Safe <strong>text</strong><script>alert(1)</script><img src="https://example.test/x.png" onerror="alert(1)" /> [Docs](https://opencode.ai) [Bad](javascript:alert(1))',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('script')).toBeNull();
     expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
@@ -1566,12 +1507,9 @@ $$`,
       vi.useFakeTimers();
       const warn = vi.spyOn(console, 'warn');
       const href = 'https://example.test/docs?one=1&two=2';
-      cleanup = render(
-        () =>
-          MarkdownRenderer({ content: `[${label}](${href} "Old title")`, cacheByContent: true }),
-        container!
+      mount(() =>
+        MarkdownRenderer({ content: `[${label}](${href} "Old title")`, cacheByContent: true })
       );
-      flushSolid();
       const link = container!.querySelector('a')!;
       expect(link.hasAttribute('title')).toBe(false);
       link.dispatchEvent(new MouseEvent('mouseenter'));
@@ -1596,17 +1534,14 @@ $$`,
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn');
     const [content, setContent] = createSignal('[First](https://example.test/first)');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        cacheByContent: true,
+      })
     );
-    flushSolid();
     const first = container!.querySelector('a')!;
     first.dispatchEvent(new MouseEvent('mouseenter'));
     await vi.advanceTimersByTimeAsync(400);
@@ -1631,9 +1566,7 @@ $$`,
     second.dispatchEvent(new MouseEvent('mouseleave'));
     flushSolid();
     second.dispatchEvent(new MouseEvent('mouseenter'));
-    cleanup();
-    cleanup = undefined;
-    flushSolid();
+    unmount();
     await vi.advanceTimersByTimeAsync(400);
     flushSolid();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
@@ -1658,10 +1591,8 @@ $$`,
     ['`C:\\work\\project\\App.tsx`', 'C:/work/project/App.tsx'],
   ])('uses the same 400 ms custom tooltip for file link %s', async (content, expected) => {
     vi.useFakeTimers();
-    setState(storePath('editorContext', 'workspacePath', '/repo'));
-    flushSolid();
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    applyState(storePath('editorContext', 'workspacePath', '/repo'));
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
     const link = container!.querySelector('a')!;
     expect(link.hasAttribute('title')).toBe(false);
     link.dispatchEvent(new MouseEvent('mouseenter'));
@@ -1679,7 +1610,7 @@ $$`,
 
   it('uses a custom tooltip for session-reference links too', async () => {
     vi.useFakeTimers();
-    setState(
+    applyState(
       storePath('sessions', [
         {
           id: 'ses_reference123',
@@ -1691,12 +1622,9 @@ $$`,
         },
       ])
     );
-    flushSolid();
-    cleanup = render(
-      () => MarkdownRenderer({ content: 'Open session:ses_reference123', cacheByContent: true }),
-      container!
+    mount(() =>
+      MarkdownRenderer({ content: 'Open session:ses_reference123', cacheByContent: true })
     );
-    flushSolid();
     const link = container!.querySelector('a')!;
     expect(link.hasAttribute('title')).toBe(false);
     link.dispatchEvent(new MouseEvent('mouseenter'));
@@ -1713,17 +1641,14 @@ $$`,
 
   it('does not add URL tooltips to URL labels or unsafe links', async () => {
     vi.useFakeTimers();
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            'https://example.test/docs [https://example.test/docs](https://example.test/docs) ' +
-            '[Unsafe](javascript:alert) [http://example.test/docs](http://example.test/docs)',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          'https://example.test/docs [https://example.test/docs](https://example.test/docs) ' +
+          '[Unsafe](javascript:alert) [http://example.test/docs](http://example.test/docs)',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
     for (const link of container!.querySelectorAll('a')) {
       expect(link.hasAttribute('aria-describedby')).toBe(false);
       link.dispatchEvent(new MouseEvent('mouseenter'));
@@ -1738,12 +1663,9 @@ $$`,
     vi.useFakeTimers();
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(
-      () =>
-        MarkdownRenderer({ content: '[Docs](https://example.test/docs)', cacheByContent: true }),
-      container!
+    mount(() =>
+      MarkdownRenderer({ content: '[Docs](https://example.test/docs)', cacheByContent: true })
     );
-    flushSolid();
     const link = container!.querySelector('a')!;
     link.dispatchEvent(new MouseEvent('mouseenter'));
     flushSolid();
@@ -1773,17 +1695,14 @@ $$`,
     async (delay) => {
       vi.useFakeTimers();
       const [content, setContent] = createSignal('[Docs](https://example.test/old)');
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            cacheByContent: true,
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          cacheByContent: true,
+        })
       );
-      flushSolid();
       const oldLink = container!.querySelector('a')!;
       oldLink.dispatchEvent(new MouseEvent('mouseenter'));
       flushSolid();
@@ -1813,16 +1732,13 @@ $$`,
   it('hydrates tooltips for completed streaming links in stable and tail segments', async () => {
     vi.useFakeTimers();
     const [content, setContent] = createSignal('See [Docs](https://example.test');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     expect(container!.querySelector('a')).toBeNull();
     setContent('See [Docs](https://example.test/docs)\n\n[More](https://example.test/more)');
     flushSolid();
@@ -1850,11 +1766,7 @@ $$`,
     ['*claude-agent-acp*', 'em'],
     ['**`claude-agent-acp`**', 'strong code'],
   ])('preserves formatting when decorating a link labeled %s', (label, selector) => {
-    cleanup = render(
-      () => MarkdownRenderer({ content: `[${label}](https://example.test)` }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: `[${label}](https://example.test)` }));
 
     const link = container?.querySelector('a.external-link');
     const formattedLabel = link?.querySelector(selector);
@@ -1869,15 +1781,12 @@ $$`,
   });
 
   it('renders linked badge markdown as user-clicked text links', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            '[![Visual Studio Marketplace](https://badgen.net/vs-marketplace/v/koltyakov.varro?color=0078d4)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro) [![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](https://github.com/koltyakov/varro/blob/main/LICENSE)',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          '[![Visual Studio Marketplace](https://badgen.net/vs-marketplace/v/koltyakov.varro?color=0078d4)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro) [![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](https://github.com/koltyakov/varro/blob/main/LICENSE)',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
     const link = Array.from(container?.querySelectorAll('a') || []).find((item) =>
@@ -1888,15 +1797,12 @@ $$`,
   });
 
   it('renders remote content images as text without resource elements', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            '![Screenshot](https://example.test/screenshot.png) [![Linked screenshot](https://example.test/linked-screenshot.png)](https://example.test/details)',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          '![Screenshot](https://example.test/screenshot.png) [![Linked screenshot](https://example.test/linked-screenshot.png)](https://example.test/details)',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('.markdown-image-frame')).toBeNull();
     expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
@@ -1905,15 +1811,12 @@ $$`,
   });
 
   it('blocks compact remote icons, portraits, and raw images', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            '![App icon](https://example.test/assets/app.png) ![Author portrait](https://example.test/people/author.jpg) <img src="https://example.test/custom.png" width="48" height="48" alt="Custom mark">',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          '![App icon](https://example.test/assets/app.png) ![Author portrait](https://example.test/people/author.jpg) <img src="https://example.test/custom.png" width="48" height="48" alt="Custom mark">',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelectorAll('.markdown-image-frame')).toHaveLength(0);
     expect(container?.querySelectorAll('img:not(.external-link-icon)')).toHaveLength(0);
@@ -1923,21 +1826,17 @@ $$`,
 
   it('offers click-to-load placeholders only for generated Markdown image tokens', () => {
     const warn = vi.spyOn(console, 'warn');
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: [
-            '![Chart](https://images.test/chart.png)',
-            '<img src="https://images.test/raw.png">',
-            '<span data-varro-generated data-remote-image="https%3A%2F%2Fimages.test%2Fforged.png" alt="Forged">Forged</span>',
-          ].join('\n\n'),
-          cacheByContent: true,
-        }),
-      container!
+    applyState(storePath('remoteImages', 'ask'));
+    mount(() =>
+      MarkdownRenderer({
+        content: [
+          '![Chart](https://images.test/chart.png)',
+          '<img src="https://images.test/raw.png">',
+          '<span data-varro-generated data-remote-image="https%3A%2F%2Fimages.test%2Fforged.png" alt="Forged">Forged</span>',
+        ].join('\n\n'),
+        cacheByContent: true,
+      })
     );
-    flushSolid();
     expect(container?.querySelectorAll('[data-remote-image]')).toHaveLength(1);
     expect(container?.querySelector('.remote-markdown-image-host')?.textContent).toBe(
       'images.test'
@@ -1949,26 +1848,21 @@ $$`,
   });
 
   it('changes image presentation without reparsing or fetching Markdown', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: '![Chart](https://images.test/chart.png)',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content: '![Chart](https://images.test/chart.png)',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
     const host = container?.querySelector('[data-remote-image]');
     expect(container?.querySelector('button')).toBeNull();
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     expect(container?.querySelector('[data-remote-image]')).toBe(host);
     expect(container?.querySelector('.rendered-markdown')?.classList).toContain(
       'remote-images-enabled'
     );
     expect(container?.querySelector('[data-remote-image-load]')?.textContent).toBe('Load image');
-    setState(storePath('remoteImages', 'off'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'off'));
     expect(container?.querySelector('button, img')).toBeNull();
     expect(container?.textContent?.trim()).toBe('Chart');
   });
@@ -1980,12 +1874,9 @@ $$`,
     'screenshots/example%20image.png',
   ])('reserves inline local images even with remote images off: %s', (source) => {
     const warn = vi.spyOn(console, 'warn');
-    cleanup = render(
-      () =>
-        MarkdownRenderer({ content: `![Local screenshot](${source})`, directory: '/workspace' }),
-      container!
+    mount(() =>
+      MarkdownRenderer({ content: `![Local screenshot](${source})`, directory: '/workspace' })
     );
-    flushSolid();
     expect(container?.querySelectorAll('[data-local-image]')).toHaveLength(1);
     expect(container?.querySelector('.local-markdown-image')).not.toBeNull();
     expect(container?.textContent).toContain('Local screenshot');
@@ -1994,29 +1885,23 @@ $$`,
   });
 
   it('does not hydrate forged local image attributes', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            '<span data-varro-generated data-local-image="secret.png" alt="Forged">Forged</span>',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          '<span data-varro-generated data-local-image="secret.png" alt="Forged">Forged</span>',
+      })
     );
-    flushSolid();
     expect(container?.querySelector('[data-local-image]')).toBeNull();
     expect(container?.textContent).toContain('Forged');
   });
 
   it('removes images with unsafe or unsupported URL schemes', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            '![Insecure](http://images.test/image.png) ![Embedded](data:image/png;base64,AA==) <img src="javascript:alert(1)" alt="Bad">',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          '![Insecure](http://images.test/image.png) ![Embedded](data:image/png;base64,AA==) <img src="javascript:alert(1)" alt="Bad">',
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('img')).toBeNull();
     expect(container?.textContent).toContain('Insecure');
@@ -2024,15 +1909,12 @@ $$`,
   });
 
   it('strips dangerous attributes from allowed html', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            '<a href="https://example.test" onclick="alert(1)" style="color:red">Link</a><svg><path d="M0 0" onload="alert(1)" /></svg>',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          '<a href="https://example.test" onclick="alert(1)" style="color:red">Link</a><svg><path d="M0 0" onload="alert(1)" /></svg>',
+      })
     );
-    flushSolid();
 
     const link = container?.querySelector('a');
     const path = container?.querySelector('path');
@@ -2059,8 +1941,7 @@ $$`,
       '```',
     ].join('\n');
 
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -2107,8 +1988,7 @@ $$`,
 
   for (const [name, payload] of mutationXssPayloads) {
     it(`does not resurrect script from a ${name} payload`, () => {
-      cleanup = render(() => MarkdownRenderer({ content: payload }), container!);
-      flushSolid();
+      mount(() => MarkdownRenderer({ content: payload }));
 
       const html = container?.innerHTML ?? '';
       expect(container?.querySelector('script')).toBeNull();
@@ -2145,8 +2025,7 @@ $$`,
     const payload =
       '<a href=" https://example.test/docs ">Safe docs</a><svg></p><style><a id="</style><img src=1 onerror=alert(1)>">';
 
-    cleanup = render(() => MarkdownRenderer({ content: payload }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: payload }));
 
     assertInertWithSafeAnchor(container!);
 
@@ -2158,7 +2037,7 @@ $$`,
   it('opens local markdown file links through VS Code', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -2166,13 +2045,8 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }));
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link).toBeInstanceOf(HTMLAnchorElement);
@@ -2231,7 +2105,7 @@ $$`,
   ])('opens the file and line in Markdown target %s', (href, path, line, endLine?: number) => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         workspaceFolders: [
@@ -2243,12 +2117,7 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
-    cleanup = render(
-      () => MarkdownRenderer({ content: `[Open query](${href})`, cacheByContent: true }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: `[Open query](${href})`, cacheByContent: true }));
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.dataset.file).toBe(JSON.stringify({ path, line, endLine }));
@@ -2286,8 +2155,7 @@ $$`,
     const send = vi.fn();
     const hostClick = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content }));
     const link = container!.querySelector<HTMLAnchorElement>('a')!;
     const path = '/repo/reports/Varro startup performance.md';
     expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
@@ -2340,7 +2208,7 @@ $$`,
       ];
       const send = vi.fn();
       window.__sendToExtension = send;
-      setState(
+      applyState(
         storePath('editorContext', {
           workspacePath: primary,
           workspaceFolders: [
@@ -2349,18 +2217,14 @@ $$`,
           ],
         })
       );
-      flushSolid();
-      cleanup = render(
-        () =>
-          MarkdownRenderer({
-            content: citations
-              .map(({ label, path, line }) => `[\`${label}\`](${path}#L${line})`)
-              .join('\n\n'),
-            cacheByContent,
-          }),
-        container!
+      mount(() =>
+        MarkdownRenderer({
+          content: citations
+            .map(({ label, path, line }) => `[\`${label}\`](${path}#L${line})`)
+            .join('\n\n'),
+          cacheByContent,
+        })
       );
-      flushSolid();
 
       const links = container!.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
       expect(links).toHaveLength(citations.length);
@@ -2401,11 +2265,7 @@ $$`,
   it('opens line fragments on raw HTML file anchors', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(
-      () => MarkdownRenderer({ content: '<a href="/other/query.py#L91-L105">Open query</a>' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '<a href="/other/query.py#L91-L105">Open query</a>' }));
 
     dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
     flushSolid();
@@ -2439,8 +2299,7 @@ $$`,
   ])('does not treat unsupported fragment target %s as a file', (href) => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(() => MarkdownRenderer({ content: `[Open query](${href})` }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: `[Open query](${href})` }));
 
     const link = container?.querySelector<HTMLAnchorElement>('a');
     expect(link?.hasAttribute('href')).toBe(false);
@@ -2452,7 +2311,7 @@ $$`,
   it('links file references with parenthesized line numbers', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -2460,13 +2319,8 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () => MarkdownRenderer({ content: 'Review go.mod (line 3).', cacheByContent: true }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: 'Review go.mod (line 3).', cacheByContent: true }));
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('go.mod (line 3)');
@@ -2503,11 +2357,9 @@ $$`,
   ])('preserves the relative reference and range in %s', (content) => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(storePath('editorContext', 'workspacePath', '/other-workspace'));
-    flushSolid();
-    setState(storePath('activeSessionId', 'different-session'));
-    flushSolid();
-    setState(
+    applyState(storePath('editorContext', 'workspacePath', '/other-workspace'));
+    applyState(storePath('activeSessionId', 'different-session'));
+    applyState(
       storePath('sessions', [
         {
           id: 'owner-session',
@@ -2519,12 +2371,7 @@ $$`,
         },
       ])
     );
-    flushSolid();
-    cleanup = render(
-      () => MarkdownRenderer({ content, sessionID: 'owner-session', cacheByContent: true }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, sessionID: 'owner-session', cacheByContent: true }));
     const link = container!.querySelector<HTMLAnchorElement>('a')!;
     expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
       content.startsWith('perceiver')
@@ -2564,20 +2411,15 @@ $$`,
     (directory) => {
       const send = vi.fn();
       window.__sendToExtension = send;
-      setState(storePath('activeSessionId', 'other'));
-      flushSolid();
-      setState(storePath('editorContext', 'workspacePath', '/other'));
-      flushSolid();
-      cleanup = render(
-        () =>
-          MarkdownRenderer({
-            content: '`app.ts`',
-            sessionID: 'modal-session',
-            directory,
-          }),
-        container!
+      applyState(storePath('activeSessionId', 'other'));
+      applyState(storePath('editorContext', 'workspacePath', '/other'));
+      mount(() =>
+        MarkdownRenderer({
+          content: '`app.ts`',
+          sessionID: 'modal-session',
+          directory,
+        })
       );
-      flushSolid();
       dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
       flushSolid();
       expect(send).toHaveBeenCalledWith({
@@ -2609,22 +2451,17 @@ $$`,
   ])('scopes cached link metadata to each session directory for %s', async (content) => {
     vi.useFakeTimers();
     const sanitize = vi.spyOn(DOMPurify, 'sanitize');
-    setState(storePath('activeSessionId', 'other'));
-    flushSolid();
-    setState(storePath('editorContext', 'workspacePath', '/other-workspace'));
-    flushSolid();
+    applyState(storePath('activeSessionId', 'other'));
+    applyState(storePath('editorContext', 'workspacePath', '/other-workspace'));
     for (const directory of ['/repo/packages/app', '/worktrees/feature', '/repo/packages/app']) {
-      cleanup = render(
-        () =>
-          MarkdownRenderer({
-            content,
-            sessionID: 'owner-session',
-            directory,
-            cacheByContent: true,
-          }),
-        container!
+      mount(() =>
+        MarkdownRenderer({
+          content,
+          sessionID: 'owner-session',
+          directory,
+          cacheByContent: true,
+        })
       );
-      flushSolid();
       const link = container!.querySelector<HTMLAnchorElement>('a')!;
       expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
         `${directory}/src/app.ts`
@@ -2642,25 +2479,20 @@ $$`,
         flushSolid();
       }
       flushSolid();
-      cleanup();
-      flushSolid();
-      cleanup = undefined;
+      unmount();
     }
     expect(sanitize).toHaveBeenCalledTimes(2);
   });
 
   it('preserves absolute link metadata when a session directory is supplied', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: '`/shared/src/app.ts:10-12`',
-          sessionID: 'owner-session',
-          directory: '/repo/packages/app',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content: '`/shared/src/app.ts:10-12`',
+        sessionID: 'owner-session',
+        directory: '/repo/packages/app',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
     const link = container!.querySelector<HTMLAnchorElement>('a')!;
     expect(link.getAttribute('href')).toBe('/shared/src/app.ts:10-12');
     expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath).toBe(
@@ -2671,18 +2503,15 @@ $$`,
   it('updates stable and tail link metadata when the owning session directory changes', async () => {
     const [directory, setDirectory] = createSignal('/repo/packages/app');
     const content = '`src/stable.ts`\n\n`src/tail.ts`';
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          content,
-          sessionID: 'owner-session',
-          get directory() {
-            return directory();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        content,
+        sessionID: 'owner-session',
+        get directory() {
+          return directory();
+        },
+      })
     );
-    flushSolid();
     const linkPaths = () =>
       Array.from(container!.querySelectorAll('a')).map(
         (link) => JSON.parse(link.getAttribute('data-vscode-context') ?? '{}').varroFilePath
@@ -2705,8 +2534,7 @@ $$`,
   it('keeps an ambiguous link clickable after cancelling the file picker', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    cleanup = render(() => MarkdownRenderer({ content: '`shared.ts`' }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '`shared.ts`' }));
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     dispatchAnchorClick(link);
     flushSolid();
@@ -2737,7 +2565,7 @@ $$`,
   it('disables a missing file link and shows warning feedback', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -2745,12 +2573,7 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
-    cleanup = render(
-      () => MarkdownRenderer({ content: '`missing-file.ts`', cacheByContent: true }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '`missing-file.ts`', cacheByContent: true }));
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     dispatchAnchorClick(link);
@@ -2794,7 +2617,7 @@ $$`,
   it('warns when a file-path-link payload fails to parse', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -2802,13 +2625,8 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }));
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link).toBeInstanceOf(HTMLAnchorElement);
@@ -2835,9 +2653,8 @@ $$`,
   ])('selects a workspace session when clicking %s in Markdown', (target) => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(storePath('activeSessionId', 'ses_origin123'));
-    flushSolid();
-    setState(
+    applyState(storePath('activeSessionId', 'ses_origin123'));
+    applyState(
       storePath('sessions', [
         {
           id: 'ses_found123',
@@ -2849,18 +2666,13 @@ $$`,
         },
       ])
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            'Session session:ses_found123 and session:ses_missing456. `session:ses_found123`',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content: 'Session session:ses_found123 and session:ses_missing456. `session:ses_found123`',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
     expect(link?.textContent).toBe('Permission request states');
@@ -2901,17 +2713,13 @@ $$`,
     };
     const lookup = vi.spyOn(client.varro.session, 'reference').mockResolvedValue(reference);
     const open = vi.spyOn(client.varro.session, 'openReference').mockResolvedValue();
-    setState(
+    applyState(
       storePath('serverStatus', { state: 'running', url: 'http://localhost/markdown-references' })
     );
-    flushSolid();
-    setState(storePath('activeSessionId', 'ses_origin'));
-    flushSolid();
-    cleanup = render(
-      () => MarkdownRenderer({ content: 'Check this too ses_external123', cacheByContent: true }),
-      container!
+    applyState(storePath('activeSessionId', 'ses_origin'));
+    mount(() =>
+      MarkdownRenderer({ content: 'Check this too ses_external123', cacheByContent: true })
     );
-    flushSolid();
     await vi.waitFor(() =>
       expect(container?.querySelector('a.session-reference-link')?.textContent).toBe(
         'Review release · other'
@@ -2932,13 +2740,12 @@ $$`,
 
   it('updates session references when a matching workspace session is discovered', async () => {
     const content = 'Open ses_discovered123';
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
 
     expect(container?.querySelector('a.session-reference-link')).toBeNull();
     expect(container?.textContent).toContain('ses_discovered123');
 
-    setState(
+    applyState(
       storePath('sessions', [
         {
           id: 'ses_discovered123',
@@ -2950,7 +2757,6 @@ $$`,
         },
       ])
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -2960,7 +2766,7 @@ $$`,
   });
 
   it('invalidates finalized multi-reference Markdown after renaming and removing sessions', async () => {
-    setState(
+    applyState(
       storePath(
         'sessions',
         ['first', 'second'].map((name) => ({
@@ -2973,14 +2779,11 @@ $$`,
         }))
       )
     );
-    flushSolid();
     const content = 'Open ses_first and session:ses_second.';
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
     expect(container?.querySelectorAll('a.session-reference-link')).toHaveLength(2);
 
-    setState(storePath('sessions', 0, 'title', 'Renamed first'));
-    flushSolid();
+    applyState(storePath('sessions', 0, 'title', 'Renamed first'));
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     flushSolid();
     expect(container?.querySelector('[data-session-id="ses_first"]')?.textContent).toBe(
@@ -2990,8 +2793,7 @@ $$`,
       '#session/ses_second'
     );
 
-    setState(storePath('sessions', []));
-    flushSolid();
+    applyState(storePath('sessions', []));
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     flushSolid();
     expect(container?.querySelector('a.session-reference-link')).toBeNull();
@@ -3002,11 +2804,7 @@ $$`,
     const send = vi.fn();
     window.__sendToExtension = send;
 
-    cleanup = render(
-      () => MarkdownRenderer({ content: '[External-ish](//example.test/path)' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '[External-ish](//example.test/path)' }));
 
     const link = container?.querySelector('a');
     expect(link?.hasAttribute('href')).toBe(false);
@@ -3022,15 +2820,12 @@ $$`,
       const send = vi.fn();
       window.__sendToExtension = send;
 
-      cleanup = render(
-        () =>
-          MarkdownRenderer({
-            content: `[Docs](${url}) ${url}\n\n| Component | URL |\n| --- | --- |\n| App | ${url} |`,
-            cacheByContent: true,
-          }),
-        container!
+      mount(() =>
+        MarkdownRenderer({
+          content: `[Docs](${url}) ${url}\n\n| Component | URL |\n| --- | --- |\n| App | ${url} |`,
+          cacheByContent: true,
+        })
       );
-      flushSolid();
 
       const links = Array.from(container?.querySelectorAll<HTMLAnchorElement>('a') ?? []);
       expect(links).toHaveLength(3);
@@ -3060,15 +2855,12 @@ $$`,
     (url) => {
       const send = vi.fn();
       window.__sendToExtension = send;
-      cleanup = render(
-        () =>
-          MarkdownRenderer({
-            content: `[Docs](${url}) ${url}\n\n| URL |\n| --- |\n| ${url} |`,
-            cacheByContent: true,
-          }),
-        container!
+      mount(() =>
+        MarkdownRenderer({
+          content: `[Docs](${url}) ${url}\n\n| URL |\n| --- |\n| ${url} |`,
+          cacheByContent: true,
+        })
       );
-      flushSolid();
 
       // VS Code's window listener forwards anchor clicks even when defaultPrevented is true.
       const hostLinkHandler = vi.fn();
@@ -3095,17 +2887,13 @@ $$`,
   );
 
   it('re-renders workspace-relative links when the workspace changes', async () => {
-    cleanup = render(
-      () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }));
 
     expect(container?.querySelector('a.file-path-link')?.getAttribute('href')).toBe(
       './src/webview/App.tsx'
     );
 
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3113,7 +2901,6 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3183,19 +2970,16 @@ $$`,
       'The new regressions pass, including the two `app.ts` example paths'
     );
     const [streaming, setStreaming] = createSignal(true);
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          get forceStreaming() {
-            return streaming();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        get forceStreaming() {
+          return streaming();
+        },
+      })
     );
-    flushSolid();
 
     for (const complete of [false, true]) {
       if (complete) {
@@ -3236,7 +3020,7 @@ $$`,
   it('links file-only inline code but not ordinary inline or fenced code', async () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3244,17 +3028,13 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: '`spotlight` `src/shared/protocol.ts`\n\n```txt\nsrc/webview/App.tsx\n```',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content: '`spotlight` `src/shared/protocol.ts`\n\n```txt\nsrc/webview/App.tsx\n```',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3293,7 +3073,7 @@ $$`,
   });
 
   it('does not linkify dotted API identifiers as files', () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3301,18 +3081,14 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            'Use workspace.fs, files.exclude, and search.exclude directly, including `workspace.fs` in code.',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          'Use workspace.fs, files.exclude, and search.exclude directly, including `workspace.fs` in code.',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
 
     expect(container?.querySelector('a.file-path-link')).toBeNull();
     expect(container?.textContent).toContain('workspace.fs');
@@ -3369,7 +3145,7 @@ $$`,
       path: '/repo/README.md',
     },
   ])('provides a native copy-path target for $content', ({ content, label, path }) => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3377,9 +3153,7 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
 
     const link = container!.querySelector('a.file-path-link');
     expect(link?.textContent).toBe(label);
@@ -3392,7 +3166,7 @@ $$`,
   });
 
   it('linkifies only text nodes and leaves path-looking attributes unchanged', () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3400,7 +3174,6 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
     const html = __parseMarkdownForTests(
       '<span title="src/webview/App.tsx" aria-label="docs/guide.md">Metadata</span> and src/shared/protocol.ts.',
       { cacheByContent: false }
@@ -3418,16 +3191,13 @@ $$`,
   });
 
   it('derives native copy-path context from the target instead of untrusted HTML attributes', () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content:
-            '<a href="/repo/src/safe.ts" data-vscode-context=\'{"webviewSection":"varroFileLink","varroFilePath":"/other/file.ts"}\'>Safe</a>',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content:
+          '<a href="/repo/src/safe.ts" data-vscode-context=\'{"webviewSection":"varroFileLink","varroFilePath":"/other/file.ts"}\'>Safe</a>',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
 
     const link = container!.querySelector('a');
     expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toEqual({
@@ -3446,8 +3216,7 @@ $$`,
     });
 
     const oversized = 'A'.repeat(25_000);
-    cleanup = render(() => MarkdownRenderer({ content: '```txt\nplaceholder\n```' }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '```txt\nplaceholder\n```' }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3471,11 +3240,7 @@ $$`,
       configurable: true,
     });
 
-    cleanup = render(
-      () => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3494,11 +3259,7 @@ $$`,
   });
 
   it('renders fenced code blocks with syntax highlight spans when the language is known', async () => {
-    cleanup = render(
-      () => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '```ts\nconst value = 1;\n```' }));
     await vi.waitFor(() => expect(container?.querySelector('.hljs-keyword')).not.toBeNull());
     flushSolid();
 
@@ -3543,8 +3304,7 @@ $$`,
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
     const content = 'Finalized cache test `7mwnc`';
 
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3557,8 +3317,7 @@ $$`,
     container = document.createElement('div');
     document.body.appendChild(container);
 
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3568,7 +3327,7 @@ $$`,
   it('separates finalized markdown cache entries by render options', async () => {
     await requestHighlight('const value = 1;', 'ts');
     flushSolid();
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3576,7 +3335,6 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
     const pathContent = 'See (./src/example.ts)';
     const withoutPathLinks = __parseMarkdownForTests(pathContent, {
@@ -3633,8 +3391,7 @@ $$`,
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
     const content = 'Streaming cache bypass test `d9q2p`';
 
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3648,8 +3405,7 @@ $$`,
     container = document.createElement('div');
     document.body.appendChild(container);
 
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3657,11 +3413,7 @@ $$`,
   });
 
   it('renders streaming content in stable and tail segments', async () => {
-    cleanup = render(
-      () => MarkdownRenderer({ content: 'First paragraph\n\nSecond paragraph' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: 'First paragraph\n\nSecond paragraph' }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3674,16 +3426,13 @@ $$`,
 
   it('reserves an incomplete streaming table until its delimiter row is complete', async () => {
     const [content, setContent] = createSignal('Status follows.\n\n| No.');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3717,19 +3466,16 @@ $$`,
     const [content, setContent] = createSignal(
       'Status follows.\n\n| Name | State |\n| --- | --- |\n| Renderer | Act'
     );
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          get cacheByContent() {
-            return completed();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        get cacheByContent() {
+          return completed();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3776,11 +3522,7 @@ $$`,
   });
 
   it('renders a complete streaming table without trailing pipes', async () => {
-    cleanup = render(
-      () => MarkdownRenderer({ content: 'Status follows.\n\n| Name | State\n| --- | ---' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: 'Status follows.\n\n| Name | State\n| --- | ---' }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3789,12 +3531,9 @@ $$`,
   });
 
   it('counts escaped pipes as table cell content while streaming', async () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({ content: 'Status follows.\n\n| Name \\| Alias | State\n| --- | ---' }),
-      container!
+    mount(() =>
+      MarkdownRenderer({ content: 'Status follows.\n\n| Name \\| Alias | State\n| --- | ---' })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3803,14 +3542,11 @@ $$`,
   });
 
   it('counts pipes after an even backslash run as table separators', async () => {
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: 'Status follows.\n\n| Path \\\\| State | Owner\n| --- | --- | ---',
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content: 'Status follows.\n\n| Path \\\\| State | Owner\n| --- | --- | ---',
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3819,16 +3555,13 @@ $$`,
 
   it('holds incomplete streaming block delimiters', async () => {
     const [content, setContent] = createSignal('Stable text.\n\n## ');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     expect(container?.querySelector('h2')).toBeNull();
@@ -3852,17 +3585,14 @@ $$`,
   it('paints an active ordered-list item while it streams', async () => {
     const base = 'Scope protects attention.';
     const [content, setContent] = createSignal(`${base}\n\n6`);
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          forceStreaming: true,
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        forceStreaming: true,
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3899,16 +3629,13 @@ $$`,
     const [content, setContent] = createSignal('First paragraph\n\nSecond');
     const sanitizeSpy = vi.spyOn(DOMPurify, 'sanitize');
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3929,7 +3656,7 @@ $$`,
   });
 
   it('linkifies complete file references in the streaming tail', async () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3937,12 +3664,7 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
-    cleanup = render(
-      () => MarkdownRenderer({ content: 'Stable paragraph\n\n`./src/webview/App.tsx`' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: 'Stable paragraph\n\n`./src/webview/App.tsx`' }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -3963,7 +3685,7 @@ $$`,
     const [content, setContent] = createSignal(
       'The related tests are in `src/webview/components/Markdown'
     );
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -3971,18 +3693,14 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4030,17 +3748,14 @@ $$`,
     'shows an indicator in $name while its inline code is unfinished',
     async ({ prefix, visibleItems, pendingItems }) => {
       const [content, setContent] = createSignal(`${prefix}\`Open as Edi`);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            forceStreaming: true,
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          forceStreaming: true,
+        })
       );
-      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       flushSolid();
 
@@ -4067,17 +3782,14 @@ $$`,
     'does not paint an empty trailing %j bullet before its content arrives',
     async (marker) => {
       const [content, setContent] = createSignal(`Two corrections:\n\n${marker}`);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            forceStreaming: true,
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          forceStreaming: true,
+        })
       );
-      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       flushSolid();
 
@@ -4199,17 +3911,14 @@ $$`,
       }
       expect(prefixes.length).toBeGreaterThan(0);
       const [content, setContent] = createSignal('Starting...');
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            forceStreaming: true,
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          forceStreaming: true,
+        })
       );
-      flushSolid();
 
       const findings: string[] = [];
       for (const prefix of [...prefixes, sample]) {
@@ -4296,11 +4005,7 @@ $$`,
       text: 'Second paragraph.',
     },
   ])('keeps $name visible while streaming', async ({ content, selector, text }) => {
-    cleanup = render(
-      () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
-      container!
-    );
-    flushSolid();
+    mount(() => createComponent(MarkdownRenderer, { content, forceStreaming: true }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     const element = container?.querySelector(selector);
@@ -4363,17 +4068,14 @@ $$`,
     async ({ delimiter, chunks }) => {
       const prefix = 'Stable paragraph.\n\n- Passed `npm run lint`, now run ';
       const [content, setContent] = createSignal(`${prefix}${delimiter}`);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-            forceStreaming: true,
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          forceStreaming: true,
+        })
       );
-      flushSolid();
 
       for (const chunk of ['', ...chunks]) {
         setContent(content() + chunk);
@@ -4404,17 +4106,14 @@ $$`,
     'hides an unfinished HTML tag %s until streaming settles',
     async (tag) => {
       const [completed, setCompleted] = createSignal(false);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            content: `Stable paragraph.\n\n${tag}`,
-            get cacheByContent() {
-              return completed();
-            },
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          content: `Stable paragraph.\n\n${tag}`,
+          get cacheByContent() {
+            return completed();
+          },
+        })
       );
-      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       flushSolid();
       expect(container?.textContent).not.toContain(tag);
@@ -4430,11 +4129,7 @@ $$`,
   it.each(['a < 3', '\\<details', '`<details`', '```html\n<details'])(
     'preserves literal HTML-like content %s during streaming',
     async (content) => {
-      cleanup = render(
-        () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
-        container!
-      );
-      flushSolid();
+      mount(() => createComponent(MarkdownRenderer, { content, forceStreaming: true }));
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       flushSolid();
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
@@ -4443,16 +4138,13 @@ $$`,
   );
 
   it('keeps explicitly escaped HTML visible while the tag is incomplete', async () => {
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          content: 'Literal <details',
-          forceStreaming: true,
-          escapeHtml: true,
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        content: 'Literal <details',
+        forceStreaming: true,
+        escapeHtml: true,
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     expect(container?.textContent).toBe('Literal <details\n');
@@ -4461,16 +4153,13 @@ $$`,
 
   it('holds unfinished inline code at the start of an ordered-list item', async () => {
     const [content, setContent] = createSignal('1. `npm run test');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     expectStreamingIndicator(container!);
@@ -4486,17 +4175,14 @@ $$`,
 
   it('reveals an unmatched backtick suffix when streaming completes', async () => {
     const [completed, setCompleted] = createSignal(false);
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          content: 'Malformed `inline content',
-          get cacheByContent() {
-            return completed();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        content: 'Malformed `inline content',
+        get cacheByContent() {
+          return completed();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     expectStreamingIndicator(container!);
@@ -4514,7 +4200,7 @@ $$`,
     const [content, setContent] = createSignal(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation'
     );
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -4522,18 +4208,14 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4585,7 +4267,7 @@ $$`,
   });
 
   it('reserves trailing bare paths and linkifies them when complete', async () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -4593,7 +4275,6 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
     const cases = [
       {
         partial: 'packages/client/components/FileTypeIcon',
@@ -4624,16 +4305,13 @@ $$`,
 
     for (const testCase of cases) {
       const [content, setContent] = createSignal(`Bare path: ${testCase.partial}`);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            get content() {
-              return content();
-            },
-          }),
-        container!
+      mount(() =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        })
       );
-      flushSolid();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       flushSolid();
 
@@ -4651,25 +4329,20 @@ $$`,
       expect(link?.getAttribute('href')).toBe(testCase.title);
       expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
 
-      cleanup();
-      flushSolid();
-      cleanup = undefined;
+      unmount();
       container!.innerHTML = '';
     }
   });
 
   it('holds a trailing bare URL until a streaming boundary arrives', async () => {
     const [content, setContent] = createSignal('Docs: https://example.test/reference/Mark');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4690,16 +4363,13 @@ $$`,
 
   it('holds a trailing bare filename once its extension starts', async () => {
     const [content, setContent] = createSignal('File: MarkdownRenderer.t');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4717,7 +4387,7 @@ $$`,
   });
 
   it('links Windows paths while reserving a trailing URL', async () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -4725,12 +4395,10 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
     const content =
       'Windows: `C:\\work\\project\\App.tsx` and [open it](C:\\work\\project\\App.tsx)\n\nURL: https://example.test/folder/App';
 
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4752,8 +4420,7 @@ $$`,
       'const path = `src/webview/components/Markdown',
     ].join('\n');
 
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4763,11 +4430,7 @@ $$`,
   });
 
   it('shows unmatched inline code when the response is already complete', async () => {
-    cleanup = render(
-      () => MarkdownRenderer({ content: 'Malformed `inline content', cacheByContent: true }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: 'Malformed `inline content', cacheByContent: true }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4778,7 +4441,7 @@ $$`,
     const [completed, setCompleted] = createSignal(false);
     const content =
       '- Core protocol: `src/shared/protocol.ts` - shared contracts\n- Start with `docs/onboarding-verification.md` for onboarding.';
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -4786,19 +4449,15 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          content,
-          get cacheByContent() {
-            return completed();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        content,
+        get cacheByContent() {
+          return completed();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     const streamingLinks = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
@@ -4824,17 +4483,14 @@ $$`,
 
   it('tracks tail block type without restyling stable content on every text append', async () => {
     const [content, setContent] = createSignal('Stable paragraph.\n\nLive paragraph.');
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          cacheByContent: false,
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        cacheByContent: false,
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(resolve));
     flushSolid();
     const stable = container!.querySelector<HTMLElement>('[data-markdown-segment="stable"]')!;
@@ -4875,7 +4531,7 @@ $$`,
   it('preserves stable markdown DOM when streaming completes', async () => {
     const [completed, setCompleted] = createSignal(false);
     const content = 'Stable paragraph.\n\nReview `src/shared/protocol.ts`.';
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -4883,19 +4539,15 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          content,
-          get cacheByContent() {
-            return completed();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        content,
+        get cacheByContent() {
+          return completed();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4918,7 +4570,7 @@ $$`,
   it('does not revert final rendering when completion briefly regresses', async () => {
     const [completed, setCompleted] = createSignal(false);
     const content = 'Stable paragraph.\n\nReview `src/shared/protocol.ts`.';
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -4926,19 +4578,15 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          content,
-          get cacheByContent() {
-            return completed();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        content,
+        get cacheByContent() {
+          return completed();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
     const streamingLink = container?.querySelector('a.file-path-link');
@@ -4968,20 +4616,17 @@ $$`,
     const [content, setContent] = createSignal('Final response.');
     const [forceStreaming, setForceStreaming] = createSignal(false);
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-          cacheByContent: true,
-          get forceStreaming() {
-            return forceStreaming();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+        cacheByContent: true,
+        get forceStreaming() {
+          return forceStreaming();
+        },
+      })
     );
-    flushSolid();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -4998,7 +4643,7 @@ $$`,
   });
 
   it('canonicalizes explicit path labels containing inline-code backticks', () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -5006,17 +4651,13 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: '[`src/shared/protocol.ts`](./src/shared/protocol.ts)',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content: '[`src/shared/protocol.ts`](./src/shared/protocol.ts)',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('protocol.ts');
@@ -5026,7 +4667,7 @@ $$`,
   });
 
   it('renders the target session file formats as isolated canonical links', () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -5034,7 +4675,6 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
     const content = [
       '- Type declaration: [`src/webview/global.d.ts`](src/webview/global.d.ts) - browser globals',
       '- Main readme: [`README.md`](README.md) - project overview',
@@ -5044,8 +4684,7 @@ $$`,
       '- Main stylesheet: [`src/webview/index.css`](src/webview/index.css)',
     ].join('\n');
 
-    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content, cacheByContent: true }));
 
     const links = Array.from(
       container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link') ?? []
@@ -5065,7 +4704,7 @@ $$`,
   });
 
   it('removes escaped backticks around plain file references', () => {
-    setState(
+    applyState(
       storePath('editorContext', {
         workspacePath: '/repo',
         activeFile: null,
@@ -5073,17 +4712,13 @@ $$`,
         diagnostics: [],
       })
     );
-    flushSolid();
 
-    cleanup = render(
-      () =>
-        MarkdownRenderer({
-          content: 'Type declaration: \\`src/webview/global.d.ts\\` - browser globals',
-          cacheByContent: true,
-        }),
-      container!
+    mount(() =>
+      MarkdownRenderer({
+        content: 'Type declaration: \\`src/webview/global.d.ts\\` - browser globals',
+        cacheByContent: true,
+      })
     );
-    flushSolid();
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link?.textContent).toBe('src/webview/global.d.ts');
@@ -5095,8 +4730,7 @@ $$`,
   it('defers syntax highlighting for an unclosed streaming fence until the fence closes', async () => {
     let content = 'Before\n\n```ts\nconst value = 1;';
 
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 
@@ -5109,8 +4743,7 @@ $$`,
     cleanup?.();
     flushSolid();
     container!.innerHTML = '';
-    cleanup = render(() => MarkdownRenderer({ content }), container!);
-    flushSolid();
+    mount(() => MarkdownRenderer({ content }));
     await vi.waitFor(() => expect(container?.querySelector('.hljs-keyword')).not.toBeNull());
     flushSolid();
 
@@ -5123,16 +4756,13 @@ $$`,
     vi.useFakeTimers();
     const [content, setContent] = createSignal('Stable paragraph\n\nTail');
 
-    cleanup = render(
-      () =>
-        createComponent(MarkdownRenderer, {
-          get content() {
-            return content();
-          },
-        }),
-      container!
+    mount(() =>
+      createComponent(MarkdownRenderer, {
+        get content() {
+          return content();
+        },
+      })
     );
-    flushSolid();
     await vi.advanceTimersByTimeAsync(16);
     flushSolid();
 
@@ -5155,11 +4785,7 @@ $$`,
   });
 
   it('falls back to escaped plain code when the language is unknown', async () => {
-    cleanup = render(
-      () => MarkdownRenderer({ content: '```definitely-not-a-lang\nconst value = 1;\n```' }),
-      container!
-    );
-    flushSolid();
+    mount(() => MarkdownRenderer({ content: '```definitely-not-a-lang\nconst value = 1;\n```' }));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     flushSolid();
 

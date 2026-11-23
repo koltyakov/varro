@@ -234,28 +234,6 @@
   flex-shrink: 0;
 }
 
-.inline-chip .inline-chip-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: none;
-  appearance: none;
-  color: color-mix(in srgb, var(--color-vscode-fg) 72%, var(--color-vscode-input-bg));
-  cursor: pointer;
-  flex-shrink: 0;
-  margin-left: -3px;
-}
-
-.inline-chip .inline-chip-remove:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
-  color: var(--color-vscode-fg);
-}
-
 .chat-thinking-box {
   outline: none;
   position: relative;
@@ -567,15 +545,6 @@
   padding: 10px 0 2px;
   color: var(--color-vscode-muted);
   font-size: 12.5px;
-}
-
-.loading-indicator .loading-spinner {
-  width: 14px;
-  height: 14px;
-  border: 1.5px solid color-mix(in srgb, var(--color-vscode-accent) 25%, transparent);
-  border-top-color: var(--color-vscode-accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
 }
 
 .loading-indicator.stale {
@@ -2122,8 +2091,7 @@ kbd {
   outline-offset: 1px;
 }
 
-.file-change-card-header,
-.file-edit-line {
+.file-change-card-header {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
@@ -2476,20 +2444,6 @@ kbd {
   color: var(--color-vscode-fg-muted);
 }
 
-.chat-subtask-part .subtask-completion-summary {
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-subtask-part .subtask-agent-name {
-  color: var(--color-vscode-fg);
-  opacity: 0.75;
-}
-
-.chat-subtask-part .subtask-check {
-  color: var(--color-vscode-success);
-  font-size: 11px;
-}
-
 .chat-retry-notice {
   margin: 4px 0;
   font-size: 11.5px;
@@ -2760,10 +2714,7 @@ kbd {
   opacity: 0.6;
 }
 
-.chat-image-preview-context-menu {
-  z-index: var(--z-modal-raised);
-}
-
+.chat-image-preview-context-menu,
 .session-action-feedback.chat-image-preview-feedback {
   z-index: var(--z-modal-raised);
 }

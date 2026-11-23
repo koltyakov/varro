@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry, Session } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import {
+  getListDistanceFromBottom,
+  installPlaybackCapture,
+  waitForAnimationFrames,
+} from './helpers';
 
 for (const virtualized of [false, true]) {
   for (const detached of [false, true]) {
@@ -99,35 +103,19 @@ for (const virtualized of [false, true]) {
           };
         }
       );
-      await page.addInitScript(
-        (fixture) => {
-          // SAFETY: The isolated E2E page reads this fixture before mounting.
-          (
-            window as typeof window & { varroPlaybackCapture: typeof fixture }
-          ).varroPlaybackCapture = fixture;
-        },
-        { session, initialMessages }
-      );
+      await installPlaybackCapture(page, { session, initialMessages });
       await page.goto('/e2e/harness/index.html?scenario=session-playback');
       const list = page.locator('.interactive-list');
       if (virtualized)
         await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-      await expect
-        .poll(() =>
-          getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-        )
-        .toBeLessThan(2);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
       const summary = page.locator('.assistant-activity-summary').last();
       await summary.click();
       await expect(summary).toHaveAttribute('aria-expanded', 'true');
       const listBox = (await list.boundingBox())!;
       await page.mouse.move(listBox.x + 5, listBox.y + listBox.height / 2);
       await page.mouse.wheel(0, 2000);
-      await expect
-        .poll(() =>
-          getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-        )
-        .toBeLessThan(2);
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
       await waitForAnimationFrames(page, 8);
       if (detached) {
         const box = (await list.boundingBox())!;

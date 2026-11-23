@@ -430,10 +430,6 @@ export function addNativePdf(pdf: NativePdfAttachment) {
   return true;
 }
 
-export function addNativePdfs(pdfs: NativePdfAttachment[]) {
-  return pdfs.filter((pdf) => !addNativePdf(pdf));
-}
-
 export function setNativePdfContextFile(id: string, contextFile: DroppedFile) {
   if (!state.nativePdfs.some((pdf) => pdf.id === id)) return false;
   setState(

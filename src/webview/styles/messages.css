@@ -371,14 +371,7 @@
   }
 }
 
-.assistant-turn-content.assistant-turn-content-bare {
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
+.assistant-turn-content.assistant-turn-content-bare,
 .assistant-turn-content.assistant-turn-content-plain {
   padding: 0;
   border: none;
@@ -595,13 +588,6 @@
   position: absolute;
   inset: -5px 0;
   content: '';
-}
-
-.assistant-activity-status-failed {
-  margin-left: 0.35em;
-  color: color-mix(in srgb, var(--color-vscode-error) 82%, var(--color-vscode-fg));
-  font-size: 11px;
-  line-height: inherit;
 }
 
 .assistant-activity-summary:focus-visible {
@@ -1335,10 +1321,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 .interactive-item-container.interactive-response.interactive-response-follows-response:not(
     .interactive-item-render-empty,
     :empty
-  ) {
-  padding-top: 6px;
-}
-
+  ),
 .interactive-item-container.interactive-response.interactive-response-follows-response.interactive-response-continues-activity-group:not(
     .interactive-item-render-empty,
     :empty
@@ -1349,10 +1332,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
 .interactive-item-container.interactive-item-follows-bordered-block:not(
     .interactive-item-render-empty,
     :empty
-  ) {
-  padding-top: 3px;
-}
-
+  ),
 .interactive-item-container.interactive-response.interactive-response-follows-response.interactive-item-follows-bordered-block:not(
     .interactive-item-render-empty,
     :empty
@@ -1526,12 +1506,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
     background-color 120ms ease;
 }
 
-.assistant-dialog-summary.is-hover-intent-active .assistant-dialog-summary-turn-action {
-  opacity: 1;
-  filter: blur(0);
-  pointer-events: auto;
-}
-
+.assistant-dialog-summary.is-hover-intent-active .assistant-dialog-summary-turn-action,
 .assistant-dialog-summary-turn-action:focus-visible {
   opacity: 1;
   filter: blur(0);
@@ -2444,19 +2419,6 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   -webkit-user-drag: none;
 }
 
-.rendered-markdown .markdown-image-frame {
-  display: block;
-  width: min(100%, 480px);
-  max-height: 270px;
-  aspect-ratio: 16 / 9;
-}
-
-.rendered-markdown .markdown-image-frame > img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
 .rendered-markdown.remote-images-enabled [data-remote-image],
 .rendered-markdown [data-local-image] {
   display: inline-flex;
@@ -3290,10 +3252,7 @@ body.vscode-dark[data-vscode-theme-id='Dark 2026'] .interactive-session .chat-in
   );
 }
 
-.interactive-session .chat-input-container.showing-context-popup {
-  z-index: var(--z-chrome-raised);
-}
-
+.interactive-session .chat-input-container.showing-context-popup,
 .interactive-session .chat-input-container.showing-model-picker {
   z-index: var(--z-chrome-raised);
 }
@@ -3374,33 +3333,6 @@ body.vscode-dark .interactive-session .chat-input-container[data-dictation-reque
 
 .interactive-session .inline-edit-composer-slot .composer-edit-loading {
   inset: 2px 0 0;
-}
-
-.interactive-session .model-selection-row {
-  display: flex;
-  justify-content: flex-start;
-  padding: 0 2px;
-  position: relative;
-  z-index: var(--z-cover);
-}
-
-.interactive-session .model-selection-trigger {
-  max-width: min(100%, 280px);
-  gap: 6px;
-}
-
-.interactive-session .model-selection-trigger .toolbar-picker-label.model-name {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.interactive-session .model-selection-label {
-  flex-shrink: 0;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-vscode-muted);
 }
 
 .interactive-session .chat-input-toolbars {
@@ -3555,10 +3487,7 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 
 .interactive-session
   .chat-input-toolbars.toolbar-meta
-  .permission-mode-settings-button:focus-visible {
-  opacity: 0.9;
-}
-
+  .permission-mode-settings-button:focus-visible,
 .interactive-session .permission-mode-controls:hover .permission-mode-settings-button:hover {
   opacity: 0.9;
 }
@@ -3698,10 +3627,7 @@ body.vscode-light .interactive-session .chat-input-toolbars.toolbar-meta {
 .interactive-session
   .chat-input-toolbars.toolbar-meta
   .toolbar-picker.permission-mode-button
-  .codicon-chevron {
-  opacity: 0.6;
-}
-
+  .codicon-chevron,
 .interactive-session
   .chat-input-toolbars.toolbar-meta
   .toolbar-picker.workspace-picker-button

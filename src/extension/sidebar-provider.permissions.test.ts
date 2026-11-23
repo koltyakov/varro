@@ -42,6 +42,46 @@ const projectAttentionCases = [
   },
 ] as const;
 
+function embeddedPermission() {
+  return {
+    id: 'perm-1',
+    sessionID: 'session-1',
+    permission: 'bash',
+    title: 'Run Bash command',
+    tool: { messageID: 'msg-1', callID: 'call-1' },
+  };
+}
+
+async function createProviderWithEmbeddedPermission() {
+  const { provider } = await createSidebarProviderInstance({
+    server: createServer({ request: undefined as never }),
+  });
+  const { posted, view } = attachTestView(provider);
+  const providerState = provider as unknown as {
+    view: typeof view;
+    blockingRequestsForWebview: Array<{
+      id: string;
+      sessionID: string;
+      kind: 'permission' | 'question';
+      props: Record<string, unknown>;
+    }>;
+    sessionState: { handleServerEvent(event: unknown): void };
+  };
+  providerState.blockingRequestsForWebview = [
+    { id: 'perm-1', sessionID: 'session-1', kind: 'permission', props: embeddedPermission() },
+  ];
+  return { provider, posted, providerState };
+}
+
+function lastPermissionAutomationLease(posted: unknown[]) {
+  return posted
+    .filter(
+      (message): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
+        (message as { type?: string }).type === 'permission-automation/update'
+    )
+    .at(-1)?.payload.lease;
+}
+
 async function createProjectAttentionHarness() {
   const values = new Map<string, unknown>([
     ['varro.sessionHistoryScopes', { 'project:project-1': 'project' }],
@@ -144,38 +184,7 @@ describe('SidebarProvider permission replay', () => {
   );
 
   it('replays pending permission requests after the webview becomes ready', async () => {
-    const { provider } = await createSidebarProviderInstance({
-      server: createServer({
-        request: undefined as never,
-      }),
-    });
-
-    const { posted, view } = attachTestView(provider);
-
-    const providerState = provider as unknown as {
-      view: typeof view;
-      blockingRequestsForWebview: Array<{
-        id: string;
-        sessionID: string;
-        kind: 'permission' | 'question';
-        props: Record<string, unknown>;
-      }>;
-      sessionState: { handleServerEvent(event: unknown): void };
-    };
-    providerState.blockingRequestsForWebview = [
-      {
-        id: 'perm-1',
-        sessionID: 'session-1',
-        kind: 'permission',
-        props: {
-          id: 'perm-1',
-          sessionID: 'session-1',
-          permission: 'bash',
-          title: 'Run Bash command',
-          tool: { messageID: 'msg-1', callID: 'call-1' },
-        },
-      },
-    ];
+    const { provider, posted, providerState } = await createProviderWithEmbeddedPermission();
 
     providerState.sessionState.handleServerEvent({
       type: 'session.updated',
@@ -183,13 +192,7 @@ describe('SidebarProvider permission replay', () => {
     });
     providerState.sessionState.handleServerEvent({
       type: 'permission.asked',
-      properties: {
-        id: 'perm-1',
-        sessionID: 'session-1',
-        permission: 'bash',
-        title: 'Run Bash command',
-        tool: { messageID: 'msg-1', callID: 'call-1' },
-      },
+      properties: embeddedPermission(),
     });
 
     await provider.handleMessage({ type: 'ready' });
@@ -198,50 +201,13 @@ describe('SidebarProvider permission replay', () => {
       type: 'server/event',
       payload: {
         type: 'permission.asked',
-        properties: {
-          id: 'perm-1',
-          sessionID: 'session-1',
-          permission: 'bash',
-          title: 'Run Bash command',
-          tool: { messageID: 'msg-1', callID: 'call-1' },
-        },
+        properties: embeddedPermission(),
       },
     });
   });
 
   it('clears resolved embedded permission requests before replay on ready', async () => {
-    const { provider } = await createSidebarProviderInstance({
-      server: createServer({
-        request: undefined as never,
-      }),
-    });
-
-    const { posted, view } = attachTestView(provider);
-
-    const providerState = provider as unknown as {
-      view: typeof view;
-      blockingRequestsForWebview: Array<{
-        id: string;
-        sessionID: string;
-        kind: 'permission' | 'question';
-        props: Record<string, unknown>;
-      }>;
-      sessionState: { handleServerEvent(event: unknown): void };
-    };
-    providerState.blockingRequestsForWebview = [
-      {
-        id: 'perm-1',
-        sessionID: 'session-1',
-        kind: 'permission',
-        props: {
-          id: 'perm-1',
-          sessionID: 'session-1',
-          permission: 'bash',
-          title: 'Run Bash command',
-          tool: { messageID: 'msg-1', callID: 'call-1' },
-        },
-      },
-    ];
+    const { provider, posted, providerState } = await createProviderWithEmbeddedPermission();
 
     providerState.sessionState.handleServerEvent({
       type: 'permission.replied',
@@ -269,13 +235,7 @@ describe('SidebarProvider permission replay', () => {
       type: 'server/event',
       payload: {
         type: 'permission.asked',
-        properties: {
-          id: 'perm-1',
-          sessionID: 'session-1',
-          permission: 'bash',
-          title: 'Run Bash command',
-          tool: { messageID: 'msg-1', callID: 'call-1' },
-        },
+        properties: embeddedPermission(),
       },
     });
   });
@@ -349,14 +309,7 @@ describe('SidebarProvider permission replay', () => {
     const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const lease = posted
-      .filter(
-        (
-          message
-        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
-          (message as { type?: string }).type === 'permission-automation/update'
-      )
-      .at(-1)?.payload.lease;
+    const lease = lastPermissionAutomationLease(posted);
     expect(lease).toBeTypeOf('number');
     const providerState = provider as unknown as {
       sessionState: { handleServerEvent(event: unknown): void };
@@ -497,14 +450,7 @@ describe('SidebarProvider permission replay', () => {
     });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const lease = posted
-      .filter(
-        (
-          message
-        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
-          (message as { type?: string }).type === 'permission-automation/update'
-      )
-      .at(-1)?.payload.lease;
+    const lease = lastPermissionAutomationLease(posted);
     expect(lease).toBeTypeOf('number');
     await provider.handleMessage({
       type: 'api/request',
@@ -541,14 +487,7 @@ describe('SidebarProvider permission replay', () => {
     const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const lease = posted
-      .filter(
-        (
-          message
-        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
-          (message as { type?: string }).type === 'permission-automation/update'
-      )
-      .at(-1)?.payload.lease;
+    const lease = lastPermissionAutomationLease(posted);
     expect(lease).toBeTypeOf('number');
     const providerState = provider as unknown as {
       sessionState: { handleServerEvent(event: unknown): void };
@@ -589,14 +528,7 @@ describe('SidebarProvider permission replay', () => {
     const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
     await provider.handleMessage({ type: 'ready' });
-    const lease = posted
-      .filter(
-        (
-          message
-        ): message is { type: 'permission-automation/update'; payload: { lease: number } } =>
-          (message as { type?: string }).type === 'permission-automation/update'
-      )
-      .at(-1)?.payload.lease;
+    const lease = lastPermissionAutomationLease(posted);
     expect(lease).toBeTypeOf('number');
     const providerState = provider as unknown as {
       sessionState: { handleServerEvent(event: unknown): void };

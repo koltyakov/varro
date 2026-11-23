@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry, ToolPart } from '../../src/webview/types';
-import { getScrollMetrics } from './helpers';
+import { getListDistanceFromBottom } from './helpers';
 
 for (const distance of [540, 1768]) {
   test(`return to latest survives tool completion after a ${distance}px jump`, async ({
@@ -45,14 +45,10 @@ for (const distance of [540, 1768]) {
     // Let the running tool enter before detaching, so completion exercises the
     // visible tray's collapse after returning to latest.
     await expect(page.locator('.assistant-active-activity-item')).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
     await list.hover({ position: { x: 20, y: 100 } });
     await page.mouse.wheel(0, -distance);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeGreaterThan(distance - 50);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(distance - 50);
     const button = page.getByRole('button', { name: 'Scroll to latest message', exact: true });
     await expect(button).toBeVisible();
 

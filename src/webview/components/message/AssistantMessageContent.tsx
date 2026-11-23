@@ -63,6 +63,7 @@ import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
 import { PermissionPrompt } from '../PermissionPrompt';
+import { createAltKeyTracker } from '../alt-key-tracker';
 import { UiIcon } from '../UiIcon';
 import { CopyIconButton } from '../CopyIconButton';
 
@@ -106,44 +107,7 @@ function getRevealTrackingKey(item: AssistantRenderItem) {
 
 const COMPACTION_BOUNDARY_RE =
   /^(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*\r?\n)+|(?:\r?\n(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*))+[ \t]*(?:\r?\n\s*)*$/g;
-const [readModeAltPressed, setReadModeAltPressed] = createSignal(false);
-let readModeAltListenerCount = 0;
-
-function handleReadModeAltKeydown(event: KeyboardEvent) {
-  if (event.key === 'Alt') setReadModeAltPressed(true);
-}
-
-function handleReadModeAltKeyup(event: KeyboardEvent) {
-  if (event.key === 'Alt') setReadModeAltPressed(false);
-}
-
-function handleReadModeAltMousemove(event: MouseEvent) {
-  setReadModeAltPressed(event.altKey);
-}
-
-function handleReadModeAltBlur() {
-  setReadModeAltPressed(false);
-}
-
-function retainReadModeAltListener() {
-  if (readModeAltListenerCount === 0) {
-    window.addEventListener('keydown', handleReadModeAltKeydown);
-    window.addEventListener('keyup', handleReadModeAltKeyup);
-    window.addEventListener('mousemove', handleReadModeAltMousemove);
-    window.addEventListener('blur', handleReadModeAltBlur);
-  }
-  readModeAltListenerCount += 1;
-
-  return () => {
-    readModeAltListenerCount -= 1;
-    if (readModeAltListenerCount > 0) return;
-    window.removeEventListener('keydown', handleReadModeAltKeydown);
-    window.removeEventListener('keyup', handleReadModeAltKeyup);
-    window.removeEventListener('mousemove', handleReadModeAltMousemove);
-    window.removeEventListener('blur', handleReadModeAltBlur);
-    setReadModeAltPressed(false);
-  };
-}
+const { pressed: readModeAltPressed, retain: retainReadModeAltListener } = createAltKeyTracker();
 
 export function stripCompactionBoundaryMarkdown(text: string, preserveTrailingWhitespace = false) {
   const stripped = text.replace(COMPACTION_BOUNDARY_RE, '');
@@ -210,7 +174,7 @@ export function getAssistantContainerVariant(params: {
   return part.type === 'tool' && !isFileEditPart(part) ? 'bare' : false;
 }
 
-export function shouldShowReadModeToggle(text: string): boolean {
+function shouldShowReadModeToggle(text: string): boolean {
   let start = 0;
   let end = text.length;
   while (start < end && text[start]!.trim().length === 0) start += 1;

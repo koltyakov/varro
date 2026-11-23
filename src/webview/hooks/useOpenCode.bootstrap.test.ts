@@ -1,25 +1,23 @@
-import { flush as flushSolid, createRoot } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 import type { onMessage } from '../lib/bridge';
 import {
+  captureBridgeHandler,
+  captureServerEventHandlers,
   getBridgeMocks,
   getClientMocks,
+  gpt4oProvider,
+  loadAndMountUseOpenCode,
   loadModules,
-  provider,
+  mountUseOpenCode,
+  primaryAgent,
   session,
   userMessage,
 } from './useOpenCode.test-support';
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
-type BridgeOnMessage = typeof onMessage;
-const bridgeOnMessage = vi.fn<BridgeOnMessage>();
-type TestServerEvent = { properties?: unknown };
-const serverEventsOn =
-  vi.fn<(name: string, handler: (payload: TestServerEvent) => void) => () => void>();
-Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
-Object.assign(clientMocks, { serverEventsOn });
 
 function setupInterruptedRecoveryClientMocks() {
   clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
@@ -35,27 +33,16 @@ function setupInterruptedRecoveryClientMocks() {
 
 describe('useOpenCode initialization', () => {
   async function startupFixture() {
-    let handle: Parameters<BridgeOnMessage>[0] | undefined;
-    const events = new Map<string, (payload: TestServerEvent) => void>();
-    bridgeOnMessage.mockImplementation((handler) => {
+    let handle: Parameters<typeof onMessage>[0] | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
       handle = handler;
       return () => {};
     });
-    serverEventsOn.mockImplementation(
-      (name: string, handler: (payload: TestServerEvent) => void) => {
-        events.set(name, handler);
-        return () => {
-          events.delete(name);
-        };
-      }
-    );
+    const events = captureServerEventHandlers();
     setupInterruptedRecoveryClientMocks();
     clientMocks.permissionList.mockResolvedValue([]);
     const modules = await loadModules();
-    const dispose = createRoot((cleanup) => {
-      modules.hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(modules.hookModule);
     return {
       ...modules,
       dispose,
@@ -365,10 +352,7 @@ describe('useOpenCode initialization', () => {
       flushSolid();
       const { hookModule } = await loadModules();
       flushSolid();
-      const dispose = createRoot((cleanup) => {
-        hookModule.useOpenCode();
-        return cleanup;
-      });
+      const dispose = mountUseOpenCode(hookModule);
       flushSolid();
       dispose();
       flushSolid();
@@ -402,10 +386,7 @@ describe('useOpenCode initialization', () => {
 
     const { hookModule } = await loadModules();
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -440,10 +421,7 @@ describe('useOpenCode initialization', () => {
 
     const { hookModule } = await loadModules();
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -485,10 +463,7 @@ describe('useOpenCode initialization', () => {
 
     const { hookModule } = await loadModules();
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
@@ -508,13 +483,7 @@ describe('useOpenCode initialization', () => {
   });
 
   it('reconciles restored permissions during startup', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
@@ -536,16 +505,11 @@ describe('useOpenCode initialization', () => {
       time: { created: 1 },
     });
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -563,13 +527,7 @@ describe('useOpenCode initialization', () => {
   });
 
   it.each(['ask', 'plan', 'custom'])('restores %s on startup', async (savedAgent) => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     window.localStorage.setItem('varro.selectedAgent', JSON.stringify(savedAgent));
     flushSolid();
@@ -577,37 +535,14 @@ describe('useOpenCode initialization', () => {
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([]);
     clientMocks.sessionStatus.mockResolvedValue({});
-    clientMocks.agentList.mockResolvedValue([
-      {
-        name: 'build',
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-      {
-        name: savedAgent,
-        mode: 'primary',
-        builtIn: true,
-        permission: { edit: 'ask', bash: {} },
-        tools: {},
-      },
-    ]);
+    clientMocks.agentList.mockResolvedValue([primaryAgent('build'), primaryAgent(savedAgent)]);
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -624,13 +559,7 @@ describe('useOpenCode initialization', () => {
   });
 
   it('hydrates 429 retry status for listed sessions before any session is opened', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([session('session-1'), session('session-2')]);
@@ -647,18 +576,10 @@ describe('useOpenCode initialization', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -691,13 +612,7 @@ describe('useOpenCode initialization', () => {
   });
 
   it('retries startup after an initial connection failure', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     clientMocks.health.mockRejectedValueOnce(new Error('offline')).mockResolvedValue({
       healthy: true,
@@ -709,18 +624,10 @@ describe('useOpenCode initialization', () => {
     clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -734,7 +641,7 @@ describe('useOpenCode initialization', () => {
       flushSolid();
       expect(clientMocks.health).toHaveBeenCalledTimes(1);
 
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -752,13 +659,7 @@ describe('useOpenCode initialization', () => {
   });
 
   it('continues sessions interrupted by a server restart or extension reload', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
 
     // SAFETY: The fixture provides the unknown fields read by this statement.
     (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
@@ -788,16 +689,11 @@ describe('useOpenCode initialization', () => {
 
     const { hookModule } = await loadModules();
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -827,27 +723,17 @@ describe('useOpenCode initialization', () => {
   });
 
   it('processes a recovery claim delivered before connection bootstrap before acknowledging it', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     setupInterruptedRecoveryClientMocks();
     flushSolid();
 
     const { hookModule } = await loadModules();
     flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
+    const dispose = mountUseOpenCode(hookModule);
     flushSolid();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'recovery/interrupted-sessions',
         payload: { claimId: 7, sessionIds: ['session-1'] },
       });
@@ -856,7 +742,7 @@ describe('useOpenCode initialization', () => {
         expect.objectContaining({ type: 'recovery/interrupted-sessions-ack' })
       );
 
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -875,27 +761,14 @@ describe('useOpenCode initialization', () => {
   });
 
   it('processes and acknowledges a recovery claim delivered after bootstrap', async () => {
-    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
-    bridgeOnMessage.mockImplementation((handler) => {
-      bridgeHandler = handler;
-      return () => {
-        bridgeHandler = undefined;
-      };
-    });
+    const bridge = captureBridgeHandler();
     setupInterruptedRecoveryClientMocks();
     flushSolid();
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
-      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
-      bridgeHandler({
+      bridge.send({
         type: 'server/status',
         payload: { state: 'running', url: 'http://127.0.0.1:4096' },
       });
@@ -903,7 +776,7 @@ describe('useOpenCode initialization', () => {
       await vi.waitFor(() => expect(stateModule.connectionInitialized()).toBe(true));
       flushSolid();
 
-      bridgeHandler({
+      bridge.send({
         type: 'recovery/interrupted-sessions',
         payload: { claimId: 8, sessionIds: ['session-1'] },
       });
@@ -933,30 +806,13 @@ describe('useOpenCode initialization', () => {
       const originalVisibility = document.visibilityState;
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
       clientMocks.providerLimit.mockResolvedValue(null);
-      const { stateModule, hookModule } = await loadModules();
-      flushSolid();
-      const dispose = createRoot((cleanup) => {
-        hookModule.useOpenCode();
-        return cleanup;
-      });
-      flushSolid();
+      const { stateModule, dispose } = await loadAndMountUseOpenCode();
       try {
         await Promise.resolve();
         flushSolid();
         stateModule.setState(storePath('serverStatus', { state: 'running' }));
         flushSolid();
-        stateModule.setState(
-          storePath('providers', [
-            provider('openai', {
-              'gpt-4o': {
-                id: 'gpt-4o',
-                name: 'GPT-4o',
-                capabilities: { toolcall: true },
-                cost: { input: 0, output: 0 },
-              },
-            }),
-          ])
-        );
+        stateModule.setState(storePath('providers', [gpt4oProvider()]));
         flushSolid();
         stateModule.setState(
           storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' })
@@ -1021,28 +877,13 @@ describe('useOpenCode initialization', () => {
     clientMocks.sessionList.mockResolvedValue([]);
     clientMocks.agentList.mockResolvedValue([]);
     clientMocks.providerList.mockResolvedValue({
-      providers: [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ],
+      providers: [gpt4oProvider({ toolcall: true, vision: true })],
       default: { openai: 'gpt-4o' },
     });
     clientMocks.providerLimit.mockResolvedValue(null);
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -1052,16 +893,7 @@ describe('useOpenCode initialization', () => {
       );
       flushSolid();
       stateModule.setState(
-        storePath('providers', [
-          provider('openai', {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true, vision: true },
-              cost: { input: 0, output: 0 },
-            },
-          }),
-        ])
+        storePath('providers', [gpt4oProvider({ toolcall: true, vision: true })])
       );
       flushSolid();
       stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
@@ -1103,16 +935,7 @@ describe('useOpenCode initialization', () => {
     clientMocks.sessionList.mockResolvedValue([]);
     clientMocks.agentList.mockResolvedValue([]);
     clientMocks.providerList.mockResolvedValue({
-      providers: [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true, vision: true },
-            cost: { input: 0, output: 0 },
-          },
-        }),
-      ],
+      providers: [gpt4oProvider({ toolcall: true, vision: true })],
       default: { openai: 'gpt-4o' },
     });
     clientMocks.providerLimit.mockResolvedValue({
@@ -1125,13 +948,7 @@ describe('useOpenCode initialization', () => {
     });
     clientMocks.questionList.mockResolvedValue([]);
 
-    const { stateModule, hookModule } = await loadModules();
-    flushSolid();
-    const dispose = createRoot((cleanup) => {
-      hookModule.useOpenCode();
-      return cleanup;
-    });
-    flushSolid();
+    const { stateModule, dispose } = await loadAndMountUseOpenCode();
 
     try {
       await Promise.resolve();
@@ -1141,16 +958,7 @@ describe('useOpenCode initialization', () => {
       );
       flushSolid();
       stateModule.setState(
-        storePath('providers', [
-          provider('openai', {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true, vision: true },
-              cost: { input: 0, output: 0 },
-            },
-          }),
-        ])
+        storePath('providers', [gpt4oProvider({ toolcall: true, vision: true })])
       );
       flushSolid();
       stateModule.setState(storePath('providerDefaults', { openai: 'gpt-4o' }));

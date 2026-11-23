@@ -8,7 +8,13 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { CdpController, revealRetainedActivity } from './ai-fuzzy-live.mjs';
 import { goToLatest } from './ai-fuzzy-navigation.mjs';
 import { controlRequest } from './ai-streaming.mjs';
-import { createCdpRequestClient, executeVscodeCommand } from './vscode-launch-process.mjs';
+import {
+  createCdpRequestClient,
+  executeVscodeCommand,
+  isVscodeWorkbenchTarget,
+  listCdpTargets,
+  openCdpSocket,
+} from './vscode-launch-process.mjs';
 import { nativePaintFixture } from './ai-native-paint-fixture.mjs';
 import { installNativePaintProbe } from './ai-native-paint-probe.mjs';
 import { analyzeNativePaint } from './ai-native-paint-analysis.mjs';
@@ -264,18 +270,10 @@ try {
   });
   await sleep(700);
   await goToLatest(cdp, { sessionId: paused.sessionID, messageId: delivered.at(-1).info.id });
-  const targets = await fetch(
-    `http://127.0.0.1:${result.launch.remoteDebuggingPort}/json/list`
-  ).then((r) => r.json());
-  const pages = targets.filter(
-    (t) => t.type === 'page' && t.title.includes('[Extension Development Host]')
-  );
+  const targets = await listCdpTargets(result.launch.remoteDebuggingPort);
+  const pages = targets.filter(isVscodeWorkbenchTarget);
   assert.equal(pages.length, 1);
-  socket = new WebSocket(pages[0].webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
+  socket = await openCdpSocket(pages[0].webSocketDebuggerUrl);
   workbench = createCdpRequestClient(socket, 20_000);
   const hosts = (
     await workbench.call('Runtime.evaluate', {

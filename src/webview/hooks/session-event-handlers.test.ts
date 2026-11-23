@@ -618,15 +618,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('keeps full-access permission prompts hidden when auto-approval races or fails', async () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const respondPermission = vi
       .fn()
@@ -634,26 +626,9 @@ describe('registerSessionEventHandlers', () => {
 
     registerSessionEventHandlers({
       ...createDefaultDeps(),
-      getActiveSessionId: () => null,
-      getMessages: () => [],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
       shouldAutoApprovePermissions: () => true,
       respondPermission,
-      setDiffs: vi.fn(),
     });
 
     handlers.get('permission.asked')?.({
@@ -676,15 +651,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('restores the permission prompt when auto-approval fails after leaving full access', async () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     let fullAccess = true;
     const respondPermission = vi.fn().mockImplementation(async () => {
@@ -694,26 +661,9 @@ describe('registerSessionEventHandlers', () => {
 
     registerSessionEventHandlers({
       ...createDefaultDeps(),
-      getActiveSessionId: () => null,
-      getMessages: () => [],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
       shouldAutoApprovePermissions: () => fullAccess,
       respondPermission,
-      setDiffs: vi.fn(),
     });
 
     handlers.get('permission.asked')?.({
@@ -739,38 +689,11 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('removes permissions when a reply only includes id', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     registerSessionEventHandlers({
       ...createDefaultDeps(),
-      getActiveSessionId: () => null,
-      getMessages: () => [],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     handlers.get('permission.replied')?.({
@@ -1264,15 +1187,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('binds event handlers to shared state-backed dependencies', async () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     getPermissionModeForSession.mockReturnValue('full');
     state.activeSessionId = 'session-1';
@@ -1342,15 +1257,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('resyncs active messages for partial message.updated payloads', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
     const applyUsageLimitNotice = vi.fn();
@@ -1361,28 +1268,12 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers({
       ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
-      getMessages: () => [],
       handoffTodosToMessages,
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      markPendingAbort: vi.fn(),
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
       clearUsageLimitOnResumedProgress,
       updateUsageLimitState,
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
       syncSessionMessages,
       applyUsageLimitNotice,
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
-      abortRemoteSession: vi.fn().mockResolvedValue(true),
-      logError: vi.fn(),
     });
 
     upsertMessageInfo.mockClear();
@@ -1441,38 +1332,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('rejects malformed user message.updated payloads with parent ids', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     registerSessionEventHandlers({
       ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
-      getMessages: () => [],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     handlers.get('message.updated')?.({
@@ -1561,15 +1426,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('resyncs active messages for partial message.part.updated payloads', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const syncTodosFromMessages = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
@@ -1577,28 +1434,9 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers({
       ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
-      getMessages: () => [],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      markPendingAbort: vi.fn(),
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
       syncSessionMessages,
-      applyUsageLimitNotice: vi.fn(),
       syncTodosFromMessages,
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
-      abortRemoteSession: vi.fn().mockResolvedValue(true),
-      logError: vi.fn(),
     });
 
     handlers.get('message.part.updated')?.({
@@ -1856,15 +1694,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('applies child-session message updates when they belong to the active session tree', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
 
@@ -1873,25 +1703,8 @@ describe('registerSessionEventHandlers', () => {
       getActiveSessionId: () => 'session-parent',
       isSessionInActiveTree: (sessionId) =>
         sessionId === 'session-parent' || sessionId === 'session-child',
-      getMessages: () => [],
       handoffTodosToMessages,
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     setState.mockClear();
@@ -2236,15 +2049,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('applies child-session tool part updates when they belong to the active session tree', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const syncTodosFromMessages = vi.fn();
 
@@ -2256,24 +2061,8 @@ describe('registerSessionEventHandlers', () => {
       getMessages: () => [
         createAssistantEntry({ id: 'assistant-child-1', sessionID: 'session-child' }),
       ],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
       syncTodosFromMessages,
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     upsertPart.mockClear();
@@ -2309,15 +2098,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('applies child-session part deltas when they belong to the active session tree', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     registerSessionEventHandlers({
       ...createDefaultDeps(),
@@ -2339,24 +2120,7 @@ describe('registerSessionEventHandlers', () => {
           ],
         },
       ],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     applyMessagePartDelta.mockClear();
@@ -5117,15 +4881,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('re-syncs todos from messages when todo.updated arrives for an active reply', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const syncTodosFromMessages = vi.fn();
 
@@ -5157,24 +4913,7 @@ describe('registerSessionEventHandlers', () => {
           parts: [],
         },
       ],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
-      setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
-      shouldResyncSessionAfterIdle: () => false,
-      syncSessionMessages: vi.fn().mockResolvedValue(undefined),
-      applyUsageLimitNotice: vi.fn(),
       syncTodosFromMessages,
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     handlers.get('todo.updated')?.({
@@ -5189,15 +4928,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('marks the session idle and resyncs messages when the active reply still looks unfinished', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const setSessionStatusEntry = vi.fn();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
@@ -5210,47 +4941,11 @@ describe('registerSessionEventHandlers', () => {
       getActiveSessionId: () => 'session-1',
       getSessionStatus: () => undefined,
       isSessionTreeStatusWorking: () => false,
-      getMessages: () => [
-        {
-          info: {
-            id: 'assistant-1',
-            sessionID: 'session-1',
-            role: 'assistant',
-            time: { created: 1 },
-            parentID: 'user-1',
-            modelID: 'gpt-4o',
-            providerID: 'openai',
-            mode: 'default',
-            path: { cwd: '/repo', root: '/repo' },
-            cost: 0,
-            tokens: {
-              input: 0,
-              output: 0,
-              reasoning: 0,
-              cache: { read: 0, write: 0 },
-            },
-          },
-          parts: [],
-        },
-      ],
+      getMessages: () => [createAssistantEntry()],
       handoffTodosToMessages,
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
       setSessionStatusEntry,
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
       shouldResyncSessionAfterIdle: () => true,
       syncSessionMessages,
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
@@ -5425,15 +5120,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('does not resync messages on idle when the active session already looks settled', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -5465,24 +5152,8 @@ describe('registerSessionEventHandlers', () => {
           parts: [],
         },
       ],
-      handoffTodosToMessages: vi.fn().mockReturnValue(true),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
-      setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
       shouldResyncSessionAfterIdle: () => true,
       syncSessionMessages,
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
@@ -5512,15 +5183,7 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('resyncs messages on idle when todo handoff cannot reconcile local state', () => {
-    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
-    serverEventsOn.mockImplementation((event, handler) => {
-      // SAFETY: The fixture provides the complete domain shape read by this statement.
-      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
-      return () => {
-        // SAFETY: The fixture provides the string fields read by this statement.
-        handlers.delete(event as string);
-      };
-    });
+    const handlers = installHandlers();
 
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
@@ -5543,23 +5206,8 @@ describe('registerSessionEventHandlers', () => {
         },
       ],
       handoffTodosToMessages: vi.fn().mockReturnValue(false),
-      upsertSession: vi.fn(),
-      setSessionCompacting: vi.fn(),
-      removeDeletedSessionTree: vi.fn(),
-      shouldIgnorePendingAbortStatus: () => false,
-      hasPendingAbort: () => false,
-      clearPendingAbort: vi.fn(),
-      setSessionStatusEntry: vi.fn(),
-      clearUsageLimitOnResumedProgress: vi.fn(),
-      updateUsageLimitState: vi.fn(),
-      syncSession: vi.fn().mockResolvedValue(undefined),
       shouldResyncSessionAfterIdle: () => true,
       syncSessionMessages,
-      applyUsageLimitNotice: vi.fn(),
-      syncTodosFromMessages: vi.fn(),
-      shouldAutoApprovePermissions: () => false,
-      respondPermission: vi.fn().mockResolvedValue(undefined),
-      setDiffs: vi.fn(),
     });
 
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });

@@ -4,9 +4,10 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { MessageEntry, Part } from '../../src/webview/types';
 import {
-  getScrollMetrics,
+  getListDistanceFromBottom,
   getVisibleMessageAnchor,
   sampleMessageTopAcrossFrames,
+  scrollToBottom,
   STREAMING_SCROLL_POLL_OPTIONS,
   waitForAnimationFrame,
   waitForAnimationFrames,
@@ -91,14 +92,9 @@ test.describe('multi-agent scroll stability', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let i = 0; i < 20; i += 1) {
@@ -108,10 +104,7 @@ test.describe('multi-agent scroll stability', () => {
       );
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(
-          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
-          STREAMING_SCROLL_POLL_OPTIONS
-        )
+        .poll(() => getListDistanceFromBottom(page), STREAMING_SCROLL_POLL_OPTIONS)
         .toBeLessThan(15);
     }
   });
@@ -121,14 +114,9 @@ test.describe('multi-agent scroll stability', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let i = 0; i < 15; i += 1) {
@@ -138,16 +126,11 @@ test.describe('multi-agent scroll stability', () => {
       );
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(
-          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
-          STREAMING_SCROLL_POLL_OPTIONS
-        )
+        .poll(() => getListDistanceFromBottom(page), STREAMING_SCROLL_POLL_OPTIONS)
         .toBeLessThan(15);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 });
 
@@ -157,9 +140,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const box = await list.boundingBox();
     expect(box).not.toBeNull();
@@ -189,9 +170,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
@@ -210,7 +189,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     await waitForAnimationFrames(page, 5);
 
     await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom), {
+      .poll(() => getListDistanceFromBottom(page), {
         timeout: 8000,
       })
       .toBeLessThan(80);
@@ -221,14 +200,9 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
-    await list.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event('scroll'));
-    });
+    await scrollToBottom(list);
     await waitForAnimationFrame(page);
 
     for (let i = 0; i < 25; i += 1) {
@@ -242,25 +216,18 @@ test.describe('multi-agent large virtualized scroll stability', () => {
       );
       await waitForAnimationFrames(page, 2);
       await expect
-        .poll(
-          () => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom),
-          STREAMING_SCROLL_POLL_OPTIONS
-        )
+        .poll(() => getListDistanceFromBottom(page), STREAMING_SCROLL_POLL_OPTIONS)
         .toBeLessThan(15);
     }
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 
   test('keeps following a rapid tool burst while the transcript is unfocused', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const composer = page.locator('[contenteditable="true"]');
     await composer.focus();
@@ -299,9 +266,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
 
     await expect(page.getByText('npm run burst-0', { exact: true })).toBeVisible();
     await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
     await expect(composer).toBeFocused();
     await page.evaluate(() => {
       const harness = (
@@ -357,9 +322,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     await expect(
       page.getByText('All forty burst commands finished.', { exact: true })
     ).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
     await expect(composer).toBeFocused();
     await page
       .locator('[data-msg-id="message-mla-assistant-streaming"] button.assistant-activity-summary')
@@ -449,9 +412,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     await list.evaluate((element) => {
       const mid = Math.floor(element.scrollHeight / 2);
@@ -486,9 +447,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
 
     const scrollHeight = await list.evaluate((el) => el.scrollHeight);
     const viewportHeight = await list.evaluate((el) => el.clientHeight);

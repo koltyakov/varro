@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, Session, ToolPart } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const settleMs of [0, 600]) {
   for (const replacement of ['edit', 'text', 'streaming-patch'] as const) {
@@ -83,15 +84,7 @@ for (const settleMs of [0, 600]) {
             time: { start: created + 110, end: created + 120 },
           },
         });
-        await page.addInitScript(
-          (fixture) => {
-            // SAFETY: The isolated E2E harness reads this fixture before mounting.
-            (
-              window as typeof window & { varroPlaybackCapture: typeof fixture }
-            ).varroPlaybackCapture = fixture;
-          },
-          { session, initialMessages: [user, assistant] }
-        );
+        await installPlaybackCapture(page, { session, initialMessages: [user, assistant] });
         await page.goto('/e2e/harness/index.html?scenario=session-playback');
         await expect(page.locator('.interactive-list')).toBeVisible();
         await expect(page.locator('.rendered-markdown').last()).toContainText('Paragraph 11.');

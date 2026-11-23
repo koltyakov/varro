@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- Persisted session metadata is validated before it enters manager state. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Persisted arrays are element-validated before restoration. */
+import type { PermissionRule } from '../shared/opencode-types';
 import type { ServerEvent } from '../shared/protocol';
 
 export const PERMISSION_JUDGE_SESSION_TITLE_PREFIX = 'Varro permission judge: ';
@@ -8,6 +9,37 @@ export const COMMIT_MESSAGE_SESSION_TITLE_PREFIX = 'Varro commit message: ';
 export const COMMIT_MESSAGE_SESSION_METADATA = { varroInternal: 'commit-message' } as const;
 export const PROMPT_COMPLETION_SESSION_TITLE_PREFIX = 'Varro prompt completion: ';
 export const PROMPT_COMPLETION_SESSION_METADATA = { varroInternal: 'prompt-completion' } as const;
+
+const DENY_ALL_PERMISSION_NAMES = [
+  'read',
+  'edit',
+  'glob',
+  'grep',
+  'list',
+  'bash',
+  'shell',
+  'task',
+  'external_directory',
+  'todowrite',
+  'question',
+  'webfetch',
+  'websearch',
+  'codesearch',
+  'lsp',
+  'doom_loop',
+  'skill',
+] as const;
+
+/** Rules every internal helper session is created with; see hasInternalHelperRules. */
+export const DENY_ALL_PERMISSION_RULES: PermissionRule[] = [
+  ...DENY_ALL_PERMISSION_NAMES.map<PermissionRule>((permission) => ({
+    permission,
+    pattern: '*',
+    action: 'deny',
+  })),
+  { permission: '*', pattern: '*', action: 'deny' },
+  { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
+];
 
 // Cover queued helper events without retaining IDs forever when deletion events are missed.
 const DELETION_TOMBSTONE_TTL_MS = 30_000;

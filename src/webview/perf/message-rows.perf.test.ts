@@ -2,10 +2,10 @@ import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createComponent } from 'solid-js';
 import { render } from '@solidjs/web';
-import type { AssistantMessage, Message, Part, TextPart } from '../types';
+import type { Message } from '../types';
 import { resetDefaultAppState, setState } from '../lib/state';
 import { MessageRows } from '../components/message-list/MessageRows';
-import { settlePerfEffects } from './harness';
+import { settlePerfEffects, createAssistantMessage, createTextPart, entry } from './harness';
 
 const { messageRenderCounts } = vi.hoisted(() => ({
   messageRenderCounts: new Map<string, number>(),
@@ -31,41 +31,6 @@ vi.mock('../components/Message', async () => {
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
-
-function createAssistantMessage(id: string): AssistantMessage {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'assistant',
-    time: { created: 1, completed: 2 },
-    parentID: 'parent-1',
-    modelID: 'gpt-4o',
-    providerID: 'openai',
-    mode: 'default',
-    path: { cwd: '/workspace', root: '/workspace' },
-    cost: 0,
-    tokens: {
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache: { read: 0, write: 0 },
-    },
-  };
-}
-
-function createTextPart(id: string, messageID: string, text: string): TextPart {
-  return {
-    id,
-    sessionID: 'session-1',
-    messageID,
-    type: 'text',
-    text,
-  };
-}
-
-function entry(info: Message, parts: Part[]) {
-  return { info, parts };
-}
 
 describe('MessageRows perf guards', () => {
   beforeEach(() => {

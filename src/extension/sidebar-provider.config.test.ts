@@ -13,6 +13,23 @@ import { getOpenCodeConfigPaths } from './open-code-process';
 
 const vscodeMock = getVscodeMock();
 
+/** Serves an empty global config that is dirty in an editor or whose stat changes between reads. */
+function mockGlobalConfigConflict(conflict: 'dirty' | 'concurrent') {
+  const globalPath = getOpenCodeConfigPaths()[1]!;
+  vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
+    if (uri.fsPath === globalPath) return new TextEncoder().encode('{}');
+    throw { code: 'FileNotFound' };
+  });
+  if (conflict === 'dirty')
+    vscodeMock.workspace.textDocuments = [
+      { isDirty: true, uri: { fsPath: globalPath, toString: () => globalPath } },
+    ];
+  else {
+    vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 1, size: 2, type: 0, ctime: 0 });
+    vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 2, size: 2, type: 0, ctime: 0 });
+  }
+}
+
 describe('SidebarProvider local config routing', () => {
   it('preserves inline native entries when adding the missing config schema', async () => {
     const baseline = '{ "action": "shell", "resource": "*", "effect": "ask" }';
@@ -162,29 +179,7 @@ describe('SidebarProvider local config routing', () => {
   it.each(['dirty', 'concurrent'] as const)(
     'rejects global permission edits when the config is %s',
     async (conflict) => {
-      const globalPath = getOpenCodeConfigPaths()[1]!;
-      vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
-        if (uri.fsPath === globalPath) return new TextEncoder().encode('{}');
-        throw { code: 'FileNotFound' };
-      });
-      if (conflict === 'dirty')
-        vscodeMock.workspace.textDocuments = [
-          { isDirty: true, uri: { fsPath: globalPath, toString: () => globalPath } },
-        ];
-      else {
-        vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
-          mtime: 1,
-          size: 2,
-          type: 0,
-          ctime: 0,
-        });
-        vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
-          mtime: 2,
-          size: 2,
-          type: 0,
-          ctime: 0,
-        });
-      }
+      mockGlobalConfigConflict(conflict);
       const { provider } = await createSidebarProviderInstance({
         server: createServer({ apiVersion: 2 }),
       });
@@ -740,29 +735,7 @@ describe('SidebarProvider local config routing', () => {
   it.each(['dirty', 'concurrent'] as const)(
     'rejects a global vision update when the config is %s',
     async (conflict) => {
-      const globalPath = getOpenCodeConfigPaths()[1]!;
-      vscodeMock.workspace.fs.readFile.mockImplementation(async (uri: { fsPath: string }) => {
-        if (uri.fsPath === globalPath) return new TextEncoder().encode('{}');
-        throw { code: 'FileNotFound' };
-      });
-      if (conflict === 'dirty')
-        vscodeMock.workspace.textDocuments = [
-          { isDirty: true, uri: { fsPath: globalPath, toString: () => globalPath } },
-        ];
-      else {
-        vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
-          mtime: 1,
-          size: 2,
-          type: 0,
-          ctime: 0,
-        });
-        vscodeMock.workspace.fs.stat.mockResolvedValueOnce({
-          mtime: 2,
-          size: 2,
-          type: 0,
-          ctime: 0,
-        });
-      }
+      mockGlobalConfigConflict(conflict);
       const { provider } = await createSidebarProviderInstance();
       const { posted } = attachTestView(provider);
       await provider.handleMessage({

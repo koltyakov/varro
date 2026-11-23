@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getListDistanceFromBottom, waitForAnimationFrames } from './helpers';
 
 test('remounted Markdown tables have their final column layout at the first row measurement', async ({
   page,
@@ -10,9 +10,7 @@ test('remounted Markdown tables have their final column layout at the first row 
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');
   const list = page.locator('.interactive-list');
   await expect(list).toBeVisible();
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
 
   const observation = await page.evaluateHandle(() => {
     const measure = Element.prototype.getBoundingClientRect;
@@ -107,9 +105,7 @@ for (const scenario of ['mixed-small-transcript', 'large-transcript']) {
     await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
 
     const result = await page.evaluate(async (fixtureName) => {
       // SAFETY: The isolated E2E fixture installs these message and replay APIs before rendering.

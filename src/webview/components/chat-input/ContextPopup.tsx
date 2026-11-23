@@ -411,7 +411,7 @@ export function ContextUsageButton(props: {
   );
 }
 
-export function getContextUsageTone(percent: number) {
+function getContextUsageTone(percent: number) {
   if (percent >= CONTEXT_USAGE_ERROR_PERCENT) return 'error';
   if (percent >= CONTEXT_USAGE_WARNING_PERCENT) return 'warning';
   return '';

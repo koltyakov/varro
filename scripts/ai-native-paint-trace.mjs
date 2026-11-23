@@ -1,6 +1,6 @@
 import { open, unlink } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
-import { createCdpRequestClient } from './vscode-launch-process.mjs';
+import { createCdpRequestClient, openCdpSocket } from './vscode-launch-process.mjs';
 
 export const PAINT_TRACE_CATEGORIES = [
   'toplevel',
@@ -29,11 +29,7 @@ export async function startPaintTrace(
   if (!categories.length || categories.some((value) => !value))
     throw new Error('Trace categories must be nonempty strings');
   const version = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json());
-  const socket = new WebSocket(version.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', reject, { once: true });
-  });
+  const socket = await openCdpSocket(version.webSocketDebuggerUrl);
   const client = createCdpRequestClient(socket, 20_000);
   let resolveComplete;
   let rejectComplete;

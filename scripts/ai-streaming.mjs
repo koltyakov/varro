@@ -20,6 +20,8 @@ import { prepareStreamingRun } from './ai-streaming-selection.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
 import {
   createCdpRequestClient,
+  dispatchCdpClick,
+  isVscodeWorkbenchTarget,
   readWindowsProcess,
   vscodeLaunchCommandMatches,
   writeVscodeLaunchMetadata,
@@ -720,19 +722,7 @@ export async function connectFrameTarget(target, signal) {
             await sleep(100);
             continue;
           }
-          for (const [type, buttons] of [
-            ['mousePressed', 1],
-            ['mouseReleased', 0],
-          ]) {
-            await requests.call('Input.dispatchMouseEvent', {
-              type,
-              x: point.x,
-              y: point.y,
-              button: 'left',
-              buttons,
-              clickCount: 1,
-            });
-          }
+          await dispatchCdpClick(requests, { x: point.x, y: point.y });
           actions.push(point.action);
           if (point.action === 'session')
             return { actions, selector: '.session-item[data-session-id] .session-item-main' };
@@ -1165,11 +1155,7 @@ export async function runCapture(options, { onMessagePage } = {}) {
     const targets = await fetch(`${metadata.remoteDebuggingUrl}/json/list`, {
       signal: AbortSignal.any([setupSignal, AbortSignal.timeout(5_000)]),
     }).then((response) => response.json());
-    if (
-      targets.filter(
-        (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-      ).length !== 1
-    )
+    if (targets.filter(isVscodeWorkbenchTarget).length !== 1)
       throw new Error('Expected exactly one owned Extension Development Host');
     const { chromium } = await import('@playwright/test');
     setupSignal.throwIfAborted();

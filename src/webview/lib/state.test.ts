@@ -2,7 +2,7 @@ import { flush as flushSolid, createEffect, createRoot, reconcile } from 'solid-
 import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebviewMessage } from '../../shared/protocol';
-import type { AssistantMessage, Part, Permission, ToolPart } from '../types';
+import type { AssistantMessage, Part, Permission, Session, ToolPart } from '../types';
 import {
   applyMessagePartDelta,
   addClipboardImage,
@@ -38,6 +38,19 @@ import {
   upsertMessageInfo,
   upsertPart,
 } from './state';
+
+function sessionInfo(id: string, title: string, updated: number, parentID?: string): Session {
+  const info: Session = {
+    id,
+    projectID: 'project-1',
+    directory: '/',
+    title,
+    version: '1',
+    time: { created: 0, updated },
+  };
+  if (parentID !== undefined) info.parentID = parentID;
+  return info;
+}
 
 function assistantMessage(id = 'message-1', sessionID = 'session-1'): AssistantMessage {
   return {
@@ -942,22 +955,8 @@ describe('failed session tracking', () => {
     flushSolid();
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 1',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'session-2',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 2',
-          version: '1',
-          time: { created: 0, updated: 20 },
-        },
+        sessionInfo('session-1', 'Session 1', 10),
+        sessionInfo('session-2', 'Session 2', 20),
       ])
     );
     flushSolid();
@@ -1306,32 +1305,9 @@ describe('getSessionTreeIds', () => {
   it('returns the root session and all descendants', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 1',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'child-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 1',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 0, updated: 20 },
-        },
-        {
-          id: 'child-2',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 2',
-          version: '1',
-          parentID: 'child-1',
-          time: { created: 0, updated: 30 },
-        },
+        sessionInfo('session-1', 'Session 1', 10),
+        sessionInfo('child-1', 'Child 1', 20, 'session-1'),
+        sessionInfo('child-2', 'Child 2', 30, 'child-1'),
       ])
     );
     flushSolid();
@@ -1344,41 +1320,10 @@ describe('getSessionTreeIds', () => {
   it('does not include sibling branches when reading a descendant subtree', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 1',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'child-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 1',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 0, updated: 20 },
-        },
-        {
-          id: 'grandchild-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Grandchild 1',
-          version: '1',
-          parentID: 'child-1',
-          time: { created: 0, updated: 30 },
-        },
-        {
-          id: 'child-2',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 2',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 0, updated: 40 },
-        },
+        sessionInfo('session-1', 'Session 1', 10),
+        sessionInfo('child-1', 'Child 1', 20, 'session-1'),
+        sessionInfo('grandchild-1', 'Grandchild 1', 30, 'child-1'),
+        sessionInfo('child-2', 'Child 2', 40, 'session-1'),
       ])
     );
     flushSolid();
@@ -1390,23 +1335,8 @@ describe('getSessionTreeIds', () => {
   it('reuses active usage-limit lookups across a session tree', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 1',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'child-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 1',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 0, updated: 20 },
-        },
+        sessionInfo('session-1', 'Session 1', 10),
+        sessionInfo('child-1', 'Child 1', 20, 'session-1'),
       ])
     );
     flushSolid();
@@ -1434,23 +1364,8 @@ describe('getSessionTreeIds', () => {
   it('clears an active usage-limit lookup after removing the notice', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 1',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'child-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 1',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 0, updated: 20 },
-        },
+        sessionInfo('session-1', 'Session 1', 10),
+        sessionInfo('child-1', 'Child 1', 20, 'session-1'),
       ])
     );
     flushSolid();
@@ -1508,23 +1423,8 @@ describe('getSessionTreeIds', () => {
   it('treats child-session prompts as active on the root session', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 1',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'child-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 1',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 0, updated: 20 },
-        },
+        sessionInfo('session-1', 'Session 1', 10),
+        sessionInfo('child-1', 'Child 1', 20, 'session-1'),
       ])
     );
     flushSolid();
@@ -1563,23 +1463,8 @@ describe('getSessionTreeIds', () => {
   it('treats root-session prompts as active on a child session', () => {
     setState(
       storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Session 1',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'child-1',
-          projectID: 'project-1',
-          directory: '/',
-          title: 'Child 1',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 0, updated: 20 },
-        },
+        sessionInfo('session-1', 'Session 1', 10),
+        sessionInfo('child-1', 'Child 1', 20, 'session-1'),
       ])
     );
     flushSolid();

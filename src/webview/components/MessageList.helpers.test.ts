@@ -1,4 +1,4 @@
-import { flush as flushSolid, reconcile } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@solidjs/web';
@@ -40,6 +40,8 @@ import {
   textPart,
   toolPart,
   userMessage,
+  setStateRecord,
+  session,
 } from './MessageList.test-utils';
 
 let container: HTMLDivElement | null = null;
@@ -55,6 +57,14 @@ installMessageListTestEnvironment({
     cleanup = nextCleanup;
   },
 });
+
+/** Mounts MessageList into the test container and returns its scroll container. */
+function mountList(): HTMLDivElement {
+  cleanup = render(() => MessageList(), container!);
+  flushSolid();
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+  return container?.querySelector('.interactive-list') as HTMLDivElement;
+}
 
 describe('MessageList prompt numbers', () => {
   beforeEach(() => {
@@ -87,8 +97,7 @@ describe('MessageList prompt numbers', () => {
       { info: userMessage('automatic'), parts: [completion] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     const summary = container!.querySelector<HTMLButtonElement>('.assistant-activity-summary')!;
@@ -225,8 +234,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.prompt-number-badge')).toBeNull();
@@ -279,8 +287,7 @@ describe('MessageList prompt numbers', () => {
         { info: userMessage('user-1'), parts: [textPart('prompt', 'First prompt')] },
       ]);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       const composer = document.createElement('textarea');
       container!.append(composer);
       composer.focus();
@@ -316,8 +323,7 @@ describe('MessageList prompt numbers', () => {
     flushSolid();
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('prompt', 'First prompt')] }]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     const ctrlDown = new KeyboardEvent('keydown', { key: 'Control', cancelable: true });
     window.dispatchEvent(ctrlDown);
     flushSolid();
@@ -369,8 +375,7 @@ describe('MessageList prompt numbers', () => {
     { key: 'a', altKey: true },
   ])('does not cancel modifier combinations or Ctrl shortcuts on Windows: %j', (init) => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0; Win64; x64');
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     for (const type of ['keydown', 'keyup']) {
       const event = new KeyboardEvent(type, { ...init, bubbles: true, cancelable: true });
       container!.dispatchEvent(event);
@@ -385,8 +390,7 @@ describe('MessageList prompt numbers', () => {
     flushSolid();
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('prompt', 'First prompt')] }]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     const composer = document.createElement('textarea');
     container!.append(composer);
     composer.focus();
@@ -425,7 +429,7 @@ describe('MessageList prompt numbers', () => {
         expect(container!.querySelector('.prompt-number-badge')).toBeNull();
       }
       expect(hostListener).toHaveBeenCalledTimes(6);
-      cleanup();
+      cleanup!();
       flushSolid();
       cleanup = undefined;
       container!.append(composer);
@@ -453,8 +457,7 @@ describe('MessageList prompt numbers', () => {
       { info: userMessage('user-2'), parts: [textPart('second', 'Next prompt')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => {
@@ -543,8 +546,7 @@ describe('MessageList prompt numbers', () => {
       user('queued-next-turn', 7),
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     const steer = container!.querySelector<HTMLElement>(
       '[data-msg-id="steer"] .user-message-card'
     )!;
@@ -587,8 +589,7 @@ describe('MessageList prompt numbers', () => {
         user('prompt-3', 14),
       ]);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
       flushSolid();
       await vi.waitFor(() => {
@@ -643,8 +644,7 @@ describe('MessageList prompt numbers', () => {
       user('next-turn', 10),
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => {
@@ -686,8 +686,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => {
@@ -715,8 +714,7 @@ describe('MessageList prompt numbers', () => {
       { info: userMessage('user-3'), parts: [textPart('third', 'Third prompt')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => {
@@ -776,8 +774,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     expect(container?.querySelector('.prompt-number-badge')).toBeNull();
@@ -824,8 +821,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
@@ -860,8 +856,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
@@ -904,8 +899,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
@@ -939,8 +933,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(1));
@@ -986,8 +979,7 @@ describe('MessageList prompt numbers', () => {
       { info: userMessage('user-3'), parts: [textPart('user-text-3', 'Current prompt')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
@@ -1036,8 +1028,7 @@ describe('MessageList prompt numbers', () => {
       { info: userMessage('user-3'), parts: [textPart('user-text-3', 'Current prompt')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
@@ -1077,8 +1068,7 @@ describe('MessageList prompt numbers', () => {
       { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Current prompt')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     try {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
@@ -1135,8 +1125,7 @@ describe('MessageList prompt numbers', () => {
       { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Current prompt')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
@@ -1164,8 +1153,7 @@ describe('MessageList prompt numbers', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     flushSolid();
     await vi.waitFor(() => {
@@ -1296,13 +1284,7 @@ describe('getLatestPlanImplementationMessageId', () => {
   });
 
   it('ignores the currently selected plan agent for older non-plan responses', () => {
-    setState((draft) => {
-      const current = draft['sessionSelectedAgents'];
-      const incoming = { 'session-1': 'plan' } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionSelectedAgents'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionSelectedAgents', { 'session-1': 'plan' });
     flushSolid();
 
     expect(
@@ -1332,24 +1314,9 @@ describe('shouldShowPlanImplementationAction', () => {
 
   it('hides the action after the plan session is skipped', () => {
     const message = assistantMessage('assistant-1', { agent: 'plan' });
-    setState((draft) => {
-      const current = draft['skippedPlanSessions'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['skippedPlanSessions'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('skippedPlanSessions', {});
     flushSolid();
-    setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'session-1',
-        version: '1',
-        time: { created: 100, updated: 200 },
-      },
-    ]);
+    setSessions([session('session-1', { time: { created: 100, updated: 200 } })]);
     flushSolid();
     skipPlanSession('session-1', 200);
     flushSolid();
@@ -1365,24 +1332,9 @@ describe('shouldShowPlanImplementationAction', () => {
 
   it('shows the action for the latest unskipped plan response', () => {
     const message = assistantMessage('assistant-1', { agent: 'plan' });
-    setState((draft) => {
-      const current = draft['skippedPlanSessions'];
-      const incoming = {} satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['skippedPlanSessions'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('skippedPlanSessions', {});
     flushSolid();
-    setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/workspace',
-        title: 'session-1',
-        version: '1',
-        time: { created: 100, updated: 200 },
-      },
-    ]);
+    setSessions([session('session-1', { time: { created: 100, updated: 200 } })]);
     flushSolid();
 
     expect(
@@ -1396,6 +1348,21 @@ describe('shouldShowPlanImplementationAction', () => {
 });
 
 describe('standalone action prompts', () => {
+  /** Builds root `session-1` and its child `child-1` as fresh records for each test. */
+  const rootAndChildSessions = () => [
+    session('session-1', {
+      directory: '/',
+      title: 'Session 1',
+      time: { created: 0, updated: 10 },
+    }),
+    session('child-1', {
+      directory: '/',
+      title: 'Child 1',
+      parentID: 'session-1',
+      time: { created: 0, updated: 20 },
+    }),
+  ];
+
   it('matches every pending tool while activating only the front permission', () => {
     const permissions: Permission[] = [
       {
@@ -1749,25 +1716,7 @@ describe('standalone action prompts', () => {
   });
 
   it('keeps child-session permissions visible for the active root session', () => {
-    setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
+    setSessions(rootAndChildSessions());
     flushSolid();
 
     const permissions: Permission[] = [
@@ -1787,14 +1736,11 @@ describe('standalone action prompts', () => {
 
   it('keeps unresolved-session permissions visible from the active session', () => {
     setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
+      session('session-1', {
         directory: '/',
         title: 'Session 1',
-        version: '1',
         time: { created: 0, updated: 10 },
-      },
+      }),
     ]);
     flushSolid();
 
@@ -1817,25 +1763,7 @@ describe('standalone action prompts', () => {
   });
 
   it('keeps child-session questions visible for the active root session', () => {
-    setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
+    setSessions(rootAndChildSessions());
     flushSolid();
 
     const questions: QuestionRequest[] = [
@@ -1850,25 +1778,7 @@ describe('standalone action prompts', () => {
   });
 
   it('keeps root-session permissions visible while viewing a child session', () => {
-    setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
+    setSessions(rootAndChildSessions());
     flushSolid();
 
     const permissions: Permission[] = [
@@ -1887,25 +1797,7 @@ describe('standalone action prompts', () => {
   });
 
   it('keeps root-session questions visible while viewing a child session', () => {
-    setSessions([
-      {
-        id: 'session-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Session 1',
-        version: '1',
-        time: { created: 0, updated: 10 },
-      },
-      {
-        id: 'child-1',
-        projectID: 'project-1',
-        directory: '/',
-        title: 'Child 1',
-        version: '1',
-        parentID: 'session-1',
-        time: { created: 0, updated: 20 },
-      },
-    ]);
+    setSessions(rootAndChildSessions());
     flushSolid();
 
     const questions: QuestionRequest[] = [

@@ -1042,7 +1042,7 @@ export class ContextProvider implements vscode.Disposable {
 
     if (isAbsolute(input)) {
       const uri = vscode.Uri.file(input);
-      if (allowMissing) {
+      const resolveAbsolute = async () => {
         const workspaceFolder =
           (restrictToWorkspace && !allowSiblingWorkspaceFolders
             ? requestedWorkspaceFolder
@@ -1050,16 +1050,11 @@ export class ContextProvider implements vscode.Disposable {
         if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
         const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
         return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
-      }
+      };
+      if (allowMissing) return resolveAbsolute();
       try {
         await vscode.workspace.fs.stat(uri);
-        const workspaceFolder =
-          (restrictToWorkspace && !allowSiblingWorkspaceFolders
-            ? requestedWorkspaceFolder
-            : undefined) ?? getWorkingFolder(uri);
-        if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
-        const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
-        return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
+        return await resolveAbsolute();
       } catch {
         return null;
       }

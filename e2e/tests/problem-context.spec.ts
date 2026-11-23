@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The test inspects controlled request records from the isolated E2E harness. */
 import { expect, test } from '@playwright/test';
+import { postWebviewMessage } from './helpers';
 
 test('Problems picker hides added entries and restores them when their attachment is removed', async ({
   page,
@@ -7,24 +8,19 @@ test('Problems picker hides added entries and restores them when their attachmen
   await page.goto('/e2e/harness/index.html?scenario=file-search');
   const composer = page.getByRole('textbox', { name: 'Message composer' });
   await composer.fill('Review ');
-  await page.evaluate(() =>
-    window.postMessage(
-      {
-        type: 'command/attach-problems',
-        payload: {
-          diagnostics: [
-            {
-              path: '/workspace/varro/playwright.config.ts',
-              line: 1,
-              severity: 'error',
-              message: 'Missing playwright dependency',
-            },
-          ],
+  await postWebviewMessage(page, {
+    type: 'command/attach-problems',
+    payload: {
+      diagnostics: [
+        {
+          path: '/workspace/varro/playwright.config.ts',
+          line: 1,
+          severity: 'error',
+          message: 'Missing playwright dependency',
         },
-      },
-      '*'
-    )
-  );
+      ],
+    },
+  });
   const attached = page
     .locator('.chat-attachments-container .chat-attachment-chip')
     .filter({ hasText: 'Problems' });
@@ -42,24 +38,19 @@ test('Problems picker hides added entries and restores them when their attachmen
   await expect(page.locator('.composer-completion-empty')).toHaveText(
     'All problems already added to context'
   );
-  await page.evaluate(() =>
-    window.postMessage(
-      {
-        type: 'command/attach-problems',
-        payload: {
-          diagnostics: [
-            {
-              path: '/workspace/varro/src/other.ts',
-              line: 9,
-              severity: 'warning',
-              message: 'Unused workspace variable',
-            },
-          ],
+  await postWebviewMessage(page, {
+    type: 'command/attach-problems',
+    payload: {
+      diagnostics: [
+        {
+          path: '/workspace/varro/src/other.ts',
+          line: 9,
+          severity: 'warning',
+          message: 'Unused workspace variable',
         },
-      },
-      '*'
-    )
-  );
+      ],
+    },
+  });
   await expect(attached.locator('.chip-detail')).toHaveText('1');
   await composer.press('Escape');
   await expect(page.locator('.composer-completion-menu')).toHaveCount(0);
@@ -132,27 +123,22 @@ test('VS Code Add to Context accumulates attachments without changing the draft 
   const composer = page.getByRole('textbox', { name: 'Message composer' });
   await expect(composer).toBeVisible();
   await composer.fill('Explain this');
-  await page.evaluate(() =>
-    window.postMessage(
-      {
-        type: 'command/attach-problems',
-        payload: {
-          diagnostics: [
-            {
-              path: '/workspace/varro/oxlint.config.mts',
-              line: 1,
-              column: 30,
-              severity: 'error',
-              message: "Cannot find module 'oxlint'",
-              source: 'ts',
-              code: 2307,
-            },
-          ],
+  await postWebviewMessage(page, {
+    type: 'command/attach-problems',
+    payload: {
+      diagnostics: [
+        {
+          path: '/workspace/varro/oxlint.config.mts',
+          line: 1,
+          column: 30,
+          severity: 'error',
+          message: "Cannot find module 'oxlint'",
+          source: 'ts',
+          code: 2307,
         },
-      },
-      '*'
-    )
-  );
+      ],
+    },
+  });
   const chip = page
     .locator('.chat-attachments-container .chat-attachment-chip')
     .filter({ hasText: 'Problems' });
@@ -163,24 +149,19 @@ test('VS Code Add to Context accumulates attachments without changing the draft 
   await expect(composer).not.toContainText('Cannot find module');
   await chip.hover();
   await expect(page.getByRole('tooltip')).toContainText("Cannot find module 'oxlint'");
-  await page.evaluate(() =>
-    window.postMessage(
-      {
-        type: 'command/attach-problems',
-        payload: {
-          diagnostics: [
-            {
-              path: '/workspace/varro/other.ts',
-              line: 9,
-              severity: 'warning',
-              message: 'Unused variable',
-            },
-          ],
+  await postWebviewMessage(page, {
+    type: 'command/attach-problems',
+    payload: {
+      diagnostics: [
+        {
+          path: '/workspace/varro/other.ts',
+          line: 9,
+          severity: 'warning',
+          message: 'Unused variable',
         },
-      },
-      '*'
-    )
-  );
+      ],
+    },
+  });
   await expect(chip.locator('.chip-detail')).toHaveText('2');
   await expect(composer).toHaveText('Explain this');
   expect(
@@ -320,36 +301,31 @@ for (const enabled of [true, false]) {
     await page.goto('/e2e/harness/index.html?scenario=file-search');
     const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
     await expect(composer).toBeVisible();
-    await page.evaluate(() =>
-      window.postMessage(
-        {
-          type: 'context/update',
-          payload: {
-            workspacePath: '/workspace/varro',
-            activeFile: {
-              path: '/workspace/varro/playwright.config.ts',
-              relativePath: 'playwright.config.ts',
-              language: 'typescript',
-            },
-            selection: { startLine: 1, endLine: 1 },
-            diagnosticCounts: { errors: 1, warnings: 0 },
-            diagnostics: [
-              {
-                path: '/workspace/varro/playwright.config.ts',
-                line: 1,
-                column: 39,
-                severity: 'error',
-                message: "Cannot find module '@playwright/test'",
-                source: 'ts',
-                code: 2307,
-                intersectsSelection: true,
-              },
-            ],
-          },
+    await postWebviewMessage(page, {
+      type: 'context/update',
+      payload: {
+        workspacePath: '/workspace/varro',
+        activeFile: {
+          path: '/workspace/varro/playwright.config.ts',
+          relativePath: 'playwright.config.ts',
+          language: 'typescript',
         },
-        '*'
-      )
-    );
+        selection: { startLine: 1, endLine: 1 },
+        diagnosticCounts: { errors: 1, warnings: 0 },
+        diagnostics: [
+          {
+            path: '/workspace/varro/playwright.config.ts',
+            line: 1,
+            column: 39,
+            severity: 'error',
+            message: "Cannot find module '@playwright/test'",
+            source: 'ts',
+            code: 2307,
+            intersectsSelection: true,
+          },
+        ],
+      },
+    });
     const strip = page.locator('.chat-attachments-container');
     const problems = strip.getByRole('button', { name: 'Problems 1' });
     await expect(problems).toHaveAttribute('aria-pressed', 'true');

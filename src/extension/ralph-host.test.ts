@@ -158,6 +158,24 @@ class FakeServer extends EventEmitter {
   private sessionCount = 0;
 }
 
+function pausedRun(config: RalphConfig, overrides: Partial<RalphRun> = {}): RalphRun {
+  return {
+    config,
+    status: 'paused',
+    currentIteration: 0,
+    iterations: [],
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+function syncLegacyRun(host: ReturnType<typeof createHost>['host'], config: RalphConfig) {
+  host.handleMessage({
+    type: 'ralph/sync',
+    payload: { legacyRuns: { [config.managerSessionId]: pausedRun(config) } },
+  });
+}
+
 function createHost(options?: {
   persistence?: Persistence;
   readFile?: (path: string, options?: unknown) => Promise<string | null>;
@@ -361,13 +379,7 @@ describe('HostRalphStore', () => {
 
   it('filters malformed runs, mismatched IDs, and unsafe persisted keys', () => {
     const config = createConfig();
-    const validRun: RalphRun = {
-      config,
-      status: 'paused',
-      currentIteration: 0,
-      iterations: [],
-      updatedAt: 1,
-    };
+    const validRun = pausedRun(config);
     const stored = Object.create(null) as Record<string, unknown>;
     stored[config.managerSessionId] = validRun;
     stored.broken = { ...validRun, iterations: null };
@@ -571,13 +583,7 @@ describe('HostRalphStore', () => {
     const config = createConfig();
 
     store.startRun(config);
-    store.adoptRun({
-      config,
-      status: 'paused',
-      currentIteration: 3,
-      iterations: [],
-      updatedAt: 1,
-    });
+    store.adoptRun(pausedRun(config, { currentIteration: 3 }));
 
     expect(store.getRun(config.managerSessionId)?.status).toBe('running');
   });
@@ -646,20 +652,7 @@ describe('RalphHost', () => {
       getOpenWorkspaceRoot: (path) => (workspaceOpen ? path : null),
     });
     const config = createConfig();
-    host.handleMessage({
-      type: 'ralph/sync',
-      payload: {
-        legacyRuns: {
-          [config.managerSessionId]: {
-            config,
-            status: 'paused',
-            currentIteration: 0,
-            iterations: [],
-            updatedAt: 1,
-          },
-        },
-      },
-    });
+    syncLegacyRun(host, config);
     await vi.waitFor(() =>
       expect(host.getStatePayload().runs[config.managerSessionId]).toBeDefined()
     );
@@ -1382,13 +1375,7 @@ describe('RalphHost', () => {
   it('adopts legacy runs from ralph/sync and broadcasts state', async () => {
     const { host, broadcasts } = createHost();
     const config = createConfig({ managerSessionId: 'manager-legacy', iterations: 3 });
-    const legacyRun: RalphRun = {
-      config,
-      status: 'paused',
-      currentIteration: 2,
-      iterations: [],
-      updatedAt: 1,
-    };
+    const legacyRun = pausedRun(config, { currentIteration: 2 });
 
     host.handleMessage({
       type: 'ralph/sync',
@@ -1413,20 +1400,7 @@ describe('RalphHost', () => {
     };
     const { host, ensureServerStarted } = createHost({ persistence });
 
-    host.handleMessage({
-      type: 'ralph/sync',
-      payload: {
-        legacyRuns: {
-          [config.managerSessionId]: {
-            config,
-            status: 'paused',
-            currentIteration: 0,
-            iterations: [],
-            updatedAt: 1,
-          },
-        },
-      },
-    });
+    syncLegacyRun(host, config);
     await vi.waitFor(() => expect(persistence.set).toHaveBeenCalledTimes(1));
 
     let disposed = false;
@@ -1451,20 +1425,7 @@ describe('RalphHost', () => {
     });
     const config = createConfig({ managerSessionId: 'manager-blocked-sync' });
 
-    host.handleMessage({
-      type: 'ralph/sync',
-      payload: {
-        legacyRuns: {
-          [config.managerSessionId]: {
-            config,
-            status: 'paused',
-            currentIteration: 0,
-            iterations: [],
-            updatedAt: 1,
-          },
-        },
-      },
-    });
+    syncLegacyRun(host, config);
     await vi.waitFor(() => expect(ensureServerStarted).toHaveBeenCalledTimes(1));
 
     await expect(host.dispose()).resolves.toBeUndefined();
@@ -1480,20 +1441,7 @@ describe('RalphHost', () => {
     };
     const { host, broadcasts } = createHost({ persistence });
 
-    host.handleMessage({
-      type: 'ralph/sync',
-      payload: {
-        legacyRuns: {
-          [config.managerSessionId]: {
-            config,
-            status: 'paused',
-            currentIteration: 0,
-            iterations: [],
-            updatedAt: 1,
-          },
-        },
-      },
-    });
+    syncLegacyRun(host, config);
 
     await vi.waitFor(() =>
       expect(mocks.logger.warn).toHaveBeenCalledWith(
@@ -1512,23 +1460,11 @@ describe('RalphHost', () => {
     const { persistence } = createMemoryPersistence();
     const existingConfig = createConfig({ managerSessionId: 'existing' });
     const stored: Record<string, RalphRun> = {
-      [existingConfig.managerSessionId]: {
-        config: existingConfig,
-        status: 'paused',
-        currentIteration: 0,
-        iterations: [],
-        updatedAt: 1,
-      },
+      [existingConfig.managerSessionId]: pausedRun(existingConfig),
     };
     for (let index = 1; index < 100; index += 1) {
       const config = createConfig({ managerSessionId: `paused-${index}` });
-      stored[config.managerSessionId] = {
-        config,
-        status: 'paused',
-        currentIteration: 0,
-        iterations: [],
-        updatedAt: index + 1,
-      };
+      stored[config.managerSessionId] = pausedRun(config, { updatedAt: index + 1 });
     }
     await persistence.set(RALPH_RUNS_KEY, stored);
     const rejectedConfig = createConfig({ managerSessionId: 'capacity-rejected' });
@@ -1539,13 +1475,7 @@ describe('RalphHost', () => {
       payload: {
         legacyRuns: {
           [existingConfig.managerSessionId]: stored[existingConfig.managerSessionId]!,
-          [rejectedConfig.managerSessionId]: {
-            config: rejectedConfig,
-            status: 'paused',
-            currentIteration: 0,
-            iterations: [],
-            updatedAt: 200,
-          },
+          [rejectedConfig.managerSessionId]: pausedRun(rejectedConfig, { updatedAt: 200 }),
         },
       },
     });
@@ -1571,20 +1501,7 @@ describe('RalphHost', () => {
     const { host } = createHost();
     const config = createConfig({ iterations: 5 });
     // Seed a run without starting the loop.
-    host.handleMessage({
-      type: 'ralph/sync',
-      payload: {
-        legacyRuns: {
-          [config.managerSessionId]: {
-            config,
-            status: 'paused',
-            currentIteration: 0,
-            iterations: [],
-            updatedAt: 1,
-          },
-        },
-      },
-    });
+    syncLegacyRun(host, config);
     await vi.waitFor(() =>
       expect(host.getStatePayload().runs[config.managerSessionId]).toBeDefined()
     );

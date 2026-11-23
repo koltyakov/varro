@@ -1,11 +1,6 @@
-/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- MiniMax API payloads are decoded before quota extraction. */
-/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Parsed JSON is checked before fields are consumed. */
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- MiniMax API payloads are decoded before quota extraction. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
-import {
-  parseRateLimitResetAt,
-  type ProviderAuthRecord,
-  type ProviderMetadata,
-} from '../../util/provider-limit';
+import { parseRateLimitResetAt } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
   asRecord,
@@ -15,11 +10,12 @@ import {
   readBoundedResponseText,
   unsupportedProviderStatus,
   providerErrorStatus,
+  resolveProviderAuthToken,
   VARRO_USER_AGENT,
+  parseJsonBody,
 } from '../adapter-utils';
 
 const MINIMAX_REMAINS_ENDPOINT = 'https://api.minimax.io/v1/api/openplatform/coding_plan/remains';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 type MiniMaxPayloadResult =
   | { kind: 'available'; windows: ProviderLimitWindow[] }
@@ -30,10 +26,10 @@ export function createMiniMaxAdapter(): ProviderLimitAdapter {
   return {
     id: 'minimax',
     matches(provider, authStore) {
-      return provider.id === 'minimax' && resolveMiniMaxAuthToken(provider, authStore) != null;
+      return provider.id === 'minimax' && resolveProviderAuthToken(provider, authStore) != null;
     },
     async fetch({ provider, authStore, modelID, checkedAt }: ProviderLimitAdapterContext) {
-      const token = resolveMiniMaxAuthToken(provider, authStore);
+      const token = resolveProviderAuthToken(provider, authStore);
       if (!token) {
         return unsupportedProviderStatus(
           provider.id,
@@ -230,19 +226,6 @@ function parseMiniMaxResetAt(remainsMs: unknown, absoluteResetAt: unknown, check
   return parseRateLimitResetAt(absoluteResetAt, checkedAt);
 }
 
-function resolveMiniMaxAuthToken(
-  provider: ProviderMetadata,
-  authStore: Record<string, ProviderAuthRecord>
-) {
-  const auth = authStore[provider.id];
-  if (auth?.type === 'oauth') return auth.access;
-  if (auth && 'key' in auth) return auth.key;
-
-  const apiKey = getString(asRecord(provider.options)?.apiKey);
-  if (!apiKey || apiKey === OPENCODE_OAUTH_DUMMY_KEY) return null;
-  return apiKey;
-}
-
 function isMiniMaxAccessBlocked(response: Response, bodyText: string) {
   const server = getString(response.headers.get('Server')).toLowerCase();
   const contentType = getString(response.headers.get('Content-Type')).toLowerCase();
@@ -257,22 +240,7 @@ function isMiniMaxAccessBlocked(response: Response, bodyText: string) {
 }
 
 function buildMiniMaxApiErrorNote(code: number, message: string) {
-  const parts = ['MiniMax quota endpoint returned an API error', formatNumeric(code)];
+  const parts = ['MiniMax quota endpoint returned an API error', String(code)];
   if (message) parts.push(`(${message})`);
   return parts.join(' ');
-}
-
-function formatNumeric(value: number) {
-  return Number.isInteger(value) ? String(value) : String(value);
-}
-
-function parseJsonBody(bodyText: string): unknown | null {
-  const trimmed = bodyText.trim();
-  if (!trimmed) return null;
-
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return null;
-  }
 }

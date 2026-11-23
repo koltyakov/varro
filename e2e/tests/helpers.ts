@@ -55,6 +55,25 @@ export async function getE2EState<T>(page: Page, selector: () => T) {
   return page.evaluate(selector);
 }
 
+/** Reads the parts of the first recorded `prompt_async` POST, or `undefined` before one is sent. */
+export async function getFirstPromptParts<Part = { type: string; text?: string }>(page: Page) {
+  const parts = await page.evaluate(() => {
+    // SAFETY: The isolated harness records request bodies exactly as the webview sent them.
+    const harness = (
+      window as Window & {
+        __varroE2E?: {
+          requests: Array<{ method: string; path: string; body?: { parts?: unknown[] } }>;
+        };
+      }
+    ).__varroE2E;
+    return harness?.requests.find(
+      (request) => request.method === 'POST' && request.path.includes('prompt_async')
+    )?.body?.parts;
+  });
+  // SAFETY: Each caller names the part fields it inspects from the controlled harness request.
+  return parts as Part[] | undefined;
+}
+
 export async function waitForAnimationFrame(page: Page) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
 }
@@ -72,6 +91,19 @@ export async function getScrollMetrics(page: Page, selector: string) {
     clientHeight: element.clientHeight,
     distanceFromBottom: element.scrollHeight - element.clientHeight - element.scrollTop,
   }));
+}
+
+/** Reads how far the transcript list is scrolled above its bottom edge. */
+export async function getListDistanceFromBottom(page: Page) {
+  return (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom;
+}
+
+/** Pins a scroller to its bottom and emits the scroll event that a user scroll would produce. */
+export async function scrollToBottom(scroller: Locator) {
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event('scroll'));
+  });
 }
 
 export async function getVisibleMessageAnchor(
@@ -159,4 +191,19 @@ export async function installOuterScrollSentinel(page: Page, scrollTop = 40) {
     root.scrollTop = targetScrollTop;
     return root.scrollTop;
   }, scrollTop);
+}
+
+/** Delivers one host message to the webview, exactly as the extension host would post it. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Tests deliberately post partial or out-of-schema host payloads.
+export async function postWebviewMessage(page: Page, message: unknown) {
+  await page.evaluate((value) => window.postMessage(value, '*'), message);
+}
+
+/** Seeds the fixture that the isolated `session-playback` scenario reads before mounting. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Fixtures are synthetic and validated by the harness when it mounts.
+export async function installPlaybackCapture(page: Page, capture: unknown) {
+  await page.addInitScript((fixture) => {
+    // SAFETY: The isolated playback harness reads this fixture before mounting.
+    (window as typeof window & { varroPlaybackCapture: unknown }).varroPlaybackCapture = fixture;
+  }, capture);
 }

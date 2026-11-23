@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, ToolPart } from '../../src/webview/types';
-import { waitForAnimationFrames } from './helpers';
+import { installPlaybackCapture, waitForAnimationFrames } from './helpers';
 
 for (const measured of [false, true]) {
   test(`does not back off when Thinking hands off to a running edit (${measured ? 'measured' : 'short'})`, async ({
@@ -64,24 +64,17 @@ for (const measured of [false, true]) {
         },
       ],
     });
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated E2E harness reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'project-test',
+        directory: '/workspace',
+        title: 'Thinking to edit',
+        version: '1.0.0',
+        time: { created, updated: created },
       },
-      {
-        session: {
-          id: sessionID,
-          projectID: 'project-test',
-          directory: '/workspace',
-          title: 'Thinking to edit',
-          version: '1.0.0',
-          time: { created, updated: created },
-        },
-        initialMessages: messages,
-      }
-    );
+      initialMessages: messages,
+    });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await expect(page.locator(`[data-msg-id="${lastContextId}"]`)).toBeVisible();
     await page.evaluate(

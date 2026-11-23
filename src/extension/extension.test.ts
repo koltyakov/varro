@@ -323,6 +323,20 @@ describe('view registration in restricted forks', () => {
   });
 });
 
+function createGlobalState(read: (key: string) => boolean) {
+  return { get: vi.fn(read), update: vi.fn(() => Promise.resolve()) };
+}
+
+function extensionContext(overrides: Record<string, unknown> = {}) {
+  return {
+    extensionUri: {},
+    extension: { id: 'koltyakov.varro' },
+    workspaceState: {},
+    subscriptions: [],
+    ...overrides,
+  } as never;
+}
+
 describe('extension activation', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -358,12 +372,7 @@ describe('extension activation', () => {
     };
     promptTracePreference.enabled = true;
     expect(await tracePrompt(server, input)).toBe(input.prompt);
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     expect(await tracePrompt(server, input)).toMatch(/^VARRO_TRACE_V1 /);
     promptTracePreference.enabled = false;
     expect(await tracePrompt(server, input)).toBe(input.prompt);
@@ -376,12 +385,7 @@ describe('extension activation', () => {
   it('does not wait for native helper preparation before registering the server and views', async () => {
     prepareProcessInspectionMock.mockReturnValue(new Promise<void>(() => {}));
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     expect(prepareProcessInspectionMock).toHaveBeenCalledOnce();
     expect(openCodeServerMock).toHaveBeenCalledOnce();
     expect(registerWebviewViewProviderMock).toHaveBeenCalledOnce();
@@ -393,12 +397,7 @@ describe('extension activation', () => {
   it('logs failed helper preparation while continuing activation', async () => {
     prepareProcessInspectionMock.mockRejectedValue(new Error('Preparation timed out'));
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     expect(loggerMock.warn).toHaveBeenCalledWith(
       'Could not prepare Windows process inspection: Preparation timed out'
     );
@@ -410,13 +409,7 @@ describe('extension activation', () => {
     const { activate } = await import('./extension');
     const secrets = { get: vi.fn(), store: vi.fn(), delete: vi.fn() };
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      secrets,
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ secrets }));
 
     expect(openCodeServerMock).toHaveBeenCalledWith(
       4096,
@@ -445,15 +438,7 @@ describe('extension activation', () => {
     const globalStorageUri = { fsPath: '/extension-storage' };
     const secrets = { get: vi.fn(), store: vi.fn(), delete: vi.fn() };
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState,
-      globalState,
-      globalStorageUri,
-      secrets,
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ workspaceState, globalState, globalStorageUri, secrets }));
 
     expect(sidebarProviderMock).toHaveBeenCalledWith(
       {},
@@ -472,24 +457,14 @@ describe('extension activation', () => {
   it('does not prepare scratch when a project is open', async () => {
     scratchMock.folders = [{ uri: { fsPath: '/repo' } }];
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     expect(scratchMock.prepare).not.toHaveBeenCalled();
   });
 
   it('prepares scratch before rescoping after the last folder closes', async () => {
     scratchMock.folders = [{ uri: { fsPath: '/repo' } }];
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     contextChangeCallback.current?.({
       workspacePath: '/varro/scratch',
       workspaceFolders: [],
@@ -511,14 +486,7 @@ describe('extension activation', () => {
   it('fails activation rather than inheriting a cwd if scratch cannot be created', async () => {
     scratchMock.prepare.mockRejectedValueOnce(new Error('Scratch is not writable'));
     const { activate } = await import('./extension');
-    await expect(
-      activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        workspaceState: {},
-        subscriptions: [],
-      } as never)
-    ).rejects.toThrow('Scratch is not writable');
+    await expect(activate(extensionContext())).rejects.toThrow('Scratch is not writable');
     expect(openCodeServerMock).not.toHaveBeenCalled();
   });
 
@@ -537,13 +505,7 @@ describe('extension activation', () => {
         }),
       };
       const { activate } = await import('./extension');
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        workspaceState: {},
-        globalState,
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState }));
       expect(openCodeServerMock.mock.calls.at(-1)?.[0]).toBe('auto');
       expect(openCodeServerMock.mock.calls.at(-1)?.[6]).toBe(existing);
       expect(globalState.update).toHaveBeenCalledWith(
@@ -560,12 +522,7 @@ describe('extension activation', () => {
     );
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
 
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:showFileDiffs', true);
 
@@ -581,12 +538,7 @@ describe('extension activation', () => {
   it('does not expose Varro compaction settings or react to legacy setting changes', async () => {
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
 
     const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
     expect(listener).toBeTypeOf('function');
@@ -605,12 +557,7 @@ describe('extension activation', () => {
   it('reapplies launch settings when configuration changes', async () => {
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
 
     const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
     listener?.({
@@ -626,12 +573,7 @@ describe('extension activation', () => {
   it('offers to reload the window when the configured server port changes', async () => {
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
 
     const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
     listener?.({
@@ -691,19 +633,10 @@ describe('extension activation', () => {
       envMock.appName = appName;
       envMock.uriScheme = uriScheme;
       getCommandsMock.mockResolvedValueOnce(['vscode.moveViews']);
-      const globalState = {
-        get: vi.fn(() => false),
-        update: vi.fn(() => Promise.resolve()),
-      };
+      const globalState = createGlobalState(() => false);
       const { activate } = await import('./extension');
 
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        globalState,
-        workspaceState: {},
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState }));
 
       expect(executeCommandMock).toHaveBeenCalledWith('vscode.moveViews', {
         viewIds: ['varro.chat'],
@@ -723,19 +656,10 @@ describe('extension activation', () => {
   it('skips startup migration after the marker but registers a repairing revealer', async () => {
     envMock.appName = 'Devin';
     envMock.uriScheme = 'devin';
-    const globalState = {
-      get: vi.fn(() => true),
-      update: vi.fn(() => Promise.resolve()),
-    };
+    const globalState = createGlobalState(() => true);
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ globalState }));
 
     expect(getCommandsMock).not.toHaveBeenCalled();
     expect(executeCommandMock).not.toHaveBeenCalledWith('vscode.moveViews', expect.anything());
@@ -752,18 +676,9 @@ describe('extension activation', () => {
   it('preserves a working fork placement when revealing after a persisted migration', async () => {
     envMock.appName = 'Cursor';
     envMock.uriScheme = 'cursor';
-    const globalState = {
-      get: vi.fn(() => true),
-      update: vi.fn(() => Promise.resolve()),
-    };
+    const globalState = createGlobalState(() => true);
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ globalState }));
     const reveal = registerCommandsMock.mock.calls[0]?.[4];
 
     expect(reveal).toBeTypeOf('function');
@@ -778,18 +693,11 @@ describe('extension activation', () => {
     async (appName, uriScheme) => {
       envMock.appName = appName;
       envMock.uriScheme = uriScheme;
-      const globalState = {
-        get: vi.fn((key: string) => key === 'layout.initialSidebarReveal.v1'),
-        update: vi.fn(() => Promise.resolve()),
-      };
+      const globalState = createGlobalState(
+        (key: string) => key === 'layout.initialSidebarReveal.v1'
+      );
       const { activate } = await import('./extension');
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        globalState,
-        workspaceState: {},
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState }));
       const reveal = registerCommandsMock.mock.calls[0]?.[4] as () => Promise<void>;
 
       expect(executeCommandMock.mock.calls.filter(([command]) => command !== 'setContext')).toEqual(
@@ -817,13 +725,10 @@ describe('extension activation', () => {
           'workbench.views.service.panel.saved-varro': 'panel',
         }
       );
-      const globalState = {
-        get: vi.fn(
-          (key: string) =>
-            key === 'layout.initialSidebarReveal.v1' || key === 'layout.cursorPrimarySidebar.v1'
-        ),
-        update: vi.fn(() => Promise.resolve()),
-      };
+      const globalState = createGlobalState(
+        (key: string) =>
+          key === 'layout.initialSidebarReveal.v1' || key === 'layout.cursorPrimarySidebar.v1'
+      );
       sidebarProviderMock.mockImplementationOnce(() => {
         latestSidebarProviderInstance.current!.view.visible = false;
       });
@@ -834,13 +739,7 @@ describe('extension activation', () => {
         return Promise.resolve();
       });
       const { activate } = await import('./extension');
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        globalState,
-        workspaceState: {},
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState }));
 
       expect(executeCommandMock.mock.calls.filter(([command]) => command !== 'setContext')).toEqual(
         []
@@ -866,13 +765,7 @@ describe('extension activation', () => {
       envMock.appName = appName;
       envMock.uriScheme = uriScheme;
       const { activate } = await import('./extension');
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        globalState: { get: () => true },
-        workspaceState: {},
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState: { get: () => true } }));
       const reveal = registerCommandsMock.mock.calls[0]?.[4] as () => Promise<void>;
       const view = latestSidebarProviderInstance.current!.view;
       view.visible = false;
@@ -904,13 +797,7 @@ describe('extension activation', () => {
       envMock.appName = 'Cursor';
       envMock.uriScheme = 'cursor';
       const { activate } = await import('./extension');
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        globalState: { get: () => true },
-        workspaceState: {},
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState: { get: () => true } }));
       const reveal = registerCommandsMock.mock.calls[0]?.[4] as () => Promise<void>;
       const view = latestSidebarProviderInstance.current!.view;
       view.visible = false;
@@ -947,10 +834,7 @@ describe('extension activation', () => {
     envMock.appName = 'Cursor';
     envMock.uriScheme = 'cursor';
     getCommandsMock.mockResolvedValue(['vscode.moveViews']);
-    const globalState = {
-      get: vi.fn(() => false),
-      update: vi.fn(() => Promise.resolve()),
-    };
+    const globalState = createGlobalState(() => false);
     executeCommandMock.mockImplementation((command: string) => {
       if (command === 'vscode.moveViews') return Promise.reject(new Error('move unavailable'));
       if (command === 'varro.chat.focus') return Promise.reject(new Error('view unavailable'));
@@ -958,13 +842,7 @@ describe('extension activation', () => {
     });
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ globalState }));
 
     await vi.waitFor(() => {
       expect(loggerMock.warn).toHaveBeenCalledWith(
@@ -984,22 +862,13 @@ describe('extension activation', () => {
     async (appName, uriScheme) => {
       envMock.appName = appName;
       envMock.uriScheme = uriScheme;
-      const globalState = {
-        get: vi.fn(
-          (key: string) =>
-            key === 'layout.initialSidebarReveal.v1' || key === 'layout.standardSecondarySidebar.v1'
-        ),
-        update: vi.fn(() => Promise.resolve()),
-      };
+      const globalState = createGlobalState(
+        (key: string) =>
+          key === 'layout.initialSidebarReveal.v1' || key === 'layout.standardSecondarySidebar.v1'
+      );
       const { activate } = await import('./extension');
 
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        globalState,
-        workspaceState: {},
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState }));
 
       await vi.waitFor(() => {
         expect(globalState.update).toHaveBeenCalledWith(
@@ -1046,23 +915,14 @@ describe('extension activation', () => {
     executeCommandMock.mockImplementation((command: string) =>
       command === blockedCommand ? commandPending : Promise.resolve()
     );
-    const globalState = {
-      get: vi.fn(
-        (key: string) =>
-          blockedCommand.endsWith('.resetViewContainerLocation') &&
-          key === 'layout.initialSidebarReveal.v1'
-      ),
-      update: vi.fn(() => Promise.resolve()),
-    };
+    const globalState = createGlobalState(
+      (key: string) =>
+        blockedCommand.endsWith('.resetViewContainerLocation') &&
+        key === 'layout.initialSidebarReveal.v1'
+    );
     const { activate } = await import('./extension');
     let activated = false;
-    const activation = activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never).then(() => {
+    const activation = activate(extensionContext({ globalState })).then(() => {
       activated = true;
     });
 
@@ -1092,19 +952,10 @@ describe('extension activation', () => {
   });
 
   it('reveals the declared secondary view without moving it after installation in VS Code', async () => {
-    const globalState = {
-      get: vi.fn(() => false),
-      update: vi.fn(() => Promise.resolve()),
-    };
+    const globalState = createGlobalState(() => false);
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ globalState }));
 
     await vi.waitFor(() => {
       expect(globalState.update).toHaveBeenCalledWith('layout.initialSidebarReveal.v1', true);
@@ -1125,19 +976,10 @@ describe('extension activation', () => {
           ? Promise.reject(new Error('view unavailable'))
           : Promise.resolve()
       );
-      const globalState = {
-        get: vi.fn(() => false),
-        update: vi.fn(() => Promise.resolve()),
-      };
+      const globalState = createGlobalState(() => false);
       const { activate } = await import('./extension');
 
-      await activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        globalState,
-        workspaceState: {},
-        subscriptions: [],
-      } as never);
+      await activate(extensionContext({ globalState }));
 
       await vi.waitFor(() => {
         expect(loggerMock.warn).toHaveBeenCalledWith(
@@ -1150,23 +992,13 @@ describe('extension activation', () => {
   );
 
   it('preserves saved placement and visibility after secondary migration', async () => {
-    const globalState = {
-      get: vi.fn(
-        (key: string) =>
-          key === 'layout.initialSidebarReveal.v1' ||
-          key === 'layout.secondarySidebarRegistration.v2'
-      ),
-      update: vi.fn(() => Promise.resolve()),
-    };
+    const globalState = createGlobalState(
+      (key: string) =>
+        key === 'layout.initialSidebarReveal.v1' || key === 'layout.secondarySidebarRegistration.v2'
+    );
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ globalState }));
 
     expect(getCommandsMock).not.toHaveBeenCalled();
     expect(executeCommandMock).not.toHaveBeenCalledWith('workbench.view.extension.varro');
@@ -1182,10 +1014,9 @@ describe('extension activation', () => {
     'varro.chat.focus',
     'invisible view',
   ])('does not mark the legacy migration complete when %s fails', async (failure) => {
-    const globalState = {
-      get: vi.fn((key: string) => key === 'layout.initialSidebarReveal.v1'),
-      update: vi.fn(() => Promise.resolve()),
-    };
+    const globalState = createGlobalState(
+      (key: string) => key === 'layout.initialSidebarReveal.v1'
+    );
     if (failure === 'invisible view') {
       sidebarProviderMock.mockImplementationOnce(() => {
         latestSidebarProviderInstance.current!.view.visible = false;
@@ -1196,13 +1027,7 @@ describe('extension activation', () => {
     );
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ globalState }));
 
     await vi.waitFor(() => {
       expect(loggerMock.warn).toHaveBeenCalledWith(
@@ -1224,13 +1049,7 @@ describe('extension activation', () => {
     };
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      globalState,
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext({ globalState }));
 
     await vi.waitFor(() => {
       expect(loggerMock.warn).toHaveBeenCalledWith(
@@ -1241,12 +1060,7 @@ describe('extension activation', () => {
 
   it('reveals the saved standard-host location on every reveal without moving or resetting it', async () => {
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     const reveal = registerCommandsMock.mock.calls[0]?.[4];
 
     expect(reveal).toBeTypeOf('function');
@@ -1259,12 +1073,7 @@ describe('extension activation', () => {
 
   it('does not reset a saved standard-host placement when revealing fails', async () => {
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     const reveal = registerCommandsMock.mock.calls[0]?.[4];
     expect(reveal).toBeTypeOf('function');
     executeCommandMock.mockClear();
@@ -1283,14 +1092,7 @@ describe('extension activation', () => {
       );
       const { activate } = await import('./extension');
 
-      await expect(
-        activate({
-          extensionUri: {},
-          extension: { id: 'koltyakov.varro' },
-          workspaceState: {},
-          subscriptions: [],
-        } as never)
-      ).rejects.toThrow('varro.server.port');
+      await expect(activate(extensionContext())).rejects.toThrow('varro.server.port');
 
       expect(openCodeServerMock).not.toHaveBeenCalled();
     }
@@ -1300,14 +1102,7 @@ describe('extension activation', () => {
     sweepStaleInjectedConfigDirectoriesMock.mockReturnValueOnce(new Promise(() => {}));
     const { activate } = await import('./extension');
 
-    await expect(
-      activate({
-        extensionUri: {},
-        extension: { id: 'koltyakov.varro' },
-        workspaceState: {},
-        subscriptions: [],
-      } as never)
-    ).resolves.toBeUndefined();
+    await expect(activate(extensionContext())).resolves.toBeUndefined();
 
     expect(sweepStaleInjectedConfigDirectoriesMock).toHaveBeenCalledOnce();
     expect(registerWebviewViewProviderMock.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1322,12 +1117,7 @@ describe('extension activation', () => {
     sweepStaleInjectedConfigDirectoriesMock.mockRejectedValueOnce(new Error('cleanup failed'));
     const { activate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     await Promise.resolve();
 
     expect(loggerMock.warn).toHaveBeenCalledWith(
@@ -1341,12 +1131,7 @@ describe('extension activation', () => {
       finishRescope = () => resolve({ state: 'connected', directory: '/repo-b' });
     });
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     latestServerInstance.current?.rescopeEventStream.mockReturnValueOnce(rescope);
     const nextContext = {
       workspacePath: '/repo-b',
@@ -1370,12 +1155,7 @@ describe('extension activation', () => {
 
   it('publishes a changed workspace after a degraded rescope timeout', async () => {
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     latestServerInstance.current?.rescopeEventStream.mockResolvedValueOnce({
       state: 'degraded',
       directory: '/repo-b',
@@ -1400,12 +1180,7 @@ describe('extension activation', () => {
   it('retries and publishes the latest context after restart cancellation', async () => {
     vi.useFakeTimers();
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     latestServerInstance.current?.rescopeEventStream
       .mockResolvedValueOnce({ state: 'cancelled', directory: '/repo-b' })
       .mockResolvedValueOnce({ state: 'inactive', directory: '/repo-b' })
@@ -1437,12 +1212,7 @@ describe('extension activation', () => {
       resolveB = resolve;
     });
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     latestServerInstance.current?.rescopeEventStream
       .mockReturnValueOnce(scopeB)
       .mockResolvedValueOnce({ state: 'connected', directory: '/repo-c' });
@@ -1475,12 +1245,7 @@ describe('extension activation', () => {
 
   it('does not publish a workspace scope when event stream rescoping fails', async () => {
     const { activate } = await import('./extension');
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
     latestServerInstance.current?.rescopeEventStream.mockRejectedValueOnce(
       new Error('stream failed')
     );
@@ -1503,12 +1268,7 @@ describe('extension activation', () => {
   it('disposes the sidebar, context provider, and server during deactivation', async () => {
     const { activate, deactivate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
 
     await deactivate();
 
@@ -1523,12 +1283,7 @@ describe('extension activation', () => {
   it('logs disposal errors and continues tearing down the extension', async () => {
     const { activate, deactivate } = await import('./extension');
 
-    await activate({
-      extensionUri: {},
-      extension: { id: 'koltyakov.varro' },
-      workspaceState: {},
-      subscriptions: [],
-    } as never);
+    await activate(extensionContext());
 
     latestSidebarProviderInstance.current?.dispose.mockRejectedValueOnce(
       new Error('sidebar failed')

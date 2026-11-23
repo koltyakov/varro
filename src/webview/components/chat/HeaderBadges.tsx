@@ -5,7 +5,9 @@ import { hourglassIcon } from '../../lib/ui-icons';
 
 const HEADER_BADGE_TOOLTIP_DELAY_MS = 1000;
 
-export function PendingSessionsBadge(props: { count: number; onClick: () => void }) {
+type SessionsBadgeProps = { count: number; onClick: () => void };
+
+export function PendingSessionsBadge(props: SessionsBadgeProps) {
   const label = 'Sessions pending background tasks';
   return (
     <Show when={props.count > 0}>
@@ -23,7 +25,7 @@ export function PendingSessionsBadge(props: { count: number; onClick: () => void
   );
 }
 
-export function RunningSessionsBadge(props: { count: number; onClick: () => void }) {
+export function RunningSessionsBadge(props: SessionsBadgeProps) {
   const label = () => `${props.count} running session${props.count === 1 ? '' : 's'}`;
 
   return (
@@ -43,78 +45,58 @@ export function RunningSessionsBadge(props: { count: number; onClick: () => void
   );
 }
 
-export function AttentionSessionsBadge(props: { count: number; onClick: () => void }) {
-  const label = 'Sessions waiting for input or permission';
-
+function DotBadge(props: SessionsBadgeProps & { label: string; class: string; dotClass: string }) {
   return (
     <Show when={props.count > 0}>
-      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
-        <button
-          type="button"
-          class="chat-header-attention-badge"
-          aria-label={label}
-          onClick={props.onClick}
-        >
-          <span class="chat-header-attention-dot" aria-hidden="true" />
+      <Tooltip content={props.label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
+        <button type="button" class={props.class} aria-label={props.label} onClick={props.onClick}>
+          <span class={props.dotClass} aria-hidden="true" />
         </button>
       </Tooltip>
     </Show>
   );
 }
 
-export function FailedSessionsBadge(props: { count: number; onClick: () => void }) {
-  const label = 'Failed sessions';
-
+export function AttentionSessionsBadge(props: SessionsBadgeProps) {
   return (
-    <Show when={props.count > 0}>
-      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
-        <button
-          type="button"
-          class="chat-header-failed-badge"
-          aria-label={label}
-          onClick={props.onClick}
-        >
-          <span class="chat-header-failed-dot" aria-hidden="true" />
-        </button>
-      </Tooltip>
-    </Show>
+    <DotBadge
+      {...props}
+      label="Sessions waiting for input or permission"
+      class="chat-header-attention-badge"
+      dotClass="chat-header-attention-dot"
+    />
   );
 }
 
-export function PlanReadyBadge(props: { count: number; onClick: () => void }) {
-  const label = 'Completed plans ready in another chat';
-
+export function FailedSessionsBadge(props: SessionsBadgeProps) {
   return (
-    <Show when={props.count > 0}>
-      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
-        <button
-          type="button"
-          class="chat-header-plan-badge"
-          aria-label={label}
-          onClick={props.onClick}
-        >
-          <span class="chat-header-plan-dot" aria-hidden="true" />
-        </button>
-      </Tooltip>
-    </Show>
+    <DotBadge
+      {...props}
+      label="Failed sessions"
+      class="chat-header-failed-badge"
+      dotClass="chat-header-failed-dot"
+    />
   );
 }
 
-export function CompletedSessionsBadge(props: { count: number; onClick: () => void }) {
-  const label = 'Completed sessions';
-
+export function PlanReadyBadge(props: SessionsBadgeProps) {
   return (
-    <Show when={props.count > 0}>
-      <Tooltip content={label} delay={HEADER_BADGE_TOOLTIP_DELAY_MS}>
-        <button
-          type="button"
-          class="chat-header-completed-badge"
-          aria-label={label}
-          onClick={props.onClick}
-        >
-          <span class="chat-header-completed-dot" aria-hidden="true" />
-        </button>
-      </Tooltip>
-    </Show>
+    <DotBadge
+      {...props}
+      label="Completed plans ready in another chat"
+      class="chat-header-plan-badge"
+      dotClass="chat-header-plan-dot"
+    />
+  );
+}
+
+export function CompletedSessionsBadge(props: SessionsBadgeProps) {
+  return (
+    <DotBadge
+      {...props}
+      label="Completed sessions"
+      class="chat-header-completed-badge"
+      dotClass="chat-header-completed-dot"
+    />
   );
 }

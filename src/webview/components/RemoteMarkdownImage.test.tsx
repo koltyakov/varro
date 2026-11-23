@@ -25,6 +25,11 @@ import { RemoteMarkdownImage } from './RemoteMarkdownImage';
 const preview = { url: 'data:image/webp;base64,AAAA', hostname: 'images.test' };
 let container: HTMLDivElement;
 let cleanup: (() => void) | undefined;
+
+function applyState(setter: Parameters<typeof setState>[0]) {
+  setState(setter);
+  flushSolid();
+}
 let sequence = 0;
 
 function mount(source = 'https://images.test/chart.png') {
@@ -40,10 +45,8 @@ function imageAction(root: ParentNode = container) {
 beforeEach(() => {
   bridge.apiCall.mockReset().mockResolvedValue(preview);
   bridge.postMessage.mockReset();
-  setState(storePath('remoteImages', 'off'));
-  flushSolid();
-  setState(storePath('activeSessionId', `remote-image-test-${++sequence}`));
-  flushSolid();
+  applyState(storePath('remoteImages', 'off'));
+  applyState(storePath('activeSessionId', `remote-image-test-${++sequence}`));
   container = document.createElement('div');
   document.body.append(container);
 });
@@ -54,10 +57,8 @@ afterEach(() => {
   cleanup = undefined;
   container.remove();
   flushSolid();
-  setState(storePath('remoteImages', 'off'));
-  flushSolid();
-  setState(storePath('activeSessionId', null));
-  flushSolid();
+  applyState(storePath('remoteImages', 'off'));
+  applyState(storePath('activeSessionId', null));
   vi.unstubAllGlobals();
 });
 
@@ -73,8 +74,7 @@ describe('RemoteMarkdownImage', () => {
   it('does not fetch when opt-in is enabled or a placeholder mounts', () => {
     mount();
     flushSolid();
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     expect(container.textContent).toContain('images.test');
     expect(imageAction()?.title).toContain('extension host');
     expect(imageAction()?.textContent).toBe('Load image');
@@ -83,8 +83,7 @@ describe('RemoteMarkdownImage', () => {
   });
 
   it('loads only on click and previews the data URL without further fetching', async () => {
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     mount();
     flushSolid();
     imageAction()?.click();
@@ -110,8 +109,7 @@ describe('RemoteMarkdownImage', () => {
   });
 
   it('reuses an approved thumbnail on remount without a request', async () => {
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     mount();
     flushSolid();
     imageAction()?.click();
@@ -127,19 +125,16 @@ describe('RemoteMarkdownImage', () => {
   });
 
   it('requires a new click after disabling and re-enabling', async () => {
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     mount();
     flushSolid();
     imageAction()?.click();
     flushSolid();
     await vi.waitFor(() => expect(container.querySelector('img')).not.toBeNull());
     flushSolid();
-    setState(storePath('remoteImages', 'off'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'off'));
     expect(container.querySelector('img')).toBeNull();
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     expect(imageAction()?.textContent).toBe('Load image');
     expect(bridge.apiCall).toHaveBeenCalledOnce();
   });
@@ -153,8 +148,7 @@ describe('RemoteMarkdownImage', () => {
           finish = resolve;
         })
       );
-      setState(storePath('remoteImages', 'ask'));
-      flushSolid();
+      applyState(storePath('remoteImages', 'ask'));
       mount();
       flushSolid();
       imageAction()?.click();
@@ -175,8 +169,7 @@ describe('RemoteMarkdownImage', () => {
     bridge.apiCall.mockRejectedValueOnce(
       new Error('Image URLs must resolve only to public internet addresses')
     );
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     mount();
     flushSolid();
     imageAction()?.click();
@@ -199,8 +192,7 @@ describe('RemoteMarkdownImage', () => {
       url: 'https://images.test/unsafe.png',
       hostname: 'images.test',
     });
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     mount();
     flushSolid();
     imageAction()?.click();
@@ -215,8 +207,7 @@ describe('RemoteMarkdownImage', () => {
   it.each(['http://images.test/a.png', 'https://user:secret@images.test/a.png', 'file:///a.png'])(
     'never offers to load unsupported source %s',
     (source) => {
-      setState(storePath('remoteImages', 'ask'));
-      flushSolid();
+      applyState(storePath('remoteImages', 'ask'));
       mount(source);
       flushSolid();
       expect(container.textContent).toBe('Sales chart');
@@ -225,8 +216,7 @@ describe('RemoteMarkdownImage', () => {
   );
 
   it('does not activate an enclosing Markdown link when loading', async () => {
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     const clicked = vi.fn();
     const anchor = document.createElement('a');
     anchor.href = 'https://other.test/';
@@ -280,8 +270,7 @@ describe('RemoteMarkdownImage', () => {
         disconnect = disconnect;
       }
     );
-    setState(storePath('remoteImages', 'on'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'on'));
     mount();
     flushSolid();
     expect(bridge.apiCall).not.toHaveBeenCalled();
@@ -300,8 +289,7 @@ describe('RemoteMarkdownImage', () => {
 
   it('does not automatically retry a failed image in a loop', async () => {
     bridge.apiCall.mockRejectedValue(new Error('Image server returned HTTP 403'));
-    setState(storePath('remoteImages', 'on'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'on'));
     mount();
     flushSolid();
     await vi.waitFor(() => expect(container.textContent).toContain('HTTP 403'));
@@ -319,15 +307,13 @@ describe('RemoteMarkdownImage', () => {
         finish = resolve;
       })
     );
-    setState(storePath('remoteImages', 'on'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'on'));
     mount();
     flushSolid();
     await vi.waitFor(() => expect(bridge.apiCall).toHaveBeenCalledOnce());
     flushSolid();
     const requestSignal = bridge.apiCall.mock.calls[0]![3].signal;
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     expect(requestSignal.aborted).toBe(true);
     finish(preview);
     await Promise.resolve();
@@ -336,8 +322,7 @@ describe('RemoteMarkdownImage', () => {
   });
 
   it('opens the full source URL exactly once without loading the image or activating an outer link', () => {
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     const outerLink = document.createElement('a');
     const outerClick = vi.fn();
     outerLink.href = 'https://other.test/';
@@ -366,8 +351,7 @@ describe('RemoteMarkdownImage', () => {
   it('copies the full source URL without fetching or opening it', async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal('navigator', { clipboard: { writeText } });
-    setState(storePath('remoteImages', 'ask'));
-    flushSolid();
+    applyState(storePath('remoteImages', 'ask'));
     const source = 'https://images.test/a/long/path/chart.png?size=large';
     mount(source);
     flushSolid();

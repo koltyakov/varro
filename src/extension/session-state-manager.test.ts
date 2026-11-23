@@ -46,12 +46,24 @@ function createManager(shouldShow: (sessionID: string) => boolean = () => true) 
   return new SessionStateManager(workspaceState as never, listener, { shouldShow });
 }
 
-function markBusy(manager: SessionStateManager, sessionID: string) {
+function createQuietManager(workspaceState: WorkspaceStateMock) {
+  return new SessionStateManager(
+    workspaceState as never,
+    { onStatusChange: vi.fn() },
+    { shouldShow: () => false }
+  );
+}
+
+function markStatus(manager: SessionStateManager, sessionID: string, type: 'busy' | 'idle') {
   manager.handleServerEvent({
     type: 'session.status',
-    properties: { sessionID, status: { type: 'busy' } },
+    properties: { sessionID, status: { type } },
   });
 }
+const markBusy = (manager: SessionStateManager, sessionID: string) =>
+  markStatus(manager, sessionID, 'busy');
+const markIdle = (manager: SessionStateManager, sessionID: string) =>
+  markStatus(manager, sessionID, 'idle');
 
 describe('SessionStateManager notifications', () => {
   beforeEach(() => {
@@ -284,10 +296,7 @@ describe('SessionStateManager notifications', () => {
         info: { sessionID: 'session-1', role: 'assistant', agent: 'plan' },
       },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'session-1');
     manager.handleServerEvent({
       type: 'session.next.step.ended',
       properties: { sessionID: 'session-1', finish: 'stop' },
@@ -297,10 +306,7 @@ describe('SessionStateManager notifications', () => {
     expect(manager.completed.has('session-1')).toBe(false);
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(true);
@@ -323,10 +329,7 @@ describe('SessionStateManager notifications', () => {
     });
     expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
     expect(manager.busy.has('session-1')).toBe(false);
   });
 
@@ -337,14 +340,8 @@ describe('SessionStateManager notifications', () => {
       type: 'session.updated',
       properties: { info: { id: 'session-1', title: 'Auth cleanup' } },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markBusy(manager, 'session-1');
+    markIdle(manager, 'session-1');
     // The deprecated `session.idle` is published alongside the status and must
     // be harmless once the session already settled (no re-notification).
     manager.handleServerEvent({
@@ -387,20 +384,14 @@ describe('SessionStateManager notifications', () => {
     expect(
       manager.reconcileStaleBusySessions({ 'session-1': { type: 'busy', background: true } }, 0)
     ).toEqual([]);
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
     expect(manager.completed.has('session-1')).toBe(true);
   });
 
   it('clears a busy session on the deprecated session.idle event', () => {
     const manager = createManager();
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'session-1');
     manager.handleServerEvent({
       type: 'session.idle',
       properties: { sessionID: 'session-1' },
@@ -431,10 +422,7 @@ describe('SessionStateManager notifications', () => {
     expect(manager.busy.has('session-1')).toBe(true);
 
     // No intervening `busy` event - idle arrives directly.
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(true);
@@ -477,14 +465,8 @@ describe('SessionStateManager notifications', () => {
     expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markBusy(manager, 'session-1');
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
@@ -493,10 +475,7 @@ describe('SessionStateManager notifications', () => {
       type: 'session.next.text.delta',
       properties: { sessionID: 'session-1', text: 'successor progress' },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(true);
@@ -580,10 +559,7 @@ describe('SessionStateManager notifications', () => {
         },
       },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
@@ -726,10 +702,7 @@ describe('SessionStateManager notifications', () => {
     (stepFinish, messageFinish) => {
       const manager = createManager();
 
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'busy' } },
-      });
+      markBusy(manager, 'session-1');
       manager.handleServerEvent({
         type: 'session.next.step.ended',
         properties: { sessionID: 'session-1', finish: stepFinish },
@@ -745,10 +718,7 @@ describe('SessionStateManager notifications', () => {
           },
         },
       });
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'busy' } },
-      });
+      markBusy(manager, 'session-1');
 
       expect(manager.busy.has('session-1')).toBe(true);
       expect(manager.completed.has('session-1')).toBe(false);
@@ -769,18 +739,12 @@ describe('SessionStateManager notifications', () => {
         },
       },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'child-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'child-1');
     manager.handleServerEvent({
       type: 'session.next.step.ended',
       properties: { sessionID: 'child-1', finish: 'stop', timestamp: Date.now() },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'child-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'child-1');
 
     expect(manager.busy.has('child-1')).toBe(false);
     expect(manager.completed.has('child-1')).toBe(false);
@@ -796,10 +760,7 @@ describe('SessionStateManager notifications', () => {
         info: { id: 'session-1', title: 'Analyze opencode capabilities (@explore subagent)' },
       },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'session-1');
     manager.handleServerEvent({
       type: 'message.updated',
       properties: {
@@ -811,10 +772,7 @@ describe('SessionStateManager notifications', () => {
         },
       },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(false);
@@ -827,10 +785,7 @@ describe('SessionStateManager notifications', () => {
     try {
       const manager = createManager();
 
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'busy' } },
-      });
+      markBusy(manager, 'session-1');
       manager.handleServerEvent({
         type: 'message.updated',
         properties: {
@@ -841,10 +796,7 @@ describe('SessionStateManager notifications', () => {
           },
         },
       });
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'idle' } },
-      });
+      markIdle(manager, 'session-1');
 
       expect(manager.busy.has('session-1')).toBe(false);
       expect(manager.completed.has('session-1')).toBe(false);
@@ -922,19 +874,13 @@ describe('SessionStateManager notifications', () => {
                 properties: { sessionID: 'session-1', status: { type: 'idle' } },
               }
       );
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'busy' } },
-      });
+      markBusy(manager, 'session-1');
 
       expect(manager.busy.has('session-1')).toBe(true);
       expect(manager.completed.has('session-1')).toBe(false);
       expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(1);
 
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'idle' } },
-      });
+      markIdle(manager, 'session-1');
 
       expect(manager.completed.has('session-1')).toBe(true);
       expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(1);
@@ -944,10 +890,7 @@ describe('SessionStateManager notifications', () => {
         properties: { sessionID: 'session-1', messageID: 'next-user', timestamp: 3 },
       });
       markBusy(manager, 'session-1');
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: 'session-1', status: { type: 'idle' } },
-      });
+      markIdle(manager, 'session-1');
       expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(2);
     }
   );
@@ -977,10 +920,7 @@ describe('SessionStateManager notifications', () => {
     expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(true);
     expect(manager.completed.has('session-1')).toBe(false);
@@ -993,10 +933,7 @@ describe('SessionStateManager notifications', () => {
       type: 'session.updated',
       properties: { info: { id: 'session-1', title: 'Codebase improvement research' } },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'session-1');
     manager.handleServerEvent({
       type: 'message.updated',
       properties: {
@@ -1007,10 +944,7 @@ describe('SessionStateManager notifications', () => {
         },
       },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(true);
@@ -1024,15 +958,9 @@ describe('SessionStateManager notifications', () => {
       properties: { info: { id: 'child-1', parentID: 'session-1' } },
     });
     markBusy(manager, 'session-1');
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
     markBusy(manager, 'session-2');
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-2', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-2');
 
     manager.acknowledgeCompletedSession('child-1');
 
@@ -1117,14 +1045,8 @@ describe('SessionStateManager notifications', () => {
 
   it('lets a persisted seen marker clear a timestamp-less host completion', () => {
     const manager = createManager();
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markBusy(manager, 'session-1');
+    markIdle(manager, 'session-1');
 
     expect(manager.completed.has('session-1')).toBe(true);
 
@@ -1138,19 +1060,13 @@ describe('SessionStateManager notifications', () => {
     manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
     manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'session-1');
     manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 100);
     manager.setSessionUnreadState('session-1', 'completed', true, '/repo', 200);
 
     expect(manager.completed.has('session-1')).toBe(false);
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.completed.has('session-1')).toBe(true);
   });
@@ -1179,12 +1095,7 @@ describe('SessionStateManager notifications', () => {
         }),
         remove: vi.fn(() => Promise.resolve()),
       };
-      const create = () =>
-        new SessionStateManager(
-          workspaceState as never,
-          { onStatusChange: vi.fn() },
-          { shouldShow: () => false }
-        );
+      const create = () => createQuietManager(workspaceState);
       const manager = create();
       manager.setSessionUnreadState('session-1', kind, true, '/repo', 100);
       manager.setSessionUnreadState('session-1', kind, false, '/repo', 200);
@@ -1216,12 +1127,7 @@ describe('SessionStateManager notifications', () => {
       }),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const create = () =>
-      new SessionStateManager(
-        workspaceState as never,
-        { onStatusChange: vi.fn() },
-        { shouldShow: () => false }
-      );
+    const create = () => createQuietManager(workspaceState);
     const manager = create();
     manager.setSessionUnreadState('session-1', 'plan-ready', false, '/repo', 600);
     manager.setSessionUnreadState('session-1', 'completed', false, '/repo', 150);
@@ -1254,11 +1160,7 @@ describe('SessionStateManager notifications', () => {
       }),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     manager.setSessionUnreadState('session-1', 'plan-ready', false, '/repo', 200);
     await manager.flush();
@@ -1278,11 +1180,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     manager.setSessionUnreadState('ordinary-1', 'completed', true, '/repo', 100);
     manager.setSessionUnreadState('plan-1', 'plan-ready', true, '/repo', 100);
@@ -1461,10 +1359,7 @@ describe('SessionStateManager notifications', () => {
         error: { name: 'aborted', data: { message: 'Aborted' } },
       },
     });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.busy.has('session-1')).toBe(false);
     expect(manager.completed.has('session-1')).toBe(false);
@@ -1478,13 +1373,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      {
-        onStatusChange: vi.fn(),
-      },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     for (let i = 0; i < 60; i += 1) {
       manager.handleServerEvent({
@@ -1493,10 +1382,7 @@ describe('SessionStateManager notifications', () => {
           info: { id: `session-${i}`, title: `Session ${i} ${'x'.repeat(600)}` },
         },
       });
-      manager.handleServerEvent({
-        type: 'session.status',
-        properties: { sessionID: `session-${i}`, status: { type: 'busy' } },
-      });
+      markBusy(manager, `session-${i}`);
     }
 
     for (let i = 0; i < 110; i += 1) {
@@ -1562,11 +1448,7 @@ describe('SessionStateManager notifications', () => {
         persisted.delete(key);
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
     const props: QuestionRequest = {
       id: 'frm_pending',
       sessionID: 'ses_child',
@@ -1592,11 +1474,7 @@ describe('SessionStateManager notifications', () => {
     manager.handleServerEvent({ type: 'question.asked', properties: props });
     await manager.persist();
     expect(persisted.get('varro.blockingRequests')).toMatchObject([{ id: props.id, props }]);
-    const recovered = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const recovered = createQuietManager(workspaceState);
     await recovered.consumeRecoverySnapshot();
     const post = vi.fn();
     recovered.replayBlockingRequests(post, new Set());
@@ -1619,11 +1497,7 @@ describe('SessionStateManager notifications', () => {
         return Promise.resolve();
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     manager.handleServerEvent({
       type: 'permission.asked',
@@ -1674,11 +1548,7 @@ describe('SessionStateManager notifications', () => {
       ((v2Snapshot?.props.source as { messageID?: string } | undefined)?.messageID ?? '').length
     ).toBe(500);
 
-    const recovered = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const recovered = createQuietManager(workspaceState);
     await recovered.consumeRecoverySnapshot();
     const post = vi.fn();
     recovered.replayBlockingRequests(post, new Set());
@@ -1711,17 +1581,10 @@ describe('SessionStateManager notifications', () => {
       }),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     markBusy(manager, 'session-1');
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     await vi.waitFor(() => expect(interruptedSnapshots).toHaveLength(1));
     expect(interruptedSnapshots[0]).toEqual([{ id: 'session-1', title: undefined }]);
@@ -1747,17 +1610,10 @@ describe('SessionStateManager notifications', () => {
       }),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     markBusy(manager, 'session-1');
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     await expect(manager.flush()).resolves.toBeUndefined();
     expect(interruptedSnapshots).toEqual([[{ id: 'session-1', title: undefined }], []]);
@@ -1802,18 +1658,11 @@ describe('SessionStateManager notifications', () => {
         return Promise.resolve();
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     markBusy(manager, 'session-1');
     const consumed = manager.consumeRecoverySnapshot();
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     await vi.waitFor(() => expect(releaseFirstWrite).toBeDefined());
     expect(events).toEqual(['set-1-start']);
@@ -1872,11 +1721,7 @@ describe('SessionStateManager notifications', () => {
         return Promise.resolve();
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     manager.handleServerEvent({
       type: 'permission.asked',
@@ -1923,13 +1768,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      {
-        onStatusChange: vi.fn(),
-      },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
       interruptedSessions: [{ id: 'session-1', title: 'Session 1' }, { id: 'session-2' }],
@@ -1946,11 +1785,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
     await manager.consumeRecoverySnapshot();
     markBusy(manager, 'session-1');
 
@@ -2011,13 +1846,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      {
-        onStatusChange: vi.fn(),
-      },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
       blockingRequests: [
@@ -2070,11 +1899,7 @@ describe('SessionStateManager notifications', () => {
         return Promise.resolve();
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
       interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
@@ -2117,11 +1942,7 @@ describe('SessionStateManager notifications', () => {
         return Promise.resolve();
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
       interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
@@ -2145,11 +1966,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.reject(new Error('write failed'))),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     await manager.consumeRecoverySnapshot();
     await expect(manager.acknowledgeInterruptedSessions(['session-1'])).rejects.toThrow(
@@ -2223,17 +2040,11 @@ describe('SessionStateManager notifications', () => {
       properties: { requestID: 'question-2', sessionID: 'child-2' },
     });
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'child-1', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'child-1');
     manager.setSessionUnreadState('root-1', 'plan-ready', true, '/repo', 100);
     expect(manager.completed.has('root-1')).toBe(false);
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'child-2', status: { type: 'busy' } },
-    });
+    markBusy(manager, 'child-2');
     manager.setSessionUnreadState('root-1', 'plan-ready', true, '/repo', 100);
     expect(manager.completed.has('root-1')).toBe(true);
   });
@@ -2277,14 +2088,8 @@ describe('SessionStateManager notifications', () => {
 
     expect(manager.completed.has('plan-1')).toBe(false);
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'plan-1', status: { type: 'busy' } },
-    });
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'plan-1', status: { type: 'idle' } },
-    });
+    markBusy(manager, 'plan-1');
+    markIdle(manager, 'plan-1');
 
     expect(manager.completed.has('plan-1')).toBe(true);
   });
@@ -2321,10 +2126,7 @@ describe('SessionStateManager notifications', () => {
       properties: { id: 'question-1', sessionID: 'child-1', questions: [] },
     });
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'root-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'root-1');
 
     expect(manager.completed.has('root-1')).toBe(false);
     expect(manager.busy.has('root-1')).toBe(false);
@@ -2515,11 +2317,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     await expect(manager.consumeRecoverySnapshot()).resolves.toEqual({
       interruptedSessions: [],
@@ -2539,11 +2337,7 @@ describe('SessionStateManager notifications', () => {
           })
       ),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     const first = manager.consumeRecoverySnapshot();
     const second = manager.consumeRecoverySnapshot();
@@ -2578,11 +2372,7 @@ describe('SessionStateManager notifications', () => {
         });
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     const recovery = manager.consumeRecoverySnapshot();
     await vi.waitFor(() => expect(releaseBlockingRemove).toBeDefined());
@@ -2620,11 +2410,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     const recovery = manager.consumeRecoverySnapshot();
     manager.handleServerEvent({
@@ -2661,11 +2447,7 @@ describe('SessionStateManager notifications', () => {
         });
       }),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     const recovery = manager.consumeRecoverySnapshot();
     await vi.waitFor(() => expect(releaseBlockingRemove).toBeDefined());
@@ -2702,11 +2484,7 @@ describe('SessionStateManager notifications', () => {
       set: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
     };
-    const manager = new SessionStateManager(
-      workspaceState as never,
-      { onStatusChange: vi.fn() },
-      { shouldShow: () => false }
-    );
+    const manager = createQuietManager(workspaceState);
 
     const recovery = manager.consumeRecoverySnapshot();
     manager.handleServerEvent({
@@ -2911,19 +2689,13 @@ describe('SessionStateManager notifications', () => {
       properties: { info: { id: 'plan', directory: '/repo-c', title: 'Plan', agent: 'plan' } },
     });
     markBusy(manager, 'plan');
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'plan', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'plan');
     manager.handleServerEvent({
       type: 'session.created',
       properties: { info: { id: 'regular', directory: '/repo-c', title: 'Regular' } },
     });
     markBusy(manager, 'regular');
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'regular', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'regular');
 
     expect(manager.getSiblingAlertCandidates()).toEqual([
       {
@@ -2970,10 +2742,7 @@ describe('SessionStateManager notifications', () => {
       properties: { info: { id: 'session-1', directory: '/repo-b' } },
     });
     markBusy(manager, 'session-1');
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    markIdle(manager, 'session-1');
 
     expect(manager.getSiblingAlertCandidates()[0]?.kinds).toEqual(['completed']);
 

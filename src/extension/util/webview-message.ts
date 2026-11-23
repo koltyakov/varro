@@ -417,23 +417,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const acknowledgement = selectionId ? { selectionId } : {};
       if (payload?.model === null)
         return { type, payload: { sessionId, model: null, ...acknowledgement } };
-      const model = asRecord(payload?.model);
-      const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
-      const modelID = getBoundedString(model?.modelID, MAX_RALPH_ID_LENGTH);
-      if (!providerID || !modelID) return null;
-      const variant =
-        model?.variant === undefined
-          ? undefined
-          : getBoundedString(model.variant, MAX_RALPH_ID_LENGTH);
-      if (model?.variant !== undefined && !variant) return null;
-      return {
-        type,
-        payload: {
-          sessionId,
-          model: variant ? { providerID, modelID, variant } : { providerID, modelID },
-          ...acknowledgement,
-        },
-      };
+      const model = parseChatModelSelection(payload?.model);
+      if (!model) return null;
+      return { type, payload: { sessionId, model, ...acknowledgement } };
     }
 
     case 'session-models/migrate': {
@@ -642,19 +628,8 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         if (payload.modelVisible !== undefined) commandState.modelVisible = payload.modelVisible;
         return { type, payload: commandState };
       }
-      const model = asRecord(payload.model);
-      const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
-      const modelID = getBoundedString(model?.modelID, MAX_RALPH_ID_LENGTH);
-      if (!providerID || !modelID) return null;
-      const variant =
-        model?.variant === undefined
-          ? undefined
-          : getBoundedString(model.variant, MAX_RALPH_ID_LENGTH);
-      if (model?.variant !== undefined && !variant) return null;
-      const selectedModel: NonNullable<
-        Extract<WebviewMessage, { type: 'commands/state' }>['payload']['model']
-      > = { providerID, modelID };
-      if (variant) selectedModel.variant = variant;
+      const selectedModel = parseChatModelSelection(payload.model);
+      if (!selectedModel) return null;
       const sessionId = parseOptionalSessionId(payload.sessionId);
       if (!sessionId.valid) return null;
       const commandState: Extract<WebviewMessage, { type: 'commands/state' }>['payload'] = {

@@ -264,26 +264,9 @@
   cursor: not-allowed;
 }
 
-.ralph-form-stepper-button + .ralph-form-stepper-input {
-  border-left: 1px solid var(--color-vscode-border);
-}
-
+.ralph-form-stepper-button + .ralph-form-stepper-input,
 .ralph-form-stepper-input + .ralph-form-stepper-button {
   border-left: 1px solid var(--color-vscode-border);
-}
-
-.ralph-form-checkboxes {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-}
-
-.ralph-form-checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  cursor: pointer;
 }
 
 .ralph-form-toggle {
@@ -757,12 +740,7 @@
   border-color: color-mix(in srgb, var(--color-vscode-success) 45%, transparent);
 }
 
-.ralph-iter-status-failed {
-  color: var(--color-vscode-error);
-  background: color-mix(in srgb, var(--color-vscode-error) 16%, transparent);
-  border-color: color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
-}
-
+.ralph-iter-status-failed,
 .ralph-iter-status-error {
   color: var(--color-vscode-error);
   background: color-mix(in srgb, var(--color-vscode-error) 16%, transparent);
@@ -770,12 +748,7 @@
 }
 
 .ralph-iter-status-unverified,
-.ralph-iter-status-pending {
-  color: var(--color-vscode-muted);
-  background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
-  border-color: color-mix(in srgb, var(--color-vscode-fg) 14%, transparent);
-}
-
+.ralph-iter-status-pending,
 .ralph-iter-status-aborted {
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
@@ -788,15 +761,6 @@
   font-size: 11px;
   color: var(--color-vscode-muted);
   white-space: nowrap;
-}
-
-.ralph-iter-files {
-  max-width: min(320px, 100%);
-  font-size: 11px;
-  color: var(--color-vscode-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .ralph-iter-tokens {

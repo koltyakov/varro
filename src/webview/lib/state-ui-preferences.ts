@@ -88,9 +88,7 @@ export function requestSessionSearchFocus() {
 }
 
 export function requestMessageListScrollToBottom(targetMessageId?: string) {
-  (() => {
-    for (const listener of beforeMessageListScrollToBottomListeners) listener(targetMessageId);
-    setMessageListScrollTargetMessageId(targetMessageId ?? null);
-    setMessageListScrollRequestKey((value) => value + 1);
-  })();
+  for (const listener of beforeMessageListScrollToBottomListeners) listener(targetMessageId);
+  setMessageListScrollTargetMessageId(targetMessageId ?? null);
+  setMessageListScrollRequestKey((value) => value + 1);
 }

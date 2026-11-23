@@ -1,4 +1,5 @@
 import { flush as flushSolid, OBSERVE, reconcile } from 'solid-js';
+import type { PathSetter } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { render } from '@solidjs/web';
@@ -14,6 +15,7 @@ import type {
   AssistantMessage,
   MessageEntry,
   Part,
+  Provider,
   Session,
   TextPart,
   UserMessage,
@@ -52,6 +54,7 @@ import {
   error as sendError,
   setSessionUsageLimit,
 } from '../lib/state';
+import type { AppState } from '../lib/app-state';
 import { handleWorkspaceSelectionFailure } from '../lib/workspace-selection';
 import { startNewChatDraft } from '../lib/new-chat-draft';
 import { client } from '../lib/client';
@@ -113,12 +116,10 @@ describe('composer dictation integration', () => {
     };
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
       defaultBridgeSend;
-    setInputText('Existing draft');
-    flushSolid();
+    setInputTextAndFlush('Existing draft');
     addContextFile({ path: '/repo/composer.css', relativePath: 'composer.css', type: 'file' });
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await Promise.resolve();
     flushSolid();
     const mic = container?.querySelector<HTMLButtonElement>('.toolbar-dictation-button');
@@ -365,12 +366,10 @@ afterEach(() => {
     '__initialWebviewState'
   );
   flushSolid();
-  setInputText('');
-  flushSolid();
+  setInputTextAndFlush('');
   setConnectionInitialized(false);
   flushSolid();
-  setIsLoading(false);
-  flushSolid();
+  setIsLoadingAndFlush(false);
   setLoadingLastActivityAt(null);
   flushSolid();
   setLoadingStartedAt(null);
@@ -383,44 +382,28 @@ afterEach(() => {
   flushSolid();
   setManualWorkspaceSelection(false);
   flushSolid();
-  setState(storePath('pendingWorkspaceSelectionPath', null));
-  flushSolid();
-  setState(storePath('workspaceSelectionRequestId', null));
-  flushSolid();
+  setStateAndFlush('pendingWorkspaceSelectionPath', null);
+  setStateAndFlush('workspaceSelectionRequestId', null);
   setError(null);
   flushSolid();
-  setState(storePath('providerRefreshPending', false));
-  flushSolid();
-  setState(storePath('workspaceCatalogReloadPending', false));
-  flushSolid();
+  setStateAndFlush('providerRefreshPending', false);
+  setStateAndFlush('workspaceCatalogReloadPending', false);
   resetProviderConnectionState();
   flushSolid();
   closeSideQuestion();
   flushSolid();
-  setState(storePath('activeSessionId', null));
-  flushSolid();
-  setState(storePath('messagesLoading', false));
-  flushSolid();
-  setState(storePath('messages', []));
-  flushSolid();
-  setState(storePath('sessions', []));
-  flushSolid();
-  setState(storePath('questions', []));
-  flushSolid();
-  setState(storePath('permissions', []));
-  flushSolid();
-  setState(storePath('providers', []));
-  flushSolid();
-  setState(storePath('agents', []));
-  flushSolid();
-  setState(storePath('allAgents', []));
-  flushSolid();
-  setState(storePath('providerDefaults', {}));
-  flushSolid();
-  setState(storePath('selectedAgent', null));
-  flushSolid();
-  setState(storePath('selectedModel', null));
-  flushSolid();
+  setStateAndFlush('activeSessionId', null);
+  setStateAndFlush('messagesLoading', false);
+  setStateAndFlush('messages', []);
+  setStateAndFlush('sessions', []);
+  setStateAndFlush('questions', []);
+  setStateAndFlush('permissions', []);
+  setStateAndFlush('providers', []);
+  setStateAndFlush('agents', []);
+  setStateAndFlush('allAgents', []);
+  setStateAndFlush('providerDefaults', {});
+  setStateAndFlush('selectedAgent', null);
+  setStateAndFlush('selectedModel', null);
   setState((draft) => {
     const current = draft['sessionSelectedModels'];
     const incoming = {} satisfies typeof current;
@@ -429,12 +412,9 @@ afterEach(() => {
     else reconcile(incoming)(current);
   });
   flushSolid();
-  setState(storePath('modelVariantSelections', {}));
-  flushSolid();
-  setState(storePath('providerLimits', {}));
-  flushSolid();
-  setState(storePath('mcpStatus', {}));
-  flushSolid();
+  setStateAndFlush('modelVariantSelections', {});
+  setStateAndFlush('providerLimits', {});
+  setStateAndFlush('mcpStatus', {});
   setState((draft) => {
     const current = draft['sessionStatus'];
     const incoming = {} satisfies typeof current;
@@ -445,65 +425,41 @@ afterEach(() => {
   flushSolid();
   resetSessionStatusSnapshotTracking();
   flushSolid();
-  setState(storePath('failedSessionIds', []));
-  flushSolid();
-  setState(storePath('sessionUsageLimits', {}));
-  flushSolid();
-  setState(storePath('sessionPermissionModes', {}));
-  flushSolid();
-  setState(storePath('sessionAutoPermissionActivity', {}));
-  flushSolid();
-  setState(storePath('clipboardImages', []));
-  flushSolid();
-  setState(storePath('nativePdfs', []));
-  flushSolid();
+  setStateAndFlush('failedSessionIds', []);
+  setStateAndFlush('sessionUsageLimits', {});
+  setStateAndFlush('sessionPermissionModes', {});
+  setStateAndFlush('sessionAutoPermissionActivity', {});
+  setStateAndFlush('clipboardImages', []);
+  setStateAndFlush('nativePdfs', []);
   resetPastedImageIndex();
   flushSolid();
-  setState(storePath('droppedFiles', []));
-  flushSolid();
-  setState(storePath('terminalSelection', null));
-  flushSolid();
-  setState(storePath('attachedDiagnostics', null));
-  flushSolid();
-  setState(storePath('inlineProblems', []));
-  flushSolid();
-  setState(storePath('issuesEnabled', true));
-  flushSolid();
-  setState(storePath('autoAttachProblems', true));
-  flushSolid();
-  setState(storePath('autoAttachActiveFile', true));
-  flushSolid();
-  setState(storePath('promptCompletionModel', ''));
-  flushSolid();
-  setState(storePath('debugShowQuotaWarning', false));
-  flushSolid();
-  setState(
-    storePath('editorContext', {
-      databaseContext: undefined,
-      extensionContexts: undefined,
-      workspacePath: null,
-      activeWorkspacePath: null,
-      activeFile: null,
-      selection: null,
-      diagnostics: [],
-      diagnosticCounts: undefined,
-    })
-  );
-  flushSolid();
-  setState(storePath('queuedMessages', []));
-  flushSolid();
-  setState(storePath('queuedMessageDispatchingId', null));
-  flushSolid();
-  setState(storePath('failedQueuedMessageIds', []));
-  flushSolid();
+  setStateAndFlush('droppedFiles', []);
+  setStateAndFlush('terminalSelection', null);
+  setStateAndFlush('attachedDiagnostics', null);
+  setStateAndFlush('inlineProblems', []);
+  setStateAndFlush('issuesEnabled', true);
+  setStateAndFlush('autoAttachProblems', true);
+  setStateAndFlush('autoAttachActiveFile', true);
+  setStateAndFlush('promptCompletionModel', '');
+  setStateAndFlush('debugShowQuotaWarning', false);
+  setStateAndFlush('editorContext', {
+    databaseContext: undefined,
+    extensionContexts: undefined,
+    workspacePath: null,
+    activeWorkspacePath: null,
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+    diagnosticCounts: undefined,
+  });
+  setStateAndFlush('queuedMessages', []);
+  setStateAndFlush('queuedMessageDispatchingId', null);
+  setStateAndFlush('failedQueuedMessageIds', []);
   setQueuedMessageEdit(null);
   flushSolid();
-  setState(storePath('todos', []));
-  flushSolid();
-  setState(storePath('hiddenProviders', []));
-  flushSolid();
-  setState(storePath('hiddenModels', []));
-  flushSolid();
+  setStateAndFlush('todos', []);
+  setStateAndFlush('hiddenProviders', []);
+  setStateAndFlush('hiddenModels', []);
   setSessionHistoryPrompts('session-1', []);
   flushSolid();
   resetMessageEditState();
@@ -567,58 +523,58 @@ afterEach(() => {
   flushSolid();
 });
 
-function setupModelState() {
+type ProviderModel = Provider['models'][string];
+
+// A tool-capable, zero-cost model; overrides replace or extend those defaults.
+function toolModel(
+  id: string,
+  name: string,
+  overrides: Partial<ProviderModel> = {}
+): ProviderModel {
+  return {
+    id,
+    name,
+    capabilities: { toolcall: true },
+    cost: { input: 0, output: 0 },
+    ...overrides,
+  };
+}
+
+function apiProvider(id: string, name: string, models: ProviderModel[]): Provider {
+  return {
+    id,
+    name,
+    source: 'api',
+    models: Object.fromEntries(models.map((model) => [model.id, model])),
+  };
+}
+
+function applyModelState() {
   setState(
     storePath('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-            limit: { context: 1000, output: 1000 },
-          },
-        },
-      },
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-4o', 'GPT-4o', { limit: { context: 1000, output: 1000 } }),
+      ]),
     ])
   );
   setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
   setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
 }
 
+function setupModelState() {
+  applyModelState();
+  flushSolid();
+}
+
 function setupVisionDelegationModelState() {
   setState(
     storePath('providers', [
-      {
-        id: 'zai',
-        name: 'Z.AI',
-        source: 'api',
-        models: {
-          'glm-4.7': {
-            id: 'glm-4.7',
-            name: 'GLM 4.7',
-            capabilities: { vision: false, toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        },
-      },
-      {
-        id: 'vision-provider',
-        name: 'Vision Provider',
-        source: 'api',
-        models: {
-          viewer: {
-            id: 'viewer',
-            name: 'Viewer',
-            capabilities: { vision: true, toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        },
-      },
+      apiProvider('zai', 'Z.AI', [
+        toolModel('glm-4.7', 'GLM 4.7', { capabilities: { vision: false, toolcall: true } }),
+      ]),
+      apiProvider('vision-provider', 'Vision Provider', [
+        toolModel('viewer', 'Viewer', { capabilities: { vision: true, toolcall: true } }),
+      ]),
     ])
   );
   setState(storePath('providerDefaults', { zai: 'glm-4.7', 'vision-provider': 'viewer' }));
@@ -633,10 +589,11 @@ function setupVisionDelegationModelState() {
       },
     ])
   );
+  flushSolid();
 }
 
 function setupMatchingActiveTurn() {
-  setupModelState();
+  applyModelState();
   setState(storePath('selectedAgent', 'build'));
   const entry = historyEntry('active-user', 'Active turn');
   setState(
@@ -644,6 +601,7 @@ function setupMatchingActiveTurn() {
       { ...entry, info: { ...entry.info, model: { providerID: 'openai', modelID: 'gpt-4o' } } },
     ])
   );
+  flushSolid();
 }
 
 function countedUserMessageEntry(text: string, onPartsRead: () => void): MessageEntry<UserMessage> {
@@ -672,27 +630,23 @@ function countedUserMessageEntry(text: string, onPartsRead: () => void): Message
   };
 }
 
+// The matching active turn, loading in the viewed session-1.
+function setupLoadingActiveTurn() {
+  setupMatchingActiveTurn();
+  setIsLoadingAndFlush(true);
+  setStateAndFlush('activeSessionId', 'session-1');
+}
+
 function setupRetryingProviderSwitchState() {
-  setupModelState();
+  applyModelState();
   setState(storePath('activeSessionId', 'session-1'));
   setState(storePath('sessions', [session('session-1', 2_000)]));
   setState(
     storePath('providers', [
       ...state.providers,
-      {
-        id: 'anthropic',
-        name: 'Anthropic',
-        source: 'api',
-        models: {
-          claude: {
-            id: 'claude',
-            name: 'Claude',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-            limit: { context: 1000, output: 1000 },
-          },
-        },
-      },
+      apiProvider('anthropic', 'Anthropic', [
+        toolModel('claude', 'Claude', { limit: { context: 1000, output: 1000 } }),
+      ]),
     ])
   );
   setState(storePath('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' }));
@@ -716,6 +670,7 @@ function setupRetryingProviderSwitchState() {
       },
     })
   );
+  flushSolid();
 }
 
 function assistantMessageEntry(tokens: { input: number; output: number }) {
@@ -770,6 +725,172 @@ async function flushAsyncWork(count = 16) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
   }
+}
+
+// Flush, drain pending async work, then flush whatever that work scheduled.
+async function settle() {
+  flushSolid();
+  await flushAsyncWork();
+  flushSolid();
+}
+
+function renderChatInput() {
+  cleanup = render(() => ChatInput(), container!);
+  flushSolid();
+}
+
+function setStateAndFlush<K extends keyof AppState>(key: K, value: PathSetter<AppState[K]>) {
+  setState(storePath(key, value));
+  flushSolid();
+}
+
+function setIsLoadingAndFlush(loading: boolean) {
+  setIsLoading(loading);
+  flushSolid();
+}
+
+function setInputTextAndFlush(text: string) {
+  setInputText(text);
+  flushSolid();
+}
+
+function focusComposer() {
+  const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+  if (!editor) throw new Error('Expected composer editor');
+  editor.focus();
+  flushSolid();
+  return editor;
+}
+
+function isPopulatedComposer(
+  editor: HTMLDivElement | null | undefined
+): editor is HTMLDivElement & { firstChild: ChildNode } {
+  return Boolean(editor?.firstChild);
+}
+
+function focusPopulatedComposer() {
+  const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+  if (!isPopulatedComposer(editor)) throw new Error('Expected populated composer editor');
+  editor.focus();
+  flushSolid();
+  return editor;
+}
+
+function idleEditorContext(workspacePath: string) {
+  return { workspacePath, activeFile: null, selection: null, diagnostics: [] };
+}
+
+function multiRootEditorContext(workspacePath: string, activeWorkspacePath?: string) {
+  const context = {
+    workspacePath,
+    workspaceFolders: [
+      { name: 'Repo A', path: '/repo-a' },
+      { name: 'Repo B', path: '/repo-b' },
+    ],
+    activeFile: null,
+    selection: null,
+    diagnostics: [],
+  };
+  return activeWorkspacePath ? { ...context, activeWorkspacePath } : context;
+}
+
+function runningV2Server() {
+  return { state: 'running' as const, url: 'http://localhost:4096', apiVersion: 2 as const };
+}
+
+const NO_QUEUED_ATTACHMENTS = {
+  droppedFiles: undefined,
+  clipboardImages: undefined,
+  nativePdfs: undefined,
+  terminalSelection: undefined,
+  attachedDiagnostics: undefined,
+};
+
+function userMessageEntry(model: UserMessage['model']): MessageEntry<UserMessage> {
+  return {
+    info: {
+      id: 'message-1',
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created: 1 },
+      agent: 'build',
+      model,
+    },
+    parts: [],
+  };
+}
+
+function skillCommand(name: string, description: string) {
+  return { name, description, template: description, source: 'skill' as const };
+}
+
+function dropdownItem(label: string) {
+  return Array.from(container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []).find(
+    (button) => button.textContent?.includes(label)
+  );
+}
+
+// Queues prompts q1..qN for session-1 while idle session-2 is the active view.
+function queueForBackgroundSession(...texts: string[]) {
+  setStateAndFlush('activeSessionId', 'session-2');
+  setStateAndFlush('sessionStatus', {
+    'session-1': { type: 'idle' },
+    'session-2': { type: 'idle' },
+  });
+  setStateAndFlush(
+    'queuedMessages',
+    texts.map((text, index) => ({ id: `q${index + 1}`, sessionId: 'session-1', text }))
+  );
+}
+
+function captureBridgeMessages() {
+  const messages: WebviewMessage[] = [];
+  fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
+    message
+  ) => messages.push(message);
+  return messages;
+}
+
+async function withControllableFileReader(
+  run: (fileReader: ReturnType<typeof installControllableFileReader>) => Promise<void>
+) {
+  const fileReader = installControllableFileReader();
+  flushSolid();
+  try {
+    await run(fileReader);
+  } finally {
+    fileReader.restore();
+    flushSolid();
+  }
+}
+
+function dispatchTextPaste(target: Element | null | undefined, text: string) {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', {
+    value: { getData: (type: string) => (type === 'text/plain' ? text : ''), items: [] },
+  });
+  target?.dispatchEvent(event);
+  return event;
+}
+
+function clickAndFlush(target: Element | null | undefined) {
+  target?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  flushSolid();
+}
+
+function clickSelectorAndFlush(selector: string) {
+  clickAndFlush(container?.querySelector(selector));
+}
+
+function pressKey(target: Element | null | undefined, init: KeyboardEventInit) {
+  target?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+}
+
+// Enter as the composer receives it from the document: bubbling, not cancelable.
+function pressComposerEnter() {
+  container
+    ?.querySelector('.rich-composer')
+    ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 }
 
 function postQueuedSessionStatus(sessionId: string, status: 'busy' | 'idle') {
@@ -945,7 +1066,6 @@ function availableProviderLimit(
 describe('ChatInput', () => {
   it('initializes queue timers before settled construction effects run', () => {
     setupModelState();
-    flushSolid();
     container = document.createElement('div');
     document.body.appendChild(container);
     cleanup = render(() => ChatInput(), container);
@@ -960,11 +1080,8 @@ describe('ChatInput', () => {
     async (source) => {
       vi.useFakeTimers();
       setupModelState();
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 2_000)]));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 2_000)]);
       const base = assistantMessageEntry({ input: 1, output: 1 });
       const textPart = (id: string, text: string): TextPart => ({
         id: `${id}-text`,
@@ -1033,15 +1150,10 @@ describe('ChatInput', () => {
       if (source === 'live messages') setState(storePath('messages', entries));
       else setCachedSessionMessages('session-1', entries);
       flushSolid();
-      setState(storePath('promptCompletionModel', 'openai/fast'));
-      flushSolid();
-      setInputText('Please fix');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-      editor.focus();
-      flushSolid();
+      setStateAndFlush('promptCompletionModel', 'openai/fast');
+      setInputTextAndFlush('Please fix');
+      renderChatInput();
+      const editor = focusComposer();
       setCollapsedSelection(editor.firstChild!, 'Please fix'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', bubbles: true }));
@@ -1064,17 +1176,12 @@ describe('ChatInput', () => {
   it('sends only the last ten user prompts from the composer chat, preserving repeated prompts', async () => {
     vi.useFakeTimers();
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_001, { parentID: 'session-1' }),
-        session('other-chat', 2_002),
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_001, { parentID: 'session-1' }),
+      session('other-chat', 2_002),
+    ]);
     const prompts = Array.from({ length: 20 }, (_, index) =>
       historyEntry(`prompt-${index}`, index >= 18 ? 'Add a feature' : `Prompt ${index}`)
     );
@@ -1086,35 +1193,27 @@ describe('ChatInput', () => {
     setSessionHistoryPrompts('session-1', [...prompts.slice(0, 15), other]);
     flushSolid();
     const assistant = assistantMessageEntry({ input: 1, output: 1 });
-    setState(
-      storePath('messages', [
-        ...prompts.slice(10),
-        child,
-        other,
-        {
-          ...assistant,
-          parts: [
-            {
-              id: 'assistant-text',
-              sessionID: 'session-1',
-              messageID: assistant.info.id,
-              type: 'text',
-              text: 'Assistant reply, not a user prompt',
-            },
-          ],
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('promptCompletionModel', 'openai/fast'));
-    flushSolid();
-    setInputText('Add a feature');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('messages', [
+      ...prompts.slice(10),
+      child,
+      other,
+      {
+        ...assistant,
+        parts: [
+          {
+            id: 'assistant-text',
+            sessionID: 'session-1',
+            messageID: assistant.info.id,
+            type: 'text',
+            text: 'Assistant reply, not a user prompt',
+          },
+        ],
+      },
+    ]);
+    setStateAndFlush('promptCompletionModel', 'openai/fast');
+    setInputTextAndFlush('Add a feature');
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
@@ -1139,33 +1238,25 @@ describe('ChatInput', () => {
   it('does not send another chat history when composing a new chat', async () => {
     vi.useFakeTimers();
     const previousReply = assistantMessageEntry({ input: 1, output: 1 });
-    setState(
-      storePath('messages', [
-        historyEntry('other-prompt', 'Another chat prompt'),
-        {
-          ...previousReply,
-          parts: [
-            {
-              id: 'old-text',
-              sessionID: 'session-1',
-              messageID: previousReply.info.id,
-              type: 'text',
-              text: 'Another chat agent reply',
-            },
-          ],
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('promptCompletionModel', 'openai/fast'));
-    flushSolid();
-    setInputText('Add a feature');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('messages', [
+      historyEntry('other-prompt', 'Another chat prompt'),
+      {
+        ...previousReply,
+        parts: [
+          {
+            id: 'old-text',
+            sessionID: 'session-1',
+            messageID: previousReply.info.id,
+            type: 'text',
+            text: 'Another chat agent reply',
+          },
+        ],
+      },
+    ]);
+    setStateAndFlush('promptCompletionModel', 'openai/fast');
+    setInputTextAndFlush('Add a feature');
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
@@ -1179,10 +1270,8 @@ describe('ChatInput', () => {
   });
   it('marks the composer pending only while a completion request is in flight', async () => {
     vi.useFakeTimers();
-    setState(storePath('promptCompletionModel', 'openai/fast'));
-    flushSolid();
-    setInputText('Add a feature');
-    flushSolid();
+    setStateAndFlush('promptCompletionModel', 'openai/fast');
+    setInputTextAndFlush('Add a feature');
     let resolve!: (result: { suffix: string }) => void;
     vi.mocked(client.varro.completePrompt).mockImplementationOnce(
       () =>
@@ -1190,11 +1279,8 @@ describe('ChatInput', () => {
           resolve = done;
         })
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
@@ -1218,24 +1304,16 @@ describe('ChatInput', () => {
     async (busy) => {
       vi.useFakeTimers();
       setupModelState();
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 2_000)]));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 2_000)]);
       setState(storePath('sessionStatus', 'session-1', { type: busy ? 'busy' : 'idle' }));
       flushSolid();
-      setState(storePath('promptCompletionModel', 'openai/fast'));
-      flushSolid();
-      setInputText('Add a feature');
-      flushSolid();
+      setStateAndFlush('promptCompletionModel', 'openai/fast');
+      setInputTextAndFlush('Add a feature');
       sendMessageMock.mockResolvedValue(true);
       vi.mocked(client.varro.completePrompt).mockRejectedValueOnce(new Error('Unavailable'));
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-      editor.focus();
-      flushSolid();
+      renderChatInput();
+      const editor = focusComposer();
       setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
@@ -1243,12 +1321,8 @@ describe('ChatInput', () => {
       await vi.advanceTimersByTimeAsync(600);
       flushSolid();
       expect(container!.querySelector('.prompt-completion-warning')).not.toBeNull();
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(inputText()).toBe('');
       expect(state.activeSessionId).toBe('session-1');
       expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
@@ -1261,18 +1335,13 @@ describe('ChatInput', () => {
   );
   it('uses the model-selection warning location and styles for completion failures, with a keyboard-focus tooltip', async () => {
     vi.useFakeTimers();
-    setState(storePath('promptCompletionModel', 'openai/fast'));
-    flushSolid();
-    setInputText('Add a feature');
-    flushSolid();
+    setStateAndFlush('promptCompletionModel', 'openai/fast');
+    setInputTextAndFlush('Add a feature');
     vi.mocked(client.varro.completePrompt).mockRejectedValueOnce(
       new Error('Prompt completion API returned HTTP 403')
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
@@ -1303,37 +1372,24 @@ describe('ChatInput', () => {
     expect(document.querySelector('[role="tooltip"] [role="separator"]')).toBeNull();
     expect(inputText()).toBe('Add a feature');
     expect(sendMessageMock).not.toHaveBeenCalled();
-    setState(storePath('promptCompletionModel', ''));
-    flushSolid();
+    setStateAndFlush('promptCompletionModel', '');
     expect(container!.querySelector('.prompt-completion-warning')).toBeNull();
   });
 
   it('shares one warning icon with the model-selection warning and retains that warning after completion recovers', async () => {
     vi.useFakeTimers();
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 2_000)]));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 2_000)]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
     setState(storePath('providers', 0, 'models', 'gpt-4o', 'variants', { high: {} }));
     flushSolid();
-    setState(
-      storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' })
-    );
-    flushSolid();
-    setState(storePath('promptCompletionModel', 'openai/fast'));
-    flushSolid();
-    setInputText('Add a feature');
-    flushSolid();
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' });
+    setStateAndFlush('promptCompletionModel', 'openai/fast');
+    setInputTextAndFlush('Add a feature');
     vi.mocked(client.varro.completePrompt).mockRejectedValueOnce(new Error('Unavailable'));
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor.firstChild!, 'Add a feature'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
@@ -1380,21 +1436,14 @@ describe('ChatInput', () => {
   it("uses the completion model's lowest variant rather than the active chat reasoning level", async () => {
     vi.useFakeTimers();
     setupModelState();
-    flushSolid();
     setState(
       storePath('providers', 0, 'models', 'gpt-4o', 'variants', { high: {}, low: {}, none: {} })
     );
     flushSolid();
-    setState(
-      storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' })
-    );
-    flushSolid();
-    setState(storePath('promptCompletionModel', 'openai/gpt-4o'));
-    flushSolid();
-    setInputText('Add a feature');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' });
+    setStateAndFlush('promptCompletionModel', 'openai/gpt-4o');
+    setInputTextAndFlush('Add a feature');
+    renderChatInput();
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor?.firstChild) throw new Error('Expected composer');
     editor.focus();
@@ -1419,12 +1468,9 @@ describe('ChatInput', () => {
     'handles inline prompt suggestions with %s without auto-sending',
     async (key) => {
       vi.useFakeTimers();
-      setState(storePath('promptCompletionModel', 'openai/fast'));
-      flushSolid();
-      setInputText('Add a feature');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('promptCompletionModel', 'openai/fast');
+      setInputTextAndFlush('Add a feature');
+      renderChatInput();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor?.firstChild) throw new Error('Expected composer');
       editor.focus();
@@ -1439,10 +1485,8 @@ describe('ChatInput', () => {
       expect(editor.textContent).toBe('Add a feature');
       expect(inputText()).toBe('Add a feature');
       expect(sendMessageMock).not.toHaveBeenCalled();
-      editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key });
+      await settle();
       if (key === 'Tab') {
         expect(inputText()).toBe('Add a feature with tests');
         await vi.advanceTimersByTimeAsync(1_000);
@@ -1450,9 +1494,7 @@ describe('ChatInput', () => {
         expect(editor.dataset.promptSuggestion).toBeUndefined();
         expect(client.varro.completePrompt).toHaveBeenCalledOnce();
         expect(sendMessageMock).not.toHaveBeenCalled();
-        editor.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })
-        );
+        pressKey(editor, { key: 'z', metaKey: true });
         flushSolid();
         expect(inputText()).toBe('Add a feature');
       } else if (key === 'Escape') {
@@ -1468,16 +1510,11 @@ describe('ChatInput', () => {
 
   it('displays and accepts a suggestion without duplicating the trailing draft space', async () => {
     vi.useFakeTimers();
-    setState(storePath('promptCompletionModel', 'openai/fast'));
-    flushSolid();
+    setStateAndFlush('promptCompletionModel', 'openai/fast');
     const draft = 'Add a feature ';
-    setInputText(draft);
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    setInputTextAndFlush(draft);
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor.firstChild!, draft.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
@@ -1486,29 +1523,20 @@ describe('ChatInput', () => {
     flushSolid();
     expect(editor.dataset.promptSuggestion).toBe('with tests');
     expect(inputText()).toBe(draft);
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Tab' });
+    await settle();
     expect(inputText()).toBe('Add a feature with tests');
     expect(sendMessageMock).not.toHaveBeenCalled();
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })
-    );
+    pressKey(editor, { key: 'z', metaKey: true });
     flushSolid();
     expect(inputText()).toBe(draft);
   });
 
   it('hides prompt suggestions during composition and a text selection', async () => {
     vi.useFakeTimers();
-    setState(storePath('promptCompletionModel', 'openai/fast'));
-    flushSolid();
-    setInputText('Add a feature');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('promptCompletionModel', 'openai/fast');
+    setInputTextAndFlush('Add a feature');
+    renderChatInput();
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor?.firstChild) throw new Error('Expected composer');
     editor.focus();
@@ -1552,11 +1580,8 @@ describe('ChatInput', () => {
 
     beforeEach(() => {
       setupModelState();
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('clipboardImages', [{ ...broken }]));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('clipboardImages', [{ ...broken }]);
       vi.mocked(imageLoading.loadImage).mockRejectedValue(new Error('Could not decode the image'));
     });
 
@@ -1569,15 +1594,12 @@ describe('ChatInput', () => {
         flushSolid();
         const error = vi.spyOn(console, 'error');
         try {
-          cleanup = render(() => ChatInput(), container!);
-          flushSolid();
-          await flushAsyncWork();
-          flushSolid();
+          renderChatInput();
+          await settle();
           expect(error).not.toHaveBeenCalled();
           expect(manualWorkspaceSelection()).toBe(true);
           setState(storePath('clipboardImages', []));
-          setInputText('');
-          flushSolid();
+          setInputTextAndFlush('');
           expect(manualWorkspaceSelection()).toBe(false);
           expect(error).not.toHaveBeenCalled();
         } finally {
@@ -1587,10 +1609,8 @@ describe('ChatInput', () => {
     );
 
     it('keeps the original attachment enabled, exposes the decode reason, and prevents previews', async () => {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
       const chip = container!.querySelector<HTMLElement>('.chat-attachment-chip')!;
       expect(chip.classList.contains('disabled')).toBe(false);
       expect(chip.title).toBe(
@@ -1616,12 +1636,9 @@ describe('ChatInput', () => {
         flushSolid();
         setIsLoading(steering);
         flushSolid();
-        setInputText('Describe [Image 1]');
-        flushSolid();
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        setInputTextAndFlush('Describe [Image 1]');
+        renderChatInput();
+        await settle();
         const chip = container!.querySelector<HTMLElement>('.inline-chip')!;
         expect(chip.classList.contains('disabled')).toBe(false);
         expect(chip.title).toBe(
@@ -1639,9 +1656,7 @@ describe('ChatInput', () => {
           .dispatchEvent(
             new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, metaKey: steering })
           );
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
         expect(sendMessageMock).toHaveBeenCalledWith(
           'Describe [Image 1]',
           expect.objectContaining({
@@ -1654,38 +1669,18 @@ describe('ChatInput', () => {
     );
 
     it('retains original images and placeholders in inline edits after preview failure', async () => {
-      setState(
-        storePath('messages', [
-          {
-            info: {
-              id: 'message-1',
-              sessionID: 'session-1',
-              role: 'user',
-              time: { created: 1 },
-              agent: 'build',
-              model: { providerID: 'openai', modelID: 'gpt-4o' },
-            },
-            parts: [],
-          },
-        ])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('messages', [userMessageEntry({ providerID: 'openai', modelID: 'gpt-4o' })]);
+      renderChatInput();
       startEditingMessage('message-1', 'session-1', 'Describe [Image 1]', {
         files: [],
         images: [{ ...broken }],
         terminalSelection: null,
       });
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       container!
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(editMessageMock).toHaveBeenCalledWith(
         'message-1',
         'Describe [Image 1]',
@@ -1705,10 +1700,8 @@ describe('ChatInput', () => {
             rejectLoad = reject;
           })
       );
-      setInputText('[Image 1]');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setInputTextAndFlush('[Image 1]');
+      renderChatInput();
       const chip = container!.querySelector<HTMLElement>('.inline-chip')!;
       expect(chip.hasAttribute('data-preview-image')).toBe(false);
       chip.click();
@@ -1716,30 +1709,21 @@ describe('ChatInput', () => {
       expect(document.querySelector('.chat-image-preview-overlay')).toBeNull();
       vi.mocked(imageLoading.loadImage).mockResolvedValue(document.createElement('img'));
       setState(storePath('clipboardImages', 0, 'url', 'data:image/gif;base64,repaired'));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       rejectLoad?.(new Error('Could not decode the old image'));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(container!.querySelector('.inline-chip.disabled')).toBeNull();
       expect(container!.querySelector('.inline-chip[data-preview-image]')).not.toBeNull();
     });
 
     it('sends the original image-only draft after preview failure', async () => {
-      setInputText('[Image 1]');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush('[Image 1]');
+      renderChatInput();
+      await settle();
       container!
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledWith(
         '[Image 1]',
         expect.objectContaining({
@@ -1757,26 +1741,20 @@ describe('ChatInput', () => {
         filename: 'Image 2',
         url: 'data:image/gif;base64,valid',
       };
-      setState(storePath('clipboardImages', [{ ...broken }, valid]));
-      flushSolid();
+      setStateAndFlush('clipboardImages', [{ ...broken }, valid]);
       vi.mocked(imageLoading.loadImage).mockImplementation(async (url) => {
         if (url === broken.url) throw new Error('Could not decode the image');
         return document.createElement('img');
       });
       setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
       flushSolid();
-      setInputText('Describe [Image 1] [Image 2]');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush('Describe [Image 1] [Image 2]');
+      renderChatInput();
+      await settle();
       container!
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.queuedMessages[0]?.text).toBe('Describe [Image 1] [Image 2]');
       expect(state.queuedMessages[0]?.clipboardImages).toEqual([
         expect.objectContaining({ id: broken.id, url: broken.url }),
@@ -1793,8 +1771,7 @@ describe('ChatInput', () => {
             rejectLoad = reject;
           })
       );
-      setInputText('Describe [Image 1]');
-      flushSolid();
+      setInputTextAndFlush('Describe [Image 1]');
       cleanup = render(() => ChatInput({ newSession: true }), container!);
       flushSolid();
       expect(
@@ -1803,9 +1780,7 @@ describe('ChatInput', () => {
       container!
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledWith(
         'Describe [Image 1]',
         expect.objectContaining({
@@ -1816,41 +1791,31 @@ describe('ChatInput', () => {
       );
       expect(showSessionActionFeedbackMock).not.toHaveBeenCalled();
       rejectLoad?.(new Error('Timed out decoding the image'));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(container!.querySelector<HTMLElement>('.inline-chip')!.title).toBe(
         'Preview unavailable: Timed out decoding the image. The original image is attached.'
       );
       container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledTimes(2);
       expect(sendMessageMock.mock.calls[1]?.[1]?.queuedAttachments?.clipboardImages?.[0]?.url).toBe(
         broken.url
       );
       vi.mocked(imageLoading.loadImage).mockResolvedValue(document.createElement('img'));
       setState(storePath('clipboardImages', 0, 'url', 'data:image/gif;base64,repaired'));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(container!.querySelector('.inline-chip.disabled')).toBeNull();
       expect(container!.querySelector('.inline-chip[data-preview-image]')).not.toBeNull();
     });
 
     it('stores and delegates the original image even when its preview fails', async () => {
       setupVisionDelegationModelState();
-      flushSolid();
-      setInputText('@vision Describe [Image 1]');
-      flushSolid();
+      setInputTextAndFlush('@vision Describe [Image 1]');
       const posted = vi.fn();
       fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
         posted;
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
       expect(posted).toHaveBeenCalledWith({
         type: 'images/store',
         payload: {
@@ -1878,15 +1843,11 @@ describe('ChatInput', () => {
           },
         })
       );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       container!
         .querySelector('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalled();
       expect(sendMessageMock.mock.calls[0]?.[1]?.queuedAttachments?.clipboardImages?.[0]?.url).toBe(
         broken.url
@@ -1922,23 +1883,17 @@ describe('ChatInput', () => {
           : null
       );
       setupModelState();
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('clipboardImages', [{ ...original }]));
-      flushSolid();
-      setInputText('[image.png]');
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('clipboardImages', [{ ...original }]);
+      setInputTextAndFlush('[image.png]');
     });
     afterEach(() => {
       vi.restoreAllMocks();
       flushSolid();
     });
     it('compresses and restores an inline image without changing its name, identity, marker or order', async () => {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
       container!
         .querySelector('.inline-chip')!
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
@@ -1971,21 +1926,15 @@ describe('ChatInput', () => {
     });
     it('supports the attachment-row chip and refuses compression during image storage', async () => {
       setupVisionDelegationModelState();
-      flushSolid();
-      setInputText('@vision Look at this');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush('@vision Look at this');
+      renderChatInput();
+      await settle();
       container!
         .querySelector('.chat-attachment-chip')!
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       flushSolid();
       document.querySelector<HTMLButtonElement>('.image-compression-menu button')!.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(document.querySelector('[role="alert"]')?.textContent).toContain(
         'Wait for the current image operation'
       );
@@ -2001,12 +1950,9 @@ describe('ChatInput', () => {
             complete = resolve;
           })
       );
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-2'));
-      flushSolid();
+      renderChatInput();
+      await settle();
+      setStateAndFlush('activeSessionId', 'session-2');
       complete?.({ width: 4000, height: 2000, recommended: compressed, smaller: null });
       await flushAsyncWork();
       flushSolid();
@@ -2016,21 +1962,16 @@ describe('ChatInput', () => {
     });
     it('does not mutate a queued image snapshot while compressing the draft', async () => {
       const queuedImage = { ...original };
-      setState(
-        storePath('queuedMessages', [
-          {
-            id: 'queue-compression',
-            sessionId: 'session-1',
-            text: 'queued',
-            clipboardImages: [queuedImage],
-          },
-        ])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setStateAndFlush('queuedMessages', [
+        {
+          id: 'queue-compression',
+          sessionId: 'session-1',
+          text: 'queued',
+          clipboardImages: [queuedImage],
+        },
+      ]);
+      renderChatInput();
+      await settle();
       container!
         .querySelector('.inline-chip')!
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
@@ -2042,33 +1983,24 @@ describe('ChatInput', () => {
     });
     it('rejects a stale image-store acknowledgement after undo restores the original', async () => {
       setupVisionDelegationModelState();
-      flushSolid();
-      setState(
-        storePath('clipboardImages', [
-          {
-            ...original,
-            contextFile: { path: '/repo/original.png', relativePath: 'original.png', type: 'file' },
-          },
-        ])
-      );
-      flushSolid();
-      setInputText('@vision inspect [image.png]');
-      flushSolid();
+      setStateAndFlush('clipboardImages', [
+        {
+          ...original,
+          contextFile: { path: '/repo/original.png', relativePath: 'original.png', type: 'file' },
+        },
+      ]);
+      setInputTextAndFlush('@vision inspect [image.png]');
       const posted = vi.fn();
       fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
         posted;
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
       container!
         .querySelector('.inline-chip[data-chip-type="image"]')!
         .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       flushSolid();
       document.querySelector<HTMLButtonElement>('.image-compression-menu button')!.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(posted).toHaveBeenCalledWith(expect.objectContaining({ type: 'images/store' }));
       container!
         .querySelector('.rich-composer')!
@@ -2102,9 +2034,7 @@ describe('ChatInput', () => {
   });
   it('attaches PDFs picked by the extension', async () => {
     setupModelState();
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     const pdf = {
       id: 'pdf-1',
       url: 'data:application/pdf;base64,JVBERi0xCg==',
@@ -2140,12 +2070,10 @@ describe('ChatInput', () => {
       })
     );
     flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'pdf-model' }));
-    flushSolid();
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'pdf-model' });
     expect(pdfChip?.textContent).toContain('PDF');
 
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
-    flushSolid();
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
     expect(pdfChip?.textContent).toContain('PDF');
   });
 
@@ -2153,7 +2081,6 @@ describe('ChatInput', () => {
     'keeps the PDF draft and explains capability %j on Enter',
     async (input) => {
       setupModelState();
-      flushSolid();
       setState(storePath('providers', 0, 'models', 'gpt-4o', 'capabilities', { input }));
       flushSolid();
       const pdf = {
@@ -2163,18 +2090,11 @@ describe('ChatInput', () => {
         size: 5,
         url: 'data:application/pdf;base64,JVBERi0=',
       };
-      setState(storePath('nativePdfs', [pdf]));
-      flushSolid();
-      setInputText('Keep my draft');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      container
-        ?.querySelector('.rich-composer')
-        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setStateAndFlush('nativePdfs', [pdf]);
+      setInputTextAndFlush('Keep my draft');
+      renderChatInput();
+      pressComposerEnter();
+      await settle();
       expect(sendMessageMock).not.toHaveBeenCalled();
       expect(inputText()).toBe('Keep my draft');
       expect(state.nativePdfs).toEqual([pdf]);
@@ -2188,235 +2108,153 @@ describe('ChatInput', () => {
   );
 
   it('does not attach a delayed pasted PDF after switching sessions', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(storePath('activeSessionId', 'session-a'));
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush('activeSessionId', 'session-a');
+      renderChatInput();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       const pdf = new File(['%PDF-1.7\n'], 'delayed.pdf', { type: 'application/pdf' });
       dispatchImagePaste(editor, [pdf]);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(fileReader.hasPending('delayed.pdf')).toBe(true);
 
-      setState(storePath('activeSessionId', 'session-b'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-b');
       fileReader.resolve('delayed.pdf');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(state.nativePdfs).toEqual([]);
       expect(container?.textContent).not.toContain('delayed.pdf');
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('does not attach a delayed pasted PDF after sending clears the composer', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(storePath('activeSessionId', 'session-a'));
-      flushSolid();
-      setInputText('Send this draft');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush('activeSessionId', 'session-a');
+      setInputTextAndFlush('Send this draft');
+      renderChatInput();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       dispatchImagePaste(editor, [
         new File(['%PDF-1.7\n'], 'send-delayed.pdf', { type: 'application/pdf' }),
       ]);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(fileReader.hasPending('send-delayed.pdf')).toBe(true);
 
-      container
-        ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+      await settle();
       expect(inputText()).toBe('');
 
       fileReader.resolve('send-delayed.pdf');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(state.nativePdfs).toEqual([]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('does not attach a delayed pasted PDF after queuing clears the composer', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(storePath('activeSessionId', 'session-a'));
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush('activeSessionId', 'session-a');
       setState(storePath('sessionStatus', 'session-a', { type: 'busy' }));
       flushSolid();
-      setInputText('Queue this draft');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setInputTextAndFlush('Queue this draft');
+      renderChatInput();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       dispatchImagePaste(editor, [
         new File(['%PDF-1.7\n'], 'queue-delayed.pdf', { type: 'application/pdf' }),
       ]);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(fileReader.hasPending('queue-delayed.pdf')).toBe(true);
 
-      container
-        ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      clickSelectorAndFlush('[aria-label="Add to queue (Enter)"]');
+      await settle();
       expect(inputText()).toBe('');
       expect(state.queuedMessages).toHaveLength(1);
 
       fileReader.resolve('queue-delayed.pdf');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(state.nativePdfs).toEqual([]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('does not attach a delayed pasted PDF after the composer is disposed', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      renderChatInput();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       dispatchImagePaste(editor, [
         new File(['%PDF-1.7\n'], 'disposed-delayed.pdf', { type: 'application/pdf' }),
       ]);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(fileReader.hasPending('disposed-delayed.pdf')).toBe(true);
 
-      cleanup();
+      cleanup!();
       flushSolid();
       cleanup = undefined;
       fileReader.resolve('disposed-delayed.pdf');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(state.nativePdfs).toEqual([]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('preserves image/PDF/image paste order when the PDF finishes first', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
+    await withControllableFileReader(async (fileReader) => {
       setupModelState();
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
       dispatchImagePaste(editor, [
         new File(['first'], 'first.png', { type: 'image/png' }),
         new File(['%PDF-1.7\n'], 'middle.pdf', { type: 'application/pdf' }),
         new File(['last'], 'last.png', { type: 'image/png' }),
       ]);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       fileReader.resolve('middle.pdf');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       fileReader.resolve('last.png');
       flushSolid();
       fileReader.resolve('first.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.clipboardImages).toHaveLength(2);
       expect(state.nativePdfs).toHaveLength(1);
       const pdfSequence = state.nativePdfs[0]!.attachmentSequence!;
       expect(state.clipboardImages[0]!.attachmentSequence!).toBeLessThan(pdfSequence);
       expect(state.clipboardImages[1]!.attachmentSequence!).toBeGreaterThan(pdfSequence);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('keeps a delayed pasted PDF when the user types before it finishes', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(storePath('activeSessionId', 'session-a'));
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush('activeSessionId', 'session-a');
+      renderChatInput();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       dispatchImagePaste(editor, [
         new File(['%PDF-1.7\n'], 'typing-delayed.pdf', { type: 'application/pdf' }),
       ]);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(fileReader.hasPending('typing-delayed.pdf')).toBe(true);
 
       enterComposerText(editor, 'Keep typing');
       fileReader.resolve('typing-delayed.pdf');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Keep typing');
       expect(state.nativePdfs).toMatchObject([{ filename: 'typing-delayed.pdf' }]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('hides pre-input status blocks while a diff overlay is expanded', () => {
-    setState(
-      storePath('todos', [
-        { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'medium' },
-      ])
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('todos', [
+      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'medium' },
+    ]);
+    renderChatInput();
 
     expect(container?.querySelector('.todo-block')).toBeInstanceOf(HTMLElement);
     expect(container?.querySelector('.chat-input-shell')).toBeInstanceOf(HTMLElement);
@@ -2437,19 +2275,12 @@ describe('ChatInput', () => {
     const collapse = vi.fn(() => setExpandedDiffOverlay(testDiffOverlayOwner, false));
     setExpandedDiffOverlay(testDiffOverlayOwner, true, collapse);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Continue with this change');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('Continue with this change');
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
 
     expect(collapse).toHaveBeenCalledTimes(1);
     expect(hasExpandedDiffOverlay()).toBe(false);
@@ -2457,21 +2288,13 @@ describe('ChatInput', () => {
   });
 
   it('sends to the composer session when navigation races slash-command detection', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Send to the original chat');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('Send to the original chat');
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    setStateAndFlush('activeSessionId', 'session-2');
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       'Send to the original chat',
@@ -2483,19 +2306,12 @@ describe('ChatInput', () => {
   });
 
   it('keeps a draft send separate when an existing session opens during detection', async () => {
-    setInputText('Send to a new chat');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('Send to a new chat');
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    setStateAndFlush('activeSessionId', 'session-2');
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       'Send to a new chat',
@@ -2504,14 +2320,10 @@ describe('ChatInput', () => {
   });
 
   it('keeps sending disabled until initial message hydration completes', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messagesLoading', true));
-    flushSolid();
-    setInputText('Send after hydration');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messagesLoading', true);
+    setInputTextAndFlush('Send after hydration');
+    renderChatInput();
 
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(sendButton?.disabled).toBe(true);
@@ -2519,10 +2331,8 @@ describe('ChatInput', () => {
     flushSolid();
     expect(sendMessageMock).not.toHaveBeenCalled();
 
-    setState(storePath('messagesLoading', false));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('messagesLoading', false);
+    await settle();
 
     expect(sendButton?.disabled).toBe(false);
   });
@@ -2620,8 +2430,7 @@ describe('ChatInput', () => {
         getData: () => '',
       });
       try {
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
+        renderChatInput();
         dispatchDragEvent(container!.querySelector('.chat-input-container')!, 'drop', transfer);
         flushSolid();
         Object.defineProperties(transfer, {
@@ -2665,8 +2474,7 @@ describe('ChatInput', () => {
       getData: () => '',
     });
     try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       dispatchDragEvent(container!.querySelector('.chat-input-container')!, 'drop', transfer);
       flushSolid();
       await vi.waitFor(() =>
@@ -2741,10 +2549,8 @@ describe('ChatInput', () => {
   });
 
   it('renders while loading before the current model memo is initialized', () => {
-    setInputText('Ask the sub-agent');
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
+    setInputTextAndFlush('Ask the sub-agent');
+    setIsLoadingAndFlush(true);
 
     expect(() => {
       cleanup = render(() => ChatInput(), container!);
@@ -2765,18 +2571,13 @@ describe('ChatInput', () => {
       const sent: WebviewMessage[] = [];
       const onBeforeSend = vi.fn();
       bridgeWindow.__sendToExtension = (message) => sent.push(message);
-      setInputText(command);
-      flushSolid();
+      setInputTextAndFlush(command);
 
       try {
         cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
         flushSolid();
-        container
-          ?.querySelector<HTMLDivElement>('.rich-composer')
-          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        pressComposerEnter();
+        await settle();
 
         expect(sent).toContainEqual({
           type: 'usage/report',
@@ -2792,53 +2593,21 @@ describe('ChatInput', () => {
   );
 
   it('shows an active hidden session model without falling back to the first visible model', () => {
-    setState(
-      storePath('providers', [
-        {
-          id: 'zai-coding-plan',
-          name: 'Z.AI Coding Plan',
-          source: 'api',
-          models: {
-            'glm-5.2': {
-              id: 'glm-5.2',
-              name: 'GLM-5.2',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
-          },
-        },
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-5.6-luna': {
-              id: 'gpt-5.6-luna',
-              name: 'GPT-5.6 Luna',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              variants: { max: {} },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { 'zai-coding-plan': 'glm-5.2' }));
-    flushSolid();
-    setState(storePath('hiddenModels', ['openai:gpt-5.6-luna']));
-    flushSolid();
-    setState(
-      storePath('selectedModel', {
-        providerID: 'openai',
-        modelID: 'gpt-5.6-luna',
-        variant: 'max',
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providers', [
+      apiProvider('zai-coding-plan', 'Z.AI Coding Plan', [toolModel('glm-5.2', 'GLM-5.2')]),
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-5.6-luna', 'GPT-5.6 Luna', { variants: { max: {} } }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { 'zai-coding-plan': 'glm-5.2' });
+    setStateAndFlush('hiddenModels', ['openai:gpt-5.6-luna']);
+    setStateAndFlush('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.6-luna',
+      variant: 'max',
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     expect(modelButton?.textContent).toContain('GPT-5.6 Luna');
@@ -2847,40 +2616,32 @@ describe('ChatInput', () => {
 
   it('uses the busy placeholder while a child session is still working', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        {
-          id: 'session-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Root session',
-          version: '1',
-          time: { created: 0, updated: 10 },
-        },
-        {
-          id: 'child-1',
-          projectID: 'project-1',
-          directory: '/workspace',
-          title: 'Research child',
-          version: '1',
-          parentID: 'session-1',
-          time: { created: 1, updated: 11 },
-        },
-      ] satisfies Session[])
-    );
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'session-1': { type: 'idle' },
-        'child-1': { type: 'busy' },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Root session',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+      {
+        id: 'child-1',
+        projectID: 'project-1',
+        directory: '/workspace',
+        title: 'Research child',
+        version: '1',
+        parentID: 'session-1',
+        time: { created: 1, updated: 11 },
+      },
+    ] satisfies Session[]);
+    setStateAndFlush('sessionStatus', {
+      'session-1': { type: 'idle' },
+      'child-1': { type: 'busy' },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await Promise.resolve();
     flushSolid();
 
@@ -2888,13 +2649,10 @@ describe('ChatInput', () => {
       'Queue a follow-up or steer'
     );
 
-    setState(
-      storePath('sessionStatus', {
-        'session-1': { type: 'idle' },
-        'child-1': { type: 'idle' },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('sessionStatus', {
+      'session-1': { type: 'idle' },
+      'child-1': { type: 'idle' },
+    });
     await Promise.resolve();
     flushSolid();
 
@@ -2913,16 +2671,11 @@ describe('ChatInput', () => {
   });
 
   it('links to the Varro repository when no status metadata is available', () => {
-    setState(storePath('activeSessionId', null));
-    flushSolid();
-    setState(storePath('mcpStatus', {}));
-    flushSolid();
-    setState(storePath('lspStatus', []));
-    flushSolid();
-    setState(storePath('providerLimits', {}));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', null);
+    setStateAndFlush('mcpStatus', {});
+    setStateAndFlush('lspStatus', []);
+    setStateAndFlush('providerLimits', {});
+    renderChatInput();
 
     const repositoryLink = container?.querySelector<HTMLAnchorElement>('.toolbar-repository-link');
     expect(repositoryLink?.href).toBe(packageJson.repository);
@@ -2933,29 +2686,22 @@ describe('ChatInput', () => {
   });
 
   it('shows configured MCP selections independently of connection status and toggles the picker', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
 
-    setState(
-      storePath('mcpStatus', {
-        alpha: { status: 'connected' },
-        beta: { status: 'disabled' },
-        gamma: { status: 'connected' },
-        delta: { status: 'failed' },
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('mcpDefaults', {
-        global: { alpha: true, beta: false, gamma: true, delta: false },
-        project: {},
-        effective: { alpha: true, beta: false, gamma: true, delta: false },
-        editable: true,
-      })
-    );
-    flushSolid();
+    setStateAndFlush('mcpStatus', {
+      alpha: { status: 'connected' },
+      beta: { status: 'disabled' },
+      gamma: { status: 'connected' },
+      delta: { status: 'failed' },
+    });
+    setStateAndFlush('mcpDefaults', {
+      global: { alpha: true, beta: false, gamma: true, delta: false },
+      project: {},
+      effective: { alpha: true, beta: false, gamma: true, delta: false },
+      editable: true,
+    });
 
     const mcpCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
     expect(mcpCount?.textContent).toContain('MCPs:');
@@ -2984,26 +2730,20 @@ describe('ChatInput', () => {
     flushSolid();
     expect(container?.querySelector('.dropdown-menu')).toBeNull();
 
-    setState(
-      storePath('mcpStatus', {
-        alpha: { status: 'failed' },
-        beta: { status: 'needs_auth' },
-        gamma: { status: 'failed' },
-        delta: { status: 'disabled' },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('mcpStatus', {
+      alpha: { status: 'failed' },
+      beta: { status: 'needs_auth' },
+      gamma: { status: 'failed' },
+      delta: { status: 'disabled' },
+    });
     expect(container?.querySelector('.toolbar-mcp-count')?.textContent).toContain('2/4');
 
-    setState(
-      storePath('mcpStatus', {
-        alpha: { status: 'disabled' },
-        beta: { status: 'disabled' },
-        gamma: { status: 'disabled' },
-        delta: { status: 'disabled' },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('mcpStatus', {
+      alpha: { status: 'disabled' },
+      beta: { status: 'disabled' },
+      gamma: { status: 'disabled' },
+      delta: { status: 'disabled' },
+    });
     setState(
       storePath('mcpDefaults', 'effective', {
         alpha: false,
@@ -3053,16 +2793,10 @@ describe('ChatInput', () => {
         else reconcile(incoming)(current);
       });
       flushSolid();
-      setInputText(command);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      container
-        ?.querySelector('.rich-composer')
-        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush(command);
+      renderChatInput();
+      pressComposerEnter();
+      await settle();
       expect(showMcpSettings()).toBe(true);
       expect(container?.querySelector('.dropdown-menu')).toBeNull();
       expect(sendMessageMock).not.toHaveBeenCalled();
@@ -3078,10 +2812,8 @@ describe('ChatInput', () => {
     flushSolid();
     setShowTurnTimer(true);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 70_000)]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 70_000)]);
     const userMessage = {
       info: {
         id: 'user-1',
@@ -3103,15 +2835,13 @@ describe('ChatInput', () => {
     } satisfies MessageEntry<UserMessage>;
     const assistantMessage = assistantMessageEntry({ input: 0, output: 0 });
     assistantMessage.info.time.created = 70_000;
-    setState(storePath('messages', [userMessage, assistantMessage]));
-    flushSolid();
+    setStateAndFlush('messages', [userMessage, assistantMessage]);
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
     setLoadingLastActivityAt(70_000);
     flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
     await vi.advanceTimersByTimeAsync(999);
@@ -3157,20 +2887,17 @@ describe('ChatInput', () => {
     flushSolid();
     expect(container?.querySelector('.toolbar-turn-timer')).not.toBeNull();
 
-    setState(
-      storePath('messages', [
-        userMessage,
-        {
-          ...assistantMessage,
-          info: {
-            ...assistantMessage.info,
-            finish: 'stop',
-            time: { ...assistantMessage.info.time, completed: Date.now() },
-          },
+    setStateAndFlush('messages', [
+      userMessage,
+      {
+        ...assistantMessage,
+        info: {
+          ...assistantMessage.info,
+          finish: 'stop',
+          time: { ...assistantMessage.info.time, completed: Date.now() },
         },
-      ])
-    );
-    flushSolid();
+      },
+    ]);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
@@ -3184,10 +2911,8 @@ describe('ChatInput', () => {
       flushSolid();
       setShowTurnTimer(true);
       flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 70_000)]));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 70_000)]);
       const userMessage = {
         info: {
           id: 'user-1',
@@ -3213,8 +2938,7 @@ describe('ChatInput', () => {
         ...assistant,
         info: { ...assistant.info, finish: 'stop', time: { created: 71_000, completed: 80_000 } },
       };
-      setState(storePath('messages', [userMessage, initiallyPending ? interim : assistant]));
-      flushSolid();
+      setStateAndFlush('messages', [userMessage, initiallyPending ? interim : assistant]);
       setState(
         storePath(
           'sessionStatus',
@@ -3225,8 +2949,7 @@ describe('ChatInput', () => {
         )
       );
       flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       const timer = container?.querySelector('.toolbar-turn-timer');
       expect(timer?.textContent).toBe('10s');
       setState(
@@ -3237,8 +2960,7 @@ describe('ChatInput', () => {
         })
       );
       flushSolid();
-      setState(storePath('messages', [userMessage, interim]));
-      flushSolid();
+      setStateAndFlush('messages', [userMessage, interim]);
       await vi.advanceTimersByTimeAsync(20_000);
       flushSolid();
       expect(container?.querySelector('.toolbar-turn-timer')).toBe(timer);
@@ -3248,8 +2970,7 @@ describe('ChatInput', () => {
         ...assistant,
         info: { ...assistant.info, id: 'assistant-resumed', time: { created: Date.now() } },
       };
-      setState(storePath('messages', [userMessage, interim, resumed]));
-      flushSolid();
+      setStateAndFlush('messages', [userMessage, interim, resumed]);
       setState((draft) => {
         const current = draft['sessionStatus']['session-1'];
         const incoming = { type: 'busy' } satisfies typeof current;
@@ -3266,21 +2987,18 @@ describe('ChatInput', () => {
       await vi.advanceTimersByTimeAsync(10_000);
       flushSolid();
       expect(timer?.textContent).toBe('40s');
-      setState(
-        storePath('messages', [
-          userMessage,
-          interim,
-          {
-            ...resumed,
-            info: {
-              ...resumed.info,
-              finish: 'stop',
-              time: { ...resumed.info.time, completed: Date.now() },
-            },
+      setStateAndFlush('messages', [
+        userMessage,
+        interim,
+        {
+          ...resumed,
+          info: {
+            ...resumed.info,
+            finish: 'stop',
+            time: { ...resumed.info.time, completed: Date.now() },
           },
-        ])
-      );
-      flushSolid();
+        },
+      ]);
       setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
       flushSolid();
       expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
@@ -3300,10 +3018,8 @@ describe('ChatInput', () => {
     flushSolid();
     setShowTurnTimer(true);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 100_000)]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 100_000)]);
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
     const prompt: MessageEntry<UserMessage> = {
@@ -3332,10 +3048,8 @@ describe('ChatInput', () => {
     assistant.info.time.created = 101_000;
     assistant.info.time.completed = 200_000;
     assistant.info.finish = 'tool_calls';
-    setState(storePath('messages', [prompt, assistant]));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('messages', [prompt, assistant]);
+    renderChatInput();
     const timer = container?.querySelector('.toolbar-turn-timer');
     expect(timer?.textContent).toBe('18m 8s');
 
@@ -3348,8 +3062,7 @@ describe('ChatInput', () => {
       },
       parts: [],
     };
-    setState(storePath('messages', [prompt, assistant, notice]));
-    flushSolid();
+    setStateAndFlush('messages', [prompt, assistant, notice]);
     expect(timer?.textContent).toBe('18m 8s');
 
     const identity = { id: 'notice-part', messageID: 'notice', sessionID: 'session-1' };
@@ -3369,24 +3082,21 @@ describe('ChatInput', () => {
                     ? 'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.'
                     : 'Run the remaining tests',
           };
-    setState(storePath('messages', [prompt, assistant, { ...notice, parts: [part] }]));
-    flushSolid();
+    setStateAndFlush('messages', [prompt, assistant, { ...notice, parts: [part] }]);
     expect(timer?.textContent).toBe('18m 8s');
     const resumed = {
       ...assistant,
       info: { ...assistant.info, id: 'assistant-resumed', time: { created: Date.now() } },
     };
-    setState(storePath('messages', [prompt, assistant, { ...notice, parts: [part] }, resumed]));
-    flushSolid();
+    setStateAndFlush('messages', [prompt, assistant, { ...notice, parts: [part] }, resumed]);
     await vi.advanceTimersByTimeAsync(2_000);
     flushSolid();
     expect(timer?.textContent).toBe('18m 10s');
     expect(container?.querySelector('.toolbar-turn-timer')).toBe(timer);
 
-    cleanup();
+    cleanup!();
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     expect(container?.querySelector('.toolbar-turn-timer')?.textContent).toBe('18m 10s');
 
     const completed = {
@@ -3398,8 +3108,7 @@ describe('ChatInput', () => {
       },
     };
     const history = [prompt, assistant, { ...notice, parts: [part] }, completed];
-    setState(storePath('messages', history));
-    flushSolid();
+    setStateAndFlush('messages', history);
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
     expect(container?.querySelector('.toolbar-turn-timer')).toBeNull();
@@ -3418,8 +3127,7 @@ describe('ChatInput', () => {
         time: { created: Date.now() },
       },
     };
-    setState(storePath('messages', [...history, nextPrompt, nextAssistant]));
-    flushSolid();
+    setStateAndFlush('messages', [...history, nextPrompt, nextAssistant]);
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
     // A stale loading clock from the prior turn must not carry into the new turn.
@@ -3436,12 +3144,10 @@ describe('ChatInput', () => {
     flushSolid();
     setShowTurnTimer(true);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
-    setIsLoading(true);
-    flushSolid();
+    setIsLoadingAndFlush(true);
     setLoadingStartedAt(70_000);
     flushSolid();
 
@@ -3452,16 +3158,11 @@ describe('ChatInput', () => {
   });
 
   it('hides the MCP control while editing a message', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('mcpStatus', {
-        alpha: { status: 'disabled' },
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('mcpStatus', {
+      alpha: { status: 'disabled' },
+    });
+    renderChatInput();
 
     expect(container?.querySelector('.toolbar-mcp-count')).not.toBeNull();
 
@@ -3474,13 +3175,10 @@ describe('ChatInput', () => {
   });
 
   it('shows one MCP count when every available MCP is enabled', () => {
-    setState(storePath('mcpStatus', { alpha: { status: 'connected' } }));
-    flushSolid();
+    setStateAndFlush('mcpStatus', { alpha: { status: 'connected' } });
     const availableNames = Object.keys(state.mcpStatus);
-    setState(storePath('draftSelectedMcps', availableNames));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('draftSelectedMcps', availableNames);
+    renderChatInput();
 
     const mcpValue = container?.querySelector('.toolbar-mcp-count-value');
     expect(mcpValue?.textContent).toBe(String(availableNames.length));
@@ -3489,20 +3187,15 @@ describe('ChatInput', () => {
   });
 
   it('shows active LSPs before MCPs and opens a read-only list', async () => {
-    setState(storePath('mcpStatus', { docs: { status: 'connected' } }));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('mcpStatus', { docs: { status: 'connected' } });
+    renderChatInput();
 
     expect(container?.querySelector('.toolbar-lsp-count')).toBeNull();
 
-    setState(
-      storePath('lspStatus', [
-        { id: 'typescript', name: 'TypeScript', root: '/repo', status: 'connected' },
-        { id: 'oxlint', name: 'Oxlint', root: '/repo', status: 'connected' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('lspStatus', [
+      { id: 'typescript', name: 'TypeScript', root: '/repo', status: 'connected' },
+      { id: 'oxlint', name: 'Oxlint', root: '/repo', status: 'connected' },
+    ]);
 
     const lspCount = container?.querySelector<HTMLButtonElement>('.toolbar-lsp-count');
     expect(lspCount?.textContent).toContain('LSPs:');
@@ -3529,44 +3222,37 @@ describe('ChatInput', () => {
 
   it('shows weekly quota warnings above the composer and gives hard-limit notices priority', () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', Date.now())]));
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': {
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-          status: 'available',
-          source: 'provider',
-          checkedAt: Date.now(),
-          usageLimitResets: { availableCount: 1, credits: null },
-          windows: [
-            {
-              id: 'five_hour',
-              label: '5-hour limit',
-              unit: 'unknown',
-              remaining: 90,
-              limit: 100,
-              resetAt: Date.now() + 60_000,
-            },
-            {
-              id: 'seven_day',
-              label: 'Weekly limit',
-              unit: 'unknown',
-              remaining: 8,
-              limit: 100,
-              resetAt: Date.now() + 86_400_000,
-            },
-          ],
-        },
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', Date.now())]);
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        status: 'available',
+        source: 'provider',
+        checkedAt: Date.now(),
+        usageLimitResets: { availableCount: 1, credits: null },
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-hour limit',
+            unit: 'unknown',
+            remaining: 90,
+            limit: 100,
+            resetAt: Date.now() + 60_000,
+          },
+          {
+            id: 'seven_day',
+            label: 'Weekly limit',
+            unit: 'unknown',
+            remaining: 8,
+            limit: 100,
+            resetAt: Date.now() + 86_400_000,
+          },
+        ],
+      },
+    });
+    renderChatInput();
     const warning = container?.querySelector('.chat-quota-warning');
     expect(warning?.textContent).toContain('Weekly limit: 8% left');
     expect(warning?.textContent).not.toContain('5-hour limit');
@@ -3596,74 +3282,51 @@ describe('ChatInput', () => {
   });
 
   it('shows all available provider-limit windows under the fixed threshold', async () => {
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [toolModel('gpt-4o', 'GPT-4o')]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-4o' });
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 41,
+            limit: 100,
+            resetAt: null,
           },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': {
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-          status: 'available',
-          source: 'provider',
-          checkedAt: 1,
-          windows: [
-            {
-              id: 'five_hour',
-              label: '5-Hour Limit',
-              unit: 'requests',
-              remaining: 41,
-              limit: 100,
-              resetAt: null,
-            },
-            {
-              id: 'month',
-              label: 'Monthly Limit',
-              unit: 'requests',
-              remaining: 80,
-              limit: 100,
-              resetAt: null,
-            },
-          ],
-        },
-      })
-    );
-    flushSolid();
+          {
+            id: 'month',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const chip = container?.querySelector('.toolbar-limit-chip');
     expect(chip).not.toBeNull();
     expect(chip?.textContent).toContain('41%');
     expect(chip?.textContent).toContain('80%');
     expect(container?.querySelector('.chat-quota-warning')).toBeNull();
-    setState(storePath('debugShowQuotaWarning', true));
-    flushSolid();
+    setStateAndFlush('debugShowQuotaWarning', true);
     expect(container?.querySelector('.chat-quota-warning')?.textContent).toContain(
       '5-Hour Limit: 41% left'
     );
-    setState(storePath('debugShowQuotaWarning', false));
-    flushSolid();
+    setStateAndFlush('debugShowQuotaWarning', false);
     expect(container?.querySelector('.chat-quota-warning')).toBeNull();
 
     const checkedAt = Date.now() - 120_000;
@@ -3679,9 +3342,7 @@ describe('ChatInput', () => {
     );
     expect(chip?.getAttribute('aria-label')).not.toContain('Snapshot age:');
     container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const popup = container?.querySelector('.provider-limit-popup');
     expect(popup).not.toBeNull();
     expect(popup?.textContent).not.toContain('Refresh failed; showing last known limits.');
@@ -3693,124 +3354,10 @@ describe('ChatInput', () => {
   it.each(['zai', 'zai-coding-plan'])(
     'hides unavailable %s limits and restores the control after recovery',
     async (providerID) => {
-      setState(
-        storePath('providers', [
-          {
-            id: providerID,
-            name: 'Z.ai',
-            source: 'api',
-            models: {
-              'glm-4.5': {
-                id: 'glm-4.5',
-                name: 'GLM-4.5',
-                capabilities: { toolcall: true },
-                cost: { input: 0, output: 0 },
-              },
-            },
-          },
-        ])
-      );
-      flushSolid();
-      setState(storePath('providerDefaults', { [providerID]: 'glm-4.5' }));
-      flushSolid();
-      setState(storePath('selectedModel', { providerID, modelID: 'glm-4.5' }));
-      flushSolid();
-      const key = `${providerID}:glm-4.5`;
-      const fresh = availableProviderLimit({
-        providerID,
-        modelID: 'glm-4.5',
-        checkedAt: Date.now(),
-      });
-      setState(
-        storePath('providerLimits', {
-          [key]: {
-            providerID,
-            modelID: 'glm-4.5',
-            status: 'unsupported',
-            source: 'provider',
-            checkedAt: Date.now(),
-            note: 'Provider quota checks are not supported in attach-only mode without a server-owned limits endpoint.',
-          },
-        })
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
-      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
-
-      setState(storePath('providerLimits', { [key]: fresh }));
-      flushSolid();
-      const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
-      expect(chip).not.toBeNull();
-      chip?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
-      expect(chip?.getAttribute('aria-expanded')).toBe('true');
-
-      setState(
-        storePath('providerLimits', {
-          [key]: {
-            ...fresh,
-            stale: true,
-            retryAt: Date.now() + 15_000,
-            note: 'Z.ai quota endpoint returned invalid quota data',
-          },
-        })
-      );
-      flushSolid();
-      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('Stale');
-      expect(container?.querySelector('.provider-limit-popup')?.textContent).toContain(
-        'Quota data is stale'
-      );
-
-      setState(
-        storePath('providerLimits', {
-          [key]: {
-            providerID,
-            modelID: 'glm-4.5',
-            status: 'unsupported',
-            source: 'provider',
-            checkedAt: Date.now(),
-            failureKind: 'authentication',
-            retryAt: Date.now() + 5 * 60_000,
-            note: 'Z.ai quota endpoint rejected credentials (401)',
-          },
-        })
-      );
-      flushSolid();
-      expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
-      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
-
-      setState(storePath('providerLimits', { [key]: fresh }));
-      flushSolid();
-      expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
-      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain(
-        'Unavailable'
-      );
-      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain('Stale');
-      expect(container?.querySelector('.toolbar-limit-chip')?.getAttribute('aria-expanded')).toBe(
-        'false'
-      );
-      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
-      container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
-      expect(container?.querySelector('.provider-limit-popup')?.textContent).not.toContain(
-        'Authentication failed'
-      );
-      expect(container?.querySelector('.provider-limit-row')).not.toBeNull();
-    }
-  );
-
-  it('shows Z.ai quota windows and available resets', async () => {
-    setState(
-      storePath('providers', [
+      setStateAndFlush('providers', [
         {
-          id: 'zai-coding-plan',
-          name: 'Z.AI Coding Plan',
+          id: providerID,
+          name: 'Z.ai',
           source: 'api',
           models: {
             'glm-4.5': {
@@ -3821,74 +3368,145 @@ describe('ChatInput', () => {
             },
           },
         },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { 'zai-coding-plan': 'glm-4.5' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'zai-coding-plan', modelID: 'glm-4.5' }));
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'zai-coding-plan:glm-4.5': {
-          providerID: 'zai-coding-plan',
+      ]);
+      setStateAndFlush('providerDefaults', { [providerID]: 'glm-4.5' });
+      setStateAndFlush('selectedModel', { providerID, modelID: 'glm-4.5' });
+      const key = `${providerID}:glm-4.5`;
+      const fresh = availableProviderLimit({
+        providerID,
+        modelID: 'glm-4.5',
+        checkedAt: Date.now(),
+      });
+      setStateAndFlush('providerLimits', {
+        [key]: {
+          providerID,
           modelID: 'glm-4.5',
-          status: 'available',
+          status: 'unsupported',
           source: 'provider',
-          checkedAt: 1,
-          usageLimitResets: {
-            availableCount: 1,
-            credits: [
-              {
-                title: 'Weekly quota reset',
-                expiresAt: Date.parse('2026-09-20T12:00:00Z'),
-              },
-            ],
-          },
-          windows: [
+          checkedAt: Date.now(),
+          note: 'Provider quota checks are not supported in attach-only mode without a server-owned limits endpoint.',
+        },
+      });
+      renderChatInput();
+      expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
+      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
+
+      setStateAndFlush('providerLimits', { [key]: fresh });
+      const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+      expect(chip).not.toBeNull();
+      chip?.click();
+      await settle();
+      expect(chip?.getAttribute('aria-expanded')).toBe('true');
+
+      setStateAndFlush('providerLimits', {
+        [key]: {
+          ...fresh,
+          stale: true,
+          retryAt: Date.now() + 15_000,
+          note: 'Z.ai quota endpoint returned invalid quota data',
+        },
+      });
+      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('Stale');
+      expect(container?.querySelector('.provider-limit-popup')?.textContent).toContain(
+        'Quota data is stale'
+      );
+
+      setStateAndFlush('providerLimits', {
+        [key]: {
+          providerID,
+          modelID: 'glm-4.5',
+          status: 'unsupported',
+          source: 'provider',
+          checkedAt: Date.now(),
+          failureKind: 'authentication',
+          retryAt: Date.now() + 5 * 60_000,
+          note: 'Z.ai quota endpoint rejected credentials (401)',
+        },
+      });
+      expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
+      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
+
+      setStateAndFlush('providerLimits', { [key]: fresh });
+      expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
+      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain(
+        'Unavailable'
+      );
+      expect(container?.querySelector('.toolbar-limit-chip')?.textContent).not.toContain('Stale');
+      expect(container?.querySelector('.toolbar-limit-chip')?.getAttribute('aria-expanded')).toBe(
+        'false'
+      );
+      expect(container?.querySelector('.provider-limit-popup')).toBeNull();
+      container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
+      await settle();
+      expect(container?.querySelector('.provider-limit-popup')?.textContent).not.toContain(
+        'Authentication failed'
+      );
+      expect(container?.querySelector('.provider-limit-row')).not.toBeNull();
+    }
+  );
+
+  it('shows Z.ai quota windows and available resets', async () => {
+    setStateAndFlush('providers', [
+      apiProvider('zai-coding-plan', 'Z.AI Coding Plan', [toolModel('glm-4.5', 'GLM-4.5')]),
+    ]);
+    setStateAndFlush('providerDefaults', { 'zai-coding-plan': 'glm-4.5' });
+    setStateAndFlush('selectedModel', { providerID: 'zai-coding-plan', modelID: 'glm-4.5' });
+    setStateAndFlush('providerLimits', {
+      'zai-coding-plan:glm-4.5': {
+        providerID: 'zai-coding-plan',
+        modelID: 'glm-4.5',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        usageLimitResets: {
+          availableCount: 1,
+          credits: [
             {
-              id: 'five_hour',
-              label: '5 Hours Quota',
-              unit: 'unknown',
-              remaining: 87,
-              limit: 100,
-              resetAt: null,
-              percent: 13,
-            },
-            {
-              id: 'weekly',
-              label: 'Weekly Quota',
-              unit: 'unknown',
-              remaining: 98,
-              limit: 100,
-              resetAt: null,
-              percent: 2,
-            },
-            {
-              id: 'mcp',
-              label: 'MCP Quota',
-              unit: 'unknown',
-              remaining: 1_000,
-              limit: 1_000,
-              resetAt: null,
-              percent: 0,
+              title: 'Weekly quota reset',
+              expiresAt: Date.parse('2026-09-20T12:00:00Z'),
             },
           ],
         },
-      })
-    );
-    flushSolid();
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5 Hours Quota',
+            unit: 'unknown',
+            remaining: 87,
+            limit: 100,
+            resetAt: null,
+            percent: 13,
+          },
+          {
+            id: 'weekly',
+            label: 'Weekly Quota',
+            unit: 'unknown',
+            remaining: 98,
+            limit: 100,
+            resetAt: null,
+            percent: 2,
+          },
+          {
+            id: 'mcp',
+            label: 'MCP Quota',
+            unit: 'unknown',
+            remaining: 1_000,
+            limit: 1_000,
+            resetAt: null,
+            percent: 0,
+          },
+        ],
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
     expect(chip?.textContent).toContain('87%');
     expect(chip?.textContent).toContain('98%');
     expect(chip?.textContent).not.toContain('100%');
 
-    chip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(chip);
     await Promise.resolve();
     flushSolid();
 
@@ -3917,25 +3535,20 @@ describe('ChatInput', () => {
 
   it('shows OpenAI usage-limit resets in a collapsed read-only popup section', async () => {
     setupModelState();
-    flushSolid();
     const expiresAt = Date.parse('2026-09-20T19:23:00Z');
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit({
-          usageLimitResets: {
-            availableCount: 3,
-            credits: [
-              { title: 'Full reset', expiresAt },
-              { title: 'Non-expiring reset', expiresAt: null },
-            ],
-          },
-        }),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        usageLimitResets: {
+          availableCount: 3,
+          credits: [
+            { title: 'Full reset', expiresAt },
+            { title: 'Non-expiring reset', expiresAt: null },
+          ],
+        },
+      }),
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')?.click();
     flushSolid();
@@ -3970,17 +3583,14 @@ describe('ChatInput', () => {
     expect(usageLink?.href).toBe('https://chatgpt.com/settings/usage?tab=overview');
     expect(container?.querySelector('button')?.textContent).not.toContain('Use reset');
 
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit({
-          usageLimitResets: {
-            availableCount: 0,
-            credits: [],
-          },
-        }),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        usageLimitResets: {
+          availableCount: 0,
+          credits: [],
+        },
+      }),
+    });
     await Promise.resolve();
     flushSolid();
 
@@ -3988,69 +3598,48 @@ describe('ChatInput', () => {
   });
 
   it('filters provider-limit badges and popup rows for the selected model', async () => {
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [toolModel('gpt-4o', 'GPT-4o')]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-4o' });
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 39,
+            limit: 100,
+            resetAt: null,
           },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': {
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-          status: 'available',
-          source: 'provider',
-          checkedAt: 1,
-          windows: [
-            {
-              id: 'five_hour',
-              label: '5-Hour Limit',
-              unit: 'requests',
-              remaining: 39,
-              limit: 100,
-              resetAt: null,
-            },
-            {
-              id: 'spark_five_hour',
-              label: '5-Hour Spark Limit',
-              unit: 'requests',
-              remaining: 10,
-              limit: 100,
-              resetAt: null,
-            },
-            {
-              id: 'month',
-              label: 'Monthly Limit',
-              unit: 'requests',
-              remaining: 80,
-              limit: 100,
-              resetAt: null,
-            },
-          ],
-        },
-      })
-    );
-    flushSolid();
+          {
+            id: 'spark_five_hour',
+            label: '5-Hour Spark Limit',
+            unit: 'requests',
+            remaining: 10,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'month',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const chip = container?.querySelector('.toolbar-limit-chip');
     expect(chip).not.toBeNull();
@@ -4058,8 +3647,7 @@ describe('ChatInput', () => {
     expect(chip?.textContent).toContain('80%');
     expect(chip?.textContent).not.toContain('10%');
 
-    chip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(chip);
     await Promise.resolve();
     flushSolid();
 
@@ -4070,53 +3658,32 @@ describe('ChatInput', () => {
   });
 
   it('shows provider-limit UI for a monthly-only Copilot-style limit', () => {
-    setState(
-      storePath('providers', [
-        {
-          id: 'github-copilot',
-          name: 'GitHub Copilot',
-          source: 'api',
-          models: {
-            'gpt-5-mini': {
-              id: 'gpt-5-mini',
-              name: 'GPT-5 mini',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
+    setStateAndFlush('providers', [
+      apiProvider('github-copilot', 'GitHub Copilot', [toolModel('gpt-5-mini', 'GPT-5 mini')]),
+    ]);
+    setStateAndFlush('providerDefaults', { 'github-copilot': 'gpt-5-mini' });
+    setStateAndFlush('selectedModel', { providerID: 'github-copilot', modelID: 'gpt-5-mini' });
+    setStateAndFlush('providerLimits', {
+      'github-copilot:gpt-5-mini': {
+        providerID: 'github-copilot',
+        modelID: 'gpt-5-mini',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'chat',
+            label: 'Monthly Chat',
+            unit: 'messages',
+            remaining: 12,
+            limit: 20,
+            resetAt: null,
           },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { 'github-copilot': 'gpt-5-mini' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'github-copilot', modelID: 'gpt-5-mini' }));
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'github-copilot:gpt-5-mini': {
-          providerID: 'github-copilot',
-          modelID: 'gpt-5-mini',
-          status: 'available',
-          source: 'provider',
-          checkedAt: 1,
-          windows: [
-            {
-              id: 'chat',
-              label: 'Monthly Chat',
-              unit: 'messages',
-              remaining: 12,
-              limit: 20,
-              resetAt: null,
-            },
-          ],
-        },
-      })
-    );
-    flushSolid();
+        ],
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
     expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('Limits:');
@@ -4125,83 +3692,75 @@ describe('ChatInput', () => {
 
   it('keeps the selected provider-limit window after limit refreshes', async () => {
     setupModelState();
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit({
-          checkedAt: 1,
-          windows: [
-            {
-              id: 'five_hour',
-              label: '5-Hour Limit',
-              unit: 'requests',
-              remaining: 39,
-              limit: 100,
-              resetAt: null,
-            },
-            {
-              id: 'seven_day',
-              label: 'Weekly All-Model',
-              unit: 'requests',
-              remaining: 30,
-              limit: 100,
-              resetAt: null,
-            },
-            {
-              id: 'monthly_limit',
-              label: 'Monthly Limit',
-              unit: 'requests',
-              remaining: 80,
-              limit: 100,
-              resetAt: null,
-            },
-          ],
-        }),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 39,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'seven_day',
+            label: 'Weekly All-Model',
+            unit: 'requests',
+            remaining: 30,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'monthly_limit',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 80,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      }),
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('39%');
     expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('30%');
     expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('80%');
 
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit({
-          checkedAt: 2,
-          windows: [
-            {
-              id: 'five_hour',
-              label: '5-Hour Limit',
-              unit: 'requests',
-              remaining: 39,
-              limit: 100,
-              resetAt: null,
-            },
-            {
-              id: 'seven_day',
-              label: 'Weekly All-Model',
-              unit: 'requests',
-              remaining: 30,
-              limit: 100,
-              resetAt: null,
-            },
-            {
-              id: 'monthly_limit',
-              label: 'Monthly Limit',
-              unit: 'requests',
-              remaining: 1,
-              limit: 100,
-              resetAt: null,
-            },
-          ],
-        }),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({
+        checkedAt: 2,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 39,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'seven_day',
+            label: 'Weekly All-Model',
+            unit: 'requests',
+            remaining: 30,
+            limit: 100,
+            resetAt: null,
+          },
+          {
+            id: 'monthly_limit',
+            label: 'Monthly Limit',
+            unit: 'requests',
+            remaining: 1,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      }),
+    });
     await Promise.resolve();
     flushSolid();
 
@@ -4212,23 +3771,18 @@ describe('ChatInput', () => {
 
   it('shows context usage before assistant tokens are available', async () => {
     setupModelState();
-    flushSolid();
     setState(storePath('providers', 0, 'models', 'gpt-4o', 'name', 'GPT-5.6 Fast'));
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 0, output: 0 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 0, output: 0 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const button = container?.querySelector<HTMLButtonElement>('.chat-context-usage');
     expect(button?.getAttribute('aria-label')).toBe('Context usage unavailable');
     expect(button?.getAttribute('title')).toBeNull();
 
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(button);
     await Promise.resolve();
     flushSolid();
 
@@ -4239,8 +3793,7 @@ describe('ChatInput', () => {
       'OpenAI / GPT-5.6 Fast'
     );
 
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
     await Promise.resolve();
     flushSolid();
 
@@ -4256,7 +3809,6 @@ describe('ChatInput', () => {
 
   it('hides context usage before a new session starts', () => {
     setupModelState();
-    flushSolid();
 
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
@@ -4266,20 +3818,15 @@ describe('ChatInput', () => {
 
   it('keeps the context button accessible while the popup is open', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const button = container?.querySelector<HTMLButtonElement>('.chat-context-usage');
     expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
 
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(button);
     await Promise.resolve();
     flushSolid();
 
@@ -4290,25 +3837,17 @@ describe('ChatInput', () => {
 
   it('shows the compact action starting at 30% context usage', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 290, output: 0 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 290, output: 0 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
     await Promise.resolve();
     flushSolid();
 
     expect(container?.querySelector('.context-popup-action')).toBeNull();
 
-    setState(storePath('messages', [assistantMessageEntry({ input: 300, output: 0 })]));
-    flushSolid();
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 300, output: 0 })]);
     await Promise.resolve();
     flushSolid();
 
@@ -4317,33 +3856,23 @@ describe('ChatInput', () => {
 
   it('includes descendant session snapshots in the session token total', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_000, {
-          parentID: 'session-1',
-          tokens: {
-            input: 500,
-            output: 100,
-            reasoning: 0,
-            cache: { read: 50, write: 25 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_000, {
+        parentID: 'session-1',
+        tokens: {
+          input: 500,
+          output: 100,
+          reasoning: 0,
+          cache: { read: 50, write: 25 },
+        },
+      }),
+    ]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
     await Promise.resolve();
     flushSolid();
 
@@ -4394,33 +3923,23 @@ describe('ChatInput', () => {
 
   it('shows unavailable root token details when only agents report usage', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_000, {
-          parentID: 'session-1',
-          tokens: {
-            input: 500,
-            output: 100,
-            reasoning: 0,
-            cache: { read: 50, write: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 0, output: 0 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_000, {
+        parentID: 'session-1',
+        tokens: {
+          input: 500,
+          output: 100,
+          reasoning: 0,
+          cache: { read: 50, write: 0 },
+        },
+      }),
+    ]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 0, output: 0 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
     await Promise.resolve();
     flushSolid();
 
@@ -4441,31 +3960,21 @@ describe('ChatInput', () => {
 
   it('uses the root session snapshot when older messages are not loaded', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000, {
-          tokens: {
-            input: 1_000,
-            output: 200,
-            reasoning: 50,
-            cache: { read: 100, write: 25 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000, {
+        tokens: {
+          input: 1_000,
+          output: 200,
+          reasoning: 50,
+          cache: { read: 100, write: 25 },
+        },
+      }),
+    ]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
     await Promise.resolve();
     flushSolid();
 
@@ -4483,31 +3992,21 @@ describe('ChatInput', () => {
   it('dims cache reads and explains why they are excluded from session totals', async () => {
     vi.useFakeTimers();
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000, {
-          tokens: {
-            input: 1_000,
-            output: 200,
-            reasoning: 0,
-            cache: { read: 100, write: 0 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000, {
+        tokens: {
+          input: 1_000,
+          output: 200,
+          reasoning: 0,
+          cache: { read: 100, write: 0 },
+        },
+      }),
+    ]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
     await Promise.resolve();
     flushSolid();
 
@@ -4532,31 +4031,21 @@ describe('ChatInput', () => {
   it('dims cache writes and explains how they contribute to session totals', async () => {
     vi.useFakeTimers();
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000, {
-          tokens: {
-            input: 1_000,
-            output: 200,
-            reasoning: 0,
-            cache: { read: 0, write: 25 },
-          },
-        }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000, {
+        tokens: {
+          input: 1_000,
+          output: 200,
+          reasoning: 0,
+          cache: { read: 0, write: 25 },
+        },
+      }),
+    ]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
     await Promise.resolve();
     flushSolid();
 
@@ -4582,20 +4071,12 @@ describe('ChatInput', () => {
 
   it('shows OpenCode session cost as a separate context detail row', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 2_000, { cost: 0.01 })]));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 2_000, { cost: 0.01 })]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
     await Promise.resolve();
     flushSolid();
 
@@ -4607,18 +4088,12 @@ describe('ChatInput', () => {
 
   it('loads tokens and costs for subagent sessions whose messages and snapshots are not loaded', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_000, { parentID: 'session-1' }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_000, { parentID: 'session-1' }),
+    ]);
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
     vi.mocked(client.varro.session.diffSummary).mockResolvedValue({
       files: 0,
       additions: 0,
@@ -4653,12 +4128,8 @@ describe('ChatInput', () => {
       activeStartedAt: null,
     });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.chat-context-usage');
 
     await vi.waitFor(() => {
       expect(container?.querySelector('.context-popup-section-toggle')?.textContent).toContain(
@@ -4721,23 +4192,17 @@ describe('ChatInput', () => {
 
   it('keeps the provider limit chip accessible while the popup is open', async () => {
     setupModelState();
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit({ planName: 'Pro' }),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit({ planName: 'Pro' }),
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
     expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 61% used');
     expect(button?.getAttribute('title')).toBeNull();
 
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(button);
     await Promise.resolve();
     flushSolid();
 
@@ -4754,20 +4219,13 @@ describe('ChatInput', () => {
 
   it('renders permission, context usage, and provider limits in the lower metadata row', () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit(),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit(),
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const shell = container?.querySelector('.chat-input-shell');
     const frame = container?.querySelector('.chat-input-container');
@@ -4793,28 +4251,18 @@ describe('ChatInput', () => {
 
   it('shows auto-approve activity across the active session tree', () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_100, { parentID: 'session-1' }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('sessionPermissionModes', { 'session-1': 'auto' }));
-    flushSolid();
-    setState(
-      storePath('sessionAutoPermissionActivity', {
-        'session-1': [{ permissionId: 'one', status: 'reviewing', title: 'one', createdAt: 2 }],
-        'child-1': [{ permissionId: 'two', status: 'auto-approved', title: 'two', createdAt: 1 }],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setStateAndFlush('sessionPermissionModes', { 'session-1': 'auto' });
+    setStateAndFlush('sessionAutoPermissionActivity', {
+      'session-1': [{ permissionId: 'one', status: 'reviewing', title: 'one', createdAt: 2 }],
+      'child-1': [{ permissionId: 'two', status: 'auto-approved', title: 'two', createdAt: 1 }],
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const dots = container?.querySelectorAll('.toolbar-meta .permission-activity-item') ?? [];
     expect(dots).toHaveLength(2);
@@ -4824,38 +4272,27 @@ describe('ChatInput', () => {
 
   it('shows auto-approve activity only for the latest prompt', () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_100, { parentID: 'session-1' }),
-      ])
-    );
-    flushSolid();
-    setState(storePath('sessionPermissionModes', { 'session-1': 'auto' }));
-    flushSolid();
-    setState(
-      storePath('sessionAutoPermissionActivity', {
-        'session-1': [
-          { permissionId: 'old-root', status: 'auto-approved', title: 'old', createdAt: 2 },
-        ],
-        'child-1': [
-          { permissionId: 'old-child', status: 'auto-approved', title: 'old', createdAt: 2 },
-        ],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setStateAndFlush('sessionPermissionModes', { 'session-1': 'auto' });
+    setStateAndFlush('sessionAutoPermissionActivity', {
+      'session-1': [
+        { permissionId: 'old-root', status: 'auto-approved', title: 'old', createdAt: 2 },
+      ],
+      'child-1': [
+        { permissionId: 'old-child', status: 'auto-approved', title: 'old', createdAt: 2 },
+      ],
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     expect(container?.querySelectorAll('.toolbar-meta .permission-activity-item')).toHaveLength(2);
 
     const latestPrompt = historyEntry('user-2', 'Next prompt');
     latestPrompt.info.time.created = 3;
-    setState(storePath('messages', [latestPrompt]));
-    flushSolid();
+    setStateAndFlush('messages', [latestPrompt]);
     expect(container?.querySelectorAll('.toolbar-meta .permission-activity-item')).toHaveLength(0);
 
     setState(
@@ -4871,19 +4308,12 @@ describe('ChatInput', () => {
 
   it('uses the full composer controls and starts a new session only when sending', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'existing-session'));
-    flushSolid();
-    setState(storePath('sessionStatus', { 'existing-session': { type: 'busy' } }));
-    flushSolid();
-    setInputText('Build a fresh feature');
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [
-        { path: '/repo/src/new.ts', relativePath: 'src/new.ts', type: 'file' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'existing-session');
+    setStateAndFlush('sessionStatus', { 'existing-session': { type: 'busy' } });
+    setInputTextAndFlush('Build a fresh feature');
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/src/new.ts', relativePath: 'src/new.ts', type: 'file' },
+    ]);
     const onBeforeSend = vi.fn(() => {
       setState(storePath('activeSessionId', null));
       setState(storePath('droppedFiles', []));
@@ -4905,12 +4335,8 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Send (Enter)"]')).not.toBeNull();
     expect(onBeforeSend).not.toHaveBeenCalled();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
 
     expect(onBeforeSend).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).toHaveBeenCalledWith('Build a fresh feature', {
@@ -4937,10 +4363,8 @@ describe('ChatInput', () => {
   });
 
   it('preserves text entered while a normal send is pending', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('original prompt');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('original prompt');
     let resolveSend: ((sent: boolean) => void) | undefined;
     sendMessageMock.mockImplementationOnce(
       () =>
@@ -4948,23 +4372,15 @@ describe('ChatInput', () => {
           resolveSend = resolve;
         })
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
     expect(inputText()).toBe('');
 
-    setInputText('new draft while sending');
-    flushSolid();
+    setInputTextAndFlush('new draft while sending');
     resolveSend?.(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('new draft while sending');
   });
@@ -4973,8 +4389,7 @@ describe('ChatInput', () => {
     'preserves shared input after navigating during a failed send, newer input: %s',
     async (newerInput) => {
       setState(storePath('activeSessionId', 'session-1'));
-      setInputText('original prompt');
-      flushSolid();
+      setInputTextAndFlush('original prompt');
       let resolveSend: ((sent: boolean) => void) | undefined;
       sendMessageMock.mockImplementationOnce(
         () =>
@@ -4982,12 +4397,9 @@ describe('ChatInput', () => {
             resolveSend = resolve;
           })
       );
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(inputText()).toBe('');
       setState(storePath('activeSessionId', 'session-2'));
       if (newerInput) setInputText('next prompt');
@@ -5005,8 +4417,7 @@ describe('ChatInput', () => {
 
   it('does not restore a failed new-chat send into another workspace', async () => {
     setState(storePath('editorContext', 'workspacePath', '/repo-a'));
-    setInputText('Only for workspace A');
-    flushSolid();
+    setInputTextAndFlush('Only for workspace A');
     let resolveSend: ((sent: boolean) => void) | undefined;
     sendMessageMock.mockImplementationOnce(
       () =>
@@ -5014,8 +4425,7 @@ describe('ChatInput', () => {
           resolveSend = resolve;
         })
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
     await flushAsyncWork();
     flushSolid();
@@ -5034,10 +4444,8 @@ describe('ChatInput', () => {
   });
 
   it('does not restore a failed snapshot after the user edits the pending draft back to empty', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('original prompt');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('original prompt');
     let resolveSend: ((sent: boolean) => void) | undefined;
     sendMessageMock.mockImplementationOnce(
       () =>
@@ -5045,16 +4453,11 @@ describe('ChatInput', () => {
           resolveSend = resolve;
         })
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
 
     editor!.textContent = 'temporary draft';
     editor?.dispatchEvent(new InputEvent('input', { bubbles: true }));
@@ -5065,63 +4468,48 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('');
 
     resolveSend?.(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('');
   });
 
   it('restores a failed draft even when consecutive errors have identical text', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('retry this prompt');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('retry this prompt');
     sendMessageMock.mockResolvedValue(false);
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const send = () =>
       container
         ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     send();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('retry this prompt');
 
     send();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('retry this prompt');
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
   });
 
   it('right-aligns the provider limit popup when no context is shown', async () => {
     setupModelState();
-    flushSolid();
     const model = state.providers[0]?.models['gpt-4o'];
     if (!model) throw new Error('Expected GPT-4o fixture');
     const modelWithoutLimit = { ...model };
     delete modelWithoutLimit.limit;
     setState(storePath('providers', 0, 'models', 'gpt-4o', modelWithoutLimit));
     flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit(),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit(),
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
 
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(button);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -5136,25 +4524,17 @@ describe('ChatInput', () => {
 
   it('right-aligns the provider limit popup when context is shown', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 400, output: 100 })]));
-    flushSolid();
-    setState(
-      storePath('providerLimits', {
-        'openai:gpt-4o': availableProviderLimit(),
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+    setStateAndFlush('providerLimits', {
+      'openai:gpt-4o': availableProviderLimit(),
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
 
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(button);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -5169,10 +4549,8 @@ describe('ChatInput', () => {
 
   it('aligns the permission popup to the input frame left edge', async () => {
     setupModelState();
-    flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const frame = container?.querySelector<HTMLElement>('.chat-input-container');
     const button = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
@@ -5206,8 +4584,7 @@ describe('ChatInput', () => {
       toJSON: () => ({}),
     });
 
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(button);
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -5219,12 +4596,10 @@ describe('ChatInput', () => {
 
   it('marks the input shell as hosting a floating popover while the model picker is open', async () => {
     setupModelState();
-    flushSolid();
     setShowModelPicker(true);
     flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('.chat-input-shell')?.className).toContain(
       'showing-floating-popover'
@@ -5235,43 +4610,29 @@ describe('ChatInput', () => {
 
   it('uses distinct panel visibility modifiers for model and MCP pickers', () => {
     setupModelState();
-    flushSolid();
     setShowChangedFiles(true);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 1_000, {
-          summary: {
-            additions: 1,
-            deletions: 0,
-            files: 1,
-            diffs: [
-              { file: 'src/app.ts', before: '', after: 'updated', additions: 1, deletions: 0 },
-            ],
-          },
-        }),
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 1_000, {
+        summary: {
+          additions: 1,
+          deletions: 0,
+          files: 1,
+          diffs: [{ file: 'src/app.ts', before: '', after: 'updated', additions: 1, deletions: 0 }],
+        },
+      }),
+    ]);
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'queue-1', sessionId: 'session-1', text: 'Queued follow-up' },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('todos', [
-        { id: 'todo-1', content: 'Keep working', status: 'in_progress', priority: 'medium' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      { id: 'queue-1', sessionId: 'session-1', text: 'Queued follow-up' },
+    ]);
+    setStateAndFlush('todos', [
+      { id: 'todo-1', content: 'Keep working', status: 'in_progress', priority: 'medium' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const inputPart = container?.querySelector('.interactive-input-part');
     const queue = container?.querySelector('.chat-queue-container');
@@ -5292,8 +4653,7 @@ describe('ChatInput', () => {
 
     setShowModelPicker(false);
     flushSolid();
-    setState(storePath('mcpStatus', { docs: { status: 'connected' } }));
-    flushSolid();
+    setStateAndFlush('mcpStatus', { docs: { status: 'connected' } });
     container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count')?.click();
     flushSolid();
 
@@ -5306,20 +4666,16 @@ describe('ChatInput', () => {
 
   it('closes toolbar popups when the composer changes', async () => {
     setupModelState();
-    flushSolid();
     setShowModelPicker(true);
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('.model-picker-menu')).not.toBeNull();
 
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
     editor!.textContent = 'Test';
     editor?.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(showModelPicker()).toBe(false);
     expect(container?.querySelector('.model-picker-menu')).toBeNull();
@@ -5328,54 +4684,37 @@ describe('ChatInput', () => {
   it('keeps queue, todo, and file panels mounted while the @ menu is open', async () => {
     setShowChangedFiles(true);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 1_000, {
-          summary: {
-            additions: 1,
-            deletions: 0,
-            files: 1,
-            diffs: [
-              { file: 'src/app.ts', before: '', after: 'updated', additions: 1, deletions: 0 },
-            ],
-          },
-        }),
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 1_000, {
+        summary: {
+          additions: 1,
+          deletions: 0,
+          files: 1,
+          diffs: [{ file: 'src/app.ts', before: '', after: 'updated', additions: 1, deletions: 0 }],
+        },
+      }),
+    ]);
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'queue-1', sessionId: 'session-1', text: 'Queued follow-up' },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('todos', [
-        { id: 'todo-1', content: 'Keep working', status: 'in_progress', priority: 'medium' },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('allAgents', [
-        {
-          name: 'helper',
-          description: 'Help with the task',
-          mode: 'subagent',
-          builtIn: false,
-          permission: [],
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('@hel');
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      { id: 'queue-1', sessionId: 'session-1', text: 'Queued follow-up' },
+    ]);
+    setStateAndFlush('todos', [
+      { id: 'todo-1', content: 'Keep working', status: 'in_progress', priority: 'medium' },
+    ]);
+    setStateAndFlush('allAgents', [
+      {
+        name: 'helper',
+        description: 'Help with the task',
+        mode: 'subagent',
+        builtIn: false,
+        permission: [],
+      },
+    ]);
+    setInputTextAndFlush('@hel');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const inputPart = container?.querySelector('.interactive-input-part');
     const queue = container?.querySelector('.chat-queue-container');
@@ -5392,9 +4731,7 @@ describe('ChatInput', () => {
     setCollapsedSelection(editor.firstChild, '@hel'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'l', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
     expect(inputPart?.classList.contains('mention-completion-open')).toBe(true);
@@ -5403,9 +4740,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.changed-files-block')).toBe(files);
 
     setInputText('');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputPart?.classList.contains('mention-completion-open')).toBe(false);
     expect(container?.querySelector('.chat-queue-container')).toBe(queue);
@@ -5417,31 +4752,22 @@ describe('ChatInput', () => {
     'hides only Varro vision from mentions (native vision model: %s)',
     async (nativeVision) => {
       setupVisionDelegationModelState();
-      flushSolid();
       if (nativeVision) setSelectedModel({ providerID: 'vision-provider', modelID: 'viewer' });
       flushSolid();
-      setState(
-        storePath('allAgents', [
-          {
-            name: 'vision',
-            description: VARRO_VISION_AGENT_DESCRIPTION,
-            prompt: VARRO_VISION_AGENT_PROMPT,
-            mode: 'subagent',
-            permission: [],
-            model: { providerID: 'vision-provider', modelID: 'viewer' },
-          },
-          { name: 'general', description: 'General tasks', mode: 'subagent', permission: [] },
-        ])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      flushSolid();
+      setStateAndFlush('allAgents', [
+        {
+          name: 'vision',
+          description: VARRO_VISION_AGENT_DESCRIPTION,
+          prompt: VARRO_VISION_AGENT_PROMPT,
+          mode: 'subagent',
+          permission: [],
+          model: { providerID: 'vision-provider', modelID: 'viewer' },
+        },
+        { name: 'general', description: 'General tasks', mode: 'subagent', permission: [] },
+      ]);
+      renderChatInput();
+      await settle();
+      const editor = focusComposer();
       enterComposerText(editor, '@');
       await flushAsyncWork();
       flushSolid();
@@ -5452,9 +4778,7 @@ describe('ChatInput', () => {
       expect(state.allAgents.some((agent) => agent.name === 'vision')).toBe(true);
 
       setState(storePath('allAgents', 0, 'prompt', 'Custom instructions for my image reviewer'));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(container?.querySelector('.composer-completion-menu')?.textContent).toContain(
         'vision'
       );
@@ -5462,27 +4786,17 @@ describe('ChatInput', () => {
   );
 
   it('reissues an active file search when the workspace changes', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setInputText('@app');
-    flushSolid();
+    const messages = captureBridgeMessages();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo-a',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setInputTextAndFlush('@app');
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '@app'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'p', bubbles: true }));
@@ -5519,22 +4833,10 @@ describe('ChatInput', () => {
   it.each(['success', 'error', 'switched'] as const)(
     'attaches @ table selections with guarded %s replies',
     async (outcome) => {
-      const messages: WebviewMessage[] = [];
-      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
-        (message) => messages.push(message);
-      setState(
-        storePath('editorContext', {
-          workspacePath: '/repo',
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-        })
-      );
-      flushSolid();
-      setInputText('@users');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      const messages = captureBridgeMessages();
+      setStateAndFlush('editorContext', idleEditorContext('/repo'));
+      setInputTextAndFlush('@users');
+      renderChatInput();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor?.firstChild) throw new Error('Expected populated composer');
       editor.focus();
@@ -5562,29 +4864,21 @@ describe('ChatInput', () => {
           },
         })
       );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       const item = container?.querySelector<HTMLButtonElement>('.completion-table');
       expect(item?.textContent).toContain('main.users');
       expect(item?.querySelector('[data-chip-icon="table"]')).not.toBeNull();
       item?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       const request = messages.find((message) => message.type === 'database/attach');
       if (request?.type !== 'database/attach') throw new Error('Expected table attachment request');
       expect(request.payload.id).toBe('users-table');
       expect(inputText()).not.toContain('@users');
       expect(state.droppedFiles).toHaveLength(0);
       setInputText('Explain');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).not.toHaveBeenCalled();
       if (outcome === 'switched')
         setState(storePath('editorContext', 'workspacePath', '/another-repo'));
@@ -5605,9 +4899,7 @@ describe('ChatInput', () => {
           },
         })
       );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.droppedFiles.map((attachment) => attachment.path)).toEqual(
         outcome === 'success' ? [file.path] : []
       );
@@ -5623,48 +4915,32 @@ describe('ChatInput', () => {
   ])(
     'keeps the $trigger completion menu mounted on backspace',
     async ({ trigger, initial, shortened }) => {
-      setState(
-        storePath('allAgents', [
-          {
-            name: 'helper',
-            description: 'Help with the task',
-            mode: 'subagent',
-            builtIn: false,
-            permission: [],
-          },
-        ])
-      );
-      flushSolid();
-      setState(
-        storePath('sessions', [session('session-auth', 2_000, { title: 'Authentication' })])
-      );
-      flushSolid();
-      setState(
-        storePath('commands', [
-          {
-            name: 'zzvarrotest',
-            description: 'Run tests',
-            template: 'Run tests',
-          },
-        ])
-      );
-      flushSolid();
-      setInputText(initial);
-      flushSolid();
+      setStateAndFlush('allAgents', [
+        {
+          name: 'helper',
+          description: 'Help with the task',
+          mode: 'subagent',
+          builtIn: false,
+          permission: [],
+        },
+      ]);
+      setStateAndFlush('sessions', [session('session-auth', 2_000, { title: 'Authentication' })]);
+      setStateAndFlush('commands', [
+        {
+          name: 'zzvarrotest',
+          description: 'Run tests',
+          template: 'Run tests',
+        },
+      ]);
+      setInputTextAndFlush(initial);
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, initial.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: initial.at(-1), bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       const menu = container?.querySelector('.composer-completion-menu');
       const slashItem = trigger === '/' ? menu?.querySelector('.completion-slash') : null;
@@ -5677,9 +4953,7 @@ describe('ChatInput', () => {
       editor.dispatchEvent(
         new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
       );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe(shortened);
       expect(container?.querySelector('.composer-completion-menu')).toBe(menu);
@@ -5693,24 +4967,17 @@ describe('ChatInput', () => {
       vi.useFakeTimers();
       const result = session('session-auth', 2_000, { title: 'Investigate authentication' });
       vi.mocked(client.session.list).mockResolvedValue({ items: [result], hasMore: false });
-      setInputText(lookup);
-      flushSolid();
+      setInputTextAndFlush(lookup);
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, lookup.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'h', bubbles: true }));
       flushSolid();
       await vi.advanceTimersByTimeAsync(120);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(client.session.list).toHaveBeenCalledWith({
         limit: 30,
@@ -5736,133 +5003,87 @@ describe('ChatInput', () => {
   );
 
   it('selects a session completion on Enter for a bare ampersand', async () => {
-    setState(
-      storePath('sessions', [
-        session('session-auth', 2_000, { title: 'Investigate authentication' }),
-      ])
-    );
-    flushSolid();
-    setInputText('Run both commands &');
-    flushSolid();
+    setStateAndFlush('sessions', [
+      session('session-auth', 2_000, { title: 'Investigate authentication' }),
+    ]);
+    setInputTextAndFlush('Run both commands &');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, 'Run both commands &'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: '&', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
 
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('Run both commands session:session-auth ');
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('selects an agent completion on Enter without sending the message', async () => {
-    setState(
-      storePath('allAgents', [
-        {
-          name: 'helper',
-          description: 'Help with the task',
-          mode: 'subagent',
-          builtIn: false,
-          permission: [],
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('Ask @hel');
-    flushSolid();
+    setStateAndFlush('allAgents', [
+      {
+        name: 'helper',
+        description: 'Help with the task',
+        mode: 'subagent',
+        builtIn: false,
+        permission: [],
+      },
+    ]);
+    setInputTextAndFlush('Ask @hel');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, 'Ask @hel'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'l', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
 
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('Ask @helper ');
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('inserts a parameterless slash completion before running it', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'zzvarrotest',
-          description: 'Run tests',
-          template: 'Run tests',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/zzv');
-    flushSolid();
+    setStateAndFlush('commands', [
+      {
+        name: 'zzvarrotest',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputTextAndFlush('/zzv');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '/zzv'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'v', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
 
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('/zzvarrotest');
     expect(container?.querySelector('.composer-completion-menu')).toBeNull();
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
 
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('');
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('zzvarrotest', '');
@@ -5872,29 +5093,19 @@ describe('ChatInput', () => {
   it.each(['click', 'Tab', 'Enter'])(
     'dismisses overlapping slash completions after %s so Enter runs the selected command',
     async (selection) => {
-      setState(
-        storePath('commands', [
-          { name: 'a-helper', description: 'Run zzvarrotest checks', template: 'Run checks' },
-          { name: 'zzvarrotest', description: 'Run tests', template: 'Run tests' },
-        ])
-      );
-      flushSolid();
-      setInputText('/zzv');
-      flushSolid();
+      setStateAndFlush('commands', [
+        { name: 'a-helper', description: 'Run zzvarrotest checks', template: 'Run checks' },
+        { name: 'zzvarrotest', description: 'Run tests', template: 'Run tests' },
+      ]);
+      setInputTextAndFlush('/zzv');
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, '/zzv'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'v', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       const items = [...container!.querySelectorAll<HTMLButtonElement>('.completion-slash')];
       expect(
@@ -5902,30 +5113,20 @@ describe('ChatInput', () => {
       ).toEqual(['/a-helper', '/zzvarrotest']);
       if (selection === 'click') items[1]!.click();
       else {
-        editor.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
-        );
+        pressKey(editor, { key: 'ArrowDown' });
         flushSolid();
-        editor.dispatchEvent(
-          new KeyboardEvent('keydown', { key: selection, bubbles: true, cancelable: true })
-        );
+        pressKey(editor, { key: selection });
         flushSolid();
       }
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('/zzvarrotest');
       expect(container?.querySelector('.composer-completion-menu')).toBeNull();
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
       expect(sendMessageMock).not.toHaveBeenCalled();
 
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
 
       expect(inputText()).toBe('');
       expect(runSlashCommandByNameMock).toHaveBeenCalledExactlyOnceWith('zzvarrotest', '');
@@ -5938,38 +5139,21 @@ describe('ChatInput', () => {
       ['click', 'Tab', 'Enter'].map((selection) => ({ name, selection }))
     )
   )('keeps the /$name picker open after $selection completion', async ({ name, selection }) => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'browser-bridge',
-          description: 'Control a browser',
-          template: 'Control a browser',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('browser-bridge', 'Control a browser')]);
     vi.mocked(client.varro.workspaceProblems).mockResolvedValue({
       total: 1,
       diagnostics: [{ path: '/repo/a.ts', line: 1, severity: 'error', message: 'A error' }],
     });
     const draft = `/${name.slice(0, 3)}`;
-    setInputText(draft);
-    flushSolid();
+    setInputTextAndFlush(draft);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, draft.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: draft.at(-1), bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     const items = [...container!.querySelectorAll<HTMLButtonElement>('.completion-slash')];
     const item = items.find(
@@ -5979,19 +5163,13 @@ describe('ChatInput', () => {
     if (selection === 'click') item.click();
     else {
       for (let index = 0; index < items.indexOf(item); index++) {
-        editor.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
-        );
+        pressKey(editor, { key: 'ArrowDown' });
         flushSolid();
       }
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: selection, bubbles: true, cancelable: true })
-      );
+      pressKey(editor, { key: selection });
       flushSolid();
     }
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe(`/${name} `);
     expect(container?.querySelector('.composer-completion-header')?.textContent).toBe(
@@ -6012,32 +5190,21 @@ describe('ChatInput', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const sent: WebviewMessage[] = [];
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setInputText('/stat');
-    flushSolid();
+    setInputTextAndFlush('/stat');
 
     try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, '/stat'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 't', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
 
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
 
       expect(inputText()).toBe('/stats');
       expect(sent).not.toContainEqual({
@@ -6046,12 +5213,8 @@ describe('ChatInput', () => {
       });
       expect(sendMessageMock).not.toHaveBeenCalled();
 
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
 
       expect(inputText()).toBe('');
       expect(sent).toContainEqual({
@@ -6066,40 +5229,26 @@ describe('ChatInput', () => {
   });
 
   it('selects a parameterized slash completion without running it', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'zzvarrotest',
-          description: 'Run matching tests',
-          template: 'Run matching tests',
-          hints: ['pattern'],
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/zzv');
-    flushSolid();
+    setStateAndFlush('commands', [
+      {
+        name: 'zzvarrotest',
+        description: 'Run matching tests',
+        template: 'Run matching tests',
+        hints: ['pattern'],
+      },
+    ]);
+    setInputTextAndFlush('/zzv');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '/zzv'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'v', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('/zzvarrotest');
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
@@ -6107,40 +5256,19 @@ describe('ChatInput', () => {
   });
 
   it('opens the skills completion list on Enter', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'browser-bridge',
-          description: 'Control a browser',
-          template: 'Control a browser',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/skills');
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('browser-bridge', 'Control a browser')]);
+    setInputTextAndFlush('/skills');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '/skills'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 's', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('/skills ');
     expect(container?.querySelector('.composer-completion-header')?.textContent).toBe('Skills');
@@ -6154,21 +5282,9 @@ describe('ChatInput', () => {
   it.each(['/docs test', '/docs', '  /DOCS test', '/docs\ntest\ntest', '/docs\n\ntest'])(
     'renders the leading skill command %s as a chip without changing its send path',
     async (draft) => {
-      setState(
-        storePath('commands', [
-          {
-            name: 'docs',
-            description: 'Write a document',
-            template: 'Write a document',
-            source: 'skill',
-          },
-        ])
-      );
-      flushSolid();
-      setInputText(draft);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('commands', [skillCommand('docs', 'Write a document')]);
+      setInputTextAndFlush(draft);
+      renderChatInput();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       const chip = editor?.querySelector<HTMLElement>('[data-chip-type="mention-skill"]');
       expect(chip?.textContent).toBe('docs');
@@ -6178,9 +5294,7 @@ describe('ChatInput', () => {
       const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
       if (!sendButton) throw new Error('Expected send button');
       sendButton.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(runSlashCommandByNameMock).toHaveBeenCalledWith(
         'docs',
         draft.trim().replace(/^\/docs\s*/i, '')
@@ -6198,12 +5312,9 @@ describe('ChatInput', () => {
   ] as const)(
     'starts a new session from the sessions list with %s for /%s',
     async (sendMethod, commandName, source, args) => {
-      setState(storePath('activeSessionId', 'existing-session'));
-      flushSolid();
-      setState(storePath('commands', [{ name: commandName, template: '', source }]));
-      flushSolid();
-      setInputText(`/${commandName} ${args}`);
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'existing-session');
+      setStateAndFlush('commands', [{ name: commandName, template: '', source }]);
+      setInputTextAndFlush(`/${commandName} ${args}`);
       const onBeforeSend = vi.fn();
       cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
       flushSolid();
@@ -6213,17 +5324,13 @@ describe('ChatInput', () => {
         );
 
       if (sendMethod === 'Enter') {
-        container
-          ?.querySelector('.rich-composer')
-          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        pressComposerEnter();
         flushSolid();
       } else {
         container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
         flushSolid();
       }
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(runSlashCommandByNameMock).toHaveBeenCalledWith(commandName, args, {
         targetSessionId: null,
@@ -6243,22 +5350,17 @@ describe('ChatInput', () => {
   ] as const)(
     'restores a failed sessions-list command without sending it as a prompt (throws: %s, /%s)',
     async (throws, commandName, source) => {
-      setState(storePath('activeSessionId', 'existing-session'));
-      flushSolid();
-      setState(storePath('commands', [{ name: commandName, template: '', source }]));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'existing-session');
+      setStateAndFlush('commands', [{ name: commandName, template: '', source }]);
       const draft = `/${commandName} check machines`;
-      setInputText(draft);
-      flushSolid();
+      setInputTextAndFlush(draft);
       if (throws) runSlashCommandByNameMock.mockRejectedValueOnce(new Error('Command failed'));
       else runSlashCommandByNameMock.mockResolvedValueOnce(false);
       const onBeforeSend = vi.fn();
       cleanup = render(() => ChatInput({ newSession: true, onBeforeSend }), container!);
       flushSolid();
       container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe(draft);
       if (source === 'skill')
@@ -6271,12 +5373,10 @@ describe('ChatInput', () => {
   );
 
   it('preserves a newer draft when a sessions-list skill command fails', async () => {
-    setState(
-      storePath('commands', [{ name: 'control', template: 'Check machines', source: 'skill' }])
-    );
-    flushSolid();
-    setInputText('/control check machines');
-    flushSolid();
+    setStateAndFlush('commands', [
+      { name: 'control', template: 'Check machines', source: 'skill' },
+    ]);
+    setInputTextAndFlush('/control check machines');
     let resolveCommand: ((sent: boolean) => void) | undefined;
     runSlashCommandByNameMock.mockImplementationOnce(
       () =>
@@ -6287,15 +5387,10 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
     container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
-    setInputText('New draft');
-    flushSolid();
+    await settle();
+    setInputTextAndFlush('New draft');
     resolveCommand?.(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('New draft');
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -6309,8 +5404,7 @@ describe('ChatInput', () => {
         draft.editorContext.workspacePath = '/repo-a';
         draft.commands = [{ name: 'goal', template: '', source: 'command' }];
       });
-      setInputText('/goal check machines');
-      flushSolid();
+      setInputTextAndFlush('/goal check machines');
       let resolveCommand: ((sent: boolean) => void) | undefined;
       runSlashCommandByNameMock.mockImplementationOnce(
         () =>
@@ -6318,8 +5412,7 @@ describe('ChatInput', () => {
             resolveCommand = resolve;
           })
       );
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
       await flushAsyncWork();
       flushSolid();
@@ -6345,53 +5438,27 @@ describe('ChatInput', () => {
   ] as const)(
     'keeps non-leading, partial, and ordinary slash commands as text: %s %s',
     (draft, source) => {
-      setState(
-        storePath('commands', [
-          { name: 'docs', description: 'Write a document', template: 'Write a document', source },
-        ])
-      );
-      flushSolid();
-      setInputText(draft);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('commands', [
+        { name: 'docs', description: 'Write a document', template: 'Write a document', source },
+      ]);
+      setInputTextAndFlush(draft);
+      renderChatInput();
       expect(container?.querySelector('[data-chip-type="mention-skill"]')).toBeNull();
       expect(inputText()).toBe(draft);
     }
   );
 
   it('renders a skill selected from the leading skills picker as a chip', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'docs',
-          description: 'Write a document',
-          template: 'Write a document',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/skills do');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('docs', 'Write a document')]);
+    setInputTextAndFlush('/skills do');
+    renderChatInput();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '/skills do'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'o', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
     expect(inputText()).toBe('/docs');
     expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe('docs');
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
@@ -6399,41 +5466,20 @@ describe('ChatInput', () => {
   });
 
   it('removes the mixed-view prefix from an existing skill row when jumping to skills', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'skill-helper',
-          description: 'Helpful skill',
-          template: 'Helpful skill',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/ski');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('skill-helper', 'Helpful skill')]);
+    setInputTextAndFlush('/ski');
+    renderChatInput();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, 4);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'i', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const row = Array.from(container?.querySelectorAll('.composer-completion-item') ?? []).find(
       (item) => item.textContent?.includes('/skill:skill-helper')
     );
     expect(row).toBeDefined();
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
     expect(inputText()).toBe('/skills ');
     expect(container?.querySelector('.composer-completion-header')?.textContent).toBe('Skills');
     expect(container?.querySelector('.composer-completion-item')).toBe(row);
@@ -6442,33 +5488,16 @@ describe('ChatInput', () => {
   });
 
   it('shows matching skills after one slash query character', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'browser-bridge',
-          description: 'Control a browser',
-          template: 'Control a browser',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/b');
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('browser-bridge', 'Control a browser')]);
+    setInputTextAndFlush('/b');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '/b'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'b', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     const titles = Array.from(
       container?.querySelectorAll<HTMLElement>('.composer-completion-title') ?? []
@@ -6479,33 +5508,16 @@ describe('ChatInput', () => {
   });
 
   it('does not show skills for a bare slash', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'browser-bridge',
-          description: 'Control a browser',
-          template: 'Control a browser',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/');
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('browser-bridge', 'Control a browser')]);
+    setInputTextAndFlush('/');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '/'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: '/', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     const titles = Array.from(
       container?.querySelectorAll<HTMLElement>('.composer-completion-title') ?? []
@@ -6522,33 +5534,23 @@ describe('ChatInput', () => {
   )(
     'preserves surrounding draft text when selecting /$query with $selection before "$suffix"',
     async ({ query, selection, suffix }) => {
-      setState(
-        storePath('commands', [
-          {
-            name: 'browser-bridge',
-            description: 'Control a browser',
-            template: 'Control a browser',
-            source: 'skill',
-            hints: ['web'],
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('commands', [
+        {
+          name: 'browser-bridge',
+          description: 'Control a browser',
+          template: 'Control a browser',
+          source: 'skill',
+          hints: ['web'],
+        },
+      ]);
       const prefix = 'Please use ';
-      setInputText(`${prefix}/${query}${suffix}`);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      setInputTextAndFlush(`${prefix}/${query}${suffix}`);
+      renderChatInput();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, prefix.length + query.length + 1);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'o', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       const items = [...container!.querySelectorAll<HTMLButtonElement>('.completion-slash')];
       const index = items.findIndex(
@@ -6561,19 +5563,13 @@ describe('ChatInput', () => {
         flushSolid();
       } else {
         for (let i = 0; i < index; i++) {
-          editor.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
-          );
+          pressKey(editor, { key: 'ArrowDown' });
           flushSolid();
         }
-        editor.dispatchEvent(
-          new KeyboardEvent('keydown', { key: selection, bubbles: true, cancelable: true })
-        );
+        pressKey(editor, { key: selection });
         flushSolid();
       }
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       const expected = `Please use $[browser-bridge]${suffix || ' '}`;
       expect(inputText()).toBe(expected);
@@ -6583,12 +5579,8 @@ describe('ChatInput', () => {
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
       expect(sendMessageMock).not.toHaveBeenCalled();
 
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(sendMessageMock.mock.calls[0]?.[0]).toBe(expected);
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     }
@@ -6610,31 +5602,14 @@ describe('ChatInput', () => {
     'Use $[%ZZ]',
     'Use $[]',
   ])('keeps skill-like input %s as ordinary draft text', async (draft) => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'docs',
-          description: 'Write a document',
-          template: 'Write a document',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText(draft);
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor) throw new Error('Expected composer editor');
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('docs', 'Write a document')]);
+    setInputTextAndFlush(draft);
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, editor.childNodes.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe(draft);
     expect(editor.querySelector('[data-chip-type="mention-skill"]')).toBeNull();
@@ -6646,45 +5621,30 @@ describe('ChatInput', () => {
   it.each(['Enter', 'Tab', 'click'])(
     'selects a dollar skill inline with %s and sends it with the prompt',
     async (selection) => {
-      setState(
-        storePath('commands', [
-          {
-            name: 'browser-bridge',
-            description: 'Control a browser',
-            template: 'Control a browser',
-            source: 'skill',
-            hints: ['web'],
-          },
-          {
-            name: 'browser-command',
-            description: 'A command',
-            template: 'A command',
-            source: 'command',
-          },
-          {
-            name: 'another-skill',
-            description: 'Another skill',
-            template: 'Another skill',
-            source: 'skill',
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('commands', [
+        {
+          name: 'browser-bridge',
+          description: 'Control a browser',
+          template: 'Control a browser',
+          source: 'skill',
+          hints: ['web'],
+        },
+        {
+          name: 'browser-command',
+          description: 'A command',
+          template: 'A command',
+          source: 'command',
+        },
+        skillCommand('another-skill', 'Another skill'),
+      ]);
       const draft = 'Please use $WEB for this';
-      setInputText(draft);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      setInputTextAndFlush(draft);
+      renderChatInput();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, 'Please use $WEB'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'B', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(container?.querySelector('.composer-completion-header')?.textContent).toBe('Skills');
       const titles = Array.from(
@@ -6696,25 +5656,17 @@ describe('ChatInput', () => {
         container?.querySelector<HTMLButtonElement>('.completion-slash')?.click();
         flushSolid();
       } else {
-        editor.dispatchEvent(
-          new KeyboardEvent('keydown', { key: selection, bubbles: true, cancelable: true })
-        );
+        pressKey(editor, { key: selection });
         flushSolid();
       }
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(inputText()).toBe('Please use $[browser-bridge] for this');
       expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
         'browser-bridge'
       );
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
       expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Please use $[browser-bridge] for this');
     }
@@ -6723,21 +5675,9 @@ describe('ChatInput', () => {
   it.each(['$', '/'])(
     'adds another %s skill without replacing an existing skill chip',
     async (trigger) => {
-      setState(
-        storePath('commands', [
-          {
-            name: 'unslop',
-            description: 'Edit writing',
-            template: 'Edit writing',
-            source: 'skill',
-          },
-        ])
-      );
-      flushSolid();
-      setInputText(`Use $[browser-bridge] then ${trigger}un`);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('commands', [skillCommand('unslop', 'Edit writing')]);
+      setInputTextAndFlush(`Use $[browser-bridge] then ${trigger}un`);
+      renderChatInput();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor?.lastChild) throw new Error('Expected populated composer editor');
       editor.focus();
@@ -6745,70 +5685,41 @@ describe('ChatInput', () => {
       setCollapsedSelection(editor.lastChild, editor.lastChild.textContent?.length ?? 0);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'n', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
+      pressKey(editor, { key: 'Tab' });
+      await settle();
       expect(inputText()).toBe('Use $[browser-bridge] then $[unslop] ');
       expect(
         Array.from(editor.querySelectorAll('[data-chip-type="mention-skill"]')).map(
           (chip) => chip.textContent
         )
       ).toEqual(['browser-bridge', 'unslop']);
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Use $[browser-bridge] then $[unslop] ');
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     }
   );
 
   it('shows only skills for a bare dollar and dismisses without clearing the draft', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'browser-bridge',
-          description: 'Control a browser',
-          template: 'Control a browser',
-          source: 'skill',
-        },
-        { name: 'custom-command', description: 'Command', template: 'Command', source: 'command' },
-      ])
-    );
-    flushSolid();
-    setInputText('$');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('commands', [
+      skillCommand('browser-bridge', 'Control a browser'),
+      { name: 'custom-command', description: 'Command', template: 'Command', source: 'command' },
+    ]);
+    setInputTextAndFlush('$');
+    renderChatInput();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, 1);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: '$', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(
       Array.from(container?.querySelectorAll('.composer-completion-title') ?? []).map(
         (element) => element.textContent
       )
     ).toEqual(['browser-bridge']);
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Escape' });
+    await settle();
     expect(inputText()).toBe('$');
     expect(container?.querySelector('.composer-completion-menu')).toBeNull();
   });
@@ -6816,44 +5727,22 @@ describe('ChatInput', () => {
   it.each(['Enter', 'Tab', 'click'])(
     'opens Skills inline as a dollar picker with %s and inserts a chip',
     async (selection) => {
-      setState(
-        storePath('commands', [
-          {
-            name: 'browser-bridge',
-            description: 'Control a browser',
-            template: 'Control a browser',
-            source: 'skill',
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('commands', [skillCommand('browser-bridge', 'Control a browser')]);
       const draft = 'Please use /ski for this';
-      setInputText(draft);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      setInputTextAndFlush(draft);
+      renderChatInput();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, 'Please use /ski'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'i', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       const skillsRow = Array.from(
         container?.querySelectorAll<HTMLButtonElement>('.completion-slash') ?? []
       ).find((row) => row.querySelector('.composer-completion-title')?.textContent === '/skills');
       if (!skillsRow) throw new Error('Expected Skills lookup option');
       if (selection === 'click') skillsRow.click();
-      else
-        editor.dispatchEvent(
-          new KeyboardEvent('keydown', { key: selection, bubbles: true, cancelable: true })
-        );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      else pressKey(editor, { key: selection });
+      await settle();
       expect(inputText()).toBe('Please use $ for this');
       expect(container?.querySelector('.composer-completion-header')?.textContent).toBe('Skills');
       expect(container?.querySelector('.composer-completion-title')?.textContent).toBe(
@@ -6861,12 +5750,8 @@ describe('ChatInput', () => {
       );
       expect(sendMessageMock).not.toHaveBeenCalled();
       expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(inputText()).toBe('Please use $[browser-bridge] for this');
       expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
         'browser-bridge'
@@ -6875,45 +5760,24 @@ describe('ChatInput', () => {
   );
 
   it('selects an inline /skills alias as a dollar skill and sends it with the prompt', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'browser-bridge',
-          description: 'Control a browser',
-          template: 'Control a browser',
-          source: 'skill',
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('commands', [skillCommand('browser-bridge', 'Control a browser')]);
     const draft = 'Please use /skills bro for this';
     const completionEnd = 'Please use /skills bro'.length;
-    setInputText(draft);
-    flushSolid();
+    setInputTextAndFlush(draft);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, completionEnd);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'o', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(container?.querySelector('.composer-completion-title')?.textContent).toBe(
       'browser-bridge'
     );
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('Please use $[browser-bridge] for this');
     expect(editor.querySelector('[data-chip-type="mention-skill"]')?.textContent).toBe(
@@ -6921,12 +5785,8 @@ describe('ChatInput', () => {
     );
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
 
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Please use $[browser-bridge] for this');
@@ -6942,16 +5802,12 @@ describe('ChatInput', () => {
         directory: '/other-project',
         external: true,
       };
-      setState(storePath('serverStatus', { state: 'running', url: `http://localhost/${marker}` }));
-      flushSolid();
+      setStateAndFlush('serverStatus', { state: 'running', url: `http://localhost/${marker}` });
       vi.mocked(client.varro.session.reference).mockResolvedValue(result);
-      setInputText(`Review ${marker}`);
-      flushSolid();
+      setInputTextAndFlush(`Review ${marker}`);
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
 
       expect(client.varro.session.reference).toHaveBeenCalledWith('ses_otherProject');
       await vi.waitFor(() =>
@@ -6973,11 +5829,9 @@ describe('ChatInput', () => {
   );
 
   it('renders HTTPS URLs as editable links without replacing their DOM while typing', () => {
-    setInputText("What's this https://iconoir.com?");
-    flushSolid();
+    setInputTextAndFlush("What's this https://iconoir.com?");
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const reference = container?.querySelector<HTMLElement>('.composer-external-link');
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
@@ -7024,11 +5878,9 @@ describe('ChatInput', () => {
   });
 
   it('escapes a URL into plain text when typing a trailing space', () => {
-    setInputText('https://iconoir.com');
-    flushSolid();
+    setInputTextAndFlush('https://iconoir.com');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
     const reference = container?.querySelector<HTMLElement>('.composer-external-link');
@@ -7065,32 +5917,27 @@ describe('ChatInput', () => {
         initialRoute: { type: 'session', sessionId: 'session-1' },
       },
     };
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'owned',
-          ownerViewId: 'editor-a',
-          sessionId: 'session-1',
-          text: 'Owned follow-up',
-          paused: true,
-        },
-        {
-          id: 'other-view',
-          ownerViewId: 'editor-b',
-          sessionId: 'session-1',
-          text: 'Other view follow-up',
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'owned',
+        ownerViewId: 'editor-a',
+        sessionId: 'session-1',
+        text: 'Owned follow-up',
+        paused: true,
+      },
+      {
+        id: 'other-view',
+        ownerViewId: 'editor-b',
+        sessionId: 'session-1',
+        text: 'Other view follow-up',
+      },
+    ]);
 
     const sendToExtension = vi.fn(defaultBridgeSend);
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
       sendToExtension;
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(
       [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent)
@@ -7136,28 +5983,20 @@ describe('ChatInput', () => {
     ] as const)('saves with %s when busy is %s', async (_shortcut, busy, metaKey) => {
       vi.useFakeTimers();
       setupModelState();
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
       setIsLoading(busy);
       flushSolid();
       setState(storePath('sessionStatus', 'session-1', { type: busy ? 'busy' : 'idle' }));
       flushSolid();
-      setInputText('Keep this draft');
-      flushSolid();
-      setState(
-        storePath('droppedFiles', [
-          { path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
-        ])
-      );
-      flushSolid();
-      setState(storePath('terminalSelection', { text: 'npm test', terminalName: 'zsh' }));
-      flushSolid();
+      setInputTextAndFlush('Keep this draft');
+      setStateAndFlush('droppedFiles', [
+        { path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+      ]);
+      setStateAndFlush('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
       const sendToExtension = vi.fn(defaultBridgeSend);
       fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
         sendToExtension;
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
       expect(pressSave({ metaKey, ctrlKey: !metaKey }).defaultPrevented).toBe(true);
       flushSolid();
@@ -7190,8 +6029,7 @@ describe('ChatInput', () => {
         container?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')?.disabled
       ).toBe(false);
 
-      setIsLoading(false);
-      flushSolid();
+      setIsLoadingAndFlush(false);
       setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
       flushSolid();
       await vi.advanceTimersByTimeAsync(1_000);
@@ -7202,37 +6040,29 @@ describe('ChatInput', () => {
 
     it('keeps a saved draft paused through edits and session switches until explicitly played', async () => {
       vi.useFakeTimers();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setInputText('Draft for later');
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setInputTextAndFlush('Draft for later');
       sendMessageMock.mockResolvedValue(true);
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       pressSave();
       flushSolid();
 
       container!.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click();
       flushSolid();
       expect(inputText()).toBe('Draft for later');
-      setInputText('Revised draft');
-      flushSolid();
+      setInputTextAndFlush('Revised draft');
       container!
         .querySelector<HTMLDivElement>('.rich-composer')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(inputText()).toBe('');
       expect(state.queuedMessages).toHaveLength(1);
       expect(state.queuedMessages[0]).toMatchObject({ text: 'Revised draft', paused: true });
 
-      setState(storePath('activeSessionId', 'session-2'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-2');
       await vi.advanceTimersByTimeAsync(1_000);
       flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
       await vi.advanceTimersByTimeAsync(1_000);
       flushSolid();
       expect(sendMessageMock).not.toHaveBeenCalled();
@@ -7240,9 +6070,7 @@ describe('ChatInput', () => {
       container!.querySelector<HTMLButtonElement>('[aria-label="Play queued message"]')!.click();
       flushSolid();
       await vi.advanceTimersByTimeAsync(300);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledExactlyOnceWith(
         'Revised draft',
         expect.objectContaining({ targetSessionId: 'session-1' })
@@ -7252,24 +6080,16 @@ describe('ChatInput', () => {
 
     it('pauses an existing queue row when saving its edit without duplicating it', async () => {
       vi.useFakeTimers();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setIsLoading(true);
-      flushSolid();
-      setState(
-        storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Original' }])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setIsLoadingAndFlush(true);
+      setStateAndFlush('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Original' }]);
+      renderChatInput();
       container!.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click();
       flushSolid();
-      setInputText('Saved revision');
-      flushSolid();
+      setInputTextAndFlush('Saved revision');
       pressSave();
       flushSolid();
-      setIsLoading(false);
-      flushSolid();
+      setIsLoadingAndFlush(false);
       await vi.advanceTimersByTimeAsync(1_000);
       flushSolid();
 
@@ -7283,20 +6103,10 @@ describe('ChatInput', () => {
       'saves %s as draft text without executing it',
       async (text) => {
         vi.useFakeTimers();
-        setState(
-          storePath('serverStatus', {
-            state: 'running',
-            url: 'http://localhost:4096',
-            apiVersion: 2,
-          })
-        );
-        flushSolid();
-        setState(storePath('activeSessionId', 'session-1'));
-        flushSolid();
-        setInputText(text);
-        flushSolid();
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
+        setStateAndFlush('serverStatus', runningV2Server());
+        setStateAndFlush('activeSessionId', 'session-1');
+        setInputTextAndFlush(text);
+        renderChatInput();
         pressSave();
         flushSolid();
         await vi.advanceTimersByTimeAsync(1_000);
@@ -7319,12 +6129,9 @@ describe('ChatInput', () => {
       { isComposing: true },
       { repeat: true },
     ])('does not save with unsupported key state %j', (options) => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setInputText('Unfinished draft');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setInputTextAndFlush('Unfinished draft');
+      renderChatInput();
       pressSave(options);
       flushSolid();
 
@@ -7334,18 +6141,14 @@ describe('ChatInput', () => {
     });
 
     it('does not save an empty draft or handle the shortcut outside the input', () => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setInputText('   ');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setInputTextAndFlush('   ');
+      renderChatInput();
       pressSave();
       flushSolid();
       expect(state.queuedMessages).toEqual([]);
 
-      setInputText('Keep typing');
-      flushSolid();
+      setInputTextAndFlush('Keep typing');
       const event = new KeyboardEvent('keydown', {
         key: 's',
         metaKey: true,
@@ -7364,8 +6167,7 @@ describe('ChatInput', () => {
       (newSession) => {
         if (newSession) setState(storePath('activeSessionId', 'session-1'));
         flushSolid();
-        setInputText('No session yet');
-        flushSolid();
+        setInputTextAndFlush('No session yet');
         cleanup = render(() => ChatInput({ newSession }), container!);
         flushSolid();
         pressSave();
@@ -7382,14 +6184,10 @@ describe('ChatInput', () => {
     );
 
     it('preserves the draft while messages are still loading', () => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('messagesLoading', true));
-      flushSolid();
-      setInputText('Wait for the session');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('messagesLoading', true);
+      setInputTextAndFlush('Wait for the session');
+      renderChatInput();
       pressSave();
       flushSolid();
 
@@ -7405,15 +6203,12 @@ describe('ChatInput', () => {
     it('does not submit an inline message edit', () => {
       const warn = vi.spyOn(console, 'warn');
       onTestFinished(() => warn.mockRestore());
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
       startEditingMessage('user-1', 'session-1', 'Original prompt');
       flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       expect(inputText()).toBe('Original prompt');
-      setInputText('Edited prompt');
-      flushSolid();
+      setInputTextAndFlush('Edited prompt');
       pressSave();
       flushSolid();
 
@@ -7427,41 +6222,26 @@ describe('ChatInput', () => {
 
   it('queues busy composer attachments and clears them from the input', async () => {
     setupModelState();
-    flushSolid();
 
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('selectedAgent', 'build'));
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [
-        { path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('clipboardImages', [
-        { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
-      ])
-    );
-    flushSolid();
-    setState(storePath('terminalSelection', { text: 'npm test', terminalName: 'zsh' }));
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('selectedAgent', 'build');
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' },
+    ]);
+    setStateAndFlush('clipboardImages', [
+      { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+    ]);
+    setStateAndFlush('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
 
-    setInputText('Follow up with context');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setInputTextAndFlush('Follow up with context');
+    renderChatInput();
+    await settle();
 
     const queueButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Add to queue (Enter)"]'
     );
-    queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(queueButton);
 
     expect(inputText()).toBe('');
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -7505,36 +6285,27 @@ describe('ChatInput', () => {
   });
 
   it('keeps the active file selection visible on a queued message', async () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/src/menus.css',
-          relativePath: 'src/menus.css',
-          language: 'css',
-        },
-        selection: { startLine: 6, endLine: 26 },
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setInputText('Test');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/src/menus.css',
+        relativePath: 'src/menus.css',
+        language: 'css',
+      },
+      selection: { startLine: 6, endLine: 26 },
+      diagnostics: [],
+    });
+    setInputTextAndFlush('Test');
+    renderChatInput();
 
     const queueButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Add to queue (Enter)"]'
     );
     expect(queueButton).not.toBeNull();
     queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.queuedMessages[0]?.droppedFiles).toEqual([
       {
@@ -7569,61 +6340,38 @@ describe('ChatInput', () => {
   });
 
   it('does not generate a queued file attachment when active-file auto-attachment is disabled', async () => {
-    setState(storePath('autoAttachActiveFile', false));
-    flushSolid();
+    setStateAndFlush('autoAttachActiveFile', false);
 
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
-        selection: { startLine: 2, endLine: 3 },
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setInputText('Review');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+      selection: { startLine: 2, endLine: 3 },
+      diagnostics: [],
+    });
+    setInputTextAndFlush('Review');
+    renderChatInput();
     container!.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')!.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.queuedMessages[0]?.droppedFiles).toEqual([]);
     expect(state.queuedMessages[0]?.queuedContext?.autoAttachedFilePath).toBeUndefined();
   });
 
   it('queues under the composer session when navigation races slash-command detection', async () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'session-1': { type: 'busy' },
-        'session-2': { type: 'idle' },
-      })
-    );
-    flushSolid();
-    setInputText('Queue in the original chat');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessionStatus', {
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
+    setInputTextAndFlush('Queue in the original chat');
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Add to queue (Enter)"]');
+    setStateAndFlush('activeSessionId', 'session-2');
     setIsLoading(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toEqual([
@@ -7635,37 +6383,27 @@ describe('ChatInput', () => {
     'dispatches a queued message on authoritative idle, followupTitle=%s',
     async (followupTitle) => {
       vi.useFakeTimers();
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setIsLoadingAndFlush(true);
+      setStateAndFlush('activeSessionId', 'session-1');
       setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
       flushSolid();
-      setState(storePath('selectedAgent', 'plan'));
-      flushSolid();
-      setState(
-        storePath('queuedMessages', [
-          {
-            id: 'q1',
-            sessionId: 'session-1',
-            text: 'Implement the plan',
-            followupTitle,
-            agent: 'build',
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('selectedAgent', 'plan');
+      setStateAndFlush('queuedMessages', [
+        {
+          id: 'q1',
+          sessionId: 'session-1',
+          text: 'Implement the plan',
+          followupTitle,
+          agent: 'build',
+        },
+      ]);
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
       expect(sendMessageMock).not.toHaveBeenCalled();
 
       setIsLoading(false);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).not.toHaveBeenCalled();
 
       for (const handler of serverEventHandlers.get('session.status') ?? []) {
@@ -7675,20 +6413,12 @@ describe('ChatInput', () => {
         });
       }
       setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       const expectedOptions = {
         messageId: expect.stringMatching(/^msg_/),
         agent: 'build',
-        queuedAttachments: {
-          droppedFiles: undefined,
-          clipboardImages: undefined,
-          nativePdfs: undefined,
-          terminalSelection: undefined,
-          attachedDiagnostics: undefined,
-        },
+        queuedAttachments: NO_QUEUED_ATTACHMENTS,
         queuedContext: expect.any(Object),
         preserveComposer: true,
         targetSessionId: 'session-1',
@@ -7702,30 +6432,21 @@ describe('ChatInput', () => {
 
   it('does not dispatch queued messages after an API failure', async () => {
     vi.useFakeTimers();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'Do not send after failure' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'Do not send after failure' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
-    setState(storePath('failedSessionIds', ['session-1']));
-    flushSolid();
+    setStateAndFlush('failedSessionIds', ['session-1']);
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
-    setIsLoading(false);
-    flushSolid();
+    setIsLoadingAndFlush(false);
     for (const eventType of ['session.status', 'session.idle']) {
       for (const handler of serverEventHandlers.get(eventType) ?? []) {
         const properties: SessionEventProperties = {
@@ -7746,52 +6467,33 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
 
-    setState(storePath('failedSessionIds', []));
-    flushSolid();
+    setStateAndFlush('failedSessionIds', []);
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
 
   it('dispatches a queued message for an idle background session', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'session-1': { type: 'busy' },
-        'session-2': { type: 'idle' },
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-2', text: 'Continue in the background' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessionStatus', {
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-2', text: 'Continue in the background' },
+    ]);
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Continue in the background', {
       messageId: expect.stringMatching(/^msg_/),
       agent: undefined,
-      queuedAttachments: {
-        droppedFiles: undefined,
-        clipboardImages: undefined,
-        nativePdfs: undefined,
-        terminalSelection: undefined,
-        attachedDiagnostics: undefined,
-      },
+      queuedAttachments: NO_QUEUED_ATTACHMENTS,
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-2',
@@ -7803,43 +6505,33 @@ describe('ChatInput', () => {
 
   it('dispatches a queued message through its original workspace after switching workspaces', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-2', 1, { title: 'Current workspace', directory: '/repo-b' }),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'Continue in the original workspace',
-          queuedContext: {
-            editorContext: {
-              workspacePath: '/repo-a',
-              activeFile: null,
-              selection: null,
-              diagnostics: [],
-            },
-            currentDocumentEnabled: false,
+    setStateAndFlush('sessions', [
+      session('session-2', 1, { title: 'Current workspace', directory: '/repo-b' }),
+    ]);
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Continue in the original workspace',
+        queuedContext: {
+          editorContext: {
+            workspacePath: '/repo-a',
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
           },
+          currentDocumentEnabled: false,
         },
-      ])
-    );
-    flushSolid();
+      },
+    ]);
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       'Continue in the original workspace',
@@ -7854,53 +6546,46 @@ describe('ChatInput', () => {
 
   it('uses the queued model snapshot instead of the displayed workspace catalog', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
-    setState(
-      storePath('providers', [
-        {
-          id: 'custom',
-          name: 'Workspace B',
-          source: 'custom',
-          models: {
-            shared: {
-              id: 'shared',
-              name: 'Shared text model',
-              capabilities: { vision: false, toolcall: false, input: ['audio'] },
-              cost: { input: 0, output: 0 },
-            },
+    setStateAndFlush('providers', [
+      {
+        id: 'custom',
+        name: 'Workspace B',
+        source: 'custom',
+        models: {
+          shared: {
+            id: 'shared',
+            name: 'Shared text model',
+            capabilities: { vision: false, toolcall: false, input: ['audio'] },
+            cost: { input: 0, output: 0 },
           },
         },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'Describe the attachment',
-          queuedContext: {
-            editorContext: {
-              workspacePath: '/repo-a',
-              activeFile: null,
-              selection: null,
-              diagnostics: [],
-              queuedModel: {
-                selection: { providerID: 'custom', modelID: 'shared', variant: 'original' },
-                capabilities: { vision: true, pdf: true, tools: true },
-              },
+      },
+    ]);
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Describe the attachment',
+        queuedContext: {
+          editorContext: {
+            workspacePath: '/repo-a',
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
+            queuedModel: {
+              selection: { providerID: 'custom', modelID: 'shared', variant: 'original' },
+              capabilities: { vision: true, pdf: true, tools: true },
             },
-            currentDocumentEnabled: false,
           },
+          currentDocumentEnabled: false,
         },
-      ])
-    );
-    flushSolid();
+      },
+    ]);
     let capturedModel: unknown;
     sendMessageMock.mockImplementation(async (_text, options) => {
       capturedModel = options?.queuedContext?.editorContext.queuedModel;
@@ -7912,12 +6597,9 @@ describe('ChatInput', () => {
       return true;
     });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(capturedModel).toMatchObject({
       capabilities: {
@@ -7937,16 +6619,14 @@ describe('ChatInput', () => {
 
   it('dispatches two background queue items after busy then idle events', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
-    setState(storePath('sessions', [session('session-2', 1, { directory: '/repo-b' })]));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'busy' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
+    setStateAndFlush('sessions', [session('session-2', 1, { directory: '/repo-b' })]);
+    setStateAndFlush('sessionStatus', {
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
     const queuedContext = {
       editorContext: {
         workspacePath: '/repo-a',
@@ -7956,13 +6636,10 @@ describe('ChatInput', () => {
       },
       currentDocumentEnabled: false,
     };
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First sibling prompt', queuedContext },
-        { id: 'q2', sessionId: 'session-1', text: 'Second sibling prompt', queuedContext },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'First sibling prompt', queuedContext },
+      { id: 'q2', sessionId: 'session-1', text: 'Second sibling prompt', queuedContext },
+    ]);
     sendMessageMock.mockImplementation(async (_text, options) => {
       if (options?.targetSessionId) {
         setState(storePath('sessionStatus', options.targetSessionId, { type: 'busy' }));
@@ -7970,8 +6647,7 @@ describe('ChatInput', () => {
       return true;
     });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(1_000);
     flushSolid();
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -7996,19 +6672,7 @@ describe('ChatInput', () => {
 
   it('waits for busy then idle after a background send is admitted', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'Second prompt' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'Second prompt');
     let resolveFirstSend: ((sent: boolean) => void) | undefined;
     sendMessageMock
       .mockImplementationOnce(
@@ -8019,19 +6683,14 @@ describe('ChatInput', () => {
       )
       .mockResolvedValueOnce(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
 
     postQueuedSessionStatus('session-1', 'idle');
     resolveFirstSend?.(true);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
     expect(state.queuedMessages.map((message) => message.id)).toEqual(['q2']);
@@ -8050,19 +6709,7 @@ describe('ChatInput', () => {
 
   it('dispatches the next background item when busy then idle complete before admission', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'Pending admission' },
-        { id: 'q2', sessionId: 'session-1', text: 'Dispatch exactly once' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('Pending admission', 'Dispatch exactly once');
     let resolveFirstSend: ((sent: boolean) => void) | undefined;
     sendMessageMock
       .mockImplementationOnce(
@@ -8073,28 +6720,21 @@ describe('ChatInput', () => {
       )
       .mockResolvedValueOnce(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['Pending admission']);
 
     postQueuedSessionStatus('session-1', 'busy');
     postQueuedSessionStatus('session-1', 'idle');
     await vi.advanceTimersByTimeAsync(1_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['Pending admission']);
     expect(state.queuedMessages.map((message) => message.id)).toEqual(['q1', 'q2']);
 
     resolveFirstSend?.(true);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
       'Pending admission',
@@ -8104,36 +6744,19 @@ describe('ChatInput', () => {
 
     postQueuedSessionStatus('session-1', 'idle');
     await vi.advanceTimersByTimeAsync(1_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
   });
 
   it('ignores a delayed prior-turn idle until a fresh status snapshot is idle', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'After fresh snapshot' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'After fresh snapshot');
     sendMessageMock.mockResolvedValue(true);
     vi.mocked(client.session.status).mockResolvedValue({ 'session-1': { type: 'idle' } });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
 
     postQueuedSessionStatus('session-1', 'idle');
@@ -8144,9 +6767,7 @@ describe('ChatInput', () => {
     expect(state.queuedMessages.map((message) => message.id)).toEqual(['q2']);
 
     await vi.advanceTimersByTimeAsync(1_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(client.session.status).toHaveBeenCalledOnce();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
@@ -8158,35 +6779,18 @@ describe('ChatInput', () => {
 
   it('reconciles authoritative status when the background busy event was missed', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'Recovered prompt' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'Recovered prompt');
     sendMessageMock.mockResolvedValue(true);
     vi.mocked(client.session.status).mockResolvedValue({});
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     postQueuedSessionStatus('session-1', 'idle');
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
 
     await vi.advanceTimersByTimeAsync(1_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(client.session.status).toHaveBeenCalledOnce();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
@@ -8199,22 +6803,7 @@ describe('ChatInput', () => {
     'recovers a running queue when idle arrives only through a snapshot, active=%s',
     async (activateQueuedSession) => {
       vi.useFakeTimers();
-      setState(storePath('activeSessionId', 'session-2'));
-      flushSolid();
-      setState(
-        storePath('sessionStatus', {
-          'session-1': { type: 'idle' },
-          'session-2': { type: 'idle' },
-        })
-      );
-      flushSolid();
-      setState(
-        storePath('queuedMessages', [
-          { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-          { id: 'q2', sessionId: 'session-1', text: 'Continue after completion' },
-        ])
-      );
-      flushSolid();
+      queueForBackgroundSession('First prompt', 'Continue after completion');
       sendMessageMock.mockImplementation(async (_text, options) => {
         if (!options?.targetSessionId) throw new Error('Missing queued target session');
         setState(storePath('sessionStatus', options.targetSessionId, { type: 'busy' }));
@@ -8222,12 +6811,9 @@ describe('ChatInput', () => {
       });
       vi.mocked(client.session.status).mockResolvedValue({ 'session-1': { type: 'idle' } });
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       await vi.advanceTimersByTimeAsync(300);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
       postQueuedSessionStatus('session-1', 'busy');
       await flushAsyncWork();
@@ -8239,9 +6825,7 @@ describe('ChatInput', () => {
       if (activateQueuedSession) setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
       await vi.advanceTimersByTimeAsync(5_000);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(client.session.status).toHaveBeenCalled();
       expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
@@ -8254,33 +6838,15 @@ describe('ChatInput', () => {
 
   it('rechecks running dispatches at a bounded interval and stops after the queue drains', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'session-1': { type: 'idle' },
-        'session-2': { type: 'idle' },
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'After confirmed idle' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'After confirmed idle');
     sendMessageMock.mockResolvedValue(true);
     vi.mocked(client.session.status)
       .mockResolvedValueOnce({ 'session-1': { type: 'busy' } })
       .mockResolvedValueOnce({ 'session-1': { type: 'idle' } });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     postQueuedSessionStatus('session-1', 'busy');
     await flushAsyncWork();
     flushSolid();
@@ -8289,16 +6855,12 @@ describe('ChatInput', () => {
     flushSolid();
     expect(client.session.status).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(client.session.status).toHaveBeenCalledOnce();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
 
     await vi.advanceTimersByTimeAsync(5_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(client.session.status).toHaveBeenCalledTimes(2);
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
       'First prompt',
@@ -8316,26 +6878,18 @@ describe('ChatInput', () => {
     'releases an inactive parent queue after a fresh snapshot settles a descendant seen in %s status',
     async (observedBy) => {
       vi.useFakeTimers();
-      setState(storePath('activeSessionId', 'session-2'));
-      flushSolid();
-      setState(
-        storePath('sessions', [
-          session('session-1', 1_000),
-          session('session-2', 1_000),
-          session('child', 2_000, { parentID: 'session-1' }),
-          session('grandchild', 3_000, { parentID: 'child' }),
-        ])
-      );
-      flushSolid();
-      setState(storePath('sessionStatus', { 'session-1': { type: 'idle' } }));
-      flushSolid();
-      setState(
-        storePath('queuedMessages', [
-          { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-          { id: 'q2', sessionId: 'session-1', text: 'After the child settles' },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-2');
+      setStateAndFlush('sessions', [
+        session('session-1', 1_000),
+        session('session-2', 1_000),
+        session('child', 2_000, { parentID: 'session-1' }),
+        session('grandchild', 3_000, { parentID: 'child' }),
+      ]);
+      setStateAndFlush('sessionStatus', { 'session-1': { type: 'idle' } });
+      setStateAndFlush('queuedMessages', [
+        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
+        { id: 'q2', sessionId: 'session-1', text: 'After the child settles' },
+      ]);
       sendMessageMock.mockResolvedValue(true);
       let resolveFirstStatus!: (
         statuses: Awaited<ReturnType<typeof client.session.status>>
@@ -8352,8 +6906,7 @@ describe('ChatInput', () => {
           'session-2': { type: 'busy' },
         });
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       await vi.advanceTimersByTimeAsync(300);
       flushSolid();
       expect(sendMessageMock).toHaveBeenCalledOnce();
@@ -8370,9 +6923,7 @@ describe('ChatInput', () => {
           ? { 'session-1': { type: 'idle' } }
           : { 'session-1': { type: 'idle' }, grandchild: { type: 'busy' } }
       );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledOnce();
       expect(state.queuedMessages.map(({ id }) => id)).toEqual(['q2']);
       postQueuedSessionStatus('session-1', 'idle');
@@ -8393,19 +6944,7 @@ describe('ChatInput', () => {
 
   it('retries an unresolved status reconciliation after remounting', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'After remount' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'After remount');
     sendMessageMock.mockResolvedValue(true);
     let resolveOldStatus: ((statuses: Record<string, { type: 'idle' }>) => void) | undefined;
     let resolveNewStatus: ((statuses: Record<string, { type: 'idle' }>) => void) | undefined;
@@ -8423,35 +6962,25 @@ describe('ChatInput', () => {
           })
       );
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(1_300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledOnce();
     expect(client.session.status).toHaveBeenCalledOnce();
 
-    cleanup();
+    cleanup!();
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(0);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(client.session.status).toHaveBeenCalledTimes(2);
     resolveOldStatus?.({ 'session-1': { type: 'idle' } });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
 
     resolveNewStatus?.({ 'session-1': { type: 'idle' } });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
       'First prompt',
       'After remount',
@@ -8460,19 +6989,7 @@ describe('ChatInput', () => {
 
   it('does not duplicate a prompt when status reconciliation races an idle event', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'Exactly once' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'Exactly once');
     let resolveStatus: ((statuses: Record<string, { type: 'idle' }>) => void) | undefined;
     vi.mocked(client.session.status).mockImplementationOnce(
       () =>
@@ -8482,27 +6999,20 @@ describe('ChatInput', () => {
     );
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(1_300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(client.session.status).toHaveBeenCalledOnce();
 
     postQueuedSessionStatus('session-1', 'busy');
     resolveStatus?.({ 'session-1': { type: 'idle' } });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
 
     postQueuedSessionStatus('session-1', 'idle');
     postQueuedSessionStatus('session-1', 'idle');
     await vi.advanceTimersByTimeAsync(1_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
       'First prompt',
@@ -8513,27 +7023,14 @@ describe('ChatInput', () => {
 
   it('does not release an inactive queue when an older idle snapshot follows a retry event', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'After the retry' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'After the retry');
     sendMessageMock.mockResolvedValue(true);
     let resolveStatus!: (statuses: Record<string, { type: 'idle' }>) => void;
     vi.mocked(client.session.status).mockImplementationOnce(
       () => new Promise((resolve) => (resolveStatus = resolve))
     );
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
     flushSolid();
     postQueuedSessionStatus('session-1', 'busy');
@@ -8566,43 +7063,21 @@ describe('ChatInput', () => {
 
   it('prunes admitted phases when queued-message ownership changes', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'idle' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'First prompt' },
-        { id: 'q2', sessionId: 'session-1', text: 'Transferred prompt' },
-      ])
-    );
-    flushSolid();
+    queueForBackgroundSession('First prompt', 'Transferred prompt');
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['First prompt']);
 
     setState(storePath('queuedMessages', 0, 'ownerViewId', 'editor'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q3', sessionId: 'session-1', text: 'New owned prompt', ownerViewId: 'sidebar' },
-      ])
-    );
-    flushSolid();
+    await settle();
+    setStateAndFlush('queuedMessages', [
+      { id: 'q3', sessionId: 'session-1', text: 'New owned prompt', ownerViewId: 'sidebar' },
+    ]);
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
       'First prompt',
@@ -8612,38 +7087,33 @@ describe('ChatInput', () => {
 
   it('expires a stale authoritative idle status before dispatching a queued message', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'busy' }, 'session-2': { type: 'idle' } })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'Wait for a fresh status',
-          paused: true,
-          queuedContext: {
-            editorContext: {
-              workspacePath: '/repo-a',
-              activeFile: null,
-              selection: null,
-              diagnostics: [],
-            },
-            currentDocumentEnabled: false,
+    setStateAndFlush('sessionStatus', {
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Wait for a fresh status',
+        paused: true,
+        queuedContext: {
+          editorContext: {
+            workspacePath: '/repo-a',
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
           },
+          currentDocumentEnabled: false,
         },
-      ])
-    );
-    flushSolid();
+      },
+    ]);
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     postQueuedSessionStatus('session-1', 'idle');
     await vi.advanceTimersByTimeAsync(5_001);
     flushSolid();
@@ -8662,21 +7132,17 @@ describe('ChatInput', () => {
 
   it('removes a restored queued prompt that OpenCode already admitted', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          messageId: 'msg_admitted',
-          sessionId: 'session-1',
-          text: 'Already admitted',
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_admitted',
+        sessionId: 'session-1',
+        text: 'Already admitted',
+      },
+    ]);
     vi.mocked(client.session.messages).mockResolvedValue([
       {
         info: {
@@ -8691,12 +7157,9 @@ describe('ChatInput', () => {
       },
     ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toEqual([]);
@@ -8705,29 +7168,22 @@ describe('ChatInput', () => {
 
   it('retains an attempted queued message when admission history cannot be read', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          messageId: 'msg_ambiguous',
-          sessionId: 'session-1',
-          text: 'Keep this prompt',
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_ambiguous',
+        sessionId: 'session-1',
+        text: 'Keep this prompt',
+      },
+    ]);
     vi.mocked(client.session.messages).mockRejectedValue(new Error('History unavailable'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toEqual([
@@ -8742,21 +7198,17 @@ describe('ChatInput', () => {
 
   it('does not resend an admitted queued message found on an older history page', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          messageId: 'msg_admitted',
-          sessionId: 'session-1',
-          text: 'Already admitted',
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_admitted',
+        sessionId: 'session-1',
+        text: 'Already admitted',
+      },
+    ]);
     // SAFETY: Session message pages are arrays with optional cursor metadata.
     const firstPage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     firstPage.nextCursor = 'cursor-older';
@@ -8776,12 +7228,9 @@ describe('ChatInput', () => {
         },
       ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(client.session.messages).toHaveBeenNthCalledWith(1, 'session-1', {
       limit: 200,
@@ -8796,29 +7245,23 @@ describe('ChatInput', () => {
   });
 
   it('groups queued rows with separate attachment and image metadata', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'Queued follow-up',
-          droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
-          clipboardImages: [
-            { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
-          ],
-          terminalSelection: { text: 'npm test', terminalName: 'zsh' },
-        },
-        { id: 'q2', sessionId: 'session-1', text: 'Another follow-up' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Queued follow-up',
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+      { id: 'q2', sessionId: 'session-1', text: 'Another follow-up' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const meta = container?.querySelector('.chat-queue-meta');
     const metaItems = Array.from(container?.querySelectorAll('.chat-queue-meta-item') || []);
@@ -8846,17 +7289,13 @@ describe('ChatInput', () => {
   });
 
   it('sets a native title only when a queued message label is truncated', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Queued follow-up' }])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'Queued follow-up' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const row = container?.querySelector('.chat-queue-item');
     const label = container?.querySelector('.chat-queue-label');
@@ -8876,21 +7315,15 @@ describe('ChatInput', () => {
   });
 
   it('pauses queued rows individually and toggles all session rows with Alt-click', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'first' },
-        { id: 'other', sessionId: 'session-2', text: 'other session' },
-        { id: 'q2', sessionId: 'session-1', text: 'second' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'other', sessionId: 'session-2', text: 'other session' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const firstRow = container?.querySelector<HTMLElement>('.chat-queue-item');
     const actions = firstRow?.querySelector<HTMLElement>('.chat-queue-actions');
@@ -8900,8 +7333,7 @@ describe('ChatInput', () => {
     );
     const pauseIcon = pauseButton?.firstElementChild;
 
-    pauseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(pauseButton);
 
     expect(state.queuedMessages.find((item) => item.id === 'q1')?.paused).toBe(true);
     expect(state.queuedMessages.find((item) => item.id === 'q2')?.paused).toBeUndefined();
@@ -8939,24 +7371,18 @@ describe('ChatInput', () => {
   });
 
   it('tracks hidden-scrollbar queue overflow at both edges', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath(
-        'queuedMessages',
-        Array.from({ length: 6 }, (_, index) => ({
-          id: `q${index + 1}`,
-          sessionId: 'session-1',
-          text: `Queued follow-up ${index + 1}`,
-        }))
-      )
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush(
+      'queuedMessages',
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `q${index + 1}`,
+        sessionId: 'session-1',
+        text: `Queued follow-up ${index + 1}`,
+      }))
     );
-    flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const list = container?.querySelector<HTMLElement>('.chat-queue-list');
     expect(list).not.toBeNull();
@@ -8995,8 +7421,7 @@ describe('ChatInput', () => {
     ['linkMove', 'link'],
     ['none', 'none'],
   ] as const)('uses an allowed attachment drop effect for %s drags', (allowed, expected) => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     const dataTransfer = createDragDataTransfer();
     dataTransfer.effectAllowed = allowed;
     const composer = container!.querySelector('.chat-input-container')!;
@@ -9019,8 +7444,7 @@ describe('ChatInput', () => {
   it.each(['text/plain', 'text/uri-list', 'text/html', 'Files'])(
     'ignores %s drags started in the chat even after leaving and re-entering',
     (dragType) => {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       const source = document.createElement('div');
       container!.append(source);
       const composer = container!.querySelector('.chat-input-container')!;
@@ -9072,8 +7496,7 @@ describe('ChatInput', () => {
       const sent: WebviewMessage[] = [];
       bridgeWindow.__sendToExtension = (message) => sent.push(message);
       try {
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
+        renderChatInput();
         const source = document.createElement('a');
         container!.append(source);
         if (cancelled) source.addEventListener('dragstart', (event) => event.preventDefault());
@@ -9122,8 +7545,7 @@ describe('ChatInput', () => {
       window.addEventListener('dragover', hostDragOver);
       flushSolid();
       try {
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
+        renderChatInput();
         const composer = container!.querySelector('.chat-input-container')!;
         for (const target of [document, container!, composer]) {
           for (const type of ['dragenter', 'dragover', 'dragover']) {
@@ -9149,8 +7571,7 @@ describe('ChatInput', () => {
   );
 
   it.each(['dragend', 'blur', 'hidden'])('clears an incoming drop overlay on %s', (type) => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     dispatchDragEvent(container!, 'dragenter', createDragDataTransfer());
     flushSolid();
     expect(document.querySelector('.chat-drop-overlay')).not.toBeNull();
@@ -9176,8 +7597,7 @@ describe('ChatInput', () => {
   });
 
   it('keeps an outgoing drag internal after the window loses focus', () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     const dataTransfer = createDragDataTransfer();
     dispatchDragEvent(container!, 'dragstart', dataTransfer);
     flushSolid();
@@ -9193,21 +7613,15 @@ describe('ChatInput', () => {
   });
 
   it('reorders queued rows by dragging the left handle without showing the file-drop overlay', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'first' },
-        { id: 'q2', sessionId: 'session-1', text: 'second' },
-        { id: 'q3', sessionId: 'session-1', text: 'third' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+      { id: 'q3', sessionId: 'session-1', text: 'third' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const handles = container!.querySelectorAll<HTMLButtonElement>(
       '[aria-label^="Reorder queued message:"]'
@@ -9249,8 +7663,7 @@ describe('ChatInput', () => {
   it.each(['application/x-varro-provider', 'application/x-varro-model'])(
     'does not treat %s reordering as a file drop',
     (dragType) => {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       const dataTransfer = createDragDataTransfer();
       dataTransfer.setData(dragType, 'openai:item');
       flushSolid();
@@ -9268,21 +7681,15 @@ describe('ChatInput', () => {
   );
 
   it('shows queue positions in the drag handles while Alt is held', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'first' },
-        { id: 'q2', sessionId: 'session-1', text: 'second' },
-        { id: 'q3', sessionId: 'session-1', text: 'third' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+      { id: 'q3', sessionId: 'session-1', text: 'third' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const handles = container!.querySelectorAll<HTMLButtonElement>(
       '[aria-label^="Reorder queued message:"]'
@@ -9303,41 +7710,34 @@ describe('ChatInput', () => {
   });
 
   it('keeps an edited queue row visible and cancels editing from the row', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'Revise this follow-up',
-          droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
-          clipboardImages: [
-            {
-              id: 'img-1',
-              url: 'data:image/png;base64,AA==',
-              mime: 'image/png',
-              filename: 'img.png',
-              size: 1,
-            },
-          ],
-          terminalSelection: { text: 'npm test', terminalName: 'zsh' },
-        },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Revise this follow-up',
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'img.png',
+            size: 1,
+          },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Edit queued message"]'
     );
     expect(editButton?.disabled).toBe(false);
-    editButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(editButton);
 
     expect(inputText()).toBe('Revise this follow-up');
     expect(state.droppedFiles).toEqual([
@@ -9374,8 +7774,7 @@ describe('ChatInput', () => {
       container?.querySelector<HTMLButtonElement>('[aria-label^="Reorder queued message:"]')?.hidden
     ).toBe(false);
 
-    cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(cancelButton);
 
     expect(inputText()).toBe('');
     expect(state.droppedFiles).toEqual([]);
@@ -9388,30 +7787,22 @@ describe('ChatInput', () => {
   });
 
   it('requeues an edited message at its original position', async () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'first' },
-        { id: 'q2', sessionId: 'session-1', text: 'second', paused: true },
-        { id: 'q3', sessionId: 'session-1', text: 'third' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second', paused: true },
+      { id: 'q3', sessionId: 'session-1', text: 'third' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     container
       ?.querySelectorAll<HTMLButtonElement>('[aria-label="Edit queued message"]')[1]
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     flushSolid();
     setInputText('second edited');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const queueButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Add to queue (Enter)"]'
     );
@@ -9419,9 +7810,7 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('second edited');
     expect(queueButton?.disabled).toBe(false);
     queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.queuedMessages.map((item) => item.text)).toEqual([
       'first',
@@ -9434,142 +7823,102 @@ describe('ChatInput', () => {
   });
 
   it('can disable an automatically attached document while editing a queued message', async () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/CHANGELOG.md',
-          relativePath: 'CHANGELOG.md',
-          language: 'markdown',
-        },
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setInputText('Also run performance tests');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setInputTextAndFlush('Also run performance tests');
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Add to queue (Enter)"]');
+    await settle();
     expect(state.queuedMessages[0]?.droppedFiles?.map((file) => file.path)).toEqual([
       '/repo/CHANGELOG.md',
     ]);
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
     expect(state.droppedFiles).toEqual([]);
     const documentChip = container?.querySelector<HTMLElement>(
       '.chat-attachments-container [role="button"][aria-pressed="true"]'
     );
     expect(documentChip?.textContent).toContain('CHANGELOG.md');
-    documentChip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(documentChip);
     expect(documentChip?.getAttribute('aria-pressed')).toBe('false');
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Add to queue (Enter)"]');
+    await settle();
     expect(state.queuedMessages[0]?.droppedFiles).toEqual([]);
     expect(state.queuedMessages[0]?.queuedContext?.currentDocumentEnabled).toBe(false);
   });
 
   it('keeps an explicitly attached active file when editing a queued message', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/CHANGELOG.md',
-          relativePath: 'CHANGELOG.md',
-          language: 'markdown',
-        },
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'Review changes',
-          droppedFiles: [
-            {
-              path: '/repo/CHANGELOG.md',
-              relativePath: 'CHANGELOG.md',
-              type: 'file',
-              attachmentSequence: 1,
-            },
-          ],
-          queuedContext: { editorContext: state.editorContext, currentDocumentEnabled: true },
-        },
-      ])
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Review changes',
+        droppedFiles: [
+          {
+            path: '/repo/CHANGELOG.md',
+            relativePath: 'CHANGELOG.md',
+            type: 'file',
+            attachmentSequence: 1,
+          },
+        ],
+        queuedContext: { editorContext: state.editorContext, currentDocumentEnabled: true },
+      },
+    ]);
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
     expect(state.droppedFiles).toEqual([
       expect.objectContaining({ path: '/repo/CHANGELOG.md', attachmentSequence: 1 }),
     ]);
   });
 
   it('restores the composer document toggle after cancelling a queued message edit', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/CHANGELOG.md',
-          relativePath: 'CHANGELOG.md',
-          language: 'markdown',
-        },
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'Review changes',
-          droppedFiles: [],
-          queuedContext: { editorContext: state.editorContext, currentDocumentEnabled: false },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('currentDocumentEnabled', true));
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: null,
+      diagnostics: [],
+    });
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Review changes',
+        droppedFiles: [],
+        queuedContext: { editorContext: state.editorContext, currentDocumentEnabled: false },
+      },
+    ]);
+    setStateAndFlush('currentDocumentEnabled', true);
     setState((draft) => {
       const current = draft['currentDocumentEnabledBySession'];
       const incoming = {} satisfies typeof current;
@@ -9578,22 +7927,14 @@ describe('ChatInput', () => {
       else reconcile(incoming)(current);
     });
     flushSolid();
-    setState(storePath('draftCurrentDocumentEnabled', null));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('draftCurrentDocumentEnabled', null);
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
     expect(state.currentDocumentEnabledBySession['session-1']).toBe(false);
     expect(state.currentDocumentEnabled).toBe(true);
 
-    container
-      ?.querySelector<HTMLButtonElement>('[title="Cancel queued message edit"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[title="Cancel queued message edit"]');
     expect(state.queuedMessageEdit).toBeNull();
     expect(state.currentDocumentEnabledBySession['session-1']).toBeUndefined();
     expect(state.currentDocumentEnabled).toBe(true);
@@ -9601,51 +7942,33 @@ describe('ChatInput', () => {
 
   it('sends an edited attempted message with a fresh message id', async () => {
     vi.useFakeTimers();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          messageId: 'msg_old_revision',
-          sessionId: 'session-1',
-          text: 'Old revision',
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_old_revision',
+        sessionId: 'session-1',
+        text: 'Old revision',
+      },
+    ]);
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
     setInputText('Edited revision');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
+    clickSelectorAndFlush('[aria-label="Add to queue (Enter)"]');
+    await settle();
 
     expect(state.queuedMessages[0]).not.toHaveProperty('messageId');
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
     flushSolid();
-    setIsLoading(false);
-    flushSolid();
+    setIsLoadingAndFlush(false);
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(client.session.messages).not.toHaveBeenCalled();
     expect(sendMessageMock).toHaveBeenCalledWith(
@@ -9660,41 +7983,25 @@ describe('ChatInput', () => {
 
   it('keeps an edited paused message queued when the session becomes idle', async () => {
     vi.useFakeTimers();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'paused follow-up', paused: true },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'paused follow-up', paused: true },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    setInputText('edited paused follow-up');
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
+    setInputTextAndFlush('edited paused follow-up');
     setIsLoading(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(sendButton).not.toBeNull();
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toHaveLength(1);
@@ -9704,55 +8011,32 @@ describe('ChatInput', () => {
 
   it('pauses automatic queue dispatch while a queued message is being edited', async () => {
     vi.useFakeTimers();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'first' },
-        { id: 'q2', sessionId: 'session-1', text: 'second' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
     setIsLoading(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
     flushSolid();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Cancel queued message edit"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Cancel queued message edit"]');
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('first', {
       messageId: expect.stringMatching(/^msg_/),
       agent: undefined,
-      queuedAttachments: {
-        droppedFiles: undefined,
-        clipboardImages: undefined,
-        nativePdfs: undefined,
-        terminalSelection: undefined,
-        attachedDiagnostics: undefined,
-      },
+      queuedAttachments: NO_QUEUED_ATTACHMENTS,
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
@@ -9761,26 +8045,20 @@ describe('ChatInput', () => {
   });
 
   it('does not overwrite existing composer content when editing a queued message', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Keep this draft');
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Queued follow-up' }])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('Keep this draft');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'Queued follow-up' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Edit queued message"]'
     );
     expect(editButton?.disabled).toBe(true);
-    editButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(editButton);
 
     expect(inputText()).toBe('Keep this draft');
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
@@ -9790,41 +8068,26 @@ describe('ChatInput', () => {
     vi.useFakeTimers();
     setConnectionInitialized(false);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'restored follow-up' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'restored follow-up' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     await vi.advanceTimersByTimeAsync(500);
     flushSolid();
     expect(sendMessageMock).not.toHaveBeenCalled();
 
     setConnectionInitialized(true);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('restored follow-up', {
       messageId: expect.stringMatching(/^msg_/),
       agent: undefined,
-      queuedAttachments: {
-        droppedFiles: undefined,
-        clipboardImages: undefined,
-        nativePdfs: undefined,
-        terminalSelection: undefined,
-        attachedDiagnostics: undefined,
-      },
+      queuedAttachments: NO_QUEUED_ATTACHMENTS,
       queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
@@ -9834,24 +8097,17 @@ describe('ChatInput', () => {
 
   it('skips paused rows and dispatches them after they are played', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'paused first', paused: true },
-        { id: 'q2', sessionId: 'session-1', text: 'active second' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'paused first', paused: true },
+      { id: 'q2', sessionId: 'session-1', text: 'active second' },
+    ]);
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['active second']);
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
@@ -9860,16 +8116,10 @@ describe('ChatInput', () => {
     flushSolid();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Play queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Play queued message"]');
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
       'active second',
@@ -9880,20 +8130,14 @@ describe('ChatInput', () => {
 
   it('blocks active-session queued actions until message hydration completes', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messagesLoading', true));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'wait for hydration' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messagesLoading', true);
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'wait for hydration' },
+    ]);
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     const sendNowButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Send as Steer"]'
     );
@@ -9904,14 +8148,10 @@ describe('ChatInput', () => {
     flushSolid();
     expect(sendMessageMock).not.toHaveBeenCalled();
 
-    setState(storePath('messagesLoading', false));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('messagesLoading', false);
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       'wait for hydration',
@@ -9921,25 +8161,17 @@ describe('ChatInput', () => {
 
   it('dispatches a hydrated session queue while the active session is hydrating', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messagesLoading', true));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'active', sessionId: 'session-1', text: 'active waits' },
-        { id: 'other', sessionId: 'session-2', text: 'other can send' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messagesLoading', true);
+    setStateAndFlush('queuedMessages', [
+      { id: 'active', sessionId: 'session-1', text: 'active waits' },
+      { id: 'other', sessionId: 'session-2', text: 'other can send' },
+    ]);
     sendMessageMock.mockResolvedValue(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).toHaveBeenCalledWith(
@@ -9951,33 +8183,26 @@ describe('ChatInput', () => {
 
   it('retains a failed automatic queue item and its attachments until an explicit retry', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          sessionId: 'session-1',
-          text: 'test 1',
-          droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
-          clipboardImages: [
-            { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
-          ],
-          terminalSelection: { text: 'npm test', terminalName: 'zsh' },
-        },
-        { id: 'q2', sessionId: 'session-1', text: 'test 2' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'test 1',
+        droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+        clipboardImages: [
+          { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+        ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+      },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
     sendMessageMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).toHaveBeenCalledWith('test 1', {
@@ -10010,9 +8235,7 @@ describe('ChatInput', () => {
     expect(retry?.querySelector('svg')?.getAttribute('width')).toBe('14');
     expect(retry?.querySelector('svg')?.getAttribute('height')).toBe('14');
     retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
     const firstDispatch = sendMessageMock.mock.calls[0]?.[1]?.queuedMessageDispatch;
@@ -10030,24 +8253,17 @@ describe('ChatInput', () => {
 
   it('retains a rejected automatic queue item without repeatedly retrying it', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'test 1' },
-        { id: 'q2', sessionId: 'session-1', text: 'test 2' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 1' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
     sendMessageMock.mockRejectedValueOnce(new Error('send failed'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     await vi.advanceTimersByTimeAsync(1_000);
     flushSolid();
 
@@ -10061,12 +8277,10 @@ describe('ChatInput', () => {
 
   it('stops retrying a queue item missing from the host queue', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'not persisted' }])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'not persisted' },
+    ]);
     const claims: WebviewMessage[] = [];
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
       message
@@ -10082,12 +8296,9 @@ describe('ChatInput', () => {
       );
     };
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(2_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(claims).toHaveLength(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -10099,10 +8310,7 @@ describe('ChatInput', () => {
 
   it('releases a queue lease granted after the claim timed out', async () => {
     vi.useFakeTimers();
-    const sent: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => sent.push(message);
+    const sent = captureBridgeMessages();
     const item = { id: 'q1', sessionId: 'session-1', text: 'late claim' };
 
     const claim = claimQueuedMessageDispatch(item);
@@ -10125,8 +8333,7 @@ describe('ChatInput', () => {
     const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
     bridgeWindow.__sendToExtension = undefined;
     const item = { id: 'q1', sessionId: 'session-1', text: 'offline claim' };
-    setState(storePath('queuedMessages', [item]));
-    flushSolid();
+    setStateAndFlush('queuedMessages', [item]);
 
     await expect(claimQueuedMessageDispatch(item)).resolves.toBeNull();
     flushSolid();
@@ -10136,12 +8343,10 @@ describe('ChatInput', () => {
 
   it('does not duplicate an in-flight queued dispatch after remounting', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'pending follow-up' }])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'pending follow-up' },
+    ]);
     let resolveSend: ((sent: boolean) => void) | undefined;
     sendMessageMock.mockImplementationOnce(
       () =>
@@ -10150,65 +8355,45 @@ describe('ChatInput', () => {
         })
     );
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(state.queuedMessageDispatchingId).toBe('q1');
 
-    cleanup();
+    cleanup!();
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(1_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
 
     resolveSend?.(true);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.queuedMessages).toEqual([]);
     expect(state.queuedMessageDispatchingId).toBeNull();
   });
 
   it('preserves a failed queued dispatch and allows retry after remounting', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'retry me' }]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'retry me' }]);
     sendMessageMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.failedQueuedMessageIds).toEqual(['q1']);
 
-    cleanup();
+    cleanup!();
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     await vi.advanceTimersByTimeAsync(1_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Retry queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Retry queued message"]');
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
     expect(state.queuedMessages).toEqual([]);
@@ -10216,32 +8401,21 @@ describe('ChatInput', () => {
   });
 
   it('preserves queued-message editing after remounting', async () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'edit this follow-up' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'edit this follow-up' },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
     expect(state.queuedMessageEdit).toEqual({ id: 'q1', sessionId: 'session-1' });
     expect(inputText()).toBe('edit this follow-up');
 
-    cleanup();
+    cleanup!();
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     expect(state.queuedMessageEdit).toEqual({ id: 'q1', sessionId: 'session-1' });
     expect(container?.querySelector('.chat-queue-item.is-editing')).not.toBeNull();
@@ -10275,14 +8449,10 @@ describe('ChatInput', () => {
       setState(storePath('activeSessionId', 'root'));
       setInputText(kind === 'inline' ? 'root unsent' : '');
       setIsLoading(true);
-      setState(
-        storePath('queuedMessages', [
-          { id: 'q', sessionId: 'root', text: 'queued edit', paused: true },
-        ])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('queuedMessages', [
+        { id: 'q', sessionId: 'root', text: 'queued edit', paused: true },
+      ]);
+      renderChatInput();
       if (kind === 'queued')
         container!.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click();
       else startEditingMessage('root-message', 'root', 'inline edit');
@@ -10304,22 +8474,13 @@ describe('ChatInput', () => {
     const sendToExtension = vi.fn(defaultBridgeSend);
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
       sendToExtension;
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'edit this follow-up' },
-      ])
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'edit this follow-up' },
+    ]);
+    renderChatInput();
+    clickSelectorAndFlush('[aria-label="Edit queued message"]');
 
     syncQueuedMessages();
     flushSolid();
@@ -10327,31 +8488,24 @@ describe('ChatInput', () => {
     if (update?.type !== 'queued-messages/update') throw new Error('Queue update missing');
     // Acknowledge persistence before the host transfers ownership away from this view.
     applyQueuedMessagesSnapshot(update.payload.messages, update.payload.mutationId);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
-    cleanup();
+    await settle();
+    cleanup!();
     flushSolid();
     resetDefaultAppState();
     flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    renderChatInput();
     expect(state.queuedMessageEdit).toEqual({ id: 'q1', sessionId: 'session-1' });
     expect(inputText()).toBe('edit this follow-up');
 
     applyQueuedMessagesSnapshot([]);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.queuedMessageEdit).toBeNull();
     expect(inputText()).toBe('');
 
-    cleanup();
+    cleanup!();
     flushSolid();
     cleanup = undefined;
     resetDefaultAppState();
@@ -10364,39 +8518,26 @@ describe('ChatInput', () => {
   it.each([undefined, 'Inspect failures'])(
     'sends queued rows as steers and removes them on success, followupTitle=%s',
     async (followupTitle) => {
-      setupMatchingActiveTurn();
-      flushSolid();
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('queuedMessages', [
-          {
-            id: 'q1',
-            sessionId: 'session-1',
-            text: 'test 2',
-            followupTitle,
-            droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
-            clipboardImages: [
-              { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
-            ],
-            terminalSelection: { text: 'npm test', terminalName: 'zsh' },
-          },
-          { id: 'q2', sessionId: 'session-1', text: 'test 3' },
-        ])
-      );
-      flushSolid();
+      setupLoadingActiveTurn();
+      setStateAndFlush('queuedMessages', [
+        {
+          id: 'q1',
+          sessionId: 'session-1',
+          text: 'test 2',
+          followupTitle,
+          droppedFiles: [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }],
+          clipboardImages: [
+            { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
+          ],
+          terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+        },
+        { id: 'q2', sessionId: 'session-1', text: 'test 3' },
+      ]);
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
-      container
-        ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      clickSelectorAndFlush('[aria-label="Send as Steer"]');
+      await settle();
 
       const expectedOptions = {
         agent: undefined,
@@ -10422,14 +8563,11 @@ describe('ChatInput', () => {
   );
 
   it('shows inbox steers above the queue until the same message lands in the transcript', async () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Later follow-up' }])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'Later follow-up' },
+    ]);
     const info: UserMessage = {
       id: 'msg_pending_steer',
       sessionID: 'session-1',
@@ -10439,25 +8577,21 @@ describe('ChatInput', () => {
       agent: 'build',
       model: { providerID: 'openai', modelID: 'test-model' },
     };
-    setState(
-      storePath('messages', [
-        {
-          info,
-          parts: [
-            {
-              id: 'part_pending',
-              messageID: info.id,
-              sessionID: info.sessionID,
-              type: 'text',
-              text: 'Change direction',
-            },
-          ],
-        },
-      ])
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('messages', [
+      {
+        info,
+        parts: [
+          {
+            id: 'part_pending',
+            messageID: info.id,
+            sessionID: info.sessionID,
+            type: 'text',
+            text: 'Change direction',
+          },
+        ],
+      },
+    ]);
+    renderChatInput();
 
     expect(
       [...container!.querySelectorAll('[role="list"]')].map((list) =>
@@ -10471,19 +8605,15 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('button[title^="Resume the existing"]')).toBeNull();
 
-    setState(storePath('activeSessionId', 'session-other'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-other');
     expect(container?.querySelector('[aria-label="Steered messages"]')).toBeNull();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     expect(container?.querySelector('[aria-label="Steered messages"]')?.textContent).toBe(
       'Change direction'
     );
 
-    setIsLoading(false);
-    flushSolid();
-    setState(storePath('sessionStatus', { 'session-1': { type: 'idle' } }));
-    flushSolid();
+    setIsLoadingAndFlush(false);
+    setStateAndFlush('sessionStatus', { 'session-1': { type: 'idle' } });
     const resume = container?.querySelector<HTMLButtonElement>(
       'button[title^="Resume the existing"]'
     );
@@ -10491,9 +8621,7 @@ describe('ChatInput', () => {
     expect(resume?.classList.contains('chat-queue-control')).toBe(true);
     expect(resume?.classList.contains('chat-steer-resume')).toBe(true);
     resume?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(client.session.resumeSteering).toHaveBeenCalledWith('session-1', {
       directory: undefined,
     });
@@ -10501,9 +8629,7 @@ describe('ChatInput', () => {
     expect(state.messages[0]?.info).toMatchObject({ pendingDelivery: 'steer' });
 
     upsertMessageInfo({ ...info, pendingDelivery: undefined });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(container?.querySelector('[aria-label="Steered messages"]')).toBeNull();
     expect(
       getVisibleThreadMessages(state.messages, 'session-1').map((entry) => entry.info.id)
@@ -10516,10 +8642,8 @@ describe('ChatInput', () => {
   it.each([false, true])(
     'matches queue annotation previews for canonical pending steers with deferred content: %s',
     (deferred) => {
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setIsLoadingAndFlush(true);
+      setStateAndFlush('activeSessionId', 'session-1');
       const file = createChatAnnotation(
         'Original passage',
         'Test annotation. '.repeat(5),
@@ -10535,43 +8659,36 @@ describe('ChatInput', () => {
         agent: 'build',
         model: { providerID: 'openai', modelID: 'test-model' },
       };
-      setState(
-        storePath('queuedMessages', [
-          { id: 'queue-annotation', sessionId: 'session-1', text, droppedFiles: [file] },
-        ])
-      );
-      flushSolid();
-      setState(
-        storePath('messages', [
-          {
-            info,
-            parts: [
-              {
-                id: 'pending-text',
-                messageID: info.id,
-                sessionID: info.sessionID,
-                type: 'text',
-                text,
-              },
-              {
-                id: 'pending-file',
-                messageID: info.id,
-                sessionID: info.sessionID,
-                type: 'file',
-                mime: 'text/plain',
-                filename: file.relativePath,
-                url: deferred
-                  ? 'varro-content:/part/pending-file'
-                  : pastedTextDataUrl(file.pastedText!),
-                annotation: deferred ? readChatAnnotation(file)! : undefined,
-              },
-            ],
-          },
-        ])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('queuedMessages', [
+        { id: 'queue-annotation', sessionId: 'session-1', text, droppedFiles: [file] },
+      ]);
+      setStateAndFlush('messages', [
+        {
+          info,
+          parts: [
+            {
+              id: 'pending-text',
+              messageID: info.id,
+              sessionID: info.sessionID,
+              type: 'text',
+              text,
+            },
+            {
+              id: 'pending-file',
+              messageID: info.id,
+              sessionID: info.sessionID,
+              type: 'file',
+              mime: 'text/plain',
+              filename: file.relativePath,
+              url: deferred
+                ? 'varro-content:/part/pending-file'
+                : pastedTextDataUrl(file.pastedText!),
+              annotation: deferred ? readChatAnnotation(file)! : undefined,
+            },
+          ],
+        },
+      ]);
+      renderChatInput();
       const labels = [...container!.querySelectorAll('.chat-queue-label')];
       expect(labels.map((label) => label.textContent)).toEqual(
         Array(2).fill(`Steer [${getChatAnnotationLabel('Test annotation. '.repeat(5))}]`)
@@ -10587,23 +8704,15 @@ describe('ChatInput', () => {
   );
 
   it('does not resend a restored queued steer that OpenCode already admitted', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        {
-          id: 'q1',
-          messageId: 'msg_admitted_steer',
-          sessionId: 'session-1',
-          text: 'Already steered',
-        },
-      ])
-    );
-    flushSolid();
+    setupLoadingActiveTurn();
+    setStateAndFlush('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_admitted_steer',
+        sessionId: 'session-1',
+        text: 'Already steered',
+      },
+    ]);
     vi.mocked(client.session.messages).mockResolvedValue([
       {
         info: {
@@ -10618,12 +8727,8 @@ describe('ChatInput', () => {
       },
     ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('[aria-label="Send as Steer"]');
     await vi.waitFor(() => expect(state.queuedMessages).toEqual([]));
     flushSolid();
 
@@ -10632,19 +8737,13 @@ describe('ChatInput', () => {
 
   it('keeps a queued steer visible and blocks later queue dispatch while pending', async () => {
     setupMatchingActiveTurn();
-    flushSolid();
     vi.useFakeTimers();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'test 1' },
-        { id: 'q2', sessionId: 'session-1', text: 'test 2' },
-      ])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 1' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
     let resolveSteer: ((value: boolean) => void) | undefined;
     sendMessageMock.mockImplementationOnce(
       () =>
@@ -10653,15 +8752,10 @@ describe('ChatInput', () => {
         })
     );
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send as Steer"]');
+    await settle();
 
     const queueLabels = () =>
       [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent);
@@ -10669,13 +8763,7 @@ describe('ChatInput', () => {
       agent: undefined,
       delivery: 'steer',
       messageId: expect.stringMatching(/^msg_/),
-      queuedAttachments: {
-        droppedFiles: undefined,
-        clipboardImages: undefined,
-        nativePdfs: undefined,
-        terminalSelection: undefined,
-        attachedDiagnostics: undefined,
-      },
+      queuedAttachments: NO_QUEUED_ATTACHMENTS,
       preserveComposer: true,
       targetSessionId: 'session-1',
       queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
@@ -10691,29 +8779,21 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Steered messages"] button')).toBeNull();
 
     setIsLoading(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
 
     expect(resolveSteer).toBeDefined();
     resolveSteer?.(true);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
 
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledTimes(2);
     expect(sendMessageMock.mock.calls[1]).toEqual([
@@ -10721,13 +8801,7 @@ describe('ChatInput', () => {
       {
         messageId: expect.stringMatching(/^msg_/),
         agent: undefined,
-        queuedAttachments: {
-          droppedFiles: undefined,
-          clipboardImages: undefined,
-          nativePdfs: undefined,
-          terminalSelection: undefined,
-          attachedDiagnostics: undefined,
-        },
+        queuedAttachments: NO_QUEUED_ATTACHMENTS,
         queuedContext: expect.any(Object),
         preserveComposer: true,
         targetSessionId: 'session-1',
@@ -10739,29 +8813,18 @@ describe('ChatInput', () => {
   it.each(['response', 'event'] as const)(
     'does not reinsert an accepted steer into the queue during %s acknowledgement',
     async (acknowledgement) => {
-      setupMatchingActiveTurn();
-      flushSolid();
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('queuedMessages', [
-          { id: 'q1', sessionId: 'session-1', text: 'Change direction' },
-          { id: 'q2', sessionId: 'session-1', text: 'Later follow-up' },
-        ])
-      );
-      flushSolid();
+      setupLoadingActiveTurn();
+      setStateAndFlush('queuedMessages', [
+        { id: 'q1', sessionId: 'session-1', text: 'Change direction' },
+        { id: 'q2', sessionId: 'session-1', text: 'Later follow-up' },
+      ]);
       let resolveSend: ((sent: boolean) => void) | undefined;
       sendMessageMock.mockImplementationOnce(
         () => new Promise<boolean>((resolve) => (resolveSend = resolve))
       );
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(resolveSend).toBeDefined();
       expect(container?.querySelector('[data-steered-message-id="q1"]')).not.toBeNull();
 
@@ -10789,9 +8852,7 @@ describe('ChatInput', () => {
         }
         flushSolid();
         resolveSend?.(true);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
 
         expect(reinserted).toEqual([]);
         expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
@@ -10803,19 +8864,11 @@ describe('ChatInput', () => {
   );
 
   it('removes a pending queued steer when the backend admits it', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'test 1' },
-        { id: 'q2', sessionId: 'session-1', text: 'test 2' },
-      ])
-    );
-    flushSolid();
+    setupLoadingActiveTurn();
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 1' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 2' },
+    ]);
     let resolveSteer: ((value: boolean) => void) | undefined;
     sendMessageMock.mockImplementationOnce(
       () =>
@@ -10824,13 +8877,9 @@ describe('ChatInput', () => {
         })
     );
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send as Steer"]');
     await vi.waitFor(() => expect(resolveSteer).toBeDefined());
     flushSolid();
 
@@ -10849,51 +8898,30 @@ describe('ChatInput', () => {
 
     expect(resolveSteer).toBeDefined();
     resolveSteer?.(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
     expect(container?.textContent).not.toContain('Retry Steer');
   });
 
   it('restores a queued row when steering it reports a send error', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'test 2' },
-        { id: 'q2', sessionId: 'session-1', text: 'test 3' },
-      ])
-    );
-    flushSolid();
+    setupLoadingActiveTurn();
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'test 2' },
+      { id: 'q2', sessionId: 'session-1', text: 'test 3' },
+    ]);
     sendMessageMock.mockResolvedValueOnce(false);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send as Steer"]');
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('test 2', {
       agent: undefined,
       delivery: 'steer',
       messageId: expect.stringMatching(/^msg_/),
-      queuedAttachments: {
-        droppedFiles: undefined,
-        clipboardImages: undefined,
-        nativePdfs: undefined,
-        terminalSelection: undefined,
-        attachedDiagnostics: undefined,
-      },
+      queuedAttachments: NO_QUEUED_ATTACHMENTS,
       preserveComposer: true,
       targetSessionId: 'session-1',
       queuedMessageDispatch: { itemId: 'q1', lease: expect.any(Number) },
@@ -10907,17 +8935,12 @@ describe('ChatInput', () => {
     async (mode) => {
       vi.useFakeTimers();
       setupMatchingActiveTurn();
-      flushSolid();
       setIsLoading(mode === 'steer');
       flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('sessions', [
-          session('session-1', 1, { directory: '/workspace-root', workspaceScope: 'workspace' }),
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [
+        session('session-1', 1, { directory: '/workspace-root', workspaceScope: 'workspace' }),
+      ]);
       setState(storePath('editorContext', 'workspacePath', '/selected-folder'));
       flushSolid();
       const queuedContext = {
@@ -10930,22 +8953,18 @@ describe('ChatInput', () => {
         },
         currentDocumentEnabled: false,
       };
-      setState(
-        storePath('queuedMessages', [
-          {
-            id: 'q1',
-            sessionId: 'session-1',
-            messageId: 'msg_original',
-            text: 'Retry in the owning workspace',
-            queuedContext,
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('queuedMessages', [
+        {
+          id: 'q1',
+          sessionId: 'session-1',
+          messageId: 'msg_original',
+          text: 'Retry in the owning workspace',
+          queuedContext,
+        },
+      ]);
       queuedMessageWasAdmittedMock.mockResolvedValue(false);
       sendMessageMock.mockResolvedValue(true);
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
       if (mode === 'steer') {
         container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
@@ -10954,9 +8973,7 @@ describe('ChatInput', () => {
         await vi.advanceTimersByTimeAsync(300);
         flushSolid();
       }
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(queuedMessageWasAdmittedMock).toHaveBeenCalledWith(
         'session-1',
@@ -10978,28 +8995,17 @@ describe('ChatInput', () => {
   );
 
   it('shows a steering retry history error and retries without changing the message identity', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', messageId: 'msg_original', text: 'Retry me' },
-      ])
-    );
-    flushSolid();
+    setupLoadingActiveTurn();
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', messageId: 'msg_original', text: 'Retry me' },
+    ]);
     queuedMessageWasAdmittedMock.mockRejectedValueOnce(new Error('404 Session not found'));
     queuedMessageWasAdmittedMock.mockResolvedValueOnce(false);
     sendMessageMock.mockResolvedValue(true);
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendError()).toContain('404 Session not found');
     flushSolid();
@@ -11008,9 +9014,7 @@ describe('ChatInput', () => {
     const retry = container?.querySelector<HTMLButtonElement>('[aria-label="Retry send as Steer"]');
     expect(retry).not.toBeNull();
     retry?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       'Retry me',
@@ -11022,27 +9026,18 @@ describe('ChatInput', () => {
   });
 
   it('shows feedback when a steering dispatch claim is denied', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]));
-    flushSolid();
+    setupLoadingActiveTurn();
+    setStateAndFlush('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]);
     defaultBridgeSend = (message) => {
       if (message.type !== 'queued-messages/claim') return;
       queueMicrotask(() => applyQueuedMessageClaimResult({ ...message.payload, granted: false }));
     };
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
       defaultBridgeSend;
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendError()).toContain('dispatch');
     flushSolid();
@@ -11053,26 +9048,17 @@ describe('ChatInput', () => {
 
   it('shows feedback when a steering dispatch claim times out', async () => {
     vi.useFakeTimers();
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]));
-    flushSolid();
+    setupLoadingActiveTurn();
+    setStateAndFlush('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]);
     defaultBridgeSend = () => {};
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
       defaultBridgeSend;
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
     flushSolid();
     await vi.advanceTimersByTimeAsync(5_000);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendError()).toContain('dispatch');
     flushSolid();
@@ -11084,28 +9070,17 @@ describe('ChatInput', () => {
   it.each(['throws', 'returns false', 'reports error'] as const)(
     'shows steering send feedback when the send %s',
     async (result) => {
-      setupMatchingActiveTurn();
-      flushSolid();
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }])
-      );
-      flushSolid();
+      setupLoadingActiveTurn();
+      setStateAndFlush('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]);
       sendMessageMock.mockImplementationOnce(async () => {
         if (result === 'throws') throw new Error('Backend unavailable');
         if (result === 'reports error') setError('Backend unavailable');
         return false;
       });
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
       container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(sendError()).toContain(
         result === 'returns false' ? 'Could not send steering message' : 'Backend unavailable'
@@ -11117,38 +9092,24 @@ describe('ChatInput', () => {
   );
 
   it('does not show a late steering history error in another session', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', messageId: 'msg_original', text: 'Retry me' },
-      ])
-    );
-    flushSolid();
+    setupLoadingActiveTurn();
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', messageId: 'msg_original', text: 'Retry me' },
+    ]);
     let rejectHistory: ((error: Error) => void) | undefined;
     queuedMessageWasAdmittedMock.mockImplementationOnce(
       () => new Promise((_resolve, reject) => (rejectHistory = reject))
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(rejectHistory).toBeDefined();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
     setError('Keep the current session error');
     flushSolid();
     rejectHistory?.(new Error('404 Session not found'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendError()).toBe('Keep the current session error');
     flushSolid();
@@ -11158,27 +9119,10 @@ describe('ChatInput', () => {
 
   it('accepts restored inline-edit images before their preview finishes decoding', async () => {
     setupModelState();
-    flushSolid();
     setState(storePath('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', true));
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('messages', [
-        {
-          info: {
-            id: 'message-1',
-            sessionID: 'session-1',
-            role: 'user',
-            time: { created: 1 },
-            agent: 'build',
-            model: { providerID: 'openai', modelID: 'gpt-4o' },
-          },
-          parts: [],
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [userMessageEntry({ providerID: 'openai', modelID: 'gpt-4o' })]);
     let finishDecode: ((image: HTMLImageElement) => void) | undefined;
     vi.mocked(imageLoading.loadImage).mockImplementationOnce(
       () => new Promise((resolve) => (finishDecode = resolve))
@@ -11190,25 +9134,20 @@ describe('ChatInput', () => {
       filename: 'Image 1',
       size: 10,
     };
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     startEditingMessage('message-1', 'session-1', 'edited prompt', {
       files: [],
       images: [image],
       terminalSelection: null,
     });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
     const send = container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!;
     expect(container!.querySelector('.chat-attachment-chip')).not.toBeNull();
     expect(send.disabled).toBe(false);
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(editMessageMock).toHaveBeenCalledWith(
       'message-1',
       'edited prompt',
@@ -11226,27 +9165,17 @@ describe('ChatInput', () => {
   });
 
   it('restores edited message context and restores draft context on cancel', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('draft prompt');
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [
-        { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('clipboardImages', [
-        { id: 'draft-img', url: 'blob:draft', mime: 'image/png', filename: 'draft.png', size: 10 },
-      ])
-    );
-    flushSolid();
-    setState(storePath('terminalSelection', { text: 'pwd', terminalName: 'draft-terminal' }));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('draft prompt');
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
+    ]);
+    setStateAndFlush('clipboardImages', [
+      { id: 'draft-img', url: 'blob:draft', mime: 'image/png', filename: 'draft.png', size: 10 },
+    ]);
+    setStateAndFlush('terminalSelection', { text: 'pwd', terminalName: 'draft-terminal' });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     startEditingMessage('message-1', 'session-1', 'edited prompt', {
       files: [{ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' }],
@@ -11269,10 +9198,7 @@ describe('ChatInput', () => {
     ]);
     expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
 
-    container
-      ?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[title="Cancel editing (Esc)"]');
 
     expect(inputText()).toBe('draft prompt');
     expect(state.droppedFiles).toEqual([
@@ -11285,59 +9211,26 @@ describe('ChatInput', () => {
   });
 
   it('uses the edited prompt model and reasoning without changing the composer on cancel', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            current: {
-              id: 'current',
-              name: 'Current model',
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: { low: {}, max: {} },
-            },
-            original: {
-              id: 'original',
-              name: 'Original model',
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: { low: {}, high: {} },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'current' }));
-    flushSolid();
-    setState(
-      storePath('selectedModel', { providerID: 'openai', modelID: 'current', variant: 'max' })
-    );
-    flushSolid();
-    setState(
-      storePath('messages', [
-        {
-          info: {
-            id: 'message-1',
-            sessionID: 'session-1',
-            role: 'user',
-            time: { created: 1 },
-            agent: 'build',
-            model: { providerID: 'openai', modelID: 'original', variant: 'high' },
-          },
-          parts: [],
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [
+        toolModel('current', 'Current model', {
+          capabilities: { toolcall: true, reasoning: true },
+          variants: { low: {}, max: {} },
+        }),
+        toolModel('original', 'Original model', {
+          capabilities: { toolcall: true, reasoning: true },
+          variants: { low: {}, high: {} },
+        }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'current' });
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'current', variant: 'max' });
+    setStateAndFlush('messages', [
+      userMessageEntry({ providerID: 'openai', modelID: 'original', variant: 'high' }),
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, {
       providerID: 'openai',
       modelID: 'original',
@@ -11357,10 +9250,7 @@ describe('ChatInput', () => {
       variant: 'max',
     });
 
-    container
-      ?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[title="Cancel editing (Esc)"]');
 
     expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Current model');
     expect(container?.querySelector('[aria-label="Thinking level"]')?.textContent).toContain('Max');
@@ -11385,9 +9275,7 @@ describe('ChatInput', () => {
         cancelable: true,
       })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(editMessageMock).toHaveBeenCalledWith(
       'message-1',
@@ -11410,49 +9298,20 @@ describe('ChatInput', () => {
   ])(
     'keeps the composer model when the edited prompt has an incomplete route %j',
     async (model) => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('providers', [
-          {
-            id: 'openai',
-            name: 'OpenAI',
-            source: 'api',
-            models: {
-              current: {
-                id: 'current',
-                name: 'Current model',
-                capabilities: { toolcall: true, reasoning: true },
-                cost: { input: 0, output: 0 },
-                variants: { low: {}, high: {} },
-              },
-            },
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('providers', [
+        apiProvider('openai', 'OpenAI', [
+          toolModel('current', 'Current model', {
+            capabilities: { toolcall: true, reasoning: true },
+            variants: { low: {}, high: {} },
+          }),
+        ]),
+      ]);
       const selection = { providerID: 'openai', modelID: 'current', variant: 'high' };
-      setState(storePath('selectedModel', selection));
-      flushSolid();
-      setState(
-        storePath('messages', [
-          {
-            info: {
-              id: 'message-1',
-              sessionID: 'session-1',
-              role: 'user',
-              time: { created: 1 },
-              agent: 'build',
-              model,
-            },
-            parts: [],
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('selectedModel', selection);
+      setStateAndFlush('messages', [userMessageEntry(model)]);
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, model);
       flushSolid();
       await Promise.resolve();
@@ -11478,9 +9337,7 @@ describe('ChatInput', () => {
         ?.dispatchEvent(
           new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
         );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(editMessageMock).toHaveBeenCalledWith(
         'message-1',
@@ -11492,62 +9349,16 @@ describe('ChatInput', () => {
   );
 
   it('retrieves provider limits as soon as a model is selected while editing', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            current: {
-              id: 'current',
-              name: 'Current model',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
-          },
-        },
-        {
-          id: 'xai',
-          name: 'xAI',
-          source: 'api',
-          models: {
-            'grok-code-fast-1': {
-              id: 'grok-code-fast-1',
-              name: 'Grok Code Fast 1',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'current', xai: 'grok-code-fast-1' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'current' }));
-    flushSolid();
-    setState(
-      storePath('messages', [
-        {
-          info: {
-            id: 'message-1',
-            sessionID: 'session-1',
-            role: 'user',
-            time: { created: 1 },
-            agent: 'build',
-            model: { providerID: 'openai', modelID: 'current' },
-          },
-          parts: [],
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [toolModel('current', 'Current model')]),
+      apiProvider('xai', 'xAI', [toolModel('grok-code-fast-1', 'Grok Code Fast 1')]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'current', xai: 'grok-code-fast-1' });
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'current' });
+    setStateAndFlush('messages', [userMessageEntry({ providerID: 'openai', modelID: 'current' })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     startEditingMessage('message-1', 'session-1', 'edited prompt');
     flushSolid();
     setShowModelPicker(true);
@@ -11571,24 +9382,8 @@ describe('ChatInput', () => {
   it.each(['published', 'failed', 'session-switched'] as const)(
     'shows chat-loading dots while an edit reconciles and clears them when %s',
     async (outcome) => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('messages', [
-          {
-            info: {
-              id: 'message-1',
-              sessionID: 'session-1',
-              role: 'user',
-              time: { created: 1 },
-              agent: 'build',
-              model: { providerID: 'openai', modelID: 'gpt-4o' },
-            },
-            parts: [],
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('messages', [userMessageEntry({ providerID: 'openai', modelID: 'gpt-4o' })]);
       let finishEdit: ((sent: boolean) => void) | undefined;
       let publishEdit: (() => void) | undefined;
       editMessageMock.mockImplementationOnce(
@@ -11598,17 +9393,12 @@ describe('ChatInput', () => {
             publishEdit = options?.onOptimisticPublish;
           })
       );
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       startEditingMessage('message-1', 'session-1', 'corrected prompt');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
       editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       const loading = container!.querySelector(
         '[role="status"][aria-label="Updating conversation"]'
@@ -11633,8 +9423,7 @@ describe('ChatInput', () => {
         expect(container!.querySelector('.composer-edit-loading')).toBeNull();
       }
       if (outcome === 'session-switched') {
-        setState(storePath('activeSessionId', 'session-2'));
-        flushSolid();
+        setStateAndFlush('activeSessionId', 'session-2');
         expect(container!.querySelector('.composer-edit-loading')).toBeNull();
       }
       flushSolid();
@@ -11654,41 +9443,19 @@ describe('ChatInput', () => {
   );
 
   it('restores edited text and preserves the prior draft when an optimistic send fails', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('original draft');
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [
-        { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
-      ])
-    );
-    flushSolid();
-    setState(storePath('terminalSelection', { text: 'pwd', terminalName: 'draft-terminal' }));
-    flushSolid();
-    setState(
-      storePath('messages', [
-        {
-          info: {
-            id: 'message-1',
-            sessionID: 'session-1',
-            role: 'user',
-            time: { created: 1 },
-            agent: 'build',
-            model: { providerID: 'openai', modelID: 'gpt-4o' },
-          },
-          parts: [],
-        },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('original draft');
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
+    ]);
+    setStateAndFlush('terminalSelection', { text: 'pwd', terminalName: 'draft-terminal' });
+    setStateAndFlush('messages', [userMessageEntry({ providerID: 'openai', modelID: 'gpt-4o' })]);
     editMessageMock.mockImplementationOnce(async (_messageId, _text, options) => {
       options?.onOptimisticPublish?.();
       return false;
     });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     startEditingMessage('message-1', 'session-1', 'corrected prompt', {
       files: [{ path: '/repo/edit.ts', relativePath: 'edit.ts', type: 'file' }],
       images: [],
@@ -11705,9 +9472,7 @@ describe('ChatInput', () => {
         cancelable: true,
       })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(editMessageMock).toHaveBeenCalledWith(
       'message-1',
@@ -11720,10 +9485,7 @@ describe('ChatInput', () => {
     ]);
     expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
 
-    container
-      ?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[title="Cancel editing (Esc)"]');
 
     expect(inputText()).toBe('original draft');
     expect(state.droppedFiles).toEqual([
@@ -11733,24 +9495,19 @@ describe('ChatInput', () => {
   });
 
   it('merges an edited whole-file attachment into the active document context', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/src/app.ts',
-          relativePath: 'src/app.ts',
-          language: 'typescript',
-        },
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        language: 'typescript',
+      },
+      selection: null,
+      diagnostics: [],
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     startEditingMessage('message-1', 'session-1', 'edited prompt', {
       files: [{ path: 'app.ts', relativePath: 'app.ts', type: 'file' }],
@@ -11769,24 +9526,19 @@ describe('ChatInput', () => {
   });
 
   it('does not duplicate the active document when editing its ranged attachment', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/package.json',
-          relativePath: 'package.json',
-          language: 'json',
-        },
-        selection: { startLine: 391, endLine: 391 },
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/package.json',
+        relativePath: 'package.json',
+        language: 'json',
+      },
+      selection: { startLine: 391, endLine: 391 },
+      diagnostics: [],
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     startEditingMessage('message-1', 'session-1', 'edited prompt', {
       files: [
@@ -11812,13 +9564,10 @@ describe('ChatInput', () => {
   });
 
   it('does not keep edited message text in the composer after remounting into another session', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('draft prompt');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('draft prompt');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     startEditingMessage('message-1', 'session-1', 'edited prompt');
     flushSolid();
@@ -11830,10 +9579,8 @@ describe('ChatInput', () => {
     cleanup?.();
     flushSolid();
     cleanup = undefined;
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
+    renderChatInput();
     await Promise.resolve();
     flushSolid();
 
@@ -11841,23 +9588,9 @@ describe('ChatInput', () => {
   });
 
   it('hides the workspace selector while editing a message', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a'));
+    renderChatInput();
     expect(container?.querySelector('.workspace-picker-button')).not.toBeNull();
 
     startEditingMessage('message-1', 'session-1', 'edited prompt');
@@ -11870,18 +9603,13 @@ describe('ChatInput', () => {
 
   it('queues on modifier Enter while a question is pending and dispatches after it clears', async () => {
     vi.useFakeTimers();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1_000)]));
-    flushSolid();
-    setState(storePath('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]));
-    flushSolid();
-    setInputText('Wait for the answer');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1_000)]);
+    setStateAndFlush('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setInputTextAndFlush('Wait for the answer');
     sendMessageMock.mockResolvedValueOnce(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const queueButton = container?.querySelector<HTMLButtonElement>(
@@ -11898,9 +9626,7 @@ describe('ChatInput', () => {
         cancelable: true,
       })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
@@ -11915,14 +9641,10 @@ describe('ChatInput', () => {
     flushSolid();
     expect(sendMessageMock).not.toHaveBeenCalled();
 
-    setState(storePath('questions', []));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('questions', []);
+    await settle();
     await vi.advanceTimersByTimeAsync(300);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Wait for the answer', {
       workspaceDirectory: '/repo',
@@ -11944,30 +9666,23 @@ describe('ChatInput', () => {
   });
 
   it('queues on Enter while a permission is pending', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1_000)]));
-    flushSolid();
-    setState(
-      storePath('permissions', [
-        {
-          id: 'permission-1',
-          type: 'bash',
-          sessionID: 'session-1',
-          messageID: 'message-1',
-          callID: 'call-1',
-          title: 'Allow bash',
-          metadata: {},
-          time: { created: 1 },
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('Wait for permission');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1_000)]);
+    setStateAndFlush('permissions', [
+      {
+        id: 'permission-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    setInputTextAndFlush('Wait for permission');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const queueButton = container?.querySelector<HTMLButtonElement>(
@@ -11976,12 +9691,8 @@ describe('ChatInput', () => {
     expect(queueButton?.disabled).toBe(false);
     expect(container?.querySelector('[aria-label="More send options"]')).toBeNull();
 
-    editor?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
@@ -11991,70 +9702,41 @@ describe('ChatInput', () => {
   });
 
   it('shows a read-only workspace dropdown in an active chat', () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 100, output: 20 })]));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a'));
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 100, output: 20 })]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('.workspace-picker-button');
 
     expect(container?.querySelector('.workspace-popover-notice')?.textContent).toContain(
       "Workspace can't be changed in an active chat."
     );
     const option = container?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]');
     expect(option?.disabled).toBe(true);
-    option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(option);
     expect(container?.querySelector('.workspace-popover')).not.toBeNull();
   });
 
   it('sends a new no-project chat in scratch without presenting it as an open folder', async () => {
-    setState(storePath('activeSessionId', null));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/varro/scratch',
-        workspaceDirectory: '/varro/scratch',
-        workspaceFolders: [],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', null);
+    setStateAndFlush('editorContext', {
+      workspacePath: '/varro/scratch',
+      workspaceDirectory: '/varro/scratch',
+      workspaceFolders: [],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    renderChatInput();
     expect(container?.querySelector('.workspace-picker-button')).toBeNull();
-    setInputText('Help me write notes');
-    flushSolid();
+    setInputTextAndFlush('Help me write notes');
     sendMessageMock.mockResolvedValue(true);
     await flushAsyncWork();
     flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledWith('Help me write notes', {
       noReply: false,
       queuedAttachments: undefined,
@@ -12063,49 +9745,25 @@ describe('ChatInput', () => {
   });
 
   it('switches an active blank workspace chat to a folder-scoped lazy chat', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 1_000, {
-          directory: '/repo-a',
-          title: 'New Chat',
-          workspaceScope: 'workspace',
-          time: { created: 1_000, updated: 1_000 },
-        }),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    const messages = captureBridgeMessages();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 1_000, {
+        directory: '/repo-a',
+        title: 'New Chat',
+        workspaceScope: 'workspace',
+        time: { created: 1_000, updated: 1_000 },
+      }),
+    ]);
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.workspace-picker-button');
 
     expect(container?.querySelector('.workspace-popover-notice')).toBeNull();
     const option = container?.querySelector<HTMLButtonElement>('[data-workspace-path="/repo-b"]');
     expect(option?.disabled).toBe(false);
-    option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(option);
     expect(container?.querySelector('.workspace-popover')).toBeNull();
     expect(state.activeSessionId).toBeNull();
     expect(manualWorkspaceSelection()).toBe(true);
@@ -12121,17 +9779,12 @@ describe('ChatInput', () => {
 
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
-    setInputText('Send from Repo B');
-    flushSolid();
+    setInputTextAndFlush('Send from Repo B');
     sendMessageMock.mockResolvedValue(true);
     await flushAsyncWork();
     flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Send from Repo B', {
       noReply: false,
@@ -12143,42 +9796,19 @@ describe('ChatInput', () => {
   it('switches an active blank folder chat back to workspace scope', () => {
     setManualWorkspaceSelection(true);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 1_000, {
-          directory: '/repo-a',
-          title: 'New Chat',
-          time: { created: 1_000, updated: 1_000 },
-        }),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 1_000, {
+        directory: '/repo-a',
+        title: 'New Chat',
+        time: { created: 1_000, updated: 1_000 },
+      }),
+    ]);
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-popover-all')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    renderChatInput();
+    clickSelectorAndFlush('.workspace-picker-button');
+    clickSelectorAndFlush('.workspace-popover-all');
 
     expect(state.activeSessionId).toBeNull();
     expect(manualWorkspaceSelection()).toBe(false);
@@ -12191,30 +9821,11 @@ describe('ChatInput', () => {
 
   it('selects the active file workspace for an empty new chat', async () => {
     setupModelState();
-    flushSolid();
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-b',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    const messages = captureBridgeMessages();
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a', '/repo-b'));
 
     cleanup = render(() => ChatInput({ newSession: true }), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(messages).toContainEqual({
       type: 'workspace/select',
@@ -12228,23 +9839,17 @@ describe('ChatInput', () => {
     const sendButton = container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!;
     expect(sendButton.disabled).toBe(true);
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('Send after the workspace acknowledgement');
 
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.pendingWorkspaceSelectionPath).toBeNull();
     expect(sendButton.disabled).toBe(false);
     sendButton.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledWith(
       'Send after the workspace acknowledgement',
       expect.objectContaining({ noReply: false })
@@ -12256,28 +9861,20 @@ describe('ChatInput', () => {
     'recovers from a failed automatic workspace switch with draft %j',
     async (draft) => {
       setupModelState();
-      flushSolid();
-      const messages: WebviewMessage[] = [];
-      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
-        (message) => messages.push(message);
-      setState(
-        storePath('editorContext', {
-          workspacePath: '/repo-a',
-          activeWorkspacePath: '/repo-b',
-          workspaceFolders: [
-            { name: 'Repo A', path: '/repo-a' },
-            { name: 'Repo B', path: '/repo-b' },
-          ],
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-        })
-      );
-      flushSolid();
+      const messages = captureBridgeMessages();
+      setStateAndFlush('editorContext', {
+        workspacePath: '/repo-a',
+        activeWorkspacePath: '/repo-b',
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
       cleanup = render(() => ChatInput({ newSession: true }), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       const request = messages.find((message) => message.type === 'workspace/select');
       if (!request || request.type !== 'workspace/select')
@@ -12292,9 +9889,7 @@ describe('ChatInput', () => {
       )!;
       expect(sendButton.disabled).toBe(true);
       editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).not.toHaveBeenCalled();
 
       handleWorkspaceSelectionFailure({ ...request.payload, error: 'Folder unavailable' });
@@ -12314,9 +9909,7 @@ describe('ChatInput', () => {
       flushSolid();
       expect(sendButton.disabled).toBe(false);
       sendButton.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledWith(
         text,
         expect.objectContaining({ newSessionWorkspace: { scope: 'folder', directory: '/repo-a' } })
@@ -12329,61 +9922,47 @@ describe('ChatInput', () => {
     async (activeWorkspacePath) => {
       vi.useFakeTimers();
       setupModelState();
-      flushSolid();
-      const messages: WebviewMessage[] = [];
-      fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
-        (message) => messages.push(message);
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 2_000, { directory: '/repo-a' })]));
-      flushSolid();
+      const messages = captureBridgeMessages();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 2_000, { directory: '/repo-a' })]);
       const assistant = assistantMessageEntry({ input: 100, output: 20 });
-      setState(
-        storePath('messages', [
-          {
-            ...assistant,
-            info: {
-              ...assistant.info,
-              agent: 'plan',
-              finish: 'stop',
-              time: { created: 1_000, completed: 2_000 },
-              path: { cwd: '/repo-a', root: '/repo-a' },
-            },
-            parts: [
-              {
-                id: 'plan-text',
-                sessionID: 'session-1',
-                messageID: assistant.info.id,
-                type: 'text',
-                text: 'Plan: add validation, then cover invalid input with tests.',
-              },
-            ],
+      setStateAndFlush('messages', [
+        {
+          ...assistant,
+          info: {
+            ...assistant.info,
+            agent: 'plan',
+            finish: 'stop',
+            time: { created: 1_000, completed: 2_000 },
+            path: { cwd: '/repo-a', root: '/repo-a' },
           },
-        ])
-      );
-      flushSolid();
-      setState(
-        storePath('editorContext', {
-          workspacePath: '/repo-a',
-          activeWorkspacePath,
-          workspaceFolders: [
-            { name: 'Repo A', path: '/repo-a' },
-            { name: 'Repo B', path: '/repo-b' },
+          parts: [
+            {
+              id: 'plan-text',
+              sessionID: 'session-1',
+              messageID: assistant.info.id,
+              type: 'text',
+              text: 'Plan: add validation, then cover invalid input with tests.',
+            },
           ],
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-        })
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+        },
+      ]);
+      setStateAndFlush('editorContext', {
+        workspacePath: '/repo-a',
+        activeWorkspacePath,
+        workspaceFolders: [
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
+      renderChatInput();
       expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
 
       startNewChatDraft();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.activeSessionId).toBeNull();
       const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
       enterComposerText(editor, 'Start a separate task');
@@ -12408,9 +9987,7 @@ describe('ChatInput', () => {
       expect(inputText()).toBe('Start a separate task');
       expect(sendButton.disabled).toBe(false);
       sendButton.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledWith(
         'Start a separate task',
         expect.objectContaining({ noReply: false })
@@ -12419,93 +9996,46 @@ describe('ChatInput', () => {
   );
 
   it('does not reselect an equivalent UNC workspace for an empty new chat', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
-    setState(
-      storePath('editorContext', {
-        workspacePath: '\\\\BuildServer\\Projects\\Varro',
-        workspaceFolders: [{ name: 'Varro', path: '\\\\BuildServer\\Projects\\Varro' }],
-        activeWorkspacePath: '//buildserver/PROJECTS/varro/',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    const messages = captureBridgeMessages();
+    setStateAndFlush('editorContext', {
+      workspacePath: '\\\\BuildServer\\Projects\\Varro',
+      workspaceFolders: [{ name: 'Varro', path: '\\\\BuildServer\\Projects\\Varro' }],
+      activeWorkspacePath: '//buildserver/PROJECTS/varro/',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
 
     cleanup = render(() => ChatInput({ newSession: true }), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
   });
 
   it('does not override a workspace selected outside the composer', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
+    const messages = captureBridgeMessages();
     setManualWorkspaceSelection(true);
     flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-b',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-a',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-b', '/repo-a'));
 
     cleanup = render(() => ChatInput({ newSession: true }), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
   });
 
   it('waits for a typed new-chat draft to become empty before selecting the active workspace', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
+    const messages = captureBridgeMessages();
 
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-b',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a', '/repo-b'));
 
-    setInputText('Keep this workspace');
-    flushSolid();
+    setInputTextAndFlush('Keep this workspace');
     cleanup = render(() => ChatInput({ newSession: true }), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
 
     setInputText('');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(messages).toContainEqual({
       type: 'workspace/select',
@@ -12514,52 +10044,25 @@ describe('ChatInput', () => {
   });
 
   it('preserves a manual composer workspace until the draft becomes empty again', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-a',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    const messages = captureBridgeMessages();
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a', '/repo-a'));
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
 
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('.workspace-picker-button');
+    clickSelectorAndFlush('button[data-workspace-path="/repo-b"]');
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
     setState(storePath('editorContext', 'activeWorkspacePath', '/repo-a'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([
       { type: 'workspace/select', payload: { path: '/repo-b', requestId: expect.any(Number) } },
     ]);
 
-    setInputText('Reset the manual choice');
-    flushSolid();
+    setInputTextAndFlush('Reset the manual choice');
     setInputText('');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(messages.filter((message) => message.type === 'workspace/select')).toEqual([
       { type: 'workspace/select', payload: { path: '/repo-b', requestId: expect.any(Number) } },
@@ -12568,39 +10071,19 @@ describe('ChatInput', () => {
   });
 
   it('treats attachment-only drafts as nonempty for workspace auto-follow', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
+    const messages = captureBridgeMessages();
     setManualWorkspaceSelection(true);
     flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-b',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-a',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-b', '/repo-a'));
     addContextFile({ path: '/repo-b/context.ts', relativePath: 'context.ts', type: 'file' });
     flushSolid();
 
     cleanup = render(() => ChatInput({ newSession: true }), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
 
     removeContextFile('/repo-b/context.ts');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(messages).toContainEqual({
       type: 'workspace/select',
@@ -12616,20 +10099,7 @@ describe('ChatInput', () => {
     ) => {
       if (message.type === 'workspace/select') sequence.push(`select:${message.payload.path}`);
     };
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-a',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a', '/repo-a'));
     sendMessageMock.mockImplementation(() => {
       sequence.push('send');
       return new Promise<boolean>((resolve) => {
@@ -12639,36 +10109,22 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
 
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('.workspace-picker-button');
+    clickSelectorAndFlush('button[data-workspace-path="/repo-b"]');
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
     setState(storePath('editorContext', 'activeWorkspacePath', '/repo-a'));
     flushSolid();
     setInputText('Send from Repo B');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
 
     expect(sequence).toEqual(['select:/repo-b', 'send']);
 
     resolveSend?.(true);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sequence).toEqual(['select:/repo-b', 'send', 'select:/repo-a']);
   });
@@ -12676,20 +10132,17 @@ describe('ChatInput', () => {
   it('keeps the selected folder until the first message is ready to replace the composer', async () => {
     let publishOptimisticMessage: (() => void) | undefined;
     let resolveSend: ((value: boolean) => void) | undefined;
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceDirectory: '/workspace',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceDirectory: '/workspace',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
     cleanup = render(
       () =>
         ChatInput({
@@ -12700,18 +10153,11 @@ describe('ChatInput', () => {
     );
     flushSolid();
 
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('.workspace-picker-button');
+    clickSelectorAndFlush('button[data-workspace-path="/repo-b"]');
     setState(storePath('editorContext', 'workspacePath', '/repo-b'));
     flushSolid();
-    setInputText('Stay in Repo B');
-    flushSolid();
+    setInputTextAndFlush('Stay in Repo B');
     sendMessageMock.mockImplementation(
       (_text, options) =>
         new Promise<boolean>((resolve) => {
@@ -12722,12 +10168,8 @@ describe('ChatInput', () => {
     await flushAsyncWork();
     flushSolid();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
 
     expect(manualWorkspaceSelection()).toBe(true);
     expect(sendMessageMock).toHaveBeenCalledWith(
@@ -12745,44 +10187,21 @@ describe('ChatInput', () => {
     expect(manualWorkspaceSelection()).toBe(false);
 
     resolveSend?.(true);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
   });
 
   it('restores a failed send before releasing its manual workspace selection', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
+    const messages = captureBridgeMessages();
     setManualWorkspaceSelection(true);
     flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-b',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-a',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setInputText('Keep this failed prompt in Repo B');
-    flushSolid();
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-b', '/repo-a'));
+    setInputTextAndFlush('Keep this failed prompt in Repo B');
     sendMessageMock.mockResolvedValue(false);
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Send (Enter)"]');
+    await settle();
 
     expect(inputText()).toBe('Keep this failed prompt in Repo B');
     expect(manualWorkspaceSelection()).toBe(true);
@@ -12793,55 +10212,21 @@ describe('ChatInput', () => {
   });
 
   it('does not switch an established chat to the active file workspace', async () => {
-    const messages: WebviewMessage[] = [];
-    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension = (
-      message
-    ) => messages.push(message);
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('messages', [assistantMessageEntry({ input: 100, output: 20 })]));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeWorkspacePath: '/repo-b',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    const messages = captureBridgeMessages();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 100, output: 20 })]);
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a', '/repo-b'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     expect(messages).not.toContainEqual(expect.objectContaining({ type: 'workspace/select' }));
   });
 
   it('does not submit a new chat on Enter while a workspace switch is pending', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setInputText('Send after switching');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a'));
+    setInputTextAndFlush('Send after switching');
 
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
@@ -12857,10 +10242,7 @@ describe('ChatInput', () => {
     expect(metaLeftButtons?.[0]?.classList.contains('workspace-picker-button')).toBe(true);
     expect(metaLeftButtons?.[1]?.classList.contains('permission-mode-button')).toBe(true);
 
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('.workspace-picker-button');
     expect(container?.querySelector('.chat-input-shell')?.className).toContain(
       'showing-floating-popover'
     );
@@ -12868,57 +10250,39 @@ describe('ChatInput', () => {
     flushSolid();
     expect(container?.querySelector('.workspace-popover')).toBeNull();
 
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('.workspace-picker-button');
+    clickSelectorAndFlush('button[data-workspace-path="/repo-b"]');
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(sendButton?.disabled).toBe(true);
 
-    editor?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('Send after switching');
   });
 
   it('keeps a preserved draft disabled until workspace catalogs reload', async () => {
-    setState(storePath('workspaceCatalogReloadPending', true));
-    flushSolid();
-    setInputText('Preserved draft');
-    flushSolid();
+    setStateAndFlush('workspaceCatalogReloadPending', true);
+    setInputTextAndFlush('Preserved draft');
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
 
     expect(
       container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
     ).toBe(true);
-    container
-      ?.querySelector<HTMLDivElement>('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('Preserved draft');
   });
 
   it('keeps sending available while a provider refresh waits for active work', async () => {
-    setState(storePath('providerRefreshPending', true));
-    flushSolid();
-    setInputText('Send with the loaded provider configuration');
-    flushSolid();
+    setStateAndFlush('providerRefreshPending', true);
+    setInputTextAndFlush('Send with the loaded provider configuration');
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
 
@@ -12927,17 +10291,12 @@ describe('ChatInput', () => {
   });
 
   it('shows queue controls while a provider refresh waits for the active turn', () => {
-    setState(storePath('providerRefreshPending', true));
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Queue against the loaded provider configuration');
-    flushSolid();
+    setStateAndFlush('providerRefreshPending', true);
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('Queue against the loaded provider configuration');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
     expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
@@ -12945,19 +10304,15 @@ describe('ChatInput', () => {
 
   it('keeps the selected model visible while workspace catalogs reload', async () => {
     setupModelState();
-    flushSolid();
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     expect(modelButton?.textContent).toContain('GPT-4o');
 
-    setState(storePath('workspaceCatalogReloadPending', true));
-    flushSolid();
-    setState(storePath('providers', []));
-    flushSolid();
-    setState(storePath('providerDefaults', {}));
-    flushSolid();
+    setStateAndFlush('workspaceCatalogReloadPending', true);
+    setStateAndFlush('providers', []);
+    setStateAndFlush('providerDefaults', {});
     await Promise.resolve();
     flushSolid();
 
@@ -12966,29 +10321,13 @@ describe('ChatInput', () => {
     expect(modelButton?.dataset.providerId).toBe('openai');
     expect(modelButton?.dataset.modelId).toBe('gpt-4o');
 
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'Workspace GPT-4o',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              limit: { context: 2_000, output: 1_000 },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-4o' }));
-    flushSolid();
-    setState(storePath('workspaceCatalogReloadPending', false));
-    flushSolid();
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-4o', 'Workspace GPT-4o', { limit: { context: 2_000, output: 1_000 } }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-4o' });
+    setStateAndFlush('workspaceCatalogReloadPending', false);
     await Promise.resolve();
     flushSolid();
 
@@ -12999,18 +10338,13 @@ describe('ChatInput', () => {
     'keeps the selected provider visible when only %s offers the same model',
     async (providerID) => {
       setupModelState();
-      flushSolid();
       cleanup = render(() => ChatInput({ newSession: true }), container!);
       flushSolid();
       const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
       const models = { ...state.providers[0]!.models };
 
-      setState(
-        storePath('providers', [{ id: providerID, name: providerID, source: 'api', models }])
-      );
-      flushSolid();
-      setState(storePath('providerDefaults', { [providerID]: 'gpt-4o' }));
-      flushSolid();
+      setStateAndFlush('providers', [{ id: providerID, name: providerID, source: 'api', models }]);
+      setStateAndFlush('providerDefaults', { [providerID]: 'gpt-4o' });
       await Promise.resolve();
       flushSolid();
 
@@ -13021,75 +10355,47 @@ describe('ChatInput', () => {
   );
 
   it('still selects a completion on Enter before queueing a pending-request message', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1_000)]));
-    flushSolid();
-    setState(storePath('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]));
-    flushSolid();
-    setState(
-      storePath('allAgents', [
-        {
-          name: 'helper',
-          description: 'Help with the task',
-          mode: 'subagent',
-          builtIn: false,
-          permission: [],
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('@hel');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1_000)]);
+    setStateAndFlush('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setStateAndFlush('allAgents', [
+      {
+        name: 'helper',
+        description: 'Help with the task',
+        mode: 'subagent',
+        builtIn: false,
+        permission: [],
+      },
+    ]);
+    setInputTextAndFlush('@hel');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusPopulatedComposer();
     setCollapsedSelection(editor.firstChild, '@hel'.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'l', bubbles: true }));
     flushSolid();
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Enter' });
+    await settle();
 
     expect(inputText()).toBe('@helper ');
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('runs /abort with attachments while a question blocks normal sends', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1_000)]));
-    flushSolid();
-    setState(storePath('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]));
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [
-        { path: '/repo/question.ts', relativePath: 'question.ts', type: 'file' },
-      ])
-    );
-    flushSolid();
-    setInputText('/abort');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1_000)]);
+    setStateAndFlush('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/question.ts', relativePath: 'question.ts', type: 'file' },
+    ]);
+    setInputTextAndFlush('/abort');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLDivElement>('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    pressComposerEnter();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -13098,40 +10404,22 @@ describe('ChatInput', () => {
   });
 
   it('runs /pause immediately on V2 and parks owned session-tree queues before interrupting', async () => {
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 1_000),
-        { ...session('child', 1_000), parentID: 'session-1' },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('sessionStatus', { 'session-1': { type: 'busy' }, child: { type: 'busy' } })
-    );
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]));
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }])
-    );
-    flushSolid();
-    setState(
-      storePath('queuedMessages', [
-        { id: 'q1', sessionId: 'session-1', text: 'next' },
-        { id: 'q2', sessionId: 'child', text: 'child next' },
-        { id: 'q3', sessionId: 'session-2', text: 'other session' },
-        { id: 'q4', sessionId: 'session-1', text: 'other view', ownerViewId: 'editor-other' },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 1_000),
+      { ...session('child', 1_000), parentID: 'session-1' },
+    ]);
+    setStateAndFlush('sessionStatus', { 'session-1': { type: 'busy' }, child: { type: 'busy' } });
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setStateAndFlush('droppedFiles', [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }]);
+    setStateAndFlush('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'next' },
+      { id: 'q2', sessionId: 'child', text: 'child next' },
+      { id: 'q3', sessionId: 'session-2', text: 'other session' },
+      { id: 'q4', sessionId: 'session-1', text: 'other view', ownerViewId: 'editor-other' },
+    ]);
     abortSessionMock.mockImplementationOnce(async () => {
       await Promise.resolve();
       expect(state.queuedMessages.filter((item) => item.paused).map((item) => item.id)).toEqual([
@@ -13161,17 +10449,11 @@ describe('ChatInput', () => {
       ...pausedSession,
       metadata: pausedMetadata,
     });
-    setInputText('/pause');
-    flushSolid();
+    setInputTextAndFlush('/pause');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLDivElement>('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    pressComposerEnter();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -13194,32 +10476,18 @@ describe('ChatInput', () => {
   });
 
   it('keeps /pause and its queue available for retry when interruption fails', async () => {
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1_000)]));
-    flushSolid();
-    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'next' }]));
-    flushSolid();
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1_000)]);
+    setStateAndFlush('sessionStatus', { 'session-1': { type: 'busy' } });
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'next' }]);
     abortSessionMock.mockRejectedValueOnce(new Error('Connection lost'));
-    setInputText('/pause');
-    flushSolid();
+    setInputTextAndFlush('/pause');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLDivElement>('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    pressComposerEnter();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(inputText()).toBe('/pause');
@@ -13229,48 +10497,34 @@ describe('ChatInput', () => {
   });
 
   it('runs /stop with attachments while a permission blocks normal sends', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1_000)]));
-    flushSolid();
-    setState(
-      storePath('permissions', [
-        {
-          id: 'permission-1',
-          type: 'bash',
-          sessionID: 'session-1',
-          messageID: 'message-1',
-          callID: 'call-1',
-          title: 'Allow bash',
-          metadata: {},
-          time: { created: 1 },
-        },
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('clipboardImages', [
-        {
-          id: 'permission-image',
-          url: 'data:image/png;base64,permission',
-          mime: 'image/png',
-          filename: 'permission.png',
-          size: 1,
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/stop');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1_000)]);
+    setStateAndFlush('permissions', [
+      {
+        id: 'permission-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    setStateAndFlush('clipboardImages', [
+      {
+        id: 'permission-image',
+        url: 'data:image/png;base64,permission',
+        mime: 'image/png',
+        filename: 'permission.png',
+        size: 1,
+      },
+    ]);
+    setInputTextAndFlush('/stop');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector<HTMLDivElement>('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    pressComposerEnter();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -13279,47 +10533,20 @@ describe('ChatInput', () => {
   });
 
   it('runs /abort with attachments while a new-chat workspace switch blocks normal sends', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo-a',
-        workspaceFolders: [
-          { name: 'Repo A', path: '/repo-a' },
-          { name: 'Repo B', path: '/repo-b' },
-        ],
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [
-        { path: '/repo-a/workspace.ts', relativePath: 'workspace.ts', type: 'file' },
-      ])
-    );
-    flushSolid();
-    setInputText('/abort');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('editorContext', multiRootEditorContext('/repo-a'));
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo-a/workspace.ts', relativePath: 'workspace.ts', type: 'file' },
+    ]);
+    setInputTextAndFlush('/abort');
 
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('.workspace-picker-button')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    container
-      ?.querySelector<HTMLButtonElement>('button[data-workspace-path="/repo-b"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('.workspace-picker-button');
+    clickSelectorAndFlush('button[data-workspace-path="/repo-b"]');
 
-    container
-      ?.querySelector<HTMLDivElement>('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -13328,11 +10555,9 @@ describe('ChatInput', () => {
   });
 
   it('shows only the stop button while loading with nothing sendable', () => {
-    setIsLoading(true);
-    flushSolid();
+    setIsLoadingAndFlush(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
     expect(container?.querySelector('.stop-button .toolbar-picker-label')).toBeNull();
@@ -13343,35 +10568,25 @@ describe('ChatInput', () => {
 
   it('handles a rejected direct stop without an unhandled promise', async () => {
     abortSessionMock.mockRejectedValueOnce(new Error('abort failed'));
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Stop"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="Stop"]');
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the stop button through a short idle gap', async () => {
     vi.useFakeTimers();
-    setIsLoading(true);
-    flushSolid();
+    setIsLoadingAndFlush(true);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
 
-    setIsLoading(false);
-    flushSolid();
+    setIsLoadingAndFlush(false);
     await Promise.resolve();
     flushSolid();
 
@@ -13390,53 +10605,38 @@ describe('ChatInput', () => {
     async (hasQueue) => {
       vi.useFakeTimers();
       const rootId = 'waiting-root';
-      setState(storePath('activeSessionId', rootId));
-      flushSolid();
-      setState(
-        storePath('sessions', [
-          session(rootId, 1),
-          session('child-1', 2, { parentID: rootId, title: 'Migrate catalog' }),
-          session('child-2', 3, { parentID: 'child-1', title: 'Validate protocol' }),
-          session('other', 4, { title: 'Unrelated work' }),
-        ])
-      );
-      flushSolid();
-      setState(
-        storePath('sessionStatus', {
-          [rootId]: { type: 'busy' },
-          'child-1': { type: 'busy' },
-          'child-2': { type: 'retry', attempt: 1, message: 'Retrying', next: 100 },
-          other: { type: 'busy' },
-        })
-      );
-      flushSolid();
+      setStateAndFlush('activeSessionId', rootId);
+      setStateAndFlush('sessions', [
+        session(rootId, 1),
+        session('child-1', 2, { parentID: rootId, title: 'Migrate catalog' }),
+        session('child-2', 3, { parentID: 'child-1', title: 'Validate protocol' }),
+        session('other', 4, { title: 'Unrelated work' }),
+      ]);
+      setStateAndFlush('sessionStatus', {
+        [rootId]: { type: 'busy' },
+        'child-1': { type: 'busy' },
+        'child-2': { type: 'retry', attempt: 1, message: 'Retrying', next: 100 },
+        other: { type: 'busy' },
+      });
       const assistant = assistantMessageEntry({ input: 1, output: 1 });
       assistant.info.sessionID = rootId;
-      setState(storePath('messages', [assistant]));
-      flushSolid();
+      setStateAndFlush('messages', [assistant]);
       if (hasQueue) {
-        setState(
-          storePath('queuedMessages', [
-            { id: 'waiting-queue', sessionId: rootId, text: 'Build and install' },
-          ])
-        );
-        flushSolid();
+        setStateAndFlush('queuedMessages', [
+          { id: 'waiting-queue', sessionId: rootId, text: 'Build and install' },
+        ]);
       }
       flushSolid();
       sendMessageMock.mockResolvedValue(true);
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       expect(container?.querySelector('.chat-subagent-waiting')).toBeNull();
 
-      setState(
-        storePath('messages', [
-          {
-            ...assistant,
-            info: { ...assistant.info, time: { created: 2, completed: 3 }, finish: 'stop' },
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('messages', [
+        {
+          ...assistant,
+          info: { ...assistant.info, time: { created: 2, completed: 3 }, finish: 'stop' },
+        },
+      ]);
       setState(storePath('sessionStatus', rootId, { type: 'idle' }));
       flushSolid();
       await vi.advanceTimersByTimeAsync(1_000);
@@ -13475,39 +10675,28 @@ describe('ChatInput', () => {
   );
 
   it('scopes the subagent waiting status to the composer session', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 1),
-        session('child-1', 2, { parentID: 'session-1', title: 'Background task' }),
-        session('session-2', 3),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'session-1': { type: 'idle' },
-        'child-1': { type: 'busy' },
-        'session-2': { type: 'idle' },
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 1),
+      session('child-1', 2, { parentID: 'session-1', title: 'Background task' }),
+      session('session-2', 3),
+    ]);
+    setStateAndFlush('sessionStatus', {
+      'session-1': { type: 'idle' },
+      'child-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
+    renderChatInput();
     expect(container?.querySelector('.chat-subagent-waiting')?.textContent).toContain(
       'Background task'
     );
 
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
+    await settle();
     expect(container?.querySelector('.chat-subagent-waiting')).toBeNull();
 
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup();
+    setStateAndFlush('activeSessionId', 'session-1');
+    cleanup!();
     flushSolid();
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
@@ -13530,58 +10719,40 @@ describe('ChatInput', () => {
       tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
       finish: 'stop',
     };
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('messages', [
-        historyEntry('user-1', 'Prompt'),
-        { info: terminalAssistant, parts: [] },
-      ])
-    );
-    flushSolid();
-    setState(storePath('sessionStatus', { 'session-1': { type: 'busy' } }));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [
+      historyEntry('user-1', 'Prompt'),
+      { info: terminalAssistant, parts: [] },
+    ]);
+    setStateAndFlush('sessionStatus', { 'session-1': { type: 'busy' } });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
     expect(container?.querySelector('[aria-label="Send (Enter)"]')).not.toBeNull();
 
-    setState(
-      storePath('messages', [
-        historyEntry('user-1', 'Prompt'),
-        { info: { ...terminalAssistant, finish: 'tool_calls' }, parts: [] },
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('messages', [
+      historyEntry('user-1', 'Prompt'),
+      { info: { ...terminalAssistant, finish: 'tool_calls' }, parts: [] },
+    ]);
 
     expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
     expect(container?.querySelector('[aria-label="Send (Enter)"]')).toBeNull();
   });
 
   it('shows send controls instead of stop while loading with sendable content', () => {
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Follow up');
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('Follow up');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
     expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
   });
 
   it('captures the displayed queued model when a session snapshot still names the previous model', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setupLoadingActiveTurn();
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
     setSelectedModel(
@@ -13599,20 +10770,15 @@ describe('ChatInput', () => {
     );
     flushSolid();
     const displayedModel = { providerID: 'openai', modelID: 'other' };
-    setState(storePath('selectedModel', displayedModel));
-    flushSolid();
-    setInputText('Keep the displayed model');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('selectedModel', displayedModel);
+    setInputTextAndFlush('Keep the displayed model');
+    renderChatInput();
     expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Other model');
 
     container
       ?.querySelector('.rich-composer')
       ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toHaveLength(1);
@@ -13624,12 +10790,7 @@ describe('ChatInput', () => {
   it.each(['agent', 'model', 'reasoning'])(
     'queues instead of steering after changing %s during a turn',
     async (changed) => {
-      setupMatchingActiveTurn();
-      flushSolid();
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setupLoadingActiveTurn();
       setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
       flushSolid();
       setState(storePath('providers', 0, 'models', 'gpt-4o', 'variants', { high: {}, xhigh: {} }));
@@ -13652,12 +10813,9 @@ describe('ChatInput', () => {
       const agent = changed === 'agent' ? 'plan' : 'build';
       setSelectedModel({ ...model }, { sessionId: 'session-1', persistGlobal: false });
       flushSolid();
-      setState(storePath('selectedAgent', agent));
-      flushSolid();
-      setInputText('Different settings');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('selectedAgent', agent);
+      setInputTextAndFlush('Different settings');
+      renderChatInput();
       expect(container?.querySelector<HTMLButtonElement>('.model-picker-btn')?.disabled).toBe(
         false
       );
@@ -13680,9 +10838,7 @@ describe('ChatInput', () => {
         ?.dispatchEvent(
           new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true })
         );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).not.toHaveBeenCalled();
       const queued = state.queuedMessages[0]!;
       expect(queued.agent).toBe(agent);
@@ -13701,10 +10857,8 @@ describe('ChatInput', () => {
         { sessionId: 'session-1', persistGlobal: false }
       );
       flushSolid();
-      setState(storePath('selectedAgent', 'build'));
-      flushSolid();
-      setInputText('Matching settings');
-      flushSolid();
+      setStateAndFlush('selectedAgent', 'build');
+      setInputTextAndFlush('Matching settings');
       if (!menuAction('Steer'))
         container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')?.click();
       flushSolid();
@@ -13715,15 +10869,12 @@ describe('ChatInput', () => {
 
       // A later active turn with the queued settings makes that row steerable.
       const entry = historyEntry('next-active-user', 'New turn');
-      setState(storePath('messages', [{ ...entry, info: { ...entry.info, agent, model } }]));
-      flushSolid();
+      setStateAndFlush('messages', [{ ...entry, info: { ...entry.info, agent, model } }]);
       expect(
         container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
       ).toBe(false);
       container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledWith(
         'Different settings',
         expect.objectContaining({ delivery: 'steer', agent, selectedModel: model })
@@ -13734,9 +10885,7 @@ describe('ChatInput', () => {
 
   it('queues and dispatches the sent model despite a delayed previous-turn model snapshot', async () => {
     setupMatchingActiveTurn();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     setState(
       storePath('providers', 0, 'models', 'other', {
         id: 'other',
@@ -13763,8 +10912,7 @@ describe('ChatInput', () => {
       { sessionId: 'session-1', selectionId: 'idle-choice' }
     );
     flushSolid();
-    setIsLoading(true);
-    flushSolid();
+    setIsLoadingAndFlush(true);
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
     // SessionSendOperations protects the actual sent model at optimistic publication.
@@ -13777,19 +10925,13 @@ describe('ChatInput', () => {
       }
     );
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     applySessionSelectedModelsSnapshot({ 'session-1': { ...previous } });
     flushSolid();
     expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Other model');
-    setInputText('Keep the first queued model');
-    flushSolid();
-    container
-      ?.querySelector('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setInputTextAndFlush('Keep the first queued model');
+    pressComposerEnter();
+    await settle();
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toHaveLength(1);
     const queued = state.queuedMessages[0]!;
@@ -13808,8 +10950,7 @@ describe('ChatInput', () => {
     await sendQueuedAsSteer(queued);
     flushSolid();
     expect(sendMessageMock).not.toHaveBeenCalled();
-    setIsLoading(false);
-    flushSolid();
+    setIsLoadingAndFlush(false);
     for (const handler of serverEventHandlers.get('session.status') ?? []) {
       handler({
         type: 'session.status',
@@ -13817,9 +10958,7 @@ describe('ChatInput', () => {
       });
     }
     setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).toHaveBeenCalledWith(
       'Keep the first queued model',
@@ -13836,12 +10975,7 @@ describe('ChatInput', () => {
   it.each(['model', 'reasoning'])(
     'keeps a changed %s dropdown and warning through active-turn snapshots',
     async (changed) => {
-      setupMatchingActiveTurn();
-      flushSolid();
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setupLoadingActiveTurn();
       setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
       flushSolid();
       setState(storePath('providers', 0, 'models', 'gpt-4o', 'variants', { high: {}, xhigh: {} }));
@@ -13861,8 +10995,7 @@ describe('ChatInput', () => {
       const sendToExtension = vi.fn(defaultBridgeSend);
       fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
         sendToExtension;
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
       if (changed === 'model') {
         container?.querySelector<HTMLButtonElement>('.model-picker-btn')?.click();
@@ -13916,8 +11049,7 @@ describe('ChatInput', () => {
         expect(container?.querySelector('[aria-label="Thinking level"]')?.textContent).toContain(
           'High'
         );
-      setIsLoading(false);
-      flushSolid();
+      setIsLoadingAndFlush(false);
       setState(storePath('sessionStatus', 'session-1', { type: 'idle' }));
       flushSolid();
       applySessionSelectedModelsSnapshot({ 'session-1': selected });
@@ -13926,58 +11058,38 @@ describe('ChatInput', () => {
   );
 
   it('sends busy composer input as a steer on modifier enter', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Change direction');
-    flushSolid();
+    setupLoadingActiveTurn();
+    setInputTextAndFlush('Change direction');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     editor?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Change direction', { delivery: 'steer' });
     expect(state.queuedMessages).toEqual([]);
   });
 
   it('stops the active response before sending from the busy send menu', async () => {
-    setupMatchingActiveTurn();
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Follow up after stopping');
-    flushSolid();
+    setupLoadingActiveTurn();
+    setInputTextAndFlush('Follow up after stopping');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const menuButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="More send options"]'
     );
     menuButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     const stopAndSendButton = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent?.includes('Stop and Send')
     );
     stopAndSendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).toHaveBeenCalledWith('Follow up after stopping', { noReply: false });
@@ -13986,29 +11098,19 @@ describe('ChatInput', () => {
 
   it('does not send from the busy menu when stopping fails', async () => {
     setupMatchingActiveTurn();
-    flushSolid();
     abortSessionMock.mockRejectedValueOnce(new Error('abort failed'));
-    setIsLoading(true);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Do not send after a failed stop');
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('Do not send after a failed stop');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickSelectorAndFlush('[aria-label="More send options"]');
     const stopAndSendButton = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent?.includes('Stop and Send')
     );
     stopAndSendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -14022,38 +11124,22 @@ describe('ChatInput', () => {
     ['session:ses_other Why?', 'other conversations'],
   ])('disables side-question sends for incompatible inline content %s', async (prompt, reason) => {
     setupMatchingActiveTurn();
-    flushSolid();
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-    flushSolid();
-    setState(storePath('allAgents', [fixture<Agent>({ name: 'explore' })]));
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setInputText(`/btw ${prompt}`);
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setStateAndFlush('allAgents', [fixture<Agent>({ name: 'explore' })]);
+    setIsLoadingAndFlush(true);
+    setInputTextAndFlush(`/btw ${prompt}`);
+    renderChatInput();
     expect(
       container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
     ).toBe(true);
-    container
-      ?.querySelector('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
     expect(sideQuestionView()).toBeNull();
     expect(inputText()).toBe(`/btw ${prompt}`);
     setInputText(prompt);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
     flushSolid();
     const action = [...container!.querySelectorAll<HTMLButtonElement>('.busy-menu button')].find(
@@ -14068,23 +11154,15 @@ describe('ChatInput', () => {
 
   it('asks the plain draft from the busy menu without stopping, queueing, steering, or consuming attachments', async () => {
     setupMatchingActiveTurn();
-    flushSolid();
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-    flushSolid();
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
     setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
     flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [{ path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' }])
-    );
-    flushSolid();
+    setIsLoadingAndFlush(true);
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' },
+    ]);
     addClipboardImage({
       id: 'busy-side-image',
       filename: 'Image 1',
@@ -14093,10 +11171,8 @@ describe('ChatInput', () => {
       size: 5,
     });
     flushSolid();
-    setInputText('Why did that fail?\nKeep it short.');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('Why did that fail?\nKeep it short.');
+    renderChatInput();
     container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
     flushSolid();
     const labels = [...container!.querySelectorAll('.busy-menu-label')];
@@ -14107,9 +11183,7 @@ describe('ChatInput', () => {
       'Stop and Send',
     ]);
     labels[2]!.closest('button')!.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sideQuestionView()).toMatchObject({
       sessionID: 'session-1',
       question: 'Why did that fail?\nKeep it short.',
@@ -14128,25 +11202,18 @@ describe('ChatInput', () => {
 
   it('does not offer a busy-menu side question on OpenCode V1', async () => {
     setupMatchingActiveTurn();
-    flushSolid();
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 1 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setInputText('Ordinary follow-up');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('serverStatus', {
+      state: 'running',
+      url: 'http://localhost:4096',
+      apiVersion: 1,
+    });
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setIsLoadingAndFlush(true);
+    setInputTextAndFlush('Ordinary follow-up');
+    renderChatInput();
     container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(
       [...container!.querySelectorAll('.busy-menu-label')].map((label) => label.textContent)
     ).toEqual(['Queue', 'Steer', 'Stop and Send']);
@@ -14162,17 +11229,11 @@ describe('ChatInput', () => {
     'excludes a $placement image from /btw using $action and keeps it for the next regular send',
     async ({ placement, action }) => {
       setupModelState();
-      flushSolid();
       setState(storePath('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', true));
       flushSolid();
-      setState(
-        storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-      );
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-      flushSolid();
+      setStateAndFlush('serverStatus', runningV2Server());
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
       const image = {
         id: 'side-image',
         filename: 'Image 1',
@@ -14184,12 +11245,9 @@ describe('ChatInput', () => {
       flushSolid();
       const attachedImage = { ...state.clipboardImages[0]! };
       const prompt = placement === 'inline' ? '[Image 1] Why?' : 'Why?';
-      setInputText(prompt);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush(prompt);
+      renderChatInput();
+      await settle();
       const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
       const imageChip = () =>
         container!.querySelector<HTMLElement>(
@@ -14219,9 +11277,7 @@ describe('ChatInput', () => {
           .dispatchEvent(
             new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
           );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(sideQuestionView()).toMatchObject({ sessionID: 'session-1', question: 'Why?' });
       expect(sideQuestionView()?.context ?? '').toBe('');
@@ -14235,17 +11291,14 @@ describe('ChatInput', () => {
 
       closeSideQuestion();
       flushSolid();
-      setInputText('Now inspect the image');
-      flushSolid();
+      setInputTextAndFlush('Now inspect the image');
       const sentImages: (typeof image)[] = [];
       sendMessageMock.mockImplementationOnce(async () => {
         sentImages.push(...state.clipboardImages);
         return true;
       });
       container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledTimes(1);
       expect(sendMessageMock.mock.calls[0]?.[0]).toBe('Now inspect the image');
       expect(sentImages).toEqual([attachedImage]);
@@ -14255,45 +11308,27 @@ describe('ChatInput', () => {
   it.each(['/b', '/bt'])(
     'opens the /btw suggestion from %s without treating the draft as a command',
     async (draft) => {
-      setState(
-        storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-      );
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-      flushSolid();
-      setInputText(draft);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      setStateAndFlush('serverStatus', runningV2Server());
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
+      setInputTextAndFlush(draft);
+      renderChatInput();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, draft.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 't', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       const suggestion = [
         ...container!.querySelectorAll<HTMLElement>('.composer-completion-item'),
       ].find((option) => option.textContent?.includes('/btw'));
       expect(suggestion).toBeDefined();
       suggestion!.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sideQuestionView()).toBeNull();
       expect(inputText()).toBe('/btw');
 
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(sideQuestionView()).toMatchObject({ sessionID: 'session-1', question: '' });
       expect(inputText()).toBe('');
       expect(state.queuedMessages).toEqual([]);
@@ -14304,28 +11339,16 @@ describe('ChatInput', () => {
   );
 
   it('opens /btw without sending or consuming existing attachments', async () => {
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-    flushSolid();
-    setState(
-      storePath('droppedFiles', [{ path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' }])
-    );
-    flushSolid();
-    setInputText('/btw Why did that fail?');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    container
-      ?.querySelector('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' },
+    ]);
+    setInputTextAndFlush('/btw Why did that fail?');
+    renderChatInput();
+    pressComposerEnter();
+    await settle();
     expect(sideQuestionView()).toMatchObject({
       sessionID: 'session-1',
       question: 'Why did that fail?',
@@ -14340,32 +11363,22 @@ describe('ChatInput', () => {
   it.each([1, 2] as const)(
     'handles /btw in a moved session without sending chat or a custom command on API %s',
     async (apiVersion) => {
-      setState(
-        storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion })
-      );
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('sessions', [
-          session('session-1', 1, {
-            transfer: { originDirectory: '/other', available: false },
-          }),
-        ])
-      );
-      flushSolid();
-      setState(storePath('commands', [{ name: 'btw', template: 'Must not execute' }]));
-      flushSolid();
-      setInputText('/btw Why?');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      container
-        ?.querySelector('.rich-composer')
-        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setStateAndFlush('serverStatus', {
+        state: 'running',
+        url: 'http://localhost:4096',
+        apiVersion,
+      });
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [
+        session('session-1', 1, {
+          transfer: { originDirectory: '/other', available: false },
+        }),
+      ]);
+      setStateAndFlush('commands', [{ name: 'btw', template: 'Must not execute' }]);
+      setInputTextAndFlush('/btw Why?');
+      renderChatInput();
+      pressComposerEnter();
+      await settle();
       if (apiVersion === 2) {
         expect(sideQuestionView()).toMatchObject({ sessionID: 'session-1', question: 'Why?' });
         expect(inputText()).toBe('');
@@ -14383,29 +11396,17 @@ describe('ChatInput', () => {
     'asks /btw during active work using %s without queueing, steering, or stopping',
     async (action) => {
       setupMatchingActiveTurn();
-      flushSolid();
-      setState(
-        storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-      );
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-      flushSolid();
+      setStateAndFlush('serverStatus', runningV2Server());
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
       setState(storePath('sessionStatus', 'session-1', { type: 'busy' }));
       flushSolid();
-      setIsLoading(true);
-      flushSolid();
-      setState(
-        storePath('droppedFiles', [
-          { path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' },
-        ])
-      );
-      flushSolid();
-      setInputText('/btw How is it going?\nKeep it short.');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setIsLoadingAndFlush(true);
+      setStateAndFlush('droppedFiles', [
+        { path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' },
+      ]);
+      setInputTextAndFlush('/btw How is it going?\nKeep it short.');
+      renderChatInput();
       expect(container?.querySelector('[aria-label="More send options"]')).toBeNull();
       expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).toBeNull();
       expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
@@ -14421,9 +11422,7 @@ describe('ChatInput', () => {
             metaKey: action === 'meta-enter',
           })
         );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sideQuestionView()).toMatchObject({
         sessionID: 'session-1',
         question: 'How is it going?\nKeep it short.',
@@ -14440,85 +11439,54 @@ describe('ChatInput', () => {
 
   it('closes the busy-send menu when the draft becomes /btw and restores ordinary queue controls afterward', async () => {
     setupMatchingActiveTurn();
-    flushSolid();
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1, { directory: '/repo' })]));
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    setInputText('Ordinary follow-up');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setIsLoadingAndFlush(true);
+    setInputTextAndFlush('Ordinary follow-up');
+    renderChatInput();
     container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
     flushSolid();
     expect(container?.querySelector('.busy-menu')).not.toBeNull();
     setInputText('/btw How is it going?');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(container?.querySelector('.busy-menu')).toBeNull();
     expect(container?.querySelector('[aria-label="More send options"]')).toBeNull();
     expect(container?.querySelector('[aria-label="Send (Enter)"]')).not.toBeNull();
     setInputText('Ordinary follow-up');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
     expect(container?.querySelector('[aria-label="More send options"]')).not.toBeNull();
   });
 
   it('does not ask about a previously selected conversation from the new-chat composer', async () => {
-    setState(
-      storePath('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 1)]));
-    flushSolid();
-    setInputText('/btw Why?');
-    flushSolid();
+    setStateAndFlush('serverStatus', runningV2Server());
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 1)]);
+    setInputTextAndFlush('/btw Why?');
     cleanup = render(() => ChatInput({ newSession: true }), container!);
     flushSolid();
-    container
-      ?.querySelector('.rich-composer')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
     expect(sideQuestionView()).toBeNull();
     expect(inputText()).toBe('/btw Why?');
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('runs a typed slash command with args on Enter', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'test',
-          description: 'Run tests',
-          template: 'Run tests',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/test --watch');
-    flushSolid();
+    setStateAndFlush('commands', [
+      {
+        name: 'test',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputTextAndFlush('/test --watch');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -14533,35 +11501,23 @@ describe('ChatInput', () => {
   ] as const)(
     'opens %s with %s while busy=%s without sending attachments',
     async (draft, action, busy) => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('sessions', [session('session-1', 1)]));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [session('session-1', 1)]);
       setState(storePath('sessionStatus', 'session-1', { type: busy ? 'busy' : 'idle' }));
       flushSolid();
       setIsLoading(busy);
       flushSolid();
-      setState(
-        storePath('mcpStatus', {
-          atlassian: { status: 'needs_auth', error: 'Login required' },
-          'browser-bridge': { status: 'disabled' },
-        })
-      );
-      flushSolid();
-      setState(
-        storePath('droppedFiles', [
-          { path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' },
-        ])
-      );
-      flushSolid();
-      setInputText(draft);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('mcpStatus', {
+        atlassian: { status: 'needs_auth', error: 'Login required' },
+        'browser-bridge': { status: 'disabled' },
+      });
+      setStateAndFlush('droppedFiles', [
+        { path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' },
+      ]);
+      setInputTextAndFlush(draft);
+      renderChatInput();
       if (action === 'enter') {
-        container
-          ?.querySelector('.rich-composer')
-          ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        pressComposerEnter();
         flushSolid();
       } else {
         const send = container!.querySelector<HTMLButtonElement>(
@@ -14571,9 +11527,7 @@ describe('ChatInput', () => {
         send!.click();
         flushSolid();
       }
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(container?.querySelector('.dropdown-header')?.textContent).toBe('MCPs');
       expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('atlassian');
       if (draft.endsWith(' at')) {
@@ -14593,27 +11547,20 @@ describe('ChatInput', () => {
   );
 
   it('runs a typed slash command with args from the send button', async () => {
-    setState(
-      storePath('commands', [
-        {
-          name: 'test',
-          description: 'Run tests',
-          template: 'Run tests',
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/test --watch');
-    flushSolid();
+    setStateAndFlush('commands', [
+      {
+        name: 'test',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputTextAndFlush('/test --watch');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -14621,17 +11568,12 @@ describe('ChatInput', () => {
   });
 
   it('opens the Varro provider connection UI with the connect slash command', async () => {
-    setInputText('/connect');
-    flushSolid();
+    setInputTextAndFlush('/connect');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(providerConnectionRequest()?.providerID).toBeNull();
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -14639,27 +11581,22 @@ describe('ChatInput', () => {
   });
 
   it('shows a Problems count chip with an independent keyboard-accessible context toggle', async () => {
-    setState(storePath('issuesEnabled', true));
-    flushSolid();
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
-        selection: null,
-        diagnostics: [
-          {
-            path: '/repo/app.ts',
-            line: 1,
-            severity: 'error',
-            message: 'Private diagnostic detail',
-          },
-        ],
-        diagnosticCounts: { errors: 1, warnings: 2 },
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('issuesEnabled', true);
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [
+        {
+          path: '/repo/app.ts',
+          line: 1,
+          severity: 'error',
+          message: 'Private diagnostic detail',
+        },
+      ],
+      diagnosticCounts: { errors: 1, warnings: 2 },
+    });
+    renderChatInput();
     const problemChip = () =>
       Array.from(
         container!.querySelectorAll<HTMLElement>(
@@ -14671,9 +11608,7 @@ describe('ChatInput', () => {
     expect(problemChip().getAttribute('aria-pressed')).toBe('true');
     const currentDocumentEnabled = state.currentDocumentEnabled;
     problemChip().click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.issuesEnabled).toBe(false);
     expect(state.currentDocumentEnabled).toBe(currentDocumentEnabled);
     expect(problemChip().getAttribute('aria-pressed')).toBe('false');
@@ -14682,61 +11617,45 @@ describe('ChatInput', () => {
       '/repo': false,
     });
     problemChip().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.issuesEnabled).toBe(true);
     expect(problemChip().getAttribute('aria-pressed')).toBe('true');
     expect(container?.querySelector('.rich-composer')?.textContent).not.toContain(
       'Private diagnostic detail'
     );
-    setState(storePath('autoAttachProblems', false));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('autoAttachProblems', false);
+    await settle();
     expect(problemChip()).toBeUndefined();
     expect(state.issuesEnabled).toBe(true);
-    setState(storePath('autoAttachProblems', true));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('autoAttachProblems', true);
+    await settle();
     expect(problemChip().getAttribute('aria-pressed')).toBe('true');
   });
 
   it('hides automatic file chips without hiding explicitly attached files', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [],
+    });
+    renderChatInput();
     const attachmentText = () =>
       container!.querySelector('.chat-attachments-container')?.textContent ?? '';
     expect(attachmentText()).toContain('app.ts');
-    setState(storePath('autoAttachActiveFile', false));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('autoAttachActiveFile', false);
+    await settle();
     expect(attachmentText()).not.toContain('app.ts');
-    setState(
-      storePath('droppedFiles', [{ path: '/repo/app.ts', relativePath: 'app.ts', type: 'file' }])
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('droppedFiles', [
+      { path: '/repo/app.ts', relativePath: 'app.ts', type: 'file' },
+    ]);
+    await settle();
     expect(attachmentText()).toContain('app.ts');
   });
 
   it('accumulates bulb-menu problems as attachments without changing the draft', async () => {
-    setInputText('Explain this');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('Explain this');
+    renderChatInput();
     const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
     editor.focus();
     flushSolid();
@@ -14754,9 +11673,7 @@ describe('ChatInput', () => {
     ];
     const message = { type: 'command/attach-problems', payload: { diagnostics } };
     window.dispatchEvent(new MessageEvent('message', { data: message }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('Explain this');
     expect(state.attachedDiagnostics).toEqual({ diagnostics, total: 1, inline: false });
     expect(container!.querySelectorAll('[data-chip-type="mention-problems"]')).toHaveLength(0);
@@ -14764,9 +11681,7 @@ describe('ChatInput', () => {
       'Problems'
     );
     window.dispatchEvent(new MessageEvent('message', { data: message }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.attachedDiagnostics?.total).toBe(1);
     window.dispatchEvent(
       new MessageEvent('message', {
@@ -14780,9 +11695,7 @@ describe('ChatInput', () => {
         },
       })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.attachedDiagnostics?.total).toBe(2);
     expect(inputText()).toBe('Explain this');
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -14797,37 +11710,26 @@ describe('ChatInput', () => {
       ],
     };
     vi.mocked(client.varro.workspaceProblems).mockResolvedValue(snapshot);
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: { path: '/repo/a.ts', relativePath: 'a.ts', language: 'typescript' },
-        selection: null,
-        diagnostics: [snapshot.diagnostics[0]!],
-        diagnosticCounts: { errors: 1, warnings: 0 },
-      })
-    );
-    flushSolid();
-    setInputText('/problems');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/a.ts', relativePath: 'a.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [snapshot.diagnostics[0]!],
+      diagnosticCounts: { errors: 1, warnings: 0 },
+    });
+    setInputTextAndFlush('/problems');
+    renderChatInput();
     const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
     editor.focus();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('/problems ');
     const completion = container!.querySelector<HTMLButtonElement>('.completion-problems');
     expect(completion?.textContent).toContain('All');
     expect(container!.querySelectorAll('.completion-problems')).toHaveLength(3);
     completion!.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(client.varro.workspaceProblems).toHaveBeenCalledOnce();
     expect(state.attachedDiagnostics).toBeNull();
     expect(state.inlineProblems).toHaveLength(1);
@@ -14854,10 +11756,8 @@ describe('ChatInput', () => {
           () => new Promise(() => undefined)
         );
       }
-      setInputText('Review /problems');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setInputTextAndFlush('Review /problems');
+      renderChatInput();
       const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
       editor.focus();
       flushSolid();
@@ -14865,12 +11765,8 @@ describe('ChatInput', () => {
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
       flushSolid();
       await flushAsyncWork();
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(inputText()).toBe('Review /problems ');
       expect(container!.querySelector('.composer-completion-menu')).not.toBeNull();
       expect(container!.querySelectorAll('.completion-problems')).toHaveLength(0);
@@ -14897,25 +11793,17 @@ describe('ChatInput', () => {
           resolve = done;
         })
     );
-    setInputText('/problems ');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('/problems ');
+    renderChatInput();
     container!.querySelector<HTMLElement>('.rich-composer')!.focus();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
-    setInputText('A different draft');
-    flushSolid();
-    setState(storePath('activeSessionId', 'other-session'));
-    flushSolid();
+    await settle();
+    setInputTextAndFlush('A different draft');
+    setStateAndFlush('activeSessionId', 'other-session');
     resolve({
       total: 1,
       diagnostics: [{ path: '/repo/a.ts', line: 1, severity: 'error', message: 'Stale' }],
     });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.attachedDiagnostics).toBeNull();
   });
 
@@ -14923,19 +11811,13 @@ describe('ChatInput', () => {
     vi.mocked(client.varro.workspaceProblems).mockImplementationOnce(
       () => new Promise(() => undefined)
     );
-    setInputText('/problems');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('/problems');
+    renderChatInput();
     const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
     editor.focus();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(client.varro.workspaceProblems).toHaveBeenCalledOnce();
 
     setState(storePath('editorContext', 'workspacePath', '/other-repo'));
@@ -14943,9 +11825,7 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('');
     enterComposerText(editor, '/problems');
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(client.varro.workspaceProblems).toHaveBeenCalledTimes(2);
   });
 
@@ -14955,20 +11835,14 @@ describe('ChatInput', () => {
       { path: '/repo/b.ts', line: 2, severity: 'warning' as const, message: 'Second warning' },
     ];
     vi.mocked(client.varro.workspaceProblems).mockResolvedValue({ total: 2, diagnostics });
-    setInputText('Explain /problems ');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('Explain /problems ');
+    renderChatInput();
     container!.querySelector<HTMLElement>('.rich-composer')!.focus();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const choices = container!.querySelectorAll<HTMLButtonElement>('.completion-problems');
     expect(choices).toHaveLength(3);
     choices[2]!.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.attachedDiagnostics).toBeNull();
     expect(state.inlineProblems).toHaveLength(1);
     expect(state.inlineProblems[0]?.diagnostic).toEqual(diagnostics[1]);
@@ -14979,9 +11853,7 @@ describe('ChatInput', () => {
         data: { type: 'command/attach-problems', payload: { diagnostics: [diagnostics[0]] } },
       })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const chip = container!.querySelector<HTMLElement>('[data-chip-type="mention-problems"]')!;
     const range = document.createRange();
     range.setStartAfter(chip);
@@ -14993,50 +11865,38 @@ describe('ChatInput', () => {
     flushSolid();
     const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.attachedDiagnostics?.diagnostics).toEqual([diagnostics[0]]);
     expect(inputText()).not.toContain('[Problem ');
     expect(state.inlineProblems).toHaveLength(0);
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.inlineProblems).toHaveLength(1);
     expect(container!.querySelector('[data-chip-type="mention-problems"]')).not.toBeNull();
     expect(state.attachedDiagnostics?.diagnostics).toEqual([diagnostics[0]]);
   });
 
   it('attaches active-file diagnostics with the diagnostics slash command', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [
-          {
-            path: '/repo/src/app.ts',
-            severity: 'error',
-            message: 'Unexpected value',
-            line: 12,
-          },
-        ],
-        diagnosticsTotal: 3,
-      })
-    );
-    flushSolid();
-    setInputText('/diagnostics');
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [
+        {
+          path: '/repo/src/app.ts',
+          severity: 'error',
+          message: 'Unexpected value',
+          line: 12,
+        },
+      ],
+      diagnosticsTotal: 3,
+    });
+    setInputTextAndFlush('/diagnostics');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(state.attachedDiagnostics).toEqual({
       diagnostics: [
@@ -15054,17 +11914,12 @@ describe('ChatInput', () => {
   });
 
   it('shows feedback when the diagnostics slash command finds no issues', async () => {
-    setInputText('/diagnostics');
-    flushSolid();
+    setInputTextAndFlush('/diagnostics');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(showSessionActionFeedbackMock).toHaveBeenCalledWith('No issues found');
     expect(state.attachedDiagnostics).toBeNull();
@@ -15073,45 +11928,14 @@ describe('ChatInput', () => {
   });
 
   it('runs the built-in undo slash command on Enter', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('messages', [
-        {
-          info: {
-            id: 'assistant-1',
-            sessionID: 'session-1',
-            role: 'assistant',
-            time: { created: 0 },
-            parentID: 'user-1',
-            modelID: 'gpt-4o',
-            providerID: 'openai',
-            mode: 'default',
-            path: { cwd: '/repo', root: '/repo' },
-            cost: 0,
-            tokens: {
-              input: 0,
-              output: 0,
-              reasoning: 0,
-              cache: { read: 0, write: 0 },
-            },
-          },
-          parts: [],
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/undo');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 0, output: 0 })]);
+    setInputTextAndFlush('/undo');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(undoSessionMock).toHaveBeenCalledTimes(1);
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
@@ -15120,19 +11944,13 @@ describe('ChatInput', () => {
   });
 
   it('runs the built-in fork slash command on Enter', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('/fork');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('/fork');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(forkSessionMock).toHaveBeenCalledWith('session-1');
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
@@ -15141,18 +11959,13 @@ describe('ChatInput', () => {
   });
 
   it('sends slash-prefixed text on Enter when it is not a known slash command', async () => {
-    setInputText("/not-a-real-command and /redo commands doesn't work");
-    flushSolid();
+    setInputTextAndFlush("/not-a-real-command and /redo commands doesn't work");
     runSlashCommandByNameMock.mockResolvedValue(false);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressComposerEnter();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       "/not-a-real-command and /redo commands doesn't work",
@@ -15162,45 +11975,15 @@ describe('ChatInput', () => {
   });
 
   it('runs the built-in undo slash command from the send button', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('messages', [
-        {
-          info: {
-            id: 'assistant-1',
-            sessionID: 'session-1',
-            role: 'assistant',
-            time: { created: 0 },
-            parentID: 'user-1',
-            modelID: 'gpt-4o',
-            providerID: 'openai',
-            mode: 'default',
-            path: { cwd: '/repo', root: '/repo' },
-            cost: 0,
-            tokens: {
-              input: 0,
-              output: 0,
-              reasoning: 0,
-              cache: { read: 0, write: 0 },
-            },
-          },
-          parts: [],
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('/undo');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('messages', [assistantMessageEntry({ input: 0, output: 0 })]);
+    setInputTextAndFlush('/undo');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(undoSessionMock).toHaveBeenCalledTimes(1);
     expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
@@ -15209,19 +11992,14 @@ describe('ChatInput', () => {
   });
 
   it('runs undo from the send button even when the suggestion list omits it', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('/undo');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('/undo');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(undoSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -15229,19 +12007,14 @@ describe('ChatInput', () => {
   });
 
   it('runs redo from the send button even when the suggestion list omits it', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('/redo');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('/redo');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(redoSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -15249,8 +12022,7 @@ describe('ChatInput', () => {
   });
 
   it('uses a contenteditable rich composer instead of textarea', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     expect(editor).not.toBeNull();
@@ -15269,11 +12041,8 @@ describe('ChatInput', () => {
           resolveMatch = resolve;
         })
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
     const event = new Event('paste', { bubbles: true, cancelable: true });
@@ -15288,20 +12057,15 @@ describe('ChatInput', () => {
     editor.dispatchEvent(new Event('input', { bubbles: true }));
     flushSolid();
     resolveMatch(null);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(`${copiedText} typed`);
     expect(editor.textContent).toBe(`${copiedText.replaceAll('\n', '')} typed`);
     flushSolid();
   });
 
   it('turns a large paste into one undoable immutable attachment', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
     const text = 'Unicode 雪\r\n'.repeat(30);
@@ -15310,31 +12074,23 @@ describe('ChatInput', () => {
       value: { getData: () => text, items: [], types: ['text/plain'] },
     });
     editor.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(`@${state.droppedFiles[0]?.relativePath}`);
     expect(state.droppedFiles[0]?.pastedText).toBe(text);
     const path = state.droppedFiles[0]?.path;
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.droppedFiles).toHaveLength(0);
     expect(inputText()).toBe('');
     editor.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true, bubbles: true })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.droppedFiles[0]).toMatchObject({ path, pastedText: text });
     openChipMenu(editor, 'mention-file');
     flushSolid();
     clickExpandToText();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(text);
     expect(state.droppedFiles).toHaveLength(0);
   });
@@ -15344,11 +12100,8 @@ describe('ChatInput', () => {
     sendMessageMock.mockImplementationOnce(
       () => new Promise<boolean>((resolve) => (resolveSend = resolve))
     );
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
     const text = 'Large pasted text\n'.repeat(30);
@@ -15357,9 +12110,7 @@ describe('ChatInput', () => {
       value: { getData: () => text, items: [], types: ['text/plain'] },
     });
     editor.dispatchEvent(paste);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const draft = inputText();
     expect(editor.querySelector('.inline-chip')).not.toBeNull();
     expect(container!.querySelector('.chat-attachments-container')).toBeNull();
@@ -15370,9 +12121,7 @@ describe('ChatInput', () => {
       cancelable: true,
     });
     editor.dispatchEvent(enter);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(enter.defaultPrevented).toBe(true);
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock.mock.calls[0]?.[0]).toBe(draft);
@@ -15380,9 +12129,7 @@ describe('ChatInput', () => {
     expect(container!.querySelector('.chat-attachments-container')).toBeNull();
 
     resolveSend(false);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(draft);
     expect(editor.querySelector('.inline-chip')).not.toBeNull();
     expect(container!.querySelector('.chat-attachments-container')).toBeNull();
@@ -15396,13 +12143,9 @@ describe('ChatInput', () => {
           resolveMatch = resolve;
         })
     );
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
     const event = new Event('paste', { bubbles: true, cancelable: true });
@@ -15411,12 +12154,9 @@ describe('ChatInput', () => {
     });
     editor.dispatchEvent(event);
     flushSolid();
-    setState(storePath('activeSessionId', 'session-2'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-2');
     resolveMatch(null);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(state.droppedFiles).toHaveLength(0);
   });
 
@@ -15430,15 +12170,10 @@ describe('ChatInput', () => {
           resolveMatch = resolve;
         })
     );
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setInputText('Explain ');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setInputTextAndFlush('Explain ');
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor.firstChild!, 8);
     flushSolid();
     const event = new Event('paste', { bubbles: true, cancelable: true });
@@ -15448,13 +12183,9 @@ describe('ChatInput', () => {
     editor.dispatchEvent(event);
     flushSolid();
     container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     resolveMatch({ type: 'terminal', selection: { text: copiedText, terminalName: 'zsh' } });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect({ sent: sendMessageMock.mock.calls[0]?.[0], draft: inputText() }).toEqual({
       sent: `Explain ${copiedText}`,
       draft: '',
@@ -15472,11 +12203,8 @@ describe('ChatInput', () => {
     vi.mocked(client.varro.matchCopiedSelection)
       .mockResolvedValueOnce({ type: 'file', file })
       .mockResolvedValueOnce({ type: 'file', file });
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
     const paste = (text: string) => {
@@ -15498,15 +12226,11 @@ describe('ChatInput', () => {
       await flushAsyncWork();
     };
     paste(copiedText);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     openChipMenu(editor, 'mention-file');
     flushSolid();
     clickExpandToText();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(copiedText);
     const range = document.createRange();
     range.selectNodeContents(editor);
@@ -15515,9 +12239,7 @@ describe('ChatInput', () => {
     window.getSelection()!.addRange(range);
     flushSolid();
     paste(otherCopiedText);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('@src/app.ts');
     await history();
     flushSolid();
@@ -15532,9 +12254,7 @@ describe('ChatInput', () => {
     openChipMenu(editor, 'mention-file');
     flushSolid();
     clickExpandToText();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(otherCopiedText);
     await history();
     flushSolid();
@@ -15546,9 +12266,7 @@ describe('ChatInput', () => {
     openChipMenu(editor, 'mention-file');
     flushSolid();
     clickExpandToText();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(copiedText);
   });
 
@@ -15562,18 +12280,11 @@ describe('ChatInput', () => {
         lineRanges: [{ startLine: 3, endLine: 5 }],
       },
     });
-    cleanup = render(() => ChatInput(), container!);
+    renderChatInput();
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
-    });
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, copiedText);
     flushSolid();
     expect(inputText()).toBe(copiedText);
     await flushAsyncWork();
@@ -15592,24 +12303,18 @@ describe('ChatInput', () => {
     setCollapsedSelection(trailingSpacer, 1);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(container?.querySelector('.composer-completion-menu')).toBeNull();
 
     setInputText('@src/app.ts @');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const finalText = editor.querySelector('[data-chip-type="mention-file"]')?.nextSibling;
     if (finalText?.nodeType !== Node.TEXT_NODE)
       throw new Error('Expected text after the file chip');
     setCollapsedSelection(finalText, finalText.textContent!.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: '@', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
     expect(state.droppedFiles).toEqual([
       expect.objectContaining({
@@ -15624,23 +12329,12 @@ describe('ChatInput', () => {
       type: 'terminal',
       selection: { text: copiedText, terminalName: 'zsh' },
     });
-    setInputText('Test ');
+    setInputTextAndFlush('Test ');
+    renderChatInput();
+    const editor = focusPopulatedComposer();
+    setCollapsedSelection(editor.firstChild, 5);
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, 5);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? copiedText : ''),
-        items: [],
-      },
-    });
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, copiedText);
     flushSolid();
     expect(inputText()).toBe(`Test ${copiedText}`);
     expect(editor?.textContent).not.toContain(copiedText);
@@ -15656,9 +12350,7 @@ describe('ChatInput', () => {
       terminalName: 'zsh',
     });
     container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledWith(
       'Test [Terminal selection]',
       expect.objectContaining({ noReply: false })
@@ -15670,29 +12362,16 @@ describe('ChatInput', () => {
     vi.mocked(client.varro.matchCopiedSelection)
       .mockResolvedValueOnce({ type: 'terminal', selection })
       .mockResolvedValueOnce({ type: 'terminal', selection });
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor) throw new Error('Expected composer editor');
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
     const paste = () => {
-      const event = new Event('paste', { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'clipboardData', {
-        value: {
-          getData: (type: string) => (type === 'text/plain' ? selection.text : ''),
-          items: [],
-        },
-      });
-      editor.dispatchEvent(event);
+      dispatchTextPaste(editor, selection.text);
     };
 
     paste();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const firstValue = inputText();
     const chip = editor.querySelector<HTMLElement>('[data-chip-type="mention-terminal"]');
     if (chip?.nextSibling?.nodeType !== Node.TEXT_NODE) throw new Error('Expected caret spacer');
@@ -15701,46 +12380,29 @@ describe('ChatInput', () => {
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
     flushSolid();
     paste();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe(firstValue);
     expect(editor.querySelectorAll('[data-chip-type="mention-terminal"]')).toHaveLength(1);
   });
 
   it('keeps a different terminal paste as text instead of replacing the attached selection', async () => {
-    setState(storePath('terminalSelection', { text: 'npm test', terminalName: 'zsh' }));
-    flushSolid();
-    setInputText('Check [Terminal selection] ');
-    flushSolid();
+    setStateAndFlush('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
+    setInputTextAndFlush('Check [Terminal selection] ');
     vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
       type: 'terminal',
       selection: { text: otherCopiedText, terminalName: 'zsh' },
     });
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor) throw new Error('Expected composer editor');
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     const trailingText = editor.querySelector('[data-chip-type="mention-terminal"]')?.nextSibling;
     if (trailingText?.nodeType !== Node.TEXT_NODE) throw new Error('Expected text after chip');
     setCollapsedSelection(trailingText, trailingText.textContent!.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
     flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? otherCopiedText : ''),
-        items: [],
-      },
-    });
-    editor.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, otherCopiedText);
+    await settle();
 
     expect(inputText()).toBe(`Check [Terminal selection] ${otherCopiedText}`);
     expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
@@ -15772,41 +12434,29 @@ describe('ChatInput', () => {
         lineRanges: [{ startLine: 3, endLine: 5 }],
       },
     });
-    setInputText('Fix ');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('Fix ');
+    renderChatInput();
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor?.firstChild) throw new Error('Expected composer editor');
     editor.focus();
     flushSolid();
     setCollapsedSelection(editor.firstChild, 4);
     flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
-    });
-    editor.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, copiedText);
+    await settle();
     expect(inputText()).toBe('Fix @src/app.ts');
 
     expect(openChipMenu(editor, 'mention-file').defaultPrevented).toBe(true);
     flushSolid();
     clickExpandToText();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe(`Fix ${copiedText}`);
     expect(state.droppedFiles).toEqual([]);
     expect(client.varro.readWorkspaceFile).not.toHaveBeenCalled();
 
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('Fix @src/app.ts');
     expect(state.droppedFiles).toEqual([
       expect.objectContaining({
@@ -15818,9 +12468,7 @@ describe('ChatInput', () => {
     openChipMenu(editor, 'mention-file');
     flushSolid();
     clickExpandToText();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe(`Fix ${copiedText}`);
     expect(client.varro.readWorkspaceFile).not.toHaveBeenCalled();
   });
@@ -15830,12 +12478,9 @@ describe('ChatInput', () => {
     const originalSend = bridgeWindow.__sendToExtension;
     const sent: WebviewMessage[] = [];
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
-    setState(storePath('terminalSelection', { text: 'npm test\nok', terminalName: 'zsh' }));
-    flushSolid();
-    setInputText('Check [Terminal selection] please');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('terminalSelection', { text: 'npm test\nok', terminalName: 'zsh' });
+    setInputTextAndFlush('Check [Terminal selection] please');
+    renderChatInput();
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor) throw new Error('Expected composer editor');
 
@@ -15843,9 +12488,7 @@ describe('ChatInput', () => {
       openChipMenu(editor, 'mention-terminal');
       flushSolid();
       clickExpandToText();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Check npm test\nok please');
       expect(state.terminalSelection).toBeNull();
@@ -15854,9 +12497,7 @@ describe('ChatInput', () => {
       editor.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true })
       );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(inputText()).toBe('Check [Terminal selection] please');
       expect(state.terminalSelection).toEqual({ text: 'npm test\nok', terminalName: 'zsh' });
       expect(editor.querySelector('[data-chip-type="mention-terminal"]')).not.toBeNull();
@@ -15864,9 +12505,7 @@ describe('ChatInput', () => {
       editor.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true, bubbles: true })
       );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(inputText()).toBe('Check npm test\nok please');
       expect(state.terminalSelection).toBeNull();
     } finally {
@@ -15883,19 +12522,15 @@ describe('ChatInput', () => {
       lineRanges: [{ startLine: 2, endLine: 3 }],
     });
     flushSolid();
-    setInputText('See @src/app.ts');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('See @src/app.ts');
+    renderChatInput();
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor) throw new Error('Expected composer editor');
 
     openChipMenu(editor, 'mention-file');
     flushSolid();
     clickExpandToText();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(client.varro.readWorkspaceFile).toHaveBeenCalledWith('/repo/src/app.ts');
     expect(inputText()).toBe('See two\nthree');
@@ -15905,10 +12540,8 @@ describe('ChatInput', () => {
   it('keeps the native context menu for whole-file chips', () => {
     addContextFile({ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' });
     flushSolid();
-    setInputText('See @src/app.ts');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setInputTextAndFlush('See @src/app.ts');
+    renderChatInput();
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor) throw new Error('Expected composer editor');
 
@@ -15927,29 +12560,16 @@ describe('ChatInput', () => {
     vi.mocked(client.varro.matchCopiedSelection)
       .mockResolvedValueOnce({ type: 'file', file })
       .mockResolvedValueOnce({ type: 'file', file });
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor) throw new Error('Expected composer editor');
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
     const paste = () => {
-      const event = new Event('paste', { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'clipboardData', {
-        value: {
-          getData: (type: string) => (type === 'text/plain' ? copiedText : ''),
-          items: [],
-        },
-      });
-      editor.dispatchEvent(event);
+      dispatchTextPaste(editor, copiedText);
     };
 
     paste();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     const chip = editor.querySelector<HTMLElement>('[data-chip-type="mention-file"]');
     if (chip?.nextSibling?.nodeType !== Node.TEXT_NODE) throw new Error('Expected caret spacer');
     setCollapsedSelection(chip.nextSibling, 1);
@@ -15957,9 +12577,7 @@ describe('ChatInput', () => {
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
     flushSolid();
     paste();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('@src/app.ts');
     expect(editor.querySelectorAll('[data-chip-type="mention-file"]')).toHaveLength(1);
@@ -15974,8 +12592,7 @@ describe('ChatInput', () => {
       lineRanges: [{ startLine: 3, endLine: 5 }],
     });
     flushSolid();
-    setInputText('@src/app.ts ');
-    flushSolid();
+    setInputTextAndFlush('@src/app.ts ');
     vi.mocked(client.varro.matchCopiedSelection).mockResolvedValueOnce({
       type: 'file',
       file: {
@@ -15985,29 +12602,16 @@ describe('ChatInput', () => {
         lineRanges: [{ startLine: 8, endLine: 9 }],
       },
     });
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor) throw new Error('Expected composer editor');
-    editor.focus();
-    flushSolid();
+    renderChatInput();
+    const editor = focusComposer();
     const trailingText = editor.querySelector('[data-chip-type="mention-file"]')?.nextSibling;
     if (trailingText?.nodeType !== Node.TEXT_NODE) throw new Error('Expected text after file chip');
     setCollapsedSelection(trailingText, trailingText.textContent!.length);
     flushSolid();
     editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
     flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? otherCopiedText : ''),
-        items: [],
-      },
-    });
-    editor.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, otherCopiedText);
+    await settle();
 
     expect(inputText()).toBe('@src/app.ts ');
     expect(editor.querySelectorAll('[data-chip-type="mention-file"]')).toHaveLength(1);
@@ -16027,20 +12631,12 @@ describe('ChatInput', () => {
           resolveMatch = resolve;
         })
     );
-    setInputText('Before after');
+    setInputTextAndFlush('Before after');
+    renderChatInput();
+    const editor = focusPopulatedComposer();
+    setCollapsedSelection(editor.firstChild, 7);
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, 7);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
-    });
-    editor?.dispatchEvent(event);
+    const event = dispatchTextPaste(editor, copiedText);
     flushSolid();
     expect(event.defaultPrevented).toBe(true);
     expect(inputText()).toBe(`Before ${copiedText}after`);
@@ -16054,9 +12650,7 @@ describe('ChatInput', () => {
         lineRanges: [{ startLine: 7, endLine: 8 }],
       },
     });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('Before @src/app.ts after');
     expect(editor?.querySelector('.inline-chip')?.textContent).toContain('L7-8');
   });
@@ -16071,21 +12665,13 @@ describe('ChatInput', () => {
           resolveMatch = resolve;
         })
     );
-    cleanup = render(() => ChatInput(), container!);
+    renderChatInput();
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
+    dispatchTextPaste(editor, copiedText);
     flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
-    });
-    editor?.dispatchEvent(event);
-    flushSolid();
-    setInputText('typed');
-    flushSolid();
+    setInputTextAndFlush('typed');
 
     resolveMatch?.({
       type: 'file',
@@ -16096,9 +12682,7 @@ describe('ChatInput', () => {
         lineRanges: [{ startLine: 7, endLine: 8 }],
       },
     });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('typed');
     expect(state.droppedFiles).toEqual([]);
   });
@@ -16107,18 +12691,11 @@ describe('ChatInput', () => {
     vi.mocked(client.varro.matchCopiedSelection).mockImplementationOnce(
       () => new Promise(() => undefined)
     );
-    cleanup = render(() => ChatInput(), container!);
+    renderChatInput();
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
-    });
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, copiedText);
     flushSolid();
     expect(inputText()).toBe(copiedText);
     expect(editor?.textContent).not.toContain(copiedText);
@@ -16130,12 +12707,9 @@ describe('ChatInput', () => {
   });
 
   it('marks plain-text-only clipboards as possible terminal copies', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
+    renderChatInput();
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
     const paste = (types: string[]) => {
       const event = new Event('paste', { bubbles: true, cancelable: true });
@@ -16152,9 +12726,7 @@ describe('ChatInput', () => {
     paste(['text/plain']);
     flushSolid();
     paste(['text/plain', 'text/html']);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(vi.mocked(client.varro.matchCopiedSelection).mock.calls).toEqual([
       [copiedText, true],
@@ -16164,41 +12736,24 @@ describe('ChatInput', () => {
 
   it('keeps pasted text when the selection lookup fails', async () => {
     vi.mocked(client.varro.matchCopiedSelection).mockRejectedValueOnce(new Error('host gone'));
-    cleanup = render(() => ChatInput(), container!);
+    renderChatInput();
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? copiedText : ''), items: [] },
-    });
-    editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, copiedText);
+    await settle();
     expect(inputText()).toBe(copiedText);
     expect(editor?.textContent).toBe(copiedText.replaceAll('\n', ''));
     flushSolid();
   });
 
   it('keeps unmatched clipboard text at the original cursor after the lookup', async () => {
-    setInputText('Before after');
+    setInputTextAndFlush('Before after');
+    renderChatInput();
+    const editor = focusPopulatedComposer();
+    setCollapsedSelection(editor.firstChild, 7);
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, 7);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: (type: string) => (type === 'text/plain' ? 'plain text ' : ''), items: [] },
-    });
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, 'plain text ');
     flushSolid();
     expect(inputText()).toBe('Before plain text after');
     await flushAsyncWork();
@@ -16207,18 +12762,9 @@ describe('ChatInput', () => {
   });
 
   it('rehydrates pasted file mentions into context files', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     expect(editor).not.toBeNull();
@@ -16228,18 +12774,8 @@ describe('ChatInput', () => {
     if (editor) setCollapsedSelection(editor, 0);
     flushSolid();
 
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? 'Review @README.md and @docs/' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, 'Review @README.md and @docs/');
+    await settle();
 
     expect(state.droppedFiles).toEqual([
       {
@@ -16261,37 +12797,16 @@ describe('ChatInput', () => {
   });
 
   it('withdraws a mention-only paste from the composer once it becomes an attachment', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
+
+    renderChatInput();
+
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, '@README.md');
+    await settle();
 
     expect(state.droppedFiles).toEqual([
       {
@@ -16305,37 +12820,17 @@ describe('ChatInput', () => {
   });
 
   it('resolves mentions in a prevented context-only paste without changing the draft', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setInputText('existing draft');
-    flushSolid();
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
+    setInputTextAndFlush('existing draft');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     editor?.focus();
     flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) =>
-          type === 'text/plain' ? '[Selection from src/app.ts lines 3-5]\n@README.md' : '',
-        items: [],
-      },
-    });
 
-    editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    const event = dispatchTextPaste(editor, '[Selection from src/app.ts lines 3-5]\n@README.md');
+    await settle();
 
     expect(event.defaultPrevented).toBe(true);
     expect(inputText()).toBe('existing draft');
@@ -16359,51 +12854,27 @@ describe('ChatInput', () => {
   });
 
   it('does not attach or withdraw when the session changes while the lookup is pending', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-a'));
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
+    setStateAndFlush('activeSessionId', 'session-a');
+
+    renderChatInput();
+
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, '@README.md');
     flushSolid();
     // The user switches sessions before the workspace lookup comes back.
-    setState(storePath('activeSessionId', 'session-b'));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-b');
+    await settle();
 
     expect(state.droppedFiles).toEqual([]);
-    setState(storePath('activeSessionId', null));
-    flushSolid();
+    setStateAndFlush('activeSessionId', null);
   });
 
   it('does not attach a pasted mention after the composer is cleared in the same session', async () => {
-    setState(storePath('activeSessionId', 'session-a'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-a');
     let resolveLookup:
       | ((value: Awaited<ReturnType<typeof client.varro.resolveWorkspacePath>>) => void)
       | undefined;
@@ -16414,39 +12885,25 @@ describe('ChatInput', () => {
         })
     );
 
-    cleanup = render(() => ChatInput(), container!);
+    renderChatInput();
+
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, '@README.md');
     flushSolid();
     expect(inputText()).toBe('@README.md');
-    setInputText('');
-    flushSolid();
+    setInputTextAndFlush('');
     resolveLookup?.({ path: '/repo/README.md', relativePath: 'README.md', type: 'file' });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('');
     expect(state.droppedFiles).toEqual([]);
   });
 
   it('does not attach a pasted mention after it is sent in the same session', async () => {
-    setState(storePath('activeSessionId', 'session-a'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-a');
     sendMessageMock.mockResolvedValueOnce(true);
     let resolveLookup:
       | ((value: Awaited<ReturnType<typeof client.varro.resolveWorkspacePath>>) => void)
@@ -16458,30 +12915,18 @@ describe('ChatInput', () => {
         })
     );
 
-    cleanup = render(() => ChatInput(), container!);
+    renderChatInput();
+
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, '@README.md');
     flushSolid();
     editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     flushSolid();
     resolveLookup?.({ path: '/repo/README.md', relativePath: 'README.md', type: 'file' });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('@README.md', { noReply: false });
     expect(inputText()).toBe('');
@@ -16489,18 +12934,9 @@ describe('ChatInput', () => {
   });
 
   it('withdraws the pasted copy, not an identical mention already in the composer', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     editor?.focus();
@@ -16508,37 +12944,21 @@ describe('ChatInput', () => {
     // Pre-existing identical mention; with no DOM selection the paste appends
     // at the end, so the two copies sit at different offsets. Searching by
     // content would strip the leading copy and leave ' and notes@README.md'.
-    setInputText('@README.md and notes');
-    flushSolid();
+    setInputTextAndFlush('@README.md and notes');
 
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, '@README.md');
+    await settle();
 
     expect(inputText()).toBe('@README.md and notes');
   });
 
   it('withdraws only the pasted mention copy when its paired image is null', async () => {
-    setInputText('@README.md');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setInputTextAndFlush('@README.md');
+    renderChatInput();
+    await settle();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, '@README.md'.length);
+    const editor = focusPopulatedComposer();
+    setCollapsedSelection(editor.firstChild, '@README.md'.length);
     flushSolid();
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
@@ -16549,9 +12969,7 @@ describe('ChatInput', () => {
     });
 
     editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(event.defaultPrevented).toBe(true);
     expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('README.md');
@@ -16567,18 +12985,11 @@ describe('ChatInput', () => {
   });
 
   it('inserts mixed-paste text once while attaching the pasted image', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusComposer();
       setCollapsedSelection(editor, 0);
       flushSolid();
 
@@ -16589,31 +13000,21 @@ describe('ChatInput', () => {
       );
       flushSolid();
       fileReader.resolve('mixed.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Pasted description [Image 1]');
       expect(inputText().match(/Pasted description/g)).toHaveLength(1);
       expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image 1']);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('attaches and disables an image for a model without vision support', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
+    await withControllableFileReader(async (fileReader) => {
       setupModelState();
-      flushSolid();
       setState(storePath('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', false));
       flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
@@ -16628,18 +13029,13 @@ describe('ChatInput', () => {
       );
 
       fileReader.resolve('unsupported.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(inputText()).toBe('');
       expect(state.clipboardImages).toHaveLength(1);
       expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeInstanceOf(
         HTMLElement
       );
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it.each(
@@ -16649,29 +13045,19 @@ describe('ChatInput', () => {
   )(
     'pastes outside the draft with editor focus=$editorWasFocused and paste target=$pasteTarget',
     async ({ editorWasFocused, pasteTarget }) => {
-      const fileReader = installControllableFileReader();
-      flushSolid();
-      try {
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+      await withControllableFileReader(async (fileReader) => {
+        renderChatInput();
+        await settle();
 
-        const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-        if (!editor) throw new Error('Expected composer editor');
-        editor.focus();
-        flushSolid();
+        const editor = focusComposer();
         dispatchImagePaste(editor, [new File(['first'], 'first.png', { type: 'image/png' })]);
         flushSolid();
         fileReader.resolve('first.png');
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
 
         const attachmentRow = container?.querySelector<HTMLElement>('.chat-attachments-container');
         if (!attachmentRow) throw new Error('Expected attachment row');
-        setInputText('Existing draft');
-        flushSolid();
+        setInputTextAndFlush('Existing draft');
         editor.focus();
         flushSolid();
         if (editor.firstChild) setCollapsedSelection(editor.firstChild, 8);
@@ -16692,9 +13078,7 @@ describe('ChatInput', () => {
         flushSolid();
         expect(paste.defaultPrevented).toBe(true);
         fileReader.resolve('second.png');
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
 
         expect(inputText()).toBe('Existing draft');
         expect(state.clipboardImages.map((image) => image.filename)).toEqual([
@@ -16711,16 +13095,11 @@ describe('ChatInput', () => {
         dispatchImagePaste(editor, [new File(['third'], 'third.png', { type: 'image/png' })]);
         flushSolid();
         fileReader.resolve('third.png');
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
 
         expect(inputText()).toBe('Existing [Image 3] draft');
         expect(attachmentRow.querySelectorAll('.chat-attachment-chip')).toHaveLength(2);
-      } finally {
-        fileReader.restore();
-        flushSolid();
-      }
+      });
     }
   );
 
@@ -16733,10 +13112,8 @@ describe('ChatInput', () => {
       size: 5,
     });
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const row = container?.querySelector<HTMLElement>('.chat-attachments-container');
     if (!row) throw new Error('Expected attachment row');
@@ -16774,51 +13151,44 @@ describe('ChatInput', () => {
     ];
     const restoreWarnings = count === 10_000 ? suppressExpectedHugeFanIn(expectedFanIn) : undefined;
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     let infoReads = 0;
     let partsReads = 0;
-    setState(
-      storePath(
-        'messages',
-        Array.from({ length: count }, (_, index): MessageEntry => {
-          const id = `history-${index}`;
-          const entry =
-            index % 2 === 0
-              ? historyEntry(id, `Prompt ${index}`)
-              : assistantMessageEntry({ input: 100, output: 20 });
-          const info = { ...entry.info, id, time: { created: index, completed: index + 1 } };
-          // Each reply belongs to the preceding prompt, not the helper's absent "user-1".
-          // Missing-parent searches are a different stress condition from loaded-history typing.
-          if (info.role === 'assistant') info.parentID = `history-${index - 1}`;
-          const parts: TextPart[] = [
-            {
-              id: `text-${index}`,
-              messageID: id,
-              sessionID: 'session-1',
-              type: 'text',
-              text: `Content ${index}`,
-            },
-          ];
-          return {
-            get info() {
-              infoReads += 1;
-              return info;
-            },
-            get parts() {
-              partsReads += 1;
-              return parts;
-            },
-          };
-        })
-      )
+    setStateAndFlush(
+      'messages',
+      Array.from({ length: count }, (_, index): MessageEntry => {
+        const id = `history-${index}`;
+        const entry =
+          index % 2 === 0
+            ? historyEntry(id, `Prompt ${index}`)
+            : assistantMessageEntry({ input: 100, output: 20 });
+        const info = { ...entry.info, id, time: { created: index, completed: index + 1 } };
+        // Each reply belongs to the preceding prompt, not the helper's absent "user-1".
+        // Missing-parent searches are a different stress condition from loaded-history typing.
+        if (info.role === 'assistant') info.parentID = `history-${index - 1}`;
+        const parts: TextPart[] = [
+          {
+            id: `text-${index}`,
+            messageID: id,
+            sessionID: 'session-1',
+            type: 'text',
+            text: `Content ${index}`,
+          },
+        ];
+        return {
+          get info() {
+            infoReads += 1;
+            return info;
+          },
+          get parts() {
+            partsReads += 1;
+            return parts;
+          },
+        };
+      })
     );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
     const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
     expect(infoReads).toBeGreaterThan(0);
     expect(partsReads).toBeGreaterThan(0);
@@ -16848,22 +13218,15 @@ describe('ChatInput', () => {
 
   it('does not inspect historical prompts while typing without images', async () => {
     setupVisionDelegationModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     let partsReadCount = 0;
-    setState(
-      storePath('messages', [
-        countedUserMessageEntry('@vision inspect the previous image', () => {
-          partsReadCount += 1;
-        }),
-      ])
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('messages', [
+      countedUserMessageEntry('@vision inspect the previous image', () => {
+        partsReadCount += 1;
+      }),
+    ]);
+    renderChatInput();
+    await settle();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor) throw new Error('Expected composer editor');
@@ -16881,18 +13244,13 @@ describe('ChatInput', () => {
 
   it('keeps automatic vision delegation enabled while the draft changes without rereading history', async () => {
     setupVisionDelegationModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     let partsReadCount = 0;
-    setState(
-      storePath('messages', [
-        countedUserMessageEntry('Inspect the previous image', () => {
-          partsReadCount += 1;
-        }),
-      ])
-    );
-    flushSolid();
+    setStateAndFlush('messages', [
+      countedUserMessageEntry('Inspect the previous image', () => {
+        partsReadCount += 1;
+      }),
+    ]);
     addClipboardImage({
       id: 'image-1',
       url: 'data:image/png;base64,aW1hZ2U=',
@@ -16902,10 +13260,8 @@ describe('ChatInput', () => {
       contextFile: { path: '/tmp/Image 1.png', relativePath: 'Image 1.png', type: 'file' },
     });
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const imageChip = container?.querySelector<HTMLElement>('.chat-attachment-chip');
@@ -16939,9 +13295,7 @@ describe('ChatInput', () => {
     'hides submitted strip attachments while sending and restores a failed draft (creates session: %s)',
     async (createsSession) => {
       setupModelState();
-      flushSolid();
-      setState(storePath('activeSessionId', createsSession ? null : 'session-1'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', createsSession ? null : 'session-1');
       let resolveSend!: (sent: boolean) => void;
       sendMessageMock.mockImplementationOnce(
         () => new Promise<boolean>((resolve) => (resolveSend = resolve))
@@ -16956,27 +13310,20 @@ describe('ChatInput', () => {
         size: 5,
       });
       flushSolid();
-      setInputText('Review these attachments');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush('Review these attachments');
+      renderChatInput();
+      await settle();
       const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
       expect(container!.querySelectorAll('.chat-attachment-chip')).toHaveLength(2);
       container!.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')!.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(sendMessageMock).toHaveBeenCalledTimes(1);
       expect(editor.textContent).toBe('');
       expect(editor.getAttribute('data-placeholder')).toBe('Queue a follow-up or steer');
       expect(container!.querySelector('.chat-attachments-container')).toBeNull();
       if (createsSession) {
-        setState(storePath('activeSessionId', 'created-session'));
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        setStateAndFlush('activeSessionId', 'created-session');
+        await settle();
         expect(editor.textContent).toBe('');
         expect(editor.getAttribute('data-placeholder')).toBe('Queue a follow-up or steer');
         expect(container!.querySelector('.chat-attachments-container')).toBeNull();
@@ -16990,9 +13337,7 @@ describe('ChatInput', () => {
       expect(container!.querySelectorAll('.chat-attachment-chip')).toHaveLength(1);
       expect(container!.querySelector('.chat-attachment-chip')?.textContent).toContain('next.ts');
       resolveSend(false);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(editor.textContent).toBe('Review these attachments');
       expect(container!.querySelectorAll('.chat-attachment-chip')).toHaveLength(3);
     }
@@ -17000,7 +13345,6 @@ describe('ChatInput', () => {
 
   it('keeps unchanged attachment chips mounted while typing', async () => {
     setupModelState();
-    flushSolid();
     addContextFile({ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' });
     flushSolid();
     addClipboardImage({
@@ -17011,10 +13355,8 @@ describe('ChatInput', () => {
       size: 5,
     });
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor) throw new Error('Expected composer editor');
@@ -17053,10 +13395,8 @@ describe('ChatInput', () => {
         },
       });
       flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
 
       const removeButton = container?.querySelector<HTMLButtonElement>(
         '.chat-attachments-container .chat-attachment-chip .chip-remove'
@@ -17079,25 +13419,19 @@ describe('ChatInput', () => {
   it.each([null, { startLine: 101, endLine: 108 }])(
     'pins the active context with its selected lines: %j',
     async (selection) => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('editorContext', {
-          workspacePath: '/repo',
-          activeFile: {
-            path: '/repo/src/app.ts',
-            relativePath: 'src/app.ts',
-            language: 'typescript',
-          },
-          selection,
-          diagnostics: [],
-        })
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('editorContext', {
+        workspacePath: '/repo',
+        activeFile: {
+          path: '/repo/src/app.ts',
+          relativePath: 'src/app.ts',
+          language: 'typescript',
+        },
+        selection,
+        diagnostics: [],
+      });
+      renderChatInput();
+      await settle();
 
       const pinButton = container?.querySelector<HTMLButtonElement>(
         '.chat-attachments-container .chat-attachment-chip .chip-pin'
@@ -17126,9 +13460,7 @@ describe('ChatInput', () => {
       );
       flushSolid();
       setState(storePath('editorContext', 'selection', null));
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(state.droppedFiles[0]?.path).toBe('/repo/src/app.ts');
       expect(state.droppedFiles[0]?.lineRanges).toEqual(selection ? [selection] : undefined);
@@ -17144,23 +13476,18 @@ describe('ChatInput', () => {
     const fileReader = installControllableFileReader();
     flushSolid();
     setupVisionDelegationModelState();
-    flushSolid();
     const posted = vi.fn();
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
       posted;
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     if (!editor) throw new Error('Expected composer editor');
     dispatchImagePaste(editor, [new File(['image'], 'delegated.png', { type: 'image/png' })]);
     flushSolid();
     fileReader.resolve('delegated.png');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     const stagedImageChip = container?.querySelector('.chat-attachment-chip');
     expect(stagedImageChip).toBeInstanceOf(HTMLElement);
@@ -17178,17 +13505,13 @@ describe('ChatInput', () => {
     );
 
     setInputText('Inspect [Image 1]');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(sendButton?.disabled).toBe(true);
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
       'Preparing attachments: storing images for vision delegation',
       'warning'
@@ -17205,49 +13528,25 @@ describe('ChatInput', () => {
         },
       })
     );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendButton?.disabled).toBe(false);
     sendButton?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(sendMessageMock).toHaveBeenCalledWith('Inspect [Image 1]', expect.anything());
     fileReader.restore();
     flushSolid();
   });
 
   it('immediately makes a staged image sendable after switching to a vision model', async () => {
-    setState(
-      storePath('providers', [
-        {
-          id: 'custom',
-          name: 'Custom',
-          source: 'api',
-          models: {
-            text: {
-              id: 'text',
-              name: 'Text',
-              capabilities: { toolcall: true, vision: false },
-              cost: { input: 0, output: 0 },
-            },
-            vision: {
-              id: 'vision',
-              name: 'Vision',
-              capabilities: { attachment: true, toolcall: true },
-              cost: { input: 0, output: 0 },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { custom: 'text' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'custom', modelID: 'text' }));
-    flushSolid();
+    setStateAndFlush('providers', [
+      apiProvider('custom', 'Custom', [
+        toolModel('text', 'Text', { capabilities: { toolcall: true, vision: false } }),
+        toolModel('vision', 'Vision', { capabilities: { attachment: true, toolcall: true } }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { custom: 'text' });
+    setStateAndFlush('selectedModel', { providerID: 'custom', modelID: 'text' });
     addClipboardImage({
       id: 'image-1',
       url: 'data:image/png;base64,aW1hZ2U=',
@@ -17256,19 +13555,14 @@ describe('ChatInput', () => {
       size: 5,
     });
     flushSolid();
-    setInputText('[Image 1]');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setInputTextAndFlush('[Image 1]');
+    renderChatInput();
+    await settle();
 
     expect(container?.querySelector('.chat-send-button')?.classList).toContain('disabled');
 
-    setState(storePath('selectedModel', { providerID: 'custom', modelID: 'vision' }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('selectedModel', { providerID: 'custom', modelID: 'vision' });
+    await settle();
 
     expect(container?.querySelector('.chat-send-button')?.classList).toContain('enabled');
     expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
@@ -17278,30 +13572,21 @@ describe('ChatInput', () => {
     'keeps prepared images previewable and sendable after New Chat (switch to vision first: %s)',
     async (switchBeforeNewChat) => {
       setupVisionDelegationModelState();
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('messages', [historyEntry('existing-user', 'An existing conversation')]));
-      flushSolid();
-      setState(
-        storePath('clipboardImages', [
-          {
-            id: 'carried-image',
-            url: 'data:image/png;base64,aW1hZ2U=',
-            mime: 'image/png',
-            filename: 'Image 1',
-            size: 5,
-            contextFile: { path: '/repo/Image 1.png', relativePath: 'Image 1.png', type: 'file' },
-          },
-        ])
-      );
-      flushSolid();
-      setInputText('Describe these images');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('messages', [historyEntry('existing-user', 'An existing conversation')]);
+      setStateAndFlush('clipboardImages', [
+        {
+          id: 'carried-image',
+          url: 'data:image/png;base64,aW1hZ2U=',
+          mime: 'image/png',
+          filename: 'Image 1',
+          size: 5,
+          contextFile: { path: '/repo/Image 1.png', relativePath: 'Image 1.png', type: 'file' },
+        },
+      ]);
+      setInputTextAndFlush('Describe these images');
+      renderChatInput();
+      await settle();
       expect(container?.querySelector('.chat-attachment-chip.clickable')).not.toBeNull();
       expect(
         container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
@@ -17313,18 +13598,14 @@ describe('ChatInput', () => {
       startNewChatDraft();
       flushSolid();
       if (!switchBeforeNewChat) setSelectedModel(visionModel);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(state.activeSessionId).toBeNull();
       expect(state.clipboardImages).toHaveLength(1);
       const imageChip = container?.querySelector<HTMLElement>('.chat-attachment-chip');
       expect(imageChip?.classList).toContain('clickable');
       imageChip?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(document.querySelector('.chat-image-preview-overlay')).not.toBeNull();
       expect(
         container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
@@ -17344,31 +13625,20 @@ describe('ChatInput', () => {
       );
       try {
         setupVisionDelegationModelState();
-        flushSolid();
-        setState(storePath('activeSessionId', 'session-1'));
-        flushSolid();
-        setState(
-          storePath('messages', [historyEntry('existing-user', 'An existing conversation')])
-        );
-        flushSolid();
-        setState(
-          storePath('clipboardImages', [
-            {
-              id: 'pending-carried-image',
-              url: 'data:image/png;base64,aW1hZ2U=',
-              mime: 'image/png',
-              filename: 'Image 1',
-              size: 5,
-            },
-          ])
-        );
-        flushSolid();
-        setInputText('Describe these images');
-        flushSolid();
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        setStateAndFlush('activeSessionId', 'session-1');
+        setStateAndFlush('messages', [historyEntry('existing-user', 'An existing conversation')]);
+        setStateAndFlush('clipboardImages', [
+          {
+            id: 'pending-carried-image',
+            url: 'data:image/png;base64,aW1hZ2U=',
+            mime: 'image/png',
+            filename: 'Image 1',
+            size: 5,
+          },
+        ]);
+        setInputTextAndFlush('Describe these images');
+        renderChatInput();
+        await settle();
         expect(decodes).toHaveLength(1);
 
         const visionModel = { providerID: 'vision-provider', modelID: 'viewer' };
@@ -17377,9 +13647,7 @@ describe('ChatInput', () => {
         startNewChatDraft();
         flushSolid();
         if (!switchBeforeNewChat) setSelectedModel(visionModel);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
         expect(container?.querySelector('.chat-attachment-chip.clickable')).toBeNull();
         expect(
           container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
@@ -17416,32 +13684,24 @@ describe('ChatInput', () => {
       });
       try {
         setupModelState();
-        flushSolid();
-        setState(
-          storePath(
-            'clipboardImages',
-            ['ready', 'pending'].map((name, index) => ({
-              id: name,
-              url: `data:image/png;base64,${name}`,
-              mime: 'image/png',
-              filename: `Image ${index + 1}`,
-              size: 5,
-            }))
-          )
+        setStateAndFlush(
+          'clipboardImages',
+          ['ready', 'pending'].map((name, index) => ({
+            id: name,
+            url: `data:image/png;base64,${name}`,
+            mime: 'image/png',
+            filename: `Image ${index + 1}`,
+            size: 5,
+          }))
         );
-        flushSolid();
-        setInputText('Describe the images');
-        flushSolid();
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        setInputTextAndFlush('Describe the images');
+        renderChatInput();
+        await settle();
         const originalDecode = finishDecode;
         if (change === 'remove') {
-          setState(
-            storePath('clipboardImages', (images) => images.filter((image) => image.id !== 'ready'))
+          setStateAndFlush('clipboardImages', (images) =>
+            images.filter((image) => image.id !== 'ready')
           );
-          flushSolid();
         } else {
           setState(
             storePath('clipboardImages', 0, 'contextFile', {
@@ -17452,9 +13712,7 @@ describe('ChatInput', () => {
           );
           flushSolid();
         }
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
         originalDecode?.();
         await flushAsyncWork();
         flushSolid();
@@ -17487,24 +13745,11 @@ describe('ChatInput', () => {
           })
       );
       try {
-        setState(
-          storePath('editorContext', {
-            workspacePath: '/repo',
-            activeFile: null,
-            selection: null,
-            diagnostics: [],
-          })
-        );
-        flushSolid();
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        setStateAndFlush('editorContext', idleEditorContext('/repo'));
+        renderChatInput();
+        await settle();
 
-        const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-        if (!editor) throw new Error('Expected composer editor');
-        editor.focus();
-        flushSolid();
+        const editor = focusComposer();
         setCollapsedSelection(editor, 0);
         flushSolid();
         dispatchImagePaste(
@@ -17528,9 +13773,7 @@ describe('ChatInput', () => {
           flushSolid();
           completeImage();
         }
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
 
         expect(inputText()).toBe('[Image 1]');
         expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo/README.md' })]);
@@ -17548,27 +13791,12 @@ describe('ChatInput', () => {
   );
 
   it('keeps an image and stripped context reference in one undoable paste transaction', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(
-        storePath('editorContext', {
-          workspacePath: '/repo',
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-        })
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush('editorContext', idleEditorContext('/repo'));
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusComposer();
       setCollapsedSelection(editor, 0);
       flushSolid();
       dispatchImagePaste(
@@ -17578,9 +13806,7 @@ describe('ChatInput', () => {
       );
       flushSolid();
       fileReader.resolve('context.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Inspect this [Image 1]');
       expect(state.droppedFiles).toEqual([
@@ -17598,10 +13824,7 @@ describe('ChatInput', () => {
       expect(inputText()).toBe('');
       expect(state.droppedFiles).toEqual([]);
       expect(state.clipboardImages).toEqual([]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it.each([
@@ -17610,18 +13833,11 @@ describe('ChatInput', () => {
   ])(
     'keeps overlapping mixed pastes ordered and independently undoable in $label',
     async ({ probeLaterRead }) => {
-      const fileReader = installControllableFileReader();
-      flushSolid();
-      try {
-        cleanup = render(() => ChatInput(), container!);
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+      await withControllableFileReader(async (fileReader) => {
+        renderChatInput();
+        await settle();
 
-        const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-        if (!editor) throw new Error('Expected composer editor');
-        editor.focus();
-        flushSolid();
+        const editor = focusComposer();
         setCollapsedSelection(editor, 0);
         flushSolid();
 
@@ -17645,13 +13861,9 @@ describe('ChatInput', () => {
 
         if (probeLaterRead) expect(fileReader.hasPending('second-mixed.png')).toBe(false);
         fileReader.resolve('first-mixed.png');
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
         fileReader.resolve('second-mixed.png');
-        flushSolid();
-        await flushAsyncWork();
-        flushSolid();
+        await settle();
 
         expect(inputText()).toBe('First [Image 1] Second [Image 2]');
         expect(
@@ -17672,26 +13884,16 @@ describe('ChatInput', () => {
         flushSolid();
         expect(inputText()).toBe('');
         expect(state.clipboardImages).toEqual([]);
-      } finally {
-        fileReader.restore();
-        flushSolid();
-      }
+      });
     }
   );
 
   it('undoes mixed pasted text, image, and placeholder as one composer edit', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusComposer();
       setCollapsedSelection(editor, 0);
       flushSolid();
       dispatchImagePaste(
@@ -17701,9 +13903,7 @@ describe('ChatInput', () => {
       );
       flushSolid();
       fileReader.resolve('undo-mixed.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Pasted description [Image 1]');
       expect(state.clipboardImages).toHaveLength(1);
@@ -17717,54 +13917,37 @@ describe('ChatInput', () => {
       flushSolid();
       expect(inputText()).toBe('Pasted description [Image 1]');
       expect(state.clipboardImages).toHaveLength(1);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('keeps mixed-paste text when the clipboard image is null', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor) throw new Error('Expected composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
 
     dispatchImagePaste(editor, [null], 'Text from a null image paste');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('Text from a null image paste');
     expect(state.clipboardImages).toEqual([]);
   });
 
   it('keeps mixed-paste text when the clipboard image is oversized', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const oversized = new File([new Uint8Array(MAX_CLIPBOARD_IMAGE_SIZE + 1)], 'oversized.png', {
       type: 'image/png',
     });
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    if (!editor) throw new Error('Expected composer editor');
-    editor.focus();
-    flushSolid();
+    const editor = focusComposer();
     setCollapsedSelection(editor, 0);
     flushSolid();
 
     dispatchImagePaste(editor, [oversized], 'Text from an oversized image paste');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('Text from an oversized image paste');
     expect(state.clipboardImages).toEqual([]);
@@ -17775,18 +13958,11 @@ describe('ChatInput', () => {
   });
 
   it('keeps mixed-paste text when the clipboard image cannot be read', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusComposer();
       setCollapsedSelection(editor, 0);
       flushSolid();
 
@@ -17797,9 +13973,7 @@ describe('ChatInput', () => {
       );
       flushSolid();
       fileReader.reject('unreadable.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Text from an unreadable image paste');
       expect(state.clipboardImages).toEqual([]);
@@ -17807,37 +13981,24 @@ describe('ChatInput', () => {
         'Could not read the pasted image',
         'warning'
       );
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('keeps mixed-paste text when the clipboard image is rejected as a duplicate', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(
-        storePath('clipboardImages', [
-          {
-            id: 'existing-image',
-            url: 'data:image/png;base64,duplicate.png',
-            mime: 'image/png',
-            filename: 'Existing',
-            size: 1,
-          },
-        ])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush('clipboardImages', [
+        {
+          id: 'existing-image',
+          url: 'data:image/png;base64,duplicate.png',
+          mime: 'image/png',
+          filename: 'Existing',
+          size: 1,
+        },
+      ]);
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusComposer();
       setCollapsedSelection(editor, 0);
       flushSolid();
 
@@ -17848,9 +14009,7 @@ describe('ChatInput', () => {
       );
       flushSolid();
       fileReader.resolve('duplicate.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Text from a rejected image paste');
       expect(state.clipboardImages.map((image) => image.id)).toEqual(['existing-image']);
@@ -17859,38 +14018,25 @@ describe('ChatInput', () => {
         'warning',
         container?.querySelector('.chat-input-shell')
       );
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('keeps mixed-paste text when clipboard image capacity is full', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(
-        storePath(
-          'clipboardImages',
-          Array.from({ length: MAX_CLIPBOARD_IMAGES }, (_, index) => ({
-            id: `existing-${index}`,
-            url: `data:image/png;base64,existing-${index}`,
-            mime: 'image/png',
-            filename: `Existing ${index}`,
-            size: 1,
-          }))
-        )
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush(
+        'clipboardImages',
+        Array.from({ length: MAX_CLIPBOARD_IMAGES }, (_, index) => ({
+          id: `existing-${index}`,
+          url: `data:image/png;base64,existing-${index}`,
+          mime: 'image/png',
+          filename: `Existing ${index}`,
+          size: 1,
+        }))
       );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor) throw new Error('Expected composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusComposer();
       setCollapsedSelection(editor, 0);
       flushSolid();
 
@@ -17910,17 +14056,12 @@ describe('ChatInput', () => {
         `You can attach up to ${MAX_CLIPBOARD_IMAGES} images`,
         'warning'
       );
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('rejects oversized clipboard images before reading them', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const readSpy = vi.spyOn(FileReader.prototype, 'readAsDataURL');
     const oversized = new File([new Uint8Array(MAX_CLIPBOARD_IMAGE_SIZE + 1)], 'large.png', {
@@ -17936,9 +14077,7 @@ describe('ChatInput', () => {
     });
 
     editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(readSpy).not.toHaveBeenCalled();
     expect(state.clipboardImages).toEqual([]);
@@ -17949,10 +14088,8 @@ describe('ChatInput', () => {
   });
 
   it('combines multiple image paste rejection reasons into one notification', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const oversized = new File([new Uint8Array(MAX_CLIPBOARD_IMAGE_SIZE + 1)], 'large.png', {
       type: 'image/png',
@@ -17961,9 +14098,7 @@ describe('ChatInput', () => {
     if (!editor) throw new Error('Expected composer editor');
 
     dispatchImagePaste(editor, [oversized, null]);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(showSessionActionFeedbackMock).toHaveBeenCalledOnce();
     expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
@@ -17973,82 +14108,53 @@ describe('ChatInput', () => {
   });
 
   it('revalidates the composer owner before committing staged pasted images', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setState(storePath('activeSessionId', 'session-a'));
-      flushSolid();
-      setInputText('draft');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setStateAndFlush('activeSessionId', 'session-a');
+      setInputTextAndFlush('draft');
+      renderChatInput();
+      await settle();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
 
       dispatchImagePaste(editor, [new File(['a'], 'session.png', { type: 'image/png' })]);
       flushSolid();
-      setState(storePath('activeSessionId', 'session-b'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-b');
       fileReader.resolve('session.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.clipboardImages).toEqual([]);
 
       dispatchImagePaste(editor, [new File(['b'], 'mutation.png', { type: 'image/png' })]);
       flushSolid();
-      setInputText('draft');
-      flushSolid();
+      setInputTextAndFlush('draft');
       fileReader.resolve('mutation.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.clipboardImages).toEqual([]);
 
       dispatchImagePaste(editor, [new File(['c'], 'value.png', { type: 'image/png' })]);
       flushSolid();
-      setInputText('');
-      flushSolid();
+      setInputTextAndFlush('');
       fileReader.resolve('value.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.clipboardImages).toEqual([]);
 
-      setInputText('send draft');
-      flushSolid();
+      setInputTextAndFlush('send draft');
       sendMessageMock.mockResolvedValueOnce(true);
       dispatchImagePaste(editor, [new File(['d'], 'send.png', { type: 'image/png' })]);
       flushSolid();
-      editor.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-      );
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      pressKey(editor, { key: 'Enter' });
+      await settle();
       expect(inputText()).toBe('');
       fileReader.resolve('send.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.clipboardImages).toEqual([]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('stages later image pastes until earlier reads finish, then applies live capacity', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      renderChatInput();
+      await settle();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
@@ -18095,10 +14201,7 @@ describe('ChatInput', () => {
           .map((file) => `data:image/png;base64,${file.name}`)
       );
       expect(nextPastedImageIndex()).toBe(MAX_CLIPBOARD_IMAGES + 1);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('sends one host snapshot for a multi-image paste transaction', async () => {
@@ -18108,10 +14211,8 @@ describe('ChatInput', () => {
     const bridgeWindow = fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window);
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
     try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       const images = ['first.png', 'second.png', 'third.png'].map(
@@ -18160,10 +14261,8 @@ describe('ChatInput', () => {
     }
     vi.stubGlobal('Image', ControlledImage);
     try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      renderChatInput();
+      await settle();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       const images = ['first.png', 'second.png', 'third.png'].map(
@@ -18201,20 +14300,12 @@ describe('ChatInput', () => {
   });
 
   it('commits overlapping image-only pastes into a non-empty composer in source order', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      setInputText('Review this');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      setInputTextAndFlush('Review this');
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, 'Review this'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
@@ -18230,14 +14321,10 @@ describe('ChatInput', () => {
       expect(state.clipboardImages).toEqual([]);
 
       fileReader.resolve('first.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(inputText()).toBe('Review this [Image 1]');
       fileReader.resolve('second.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('Review this [Image 1] [Image 2]');
       expect(
@@ -18247,20 +14334,13 @@ describe('ChatInput', () => {
         { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
       ]);
       expect(nextPastedImageIndex()).toBe(3);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('admits a later paste after duplicate images release capacity', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      renderChatInput();
+      await settle();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
       const duplicates = Array.from(
@@ -18281,28 +14361,19 @@ describe('ChatInput', () => {
       expect(fileReader.hasPending('later.png')).toBe(true);
 
       fileReader.resolve('later.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.clipboardImages.map((image) => image.url)).toEqual([
         'data:image/png;base64,same-content',
         'data:image/png;base64,later.png',
       ]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('releases ordered paste admission when a file read stalls', async () => {
     vi.useFakeTimers();
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+    await withControllableFileReader(async (fileReader) => {
+      renderChatInput();
+      await settle();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       if (!editor) throw new Error('Expected composer editor');
 
@@ -18313,41 +14384,26 @@ describe('ChatInput', () => {
       expect(fileReader.hasPending('later.png')).toBe(false);
 
       await vi.advanceTimersByTimeAsync(10_000);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(fileReader.hasPending('stalled.png')).toBe(false);
       expect(fileReader.hasPending('later.png')).toBe(true);
 
       fileReader.resolve('later.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(state.clipboardImages).toEqual([
         expect.objectContaining({ url: 'data:image/png;base64,later.png' }),
       ]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('pastes images at the live selection on the first line', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
+    await withControllableFileReader(async (fileReader) => {
       const draft = 'First line\nSecond line';
-      setInputText(draft);
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush(draft);
+      renderChatInput();
+      await settle();
 
-      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
-      editor.focus();
-      flushSolid();
+      const editor = focusPopulatedComposer();
       setCollapsedSelection(editor.firstChild, 'First line'.length);
       flushSolid();
       editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
@@ -18363,9 +14419,7 @@ describe('ChatInput', () => {
       fileReader.resolve('first.png');
       flushSolid();
       fileReader.resolve('second.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('[Image 1] [Image 2] First line\nSecond line');
       expect(
@@ -18374,16 +14428,11 @@ describe('ChatInput', () => {
         { filename: 'Image 1', url: 'data:image/png;base64,first.png' },
         { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
       ]);
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('pastes an image after an inline image chip without adding a newline', async () => {
-    const fileReader = installControllableFileReader();
-    flushSolid();
-    try {
+    await withControllableFileReader(async (fileReader) => {
       addClipboardImage({
         id: 'existing-image',
         url: 'data:image/png;base64,existing',
@@ -18392,12 +14441,9 @@ describe('ChatInput', () => {
         size: 8,
       });
       flushSolid();
-      setInputText('sdsds [Image 1] ');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      setInputTextAndFlush('sdsds [Image 1] ');
+      renderChatInput();
+      await settle();
 
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       const chip = editor?.querySelector<HTMLElement>('[data-chip-type="image"]');
@@ -18415,9 +14461,7 @@ describe('ChatInput', () => {
       dispatchImagePaste(editor, [new File(['next'], 'next.png', { type: 'image/png' })], '\n');
       flushSolid();
       fileReader.resolve('next.png');
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
 
       expect(inputText()).toBe('sdsds [Image 1] [Image 2] ');
       expect(editor.querySelectorAll('br')).toHaveLength(0);
@@ -18425,101 +14469,47 @@ describe('ChatInput', () => {
         editor.querySelectorAll<HTMLElement>('[data-chip-type="image"]')
       ).at(-1);
       expect(pastedChip?.nextSibling?.textContent).toBe('\u200B ');
-    } finally {
-      fileReader.restore();
-      flushSolid();
-    }
+    });
   });
 
   it('keeps a mention-only paste as text when the mention does not resolve', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
+
+    renderChatInput();
+
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? '@scope/package' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, '@scope/package');
+    await settle();
 
     expect(state.droppedFiles).toEqual([]);
     expect(inputText()).toBe('@scope/package');
   });
 
   it('keeps a mention-only paste when the user typed inside it before it resolved', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
+
+    renderChatInput();
+
+    const editor = focusComposer();
+    setCollapsedSelection(editor, 0);
     flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-
-    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.focus();
-    flushSolid();
-    if (editor) setCollapsedSelection(editor, 0);
-    flushSolid();
-
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
+    dispatchTextPaste(editor, '@README.md');
     flushSolid();
     setInputText('@READ-edited-ME.md');
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(inputText()).toBe('@READ-edited-ME.md');
     expect(state.droppedFiles).toEqual([]);
   });
 
   it('keeps unresolved scoped package names as plain pasted text', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     expect(editor).not.toBeNull();
@@ -18529,18 +14519,8 @@ describe('ChatInput', () => {
     if (editor) setCollapsedSelection(editor, 0);
     flushSolid();
 
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: (type: string) => (type === 'text/plain' ? 'Use npx @scope/package init' : ''),
-        items: [],
-      },
-    });
-
-    editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    dispatchTextPaste(editor, 'Use npx @scope/package init');
+    await settle();
 
     expect(state.droppedFiles).toEqual([]);
     expect(inputText()).toBe('Use npx @scope/package init');
@@ -18548,18 +14528,9 @@ describe('ChatInput', () => {
   });
 
   it('strips pasted context reference lines while restoring them as attachments', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', idleEditorContext('/repo'));
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     expect(editor).not.toBeNull();
@@ -18581,9 +14552,7 @@ describe('ChatInput', () => {
     });
 
     editor?.dispatchEvent(event);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.droppedFiles).toEqual([
       {
@@ -18604,72 +14573,57 @@ describe('ChatInput', () => {
   });
 
   it('renders inline image chips without a remove button', async () => {
-    setState(
-      storePath('clipboardImages', [
-        {
-          id: 'img-1',
-          url: 'data:image/png;base64,abc',
-          mime: 'image/png',
-          filename: 'Image',
-          size: 12,
-        },
-      ])
-    );
-    flushSolid();
-    setInputText('[Image]');
-    flushSolid();
+    setStateAndFlush('clipboardImages', [
+      {
+        id: 'img-1',
+        url: 'data:image/png;base64,abc',
+        mime: 'image/png',
+        filename: 'Image',
+        size: 12,
+      },
+    ]);
+    setInputTextAndFlush('[Image]');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
     expect(container?.querySelector('.rich-composer .inline-chip-remove')).toBeNull();
   });
 
   it('does not reserve an empty attachment row for inline active-file context', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/src/app.ts',
-          relativePath: 'src/app.ts',
-          language: 'typescript',
-        },
-        selection: null,
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        language: 'typescript',
+      },
+      selection: null,
+      diagnostics: [],
+    });
     addContextFile({ path: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'file' });
     flushSolid();
-    setInputText('@src/app.ts');
-    flushSolid();
+    setInputTextAndFlush('@src/app.ts');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     expect(container?.querySelector('.rich-composer .inline-chip')).not.toBeNull();
     expect(container?.querySelector('.chat-attachments-container')).toBeNull();
   });
 
   it('hides an active selection attachment when the same file and lines are inline', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/CHANGELOG.md',
-          relativePath: 'CHANGELOG.md',
-          language: 'markdown',
-        },
-        selection: { startLine: 23, endLine: 24 },
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: { startLine: 23, endLine: 24 },
+      diagnostics: [],
+    });
     addContextFile({
       path: '/repo/CHANGELOG.md',
       relativePath: 'CHANGELOG.md',
@@ -18677,13 +14631,10 @@ describe('ChatInput', () => {
       lineRanges: [{ startLine: 23, endLine: 24 }],
     });
     flushSolid();
-    setInputText('Test message @CHANGELOG.md');
-    flushSolid();
+    setInputTextAndFlush('Test message @CHANGELOG.md');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     expect(
       container?.querySelector('.rich-composer [data-chip-type="mention-file"]')?.textContent
@@ -18693,19 +14644,16 @@ describe('ChatInput', () => {
   });
 
   it('keeps active selection context when its lines differ from the inline file range', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: {
-          path: '/repo/CHANGELOG.md',
-          relativePath: 'CHANGELOG.md',
-          language: 'markdown',
-        },
-        selection: { startLine: 25, endLine: 26 },
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/CHANGELOG.md',
+        relativePath: 'CHANGELOG.md',
+        language: 'markdown',
+      },
+      selection: { startLine: 25, endLine: 26 },
+      diagnostics: [],
+    });
     addContextFile({
       path: '/repo/CHANGELOG.md',
       relativePath: 'CHANGELOG.md',
@@ -18713,13 +14661,10 @@ describe('ChatInput', () => {
       lineRanges: [{ startLine: 23, endLine: 24 }],
     });
     flushSolid();
-    setInputText('Test message @CHANGELOG.md');
-    flushSolid();
+    setInputTextAndFlush('Test message @CHANGELOG.md');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     expect(
       container?.querySelector('.rich-composer [data-chip-type="mention-file"]')?.textContent
@@ -18746,12 +14691,9 @@ describe('ChatInput', () => {
       },
     });
     flushSolid();
-    setInputText('@users-context.json');
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setInputTextAndFlush('@users-context.json');
+    renderChatInput();
+    await settle();
     const chip = container?.querySelector('.rich-composer .inline-chip');
     expect(chip?.textContent).toContain('users');
     expect(chip?.textContent).toContain('2 rows');
@@ -18762,34 +14704,29 @@ describe('ChatInput', () => {
   });
 
   it('shows a DDL editor as table context without a local file', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-        databaseContext: {
-          name: 'users',
-          dataSource: 'Demo SQLite',
-          dialect: 'SQLite',
-          filter: '',
-          columns: [],
-          rows: [],
-          selectedRowCount: 0,
-          scope: 'ddl',
-          ddl: 'create table users (id INT primary key);',
-          pendingChanges: false,
-          cellEditing: false,
-          pageStart: 0,
-          truncated: false,
-        },
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+      databaseContext: {
+        name: 'users',
+        dataSource: 'Demo SQLite',
+        dialect: 'SQLite',
+        filter: '',
+        columns: [],
+        rows: [],
+        selectedRowCount: 0,
+        scope: 'ddl',
+        ddl: 'create table users (id INT primary key);',
+        pendingChanges: false,
+        cellEditing: false,
+        pageStart: 0,
+        truncated: false,
+      },
+    });
+    renderChatInput();
+    await settle();
     const chip = container?.querySelector('.chat-attachments-container .chat-attachment-chip');
     expect(chip?.textContent).toContain('users');
     expect(chip?.textContent).toContain('DDL');
@@ -18810,39 +14747,30 @@ describe('ChatInput', () => {
       ],
     });
     try {
-      setIsLoading(true);
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(
-        storePath('editorContext', {
-          workspacePath: '/repo',
-          activeFile: null,
-          selection: null,
-          diagnostics: [],
-          extensionContexts: [
-            {
-              provider: 'example.selection',
-              version: 1,
-              label: 'Issue 42',
-              placement: 'replace-document',
-              data: { revision: 1 },
-            },
-          ],
-        })
-      );
-      flushSolid();
-      setInputText('Explain this');
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setIsLoadingAndFlush(true);
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+        extensionContexts: [
+          {
+            provider: 'example.selection',
+            version: 1,
+            label: 'Issue 42',
+            placement: 'replace-document',
+            data: { revision: 1 },
+          },
+        ],
+      });
+      setInputTextAndFlush('Explain this');
+      renderChatInput();
       expect(container?.querySelector('.chat-attachments-container')?.textContent).toContain(
         'Issue 42'
       );
       container?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')?.click();
-      flushSolid();
-      await flushAsyncWork();
-      flushSolid();
+      await settle();
       expect(
         state.queuedMessages[0]?.queuedContext?.editorContext.extensionContexts?.[0]?.captured?.text
       ).toBe('Captured selection');
@@ -18874,69 +14802,57 @@ describe('ChatInput', () => {
   });
 
   it('shows database selection context and can disable it', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-        databaseContext: {
-          name: 'public.orders',
-          dataSource: 'local',
-          dialect: 'PostgreSQL',
-          filter: '',
-          columns: [{ name: 'id', type: 'integer' }],
-          rows: [['1']],
-          selectedRowCount: 3,
-          scope: 'selected-rows',
-          pendingChanges: false,
-          cellEditing: false,
-          pageStart: 0,
-          truncated: true,
-        },
-      })
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+      databaseContext: {
+        name: 'public.orders',
+        dataSource: 'local',
+        dialect: 'PostgreSQL',
+        filter: '',
+        columns: [{ name: 'id', type: 'integer' }],
+        rows: [['1']],
+        selectedRowCount: 3,
+        scope: 'selected-rows',
+        pendingChanges: false,
+        cellEditing: false,
+        pageStart: 0,
+        truncated: true,
+      },
+    });
+    renderChatInput();
+    await settle();
     const chip = container?.querySelector<HTMLButtonElement>(
       '.chat-attachments-container .chat-attachment-chip'
     );
     expect(chip?.textContent).toContain('public.orders');
     expect(chip?.textContent).toContain('1 of 3 rows; truncated');
     chip?.click();
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(chip?.title).toContain('database context is disabled');
   });
 
   it('shows captured context from an unsaved editor selection', async () => {
-    setState(
-      storePath('editorContext', {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: { startLine: 1, endLine: 3 },
-        editorText: {
-          kind: 'selection',
-          path: null,
-          relativePath: 'Untitled-1',
-          language: 'markdown',
-          range: { startLine: 1, endLine: 3 },
-          text: '# Reproduction\nClick New Chat.\nReturn to the session.',
-          truncated: false,
-        },
-        diagnostics: [],
-      })
-    );
-    flushSolid();
+    setStateAndFlush('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: { startLine: 1, endLine: 3 },
+      editorText: {
+        kind: 'selection',
+        path: null,
+        relativePath: 'Untitled-1',
+        language: 'markdown',
+        range: { startLine: 1, endLine: 3 },
+        text: '# Reproduction\nClick New Chat.\nReturn to the session.',
+        truncated: false,
+      },
+      diagnostics: [],
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    renderChatInput();
+    await settle();
 
     const chip = container?.querySelector('.chat-attachments-container .chat-attachment-chip');
     expect(chip?.textContent).toContain('Untitled-1');
@@ -18947,74 +14863,37 @@ describe('ChatInput', () => {
     const { ralphStore } = await import('../lib/stores/ralph-store');
     flushSolid();
 
-    setState(storePath('activeSessionId', 'child-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('manager-1', 2_000),
-        session('child-1', 2_100, { parentID: 'manager-1' }),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              limit: { context: 1000, output: 1000 },
-            },
-          },
-        },
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          source: 'api',
-          models: {
-            claude: {
-              id: 'claude',
-              name: 'Claude',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              limit: { context: 1000, output: 1000 },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'child-1': { type: 'retry', attempt: 5, message: 'messages exhausted', next: 28 },
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'child-1': {
-          source: 'status',
-          statusCode: 429,
-          message: 'messages exhausted · retry in 28s · attempt #5',
-          unit: 'messages',
-          retryAt: 28_000,
-          attempt: 5,
-          sessionID: 'child-1',
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-        },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'child-1');
+    setStateAndFlush('sessions', [
+      session('manager-1', 2_000),
+      session('child-1', 2_100, { parentID: 'manager-1' }),
+    ]);
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-4o', 'GPT-4o', { limit: { context: 1000, output: 1000 } }),
+      ]),
+      apiProvider('anthropic', 'Anthropic', [
+        toolModel('claude', 'Claude', { limit: { context: 1000, output: 1000 } }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setStateAndFlush('sessionStatus', {
+      'child-1': { type: 'retry', attempt: 5, message: 'messages exhausted', next: 28 },
+    });
+    setStateAndFlush('sessionUsageLimits', {
+      'child-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'messages exhausted · retry in 28s · attempt #5',
+        unit: 'messages',
+        retryAt: 28_000,
+        attempt: 5,
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
     ralphStore.startRun({
       managerSessionId: 'manager-1',
       workspaceDirectory: '/workspace',
@@ -19038,22 +14917,16 @@ describe('ChatInput', () => {
     });
     flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
-    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(modelButton);
     await waitForDropdown();
     flushSolid();
 
-    const claudeOption = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
-    ).find((button) => button.textContent?.includes('Claude'));
+    const claudeOption = dropdownItem('Claude');
     claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.selectedModel).toEqual({
       providerID: 'anthropic',
@@ -19073,93 +14946,50 @@ describe('ChatInput', () => {
   });
 
   it('clears the active usage-limit banner when switching away from the limited provider', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_100, { parentID: 'session-1' }),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-4o': {
-              id: 'gpt-4o',
-              name: 'GPT-4o',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              limit: { context: 1000, output: 1000 },
-            },
-          },
-        },
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          source: 'api',
-          models: {
-            claude: {
-              id: 'claude',
-              name: 'Claude',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              limit: { context: 1000, output: 1000 },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'child-1': { type: 'retry', attempt: 9, message: 'messages exhausted', next: 408 },
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'child-1': {
-          source: 'status',
-          statusCode: 429,
-          message: 'messages exhausted · retry in 408s · attempt #9',
-          unit: 'messages',
-          retryAt: 408_000,
-          attempt: 9,
-          sessionID: 'child-1',
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-        },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-4o', 'GPT-4o', { limit: { context: 1000, output: 1000 } }),
+      ]),
+      apiProvider('anthropic', 'Anthropic', [
+        toolModel('claude', 'Claude', { limit: { context: 1000, output: 1000 } }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    setStateAndFlush('sessionStatus', {
+      'child-1': { type: 'retry', attempt: 9, message: 'messages exhausted', next: 408 },
+    });
+    setStateAndFlush('sessionUsageLimits', {
+      'child-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'messages exhausted · retry in 408s · attempt #9',
+        unit: 'messages',
+        retryAt: 408_000,
+        attempt: 9,
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.textContent).toContain('Usage limit reached');
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
-    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(modelButton);
     await waitForDropdown();
     flushSolid();
 
-    const claudeOption = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
-    ).find((button) => button.textContent?.includes('Claude'));
+    const claudeOption = dropdownItem('Claude');
     claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.selectedModel).toEqual({
       providerID: 'anthropic',
@@ -19174,26 +15004,19 @@ describe('ChatInput', () => {
     abortSessionMock.mockResolvedValue(undefined);
     continueInterruptedSessionMock.mockResolvedValue(undefined);
     setupRetryingProviderSwitchState();
-    flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const switchProviderButton = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('button')
     ).find((button) => button.textContent === 'Switch provider');
-    switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(switchProviderButton);
     await waitForDropdown();
     flushSolid();
 
-    const claudeOption = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
-    ).find((button) => button.textContent?.includes('Claude'));
+    const claudeOption = dropdownItem('Claude');
     claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.selectedModel).toEqual({
       providerID: 'anthropic',
@@ -19210,26 +15033,19 @@ describe('ChatInput', () => {
   it('does not continue a retry when provider-switch abort fails', async () => {
     abortSessionMock.mockRejectedValueOnce(new Error('abort failed'));
     setupRetryingProviderSwitchState();
-    flushSolid();
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const switchProviderButton = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('button')
     ).find((button) => button.textContent === 'Switch provider');
-    switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(switchProviderButton);
     await waitForDropdown();
     flushSolid();
 
-    const claudeOption = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
-    ).find((button) => button.textContent?.includes('Claude'));
+    const claudeOption = dropdownItem('Claude');
     claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(continueInterruptedSessionMock).not.toHaveBeenCalled();
@@ -19248,45 +15064,33 @@ describe('ChatInput', () => {
 
   it('clears usage-limit notices across the active tree before sending a prompt', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_100, { parentID: 'session-1' }),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'child-1': {
-          source: 'status',
-          statusCode: 429,
-          message: 'messages exhausted',
-          unit: 'messages',
-          retryAt: null,
-          attempt: 2,
-          sessionID: 'child-1',
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-        },
-      })
-    );
-    flushSolid();
-    setInputText('continue');
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setStateAndFlush('sessionUsageLimits', {
+      'child-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'messages exhausted',
+        unit: 'messages',
+        retryAt: null,
+        attempt: 2,
+        sessionID: 'child-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
+    setInputTextAndFlush('continue');
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.textContent).toContain('Usage limit reached');
 
     const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('continue', { noReply: false });
     expect(state.sessionUsageLimits['child-1']).toBeUndefined();
@@ -19295,38 +15099,29 @@ describe('ChatInput', () => {
 
   it('continues from the usage-limit banner and closes the notice', async () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 2_000)]));
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'session-1': {
-          source: 'message',
-          statusCode: 429,
-          message: '429 usage limit reached',
-          unit: 'messages',
-          retryAt: null,
-          attempt: null,
-          sessionID: 'session-1',
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-        },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 2_000)]);
+    setStateAndFlush('sessionUsageLimits', {
+      'session-1': {
+        source: 'message',
+        statusCode: 429,
+        message: '429 usage limit reached',
+        unit: 'messages',
+        retryAt: null,
+        attempt: null,
+        sessionID: 'session-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const continueButton = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('button')
     ).find((button) => button.textContent === 'Continue');
     continueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Continue', { noReply: false });
     expect(state.sessionUsageLimits['session-1']).toBeUndefined();
@@ -19335,35 +15130,29 @@ describe('ChatInput', () => {
 
   it('renders and opens a safe structured retry action through the extension bridge', () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 2_000)]));
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'session-1': {
-          source: 'status',
-          statusCode: 429,
-          message: '429 rate limit reached',
-          unit: 'requests',
-          retryAt: Date.now() + 30_000,
-          attempt: 4,
-          sessionID: 'session-1',
-          providerID: 'openai',
-          modelID: 'gpt-4o',
-          action: {
-            reason: 'billing',
-            provider: 'openai',
-            title: 'Add credits to continue',
-            message: 'Your OpenAI balance is empty.',
-            label: 'Manage billing',
-            link: 'https://platform.openai.com/settings/billing',
-          },
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 2_000)]);
+    setStateAndFlush('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: '429 rate limit reached',
+        unit: 'requests',
+        retryAt: Date.now() + 30_000,
+        attempt: 4,
+        sessionID: 'session-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        action: {
+          reason: 'billing',
+          provider: 'openai',
+          title: 'Add credits to continue',
+          message: 'Your OpenAI balance is empty.',
+          label: 'Manage billing',
+          link: 'https://platform.openai.com/settings/billing',
         },
-      })
-    );
-    flushSolid();
+      },
+    });
     const sent: WebviewMessage[] = [];
     // SAFETY: The fixture provides the unknown fields read by this statement.
     const bridgeWindow = window as {
@@ -19373,8 +15162,7 @@ describe('ChatInput', () => {
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
 
     try {
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
       expect(container?.textContent).toContain('Add credits to continue');
       expect(container?.textContent).toContain('Your OpenAI balance is empty.');
@@ -19384,8 +15172,7 @@ describe('ChatInput', () => {
       const actionButton = Array.from(
         container!.querySelectorAll<HTMLButtonElement>('button')
       ).find((button) => button.textContent === 'Manage billing');
-      actionButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      flushSolid();
+      clickAndFlush(actionButton);
 
       expect(sent).toContainEqual({
         type: 'vscode/open-external',
@@ -19399,36 +15186,29 @@ describe('ChatInput', () => {
 
   it('does not render a structured retry action with a non-HTTPS link', () => {
     setupModelState();
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 2_000)]));
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'session-1': {
-          source: 'status',
-          statusCode: 429,
-          message: '429 rate limit reached',
-          unit: 'requests',
-          retryAt: null,
-          attempt: 4,
-          sessionID: 'session-1',
-          action: {
-            reason: 'billing',
-            provider: 'openai',
-            title: 'Add credits to continue',
-            message: 'Your balance is empty.',
-            label: 'Manage billing',
-            link: 'http://example.com/billing',
-          },
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 2_000)]);
+    setStateAndFlush('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: '429 rate limit reached',
+        unit: 'requests',
+        retryAt: null,
+        attempt: 4,
+        sessionID: 'session-1',
+        action: {
+          reason: 'billing',
+          provider: 'openai',
+          title: 'Add credits to continue',
+          message: 'Your balance is empty.',
+          label: 'Manage billing',
+          link: 'http://example.com/billing',
         },
-      })
-    );
-    flushSolid();
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.textContent).toContain('Add credits to continue');
     expect(container?.textContent).toContain('Your balance is empty.');
@@ -19440,57 +15220,36 @@ describe('ChatInput', () => {
   });
 
   it('restores reasoning selections per model instead of carrying them across models', async () => {
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-5.4': {
-              id: 'gpt-5.4',
-              name: 'GPT-5.4',
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: { low: {}, medium: {}, high: {} },
-            },
-            'gpt-5.5': {
-              id: 'gpt-5.5',
-              name: 'GPT-5.5',
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: { low: {}, medium: {}, high: {} },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-5.4' }));
-    flushSolid();
-    setState(
-      storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-5.4', variant: 'medium' })
-    );
-    flushSolid();
-    setState(storePath('modelVariantSelections', { 'openai:gpt-5.4': 'medium' }));
-    flushSolid();
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-5.4', 'GPT-5.4', {
+          capabilities: { toolcall: true, reasoning: true },
+          variants: { low: {}, medium: {}, high: {} },
+        }),
+        toolModel('gpt-5.5', 'GPT-5.5', {
+          capabilities: { toolcall: true, reasoning: true },
+          variants: { low: {}, medium: {}, high: {} },
+        }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-5.4' });
+    setStateAndFlush('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'medium',
+    });
+    setStateAndFlush('modelVariantSelections', { 'openai:gpt-5.4': 'medium' });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
-    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(modelButton);
     await waitForDropdown();
     flushSolid();
 
-    const gpt55Option = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
-    ).find((button) => button.textContent?.includes('GPT-5.5'));
+    const gpt55Option = dropdownItem('GPT-5.5');
     gpt55Option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.selectedModel).toEqual({
       providerID: 'openai',
@@ -19498,30 +15257,23 @@ describe('ChatInput', () => {
       variant: undefined,
     });
 
-    setState(
-      storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'high' })
-    );
-    flushSolid();
-    setState(
-      storePath('modelVariantSelections', {
-        'openai:gpt-5.4': 'medium',
-        'openai:gpt-5.5': 'high',
-      })
-    );
-    flushSolid();
+    setStateAndFlush('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+      variant: 'high',
+    });
+    setStateAndFlush('modelVariantSelections', {
+      'openai:gpt-5.4': 'medium',
+      'openai:gpt-5.5': 'high',
+    });
 
-    modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(modelButton);
     await waitForDropdown();
     flushSolid();
 
-    const gpt54Option = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
-    ).find((button) => button.textContent?.includes('GPT-5.4'));
+    const gpt54Option = dropdownItem('GPT-5.4');
     gpt54Option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
 
     expect(state.selectedModel).toEqual({
       providerID: 'openai',
@@ -19531,42 +15283,23 @@ describe('ChatInput', () => {
   });
 
   it('shows Default for a session without reasoning despite a remembered variant', () => {
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-5.4': {
-              id: 'gpt-5.4',
-              name: 'GPT-5.4',
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: { low: {}, medium: {}, high: {} },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-5.4' }));
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-5.4' }));
-    flushSolid();
-    setState(
-      storePath('sessionSelectedModels', {
-        'session-1': { providerID: 'openai', modelID: 'gpt-5.4' },
-      })
-    );
-    flushSolid();
-    setState(storePath('modelVariantSelections', { 'openai:gpt-5.4': 'high' }));
-    flushSolid();
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-5.4', 'GPT-5.4', {
+          capabilities: { toolcall: true, reasoning: true },
+          variants: { low: {}, medium: {}, high: {} },
+        }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-5.4' });
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-5.4' });
+    setStateAndFlush('sessionSelectedModels', {
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.4' },
+    });
+    setStateAndFlush('modelVariantSelections', { 'openai:gpt-5.4': 'high' });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(
       container?.querySelector<HTMLButtonElement>('button[aria-label="Thinking level"]')
@@ -19577,49 +15310,33 @@ describe('ChatInput', () => {
   it.each([undefined, '', 'default'])(
     'does not warn for an unchanged default variant %j',
     (variant) => {
-      setState(
-        storePath('providers', [
-          {
-            id: 'meta',
-            name: 'Meta',
-            source: 'api',
-            models: {
-              'muse-1.3c': {
-                id: 'muse-1.3c',
-                name: 'Muse 1.3c',
-                capabilities: { toolcall: true, reasoning: true },
-                cost: { input: 0, output: 0 },
-                variants: { '': {}, high: {} },
-              },
-            },
-          },
-        ])
-      );
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('selectedModel', { providerID: 'meta', modelID: 'muse-1.3c' }));
-      flushSolid();
+      setStateAndFlush('providers', [
+        apiProvider('meta', 'Meta', [
+          toolModel('muse-1.3c', 'Muse 1.3c', {
+            capabilities: { toolcall: true, reasoning: true },
+            variants: { '': {}, high: {} },
+          }),
+        ]),
+      ]);
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('selectedModel', { providerID: 'meta', modelID: 'muse-1.3c' });
       const response = assistantMessageEntry({ input: 400, output: 100 });
-      setState(
-        storePath('messages', [
-          {
-            ...response,
-            info: { ...response.info, providerID: 'meta', modelID: 'muse-1.3c', variant },
-          },
-        ])
-      );
-      flushSolid();
+      setStateAndFlush('messages', [
+        {
+          ...response,
+          info: { ...response.info, providerID: 'meta', modelID: 'muse-1.3c', variant },
+        },
+      ]);
 
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
 
       expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
 
-      setState(
-        storePath('selectedModel', { providerID: 'meta', modelID: 'muse-1.3c', variant: 'high' })
-      );
-      flushSolid();
+      setStateAndFlush('selectedModel', {
+        providerID: 'meta',
+        modelID: 'muse-1.3c',
+        variant: 'high',
+      });
       expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
     }
   );
@@ -19628,38 +15345,21 @@ describe('ChatInput', () => {
     'does not flash a switch warning while sent %s metadata is incomplete',
     (missingMetadata) => {
       const model = { providerID: 'openai', modelID: 'gpt-5.4', variant: 'high' };
-      setState(
-        storePath('providers', [
-          {
-            id: 'openai',
-            name: 'OpenAI',
-            source: 'api',
-            models: {
-              'gpt-5.4': {
-                id: 'gpt-5.4',
-                name: 'GPT-5.4',
-                capabilities: { toolcall: true, reasoning: true },
-                cost: { input: 0, output: 0 },
-                variants: { low: {}, high: {} },
-              },
-            },
-          },
-        ])
-      );
-      flushSolid();
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
-      setState(storePath('selectedModel', model));
-      flushSolid();
+      setStateAndFlush('providers', [
+        apiProvider('openai', 'OpenAI', [
+          toolModel('gpt-5.4', 'GPT-5.4', {
+            capabilities: { toolcall: true, reasoning: true },
+            variants: { low: {}, high: {} },
+          }),
+        ]),
+      ]);
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('selectedModel', model);
       const previousResponse = assistantMessageEntry({ input: 400, output: 100 });
-      setState(
-        storePath('messages', [
-          { ...previousResponse, info: { ...previousResponse.info, ...model } },
-        ])
-      );
-      flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      setStateAndFlush('messages', [
+        { ...previousResponse, info: { ...previousResponse.info, ...model } },
+      ]);
+      renderChatInput();
       const expectNoWarning = () =>
         expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
       expectNoWarning();
@@ -19708,8 +15408,7 @@ describe('ChatInput', () => {
       flushSolid();
       expectNoWarning();
 
-      setState(storePath('selectedModel', { ...model, variant: 'low' }));
-      flushSolid();
+      setStateAndFlush('selectedModel', { ...model, variant: 'low' });
       expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
     }
   );
@@ -19720,90 +15419,61 @@ describe('ChatInput', () => {
     flushSolid();
     setSessionUsageLimit('child-1', null);
     flushSolid();
-    setState(
-      storePath('providers', [
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-5.4': {
-              id: 'gpt-5.4',
-              name: 'GPT-5.4',
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: { low: {}, medium: {}, high: {} },
-            },
-            'gpt-5.5': {
-              id: 'gpt-5.5',
-              name: 'GPT-5.5',
-              capabilities: { toolcall: true, reasoning: true },
-              cost: { input: 0, output: 0 },
-              variants: { low: {}, high: {} },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { openai: 'gpt-5.4' }));
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(
-      storePath('sessions', [
-        session('session-1', 2_000),
-        session('child-1', 2_001, { parentID: 'session-1' }),
-      ])
-    );
-    flushSolid();
-    setState(
-      storePath('selectedModel', {
-        providerID: 'openai',
-        modelID: 'gpt-5.4',
-        variant: 'medium',
-      })
-    );
-    flushSolid();
+    setStateAndFlush('providers', [
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-5.4', 'GPT-5.4', {
+          capabilities: { toolcall: true, reasoning: true },
+          variants: { low: {}, medium: {}, high: {} },
+        }),
+        toolModel('gpt-5.5', 'GPT-5.5', {
+          capabilities: { toolcall: true, reasoning: true },
+          variants: { low: {}, high: {} },
+        }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { openai: 'gpt-5.4' });
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_001, { parentID: 'session-1' }),
+    ]);
+    setStateAndFlush('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'medium',
+    });
     const previousResponse = assistantMessageEntry({ input: 400, output: 100 });
     const childResponse = assistantMessageEntry({ input: 100, output: 20 });
-    setState(
-      storePath('messages', [
-        {
-          ...previousResponse,
-          info: {
-            ...previousResponse.info,
-            modelID: 'gpt-5.4',
-            variant: 'medium',
-          },
+    setStateAndFlush('messages', [
+      {
+        ...previousResponse,
+        info: {
+          ...previousResponse.info,
+          modelID: 'gpt-5.4',
+          variant: 'medium',
         },
-        {
-          ...childResponse,
-          info: {
-            ...childResponse.info,
-            id: 'assistant-child-1',
-            sessionID: 'child-1',
-            modelID: 'gpt-5.5',
-            variant: 'low',
-          },
+      },
+      {
+        ...childResponse,
+        info: {
+          ...childResponse.info,
+          id: 'assistant-child-1',
+          sessionID: 'child-1',
+          modelID: 'gpt-5.5',
+          variant: 'low',
         },
-      ])
-    );
-    flushSolid();
+      },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
 
-    setState(
-      storePath('selectedModel', {
-        providerID: 'openai',
-        modelID: 'gpt-5.4',
-        variant: 'high',
-      })
-    );
-    flushSolid();
+    setStateAndFlush('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'high',
+    });
     const warning = container?.querySelector<HTMLElement>('.model-selection-cost-warning');
     expect(warning).not.toBeNull();
 
@@ -19819,10 +15489,7 @@ describe('ChatInput', () => {
       'Current session: OpenAI / GPT-5.4 · Medium'
     );
 
-    setState(
-      storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' })
-    );
-    flushSolid();
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
     expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
 
     const modelButton = () => container?.querySelector<HTMLButtonElement>('.model-picker-btn');
@@ -19863,122 +15530,76 @@ describe('ChatInput', () => {
     setState(storePath('sessionStatus', 'child-1', { type: 'idle' }));
     flushSolid();
 
-    setState(
-      storePath('selectedModel', {
-        providerID: 'openai',
-        modelID: 'gpt-5.4',
-        variant: 'medium',
-      })
-    );
-    flushSolid();
+    setStateAndFlush('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'medium',
+    });
     expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
 
-    setState(storePath('messagesLoading', true));
-    flushSolid();
-    setState(
-      storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' })
-    );
-    flushSolid();
+    setStateAndFlush('messagesLoading', true);
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
     expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
   });
 
   it('keeps the usage-limit banner visible when a retry notice predates active-session model hydration', () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 2_000)]));
-    flushSolid();
-    setState(
-      storePath('providers', [
-        {
-          id: 'copilot',
-          name: 'GitHub Copilot',
-          source: 'api',
-          models: {
-            'gpt-5-mini': {
-              id: 'gpt-5-mini',
-              name: 'GPT-5 mini',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              limit: { context: 1000, output: 1000 },
-            },
-          },
-        },
-        {
-          id: 'openai',
-          name: 'OpenAI',
-          source: 'api',
-          models: {
-            'gpt-4.1': {
-              id: 'gpt-4.1',
-              name: 'GPT-4.1',
-              capabilities: { toolcall: true },
-              cost: { input: 0, output: 0 },
-              limit: { context: 1000, output: 1000 },
-            },
-          },
-        },
-      ])
-    );
-    flushSolid();
-    setState(storePath('providerDefaults', { copilot: 'gpt-5-mini' }));
-    flushSolid();
-    setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4.1' }));
-    flushSolid();
-    setState(
-      storePath('sessionStatus', {
-        'session-1': {
-          type: 'retry',
-          attempt: 2,
-          message: '429 usage limit reached. retry in 45s attempt #2',
-          next: 45,
-        },
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'session-1': {
-          source: 'status',
-          statusCode: 429,
-          message: '429 usage limit reached. retry in 45s attempt #2',
-          unit: 'messages',
-          retryAt: 45_000,
-          attempt: 2,
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 2_000)]);
+    setStateAndFlush('providers', [
+      apiProvider('copilot', 'GitHub Copilot', [
+        toolModel('gpt-5-mini', 'GPT-5 mini', { limit: { context: 1000, output: 1000 } }),
+      ]),
+      apiProvider('openai', 'OpenAI', [
+        toolModel('gpt-4.1', 'GPT-4.1', { limit: { context: 1000, output: 1000 } }),
+      ]),
+    ]);
+    setStateAndFlush('providerDefaults', { copilot: 'gpt-5-mini' });
+    setStateAndFlush('selectedModel', { providerID: 'openai', modelID: 'gpt-4.1' });
+    setStateAndFlush('sessionStatus', {
+      'session-1': {
+        type: 'retry',
+        attempt: 2,
+        message: '429 usage limit reached. retry in 45s attempt #2',
+        next: 45,
+      },
+    });
+    setStateAndFlush('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: '429 usage limit reached. retry in 45s attempt #2',
+        unit: 'messages',
+        retryAt: 45_000,
+        attempt: 2,
+        sessionID: 'session-1',
+        providerID: 'copilot',
+        modelID: 'gpt-5-mini',
+      },
+    });
+    setStateAndFlush('messages', [
+      {
+        info: {
+          id: 'assistant-usage-limit',
           sessionID: 'session-1',
-          providerID: 'copilot',
-          modelID: 'gpt-5-mini',
-        },
-      })
-    );
-    flushSolid();
-    setState(
-      storePath('messages', [
-        {
-          info: {
-            id: 'assistant-usage-limit',
-            sessionID: 'session-1',
-            role: 'assistant',
-            time: { created: 0, completed: 1 },
-            parentID: 'user-1',
-            modelID: 'gpt-4.1',
-            providerID: 'openai',
-            mode: 'default',
-            path: { cwd: '/repo', root: '/repo' },
-            cost: 0,
-            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-            error: {
-              name: 'rate_limit_exceeded',
-              data: { message: '429 usage limit reached. retry in 45s attempt #2' },
-            },
+          role: 'assistant',
+          time: { created: 0, completed: 1 },
+          parentID: 'user-1',
+          modelID: 'gpt-4.1',
+          providerID: 'openai',
+          mode: 'default',
+          path: { cwd: '/repo', root: '/repo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          error: {
+            name: 'rate_limit_exceeded',
+            data: { message: '429 usage limit reached. retry in 45s attempt #2' },
           },
-          parts: [],
         },
-      ])
-    );
-    flushSolid();
+        parts: [],
+      },
+    ]);
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     expect(container?.textContent).toContain('Usage limit reached');
     expect(container?.textContent).toContain('Stop retrying');
@@ -19986,27 +15607,21 @@ describe('ChatInput', () => {
   });
 
   it('shows a temporary service failure only from the fourth retry', () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setState(storePath('sessions', [session('session-1', 2_000)]));
-    flushSolid();
-    setState(
-      storePath('sessionUsageLimits', {
-        'session-1': {
-          source: 'status',
-          statusCode: 429,
-          message: 'Our servers are currently overloaded. Please try again later.',
-          unit: 'unknown',
-          retryAt: null,
-          attempt: 3,
-          sessionID: 'session-1',
-        },
-      })
-    );
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setStateAndFlush('sessions', [session('session-1', 2_000)]);
+    setStateAndFlush('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'Our servers are currently overloaded. Please try again later.',
+        unit: 'unknown',
+        retryAt: null,
+        attempt: 3,
+        sessionID: 'session-1',
+      },
+    });
 
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
     expect(container?.textContent).not.toContain('Service temporarily unavailable');
 
     setState(storePath('sessionUsageLimits', 'session-1', 'attempt', 4));
@@ -20014,10 +15629,6 @@ describe('ChatInput', () => {
     expect(container?.textContent).toContain('Service temporarily unavailable');
   });
 });
-
-function pressKey(editor: HTMLDivElement | null | undefined, init: KeyboardEventInit) {
-  editor?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
-}
 
 function historyEntry(id: string, text: string) {
   const info: UserMessage = {
@@ -20042,16 +15653,14 @@ describe('ChatInput composer history hotkeys', () => {
   it.each(['loaded history', 'live messages'])(
     'does not recall generated follow-up prompts from %s as user input',
     (source) => {
-      setState(storePath('activeSessionId', 'session-1'));
-      flushSolid();
+      setStateAndFlush('activeSessionId', 'session-1');
       const followup = historyEntry('followup', 'Fix only the reported parser failures.');
       followup.info.followupTitle = 'Fix parser failures';
       const entries = [historyEntry('typed', 'Review the parser'), followup];
       if (source === 'loaded history') setSessionHistoryPrompts('session-1', entries);
       else setState(storePath('messages', entries));
       flushSolid();
-      cleanup = render(() => ChatInput(), container!);
-      flushSolid();
+      renderChatInput();
       const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
       pressKey(editor, { key: 'ArrowUp' });
       flushSolid();
@@ -20059,8 +15668,7 @@ describe('ChatInput composer history hotkeys', () => {
     }
   );
   it.each(['loaded history', 'live messages'])('recalls only prompt text from %s', (source) => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     const entry = historyEntry(
       'user-1',
       'Sync with latest Varro\n\n[Active file: src/main/resources/META-INF/plugin.xml]'
@@ -20068,8 +15676,7 @@ describe('ChatInput composer history hotkeys', () => {
     if (source === 'loaded history') setSessionHistoryPrompts('session-1', [entry]);
     else setState(storePath('messages', [entry]));
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     pressKey(editor, { key: 'ArrowUp' });
@@ -20084,15 +15691,13 @@ describe('ChatInput composer history hotkeys', () => {
   });
 
   it('paginates through sent prompts with Up and returns with Down', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
     setSessionHistoryPrompts('session-1', [
       historyEntry('user-1', 'Earlier loaded prompt'),
       historyEntry('user-2', 'Most recent loaded prompt'),
     ]);
     flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     pressKey(editor, { key: 'ArrowUp' });
@@ -20112,9 +15717,7 @@ describe('ChatInput composer history hotkeys', () => {
       return true;
     });
     pressKey(editor, { key: 'ArrowUp' });
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    await settle();
     expect(inputText()).toBe('Oldest fetched prompt');
 
     pressKey(editor, { key: 'ArrowDown' });
@@ -20131,12 +15734,9 @@ describe('ChatInput composer history hotkeys', () => {
   });
 
   it('undoes and redoes composer text edits with the keyboard', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    setInputText('hello');
-    flushSolid();
-    setInputText('hello world');
-    flushSolid();
+    renderChatInput();
+    setInputTextAndFlush('hello');
+    setInputTextAndFlush('hello world');
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     pressKey(editor, { key: 'z', metaKey: true });
@@ -20166,12 +15766,9 @@ describe('ChatInput composer history hotkeys', () => {
   });
 
   it('restores composer text after pasted content is undone', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
-    setInputText('draft');
-    flushSolid();
-    setInputText('draft pasted block of text');
-    flushSolid();
+    renderChatInput();
+    setInputTextAndFlush('draft');
+    setInputTextAndFlush('draft pasted block of text');
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     pressKey(editor, { key: 'z', metaKey: true });
@@ -20184,8 +15781,7 @@ describe('ChatInput composer history hotkeys', () => {
   });
 
   it('undoes and redoes attachment changes', async () => {
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    renderChatInput();
 
     addContextFile({ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' });
     flushSolid();
@@ -20210,43 +15806,31 @@ describe('ChatInput composer history hotkeys', () => {
   });
 
   it('does not stop the running session on Escape', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    setIsLoading(true);
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    setIsLoadingAndFlush(true);
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Escape' });
+    await settle();
 
     expect(abortSessionMock).not.toHaveBeenCalled();
   });
 
   it('closes a toolbar popup on Escape without leaking the shortcut', () => {
-    setState(
-      storePath('agents', [
-        {
-          name: 'plan',
-          description: 'Draft implementation plans',
-          mode: 'primary',
-          builtIn: true,
-          permission: [],
-        },
-      ])
-    );
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('agents', [
+      {
+        name: 'plan',
+        description: 'Draft implementation plans',
+        mode: 'primary',
+        builtIn: true,
+        permission: [],
+      },
+    ]);
+    renderChatInput();
 
     const agentButton = container?.querySelector<HTMLButtonElement>('[aria-label="Select agent"]');
-    agentButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    flushSolid();
+    clickAndFlush(agentButton);
     expect(container?.querySelector('.agent-popover')).toBeInstanceOf(HTMLDivElement);
 
     const event = new KeyboardEvent('keydown', {
@@ -20262,18 +15846,12 @@ describe('ChatInput composer history hotkeys', () => {
   });
 
   it('does not stop anything on Escape while idle', async () => {
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    cleanup = render(() => ChatInput(), container!);
-    flushSolid();
+    setStateAndFlush('activeSessionId', 'session-1');
+    renderChatInput();
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    editor?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-    );
-    flushSolid();
-    await flushAsyncWork();
-    flushSolid();
+    pressKey(editor, { key: 'Escape' });
+    await settle();
 
     expect(abortSessionMock).not.toHaveBeenCalled();
   });

@@ -1727,13 +1727,17 @@ export class OpenCodeServer extends EventEmitter {
       this.processManager.confirmManagedServerConnection(undefined, signal),
     deadline = performance.now() + STARTUP_HEALTH_TIMEOUT_MS
   ) {
-    if (
-      signal?.aborted ||
-      !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
-    ) {
+    const rejectIfCancelled = () => {
+      if (
+        !signal?.aborted &&
+        this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
+      ) {
+        return false;
+      }
       reject(this.getCancellationError(signal));
-      return;
-    }
+      return true;
+    };
+    if (rejectIfCancelled()) return;
     if (performance.now() >= deadline) {
       this.cancelPollHealth();
       this.setStatus({ state: 'error', message: 'Server failed to start within timeout' });
@@ -1743,13 +1747,7 @@ export class OpenCodeServer extends EventEmitter {
 
     const pollOnce = async () => {
       this.pollHealthTimer = null;
-      if (
-        signal?.aborted ||
-        !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
-      ) {
-        reject(this.getCancellationError(signal));
-        return;
-      }
+      if (rejectIfCancelled()) return;
       if (performance.now() >= deadline) {
         reject(new Error(`Server health check timed out after ${STARTUP_HEALTH_TIMEOUT_MS}ms`));
         return;
@@ -1766,13 +1764,7 @@ export class OpenCodeServer extends EventEmitter {
         reject(err instanceof Error ? err : new Error(String(err)));
         return;
       }
-      if (
-        signal?.aborted ||
-        !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
-      ) {
-        reject(this.getCancellationError(signal));
-        return;
-      }
+      if (rejectIfCancelled()) return;
       if (health.healthy && !isSupportedOpenCodeVersion(health.version)) {
         this.cancelPollHealth();
         const { message, detail } = createUpdateRequiredError({
@@ -1793,25 +1785,13 @@ export class OpenCodeServer extends EventEmitter {
           reject(err instanceof Error ? err : new Error(String(err)));
           return;
         }
-        if (
-          signal?.aborted ||
-          !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
-        ) {
-          reject(this.getCancellationError(signal));
-          return;
-        }
+        if (rejectIfCancelled()) return;
         if (!ownershipConfirmed) {
           reject(new Error(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE));
           return;
         }
         await this.admitManagedServer(signal);
-        if (
-          signal?.aborted ||
-          !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
-        ) {
-          reject(this.getCancellationError(signal));
-          return;
-        }
+        if (rejectIfCancelled()) return;
         this.processManager.resetPortRetryState();
         this.beginRunningEventStream();
         resolve(this.url);

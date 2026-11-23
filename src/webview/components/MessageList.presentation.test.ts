@@ -1,4 +1,4 @@
-import { flush as flushSolid, reconcile } from 'solid-js';
+import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -25,6 +25,7 @@ import {
   textPart,
   toolPart,
   userMessage,
+  setStateRecord,
 } from './MessageList.test-utils';
 
 let container: HTMLDivElement | null = null;
@@ -69,13 +70,7 @@ function completeSearch(part: ToolPart): ToolPart {
 
 function openChat(parts: Part[] = []) {
   setState(storePath('activeSessionId', 'session-1'));
-  setState((draft) => {
-    const current = draft['sessionStatus'];
-    const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionStatus'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
   replaceMessages([
     { info: userMessage('prompt'), parts: [textPart('prompt-text', 'Inspect the queue')] },
     { info: assistantMessage('answer', { parentID: 'prompt', time: { created: 1 } }), parts },
@@ -650,18 +645,7 @@ describe('streaming presentation handoff', () => {
         if (frame === 60) {
           (() => {
             setState(storePath('messages', 1, 'info', 'time', { created: 1, completed: 5 }));
-            setState((draft) => {
-              const current = draft['sessionStatus'];
-              const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-              if (
-                incoming === null ||
-                incoming === undefined ||
-                current === null ||
-                current === undefined
-              )
-                draft['sessionStatus'] = incoming;
-              else reconcile(incoming)(current);
-            });
+            setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
           })();
         }
         expect(container?.textContent).toContain(answer);
@@ -855,18 +839,7 @@ describe('streaming presentation handoff', () => {
           time: { created: 1, completed: Date.now() },
         })
       );
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'idle' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'idle' } });
     })();
     await Promise.resolve();
     flushSolid();

@@ -2,7 +2,7 @@ import { flush as flushSolid, createSignal } from 'solid-js';
 import cubeIcon from 'iconoir/icons/cube.svg';
 import binocularSvg from 'iconoir/icons/binocular.svg?raw';
 import cubeScanSolidSvg from 'iconoir/icons/cube-scan-solid.svg?raw';
-import { render } from '@solidjs/web';
+import { render, type JSX } from '@solidjs/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelPricing, WebviewMessage } from '../../../shared/protocol';
 import type { Agent, Provider } from '../../types';
@@ -38,6 +38,11 @@ vi.mock('../../lib/agent-icon-catalog', () => ({
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+
+function renderAndFlush(code: () => JSX.Element) {
+  cleanup = render(code, container!);
+  flushSolid();
+}
 
 function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
@@ -80,24 +85,20 @@ afterEach(() => {
 describe('ToolbarPickers', () => {
   it('only abbreviates workspace names with more than two words', () => {
     const [selectedPath, setSelectedPath] = createSignal('/jira-stats-tj');
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          folders={[
-            { name: 'jira-stats-tj', path: '/jira-stats-tj' },
-            { name: 'MyDotNetProject', path: '/MyDotNetProject' },
-            { name: 'gosip', path: '/gosip' },
-            { name: 'Drop Box', path: '/Drop Box' },
-          ]}
-          selectedPath={selectedPath()}
-          showPicker={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        folders={[
+          { name: 'jira-stats-tj', path: '/jira-stats-tj' },
+          { name: 'MyDotNetProject', path: '/MyDotNetProject' },
+          { name: 'gosip', path: '/gosip' },
+          { name: 'Drop Box', path: '/Drop Box' },
+        ]}
+        selectedPath={selectedPath()}
+        showPicker={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst');
     expect(
@@ -127,23 +128,19 @@ describe('ToolbarPickers', () => {
 
   it('indexes duplicate abbreviations in VS Code workspace order', () => {
     const [selectedPath, setSelectedPath] = createSignal('/jira-stats-tool');
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          folders={[
-            { name: 'jira-stats-tool', path: '/jira-stats-tool' },
-            { name: 'jobs-service-test', path: '/jobs-service-test' },
-            { name: 'java-script-tools', path: '/java-script-tools' },
-          ]}
-          selectedPath={selectedPath()}
-          showPicker={false}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        folders={[
+          { name: 'jira-stats-tool', path: '/jira-stats-tool' },
+          { name: 'jobs-service-test', path: '/jobs-service-test' },
+          { name: 'java-script-tools', path: '/java-script-tools' },
+        ]}
+        selectedPath={selectedPath()}
+        showPicker={false}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     expect(container?.querySelector('.workspace-picker-abbreviation')?.textContent).toBe('jst1');
     setSelectedPath('/jobs-service-test');
@@ -155,22 +152,18 @@ describe('ToolbarPickers', () => {
   });
 
   it('announces the selected workspace and marks its option as current', () => {
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          folders={[
-            { name: 'Repo A', path: '/repo-a' },
-            { name: 'Repo B', path: '/repo-b' },
-          ]}
-          selectedPath="/repo-b"
-          showPicker={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        folders={[
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ]}
+        selectedPath="/repo-b"
+        showPicker={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     expect(container?.querySelector('.workspace-picker-button')?.getAttribute('aria-label')).toBe(
       'Selected workspace: Repo B'
@@ -181,24 +174,20 @@ describe('ToolbarPickers', () => {
   });
 
   it('gives the all-folders option a secondary folder count', () => {
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          folders={[
-            { name: 'Repo A', path: '/repo-a' },
-            { name: 'Repo B', path: '/repo-b' },
-          ]}
-          selectedPath={null}
-          showPicker={true}
-          allLabel="All folders"
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onSelectAll={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        folders={[
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ]}
+        selectedPath={null}
+        showPicker={true}
+        allLabel="All folders"
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+        onSelectAll={vi.fn()}
+      />
+    ));
 
     const allFolders = container?.querySelector('.workspace-popover-all');
     expect(allFolders?.querySelector('.workspace-popover-name')?.textContent).toBe('All folders');
@@ -210,24 +199,20 @@ describe('ToolbarPickers', () => {
   it('uses a folder count for the workspace tooltip and a path for folder tooltips', async () => {
     vi.useFakeTimers();
     const [selectedPath, setSelectedPath] = createSignal<string | null>(null);
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          folders={[
-            { name: 'Repo A', path: '/repo-a' },
-            { name: 'Repo B', path: '/repo-b' },
-          ]}
-          selectedPath={selectedPath()}
-          showPicker={false}
-          allLabel="Workspace"
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onSelectAll={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        folders={[
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ]}
+        selectedPath={selectedPath()}
+        showPicker={false}
+        allLabel="Workspace"
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+        onSelectAll={vi.fn()}
+      />
+    ));
 
     const button = container?.querySelector('.workspace-picker-button');
     button?.dispatchEvent(new MouseEvent('mouseenter'));
@@ -248,19 +233,15 @@ describe('ToolbarPickers', () => {
   });
 
   it('marks an equivalent UNC workspace spelling as selected', () => {
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          folders={[{ name: 'Varro', path: '\\\\BuildServer\\Projects\\Varro' }]}
-          selectedPath="//buildserver/PROJECTS/varro/"
-          showPicker={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        folders={[{ name: 'Varro', path: '\\\\BuildServer\\Projects\\Varro' }]}
+        selectedPath="//buildserver/PROJECTS/varro/"
+        showPicker={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     expect(container?.querySelector('.workspace-picker-button')?.getAttribute('aria-label')).toBe(
       'Selected workspace: Varro'
@@ -271,22 +252,18 @@ describe('ToolbarPickers', () => {
   });
 
   it('shows a workspace path title only when the path is truncated', async () => {
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          folders={[
-            { name: 'Repo A', path: '/repo-a' },
-            { name: 'Repo B', path: '/a/long/path/to/repo-b' },
-          ]}
-          selectedPath="/repo-a"
-          showPicker={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        folders={[
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/a/long/path/to/repo-b' },
+        ]}
+        selectedPath="/repo-a"
+        showPicker={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
     const path = container?.querySelector<HTMLElement>(
       '[data-workspace-path="/a/long/path/to/repo-b"] .workspace-popover-path'
     );
@@ -331,22 +308,18 @@ describe('ToolbarPickers', () => {
     });
 
     try {
-      cleanup = render(
-        () => (
-          <WorkspacePicker
-            folders={Array.from({ length: 20 }, (_, index) => ({
-              name: `Repo ${index}`,
-              path: `/repo-${index}`,
-            }))}
-            selectedPath={null}
-            showPicker={true}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <WorkspacePicker
+          folders={Array.from({ length: 20 }, (_, index) => ({
+            name: `Repo ${index}`,
+            path: `/repo-${index}`,
+          }))}
+          selectedPath={null}
+          showPicker={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ));
       await flushMicrotasks();
       flushSolid();
       expect(observerCount).toBe(1);
@@ -369,24 +342,20 @@ describe('ToolbarPickers', () => {
       toJSON: () => ({}),
     });
 
-    cleanup = render(
-      () => (
-        <WorkspacePicker
-          boundaryRef={boundary}
-          alignTo="left"
-          folders={[
-            { name: 'Repo A', path: '/repo-a' },
-            { name: 'Repo B', path: '/repo-b' },
-          ]}
-          selectedPath="/repo-a"
-          showPicker={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <WorkspacePicker
+        boundaryRef={boundary}
+        alignTo="left"
+        folders={[
+          { name: 'Repo A', path: '/repo-a' },
+          { name: 'Repo B', path: '/repo-b' },
+        ]}
+        selectedPath="/repo-a"
+        showPicker={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
     await flushMicrotasks();
     flushSolid();
 
@@ -420,26 +389,22 @@ describe('ToolbarPickers', () => {
     let buttonRef: HTMLButtonElement | undefined;
     let popoverRef: HTMLDivElement | undefined;
 
-    cleanup = render(
-      () => (
-        <div onClick={parentClick}>
-          <PermissionModePicker
-            buttonRef={(el) => {
-              buttonRef = el;
-            }}
-            popoverRef={(el) => {
-              popoverRef = el;
-            }}
-            mode="default"
-            showPicker={true}
-            onToggle={onToggle}
-            onSelect={onSelect}
-          />
-        </div>
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <div onClick={parentClick}>
+        <PermissionModePicker
+          buttonRef={(el) => {
+            buttonRef = el;
+          }}
+          popoverRef={(el) => {
+            popoverRef = el;
+          }}
+          mode="default"
+          showPicker={true}
+          onToggle={onToggle}
+          onSelect={onSelect}
+        />
+      </div>
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
     const options = container?.querySelectorAll<HTMLButtonElement>('.toolbar-popover-item') ?? [];
@@ -470,18 +435,14 @@ describe('ToolbarPickers', () => {
     Reflect.set(window, '__sendToExtension', send);
     flushSolid();
 
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="default"
-          showPicker={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <PermissionModePicker
+        mode="default"
+        showPicker={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     const learnMore = container?.querySelector<HTMLButtonElement>('.permission-mode-learn-more');
     const externalIcon = learnMore?.querySelector<HTMLElement>('.ui-icon');
@@ -500,36 +461,23 @@ describe('ToolbarPickers', () => {
   });
 
   it.each(['auto', 'full'] as const)('hides permission settings in %s mode', (mode) => {
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode={mode}
-          showPicker={false}
-          showLabel={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <PermissionModePicker
+        mode={mode}
+        showPicker={false}
+        showLabel={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     expect(container?.querySelector('.permission-mode-settings-button')).toBeNull();
   });
 
   it('uses the auto-approve title when selected', () => {
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="auto"
-          showPicker={false}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <PermissionModePicker mode="auto" showPicker={false} onToggle={vi.fn()} onSelect={vi.fn()} />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
 
@@ -538,68 +486,64 @@ describe('ToolbarPickers', () => {
 
   it('shows active reviews and the five latest completed auto-approve activities', () => {
     const onToggle = vi.fn();
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="auto"
-          activity={[
-            {
-              permissionId: 'old',
-              status: 'auto-approved',
-              title: 'old completed request',
-              createdAt: 0,
-            },
-            {
-              permissionId: 'one',
-              status: 'reviewing',
-              title: 'npm test',
-              createdAt: 1,
-            },
-            {
-              permissionId: 'two',
-              status: 'auto-approved',
-              title: 'edit src/app.ts',
-              detail: 'Workspace file edit.',
-              createdAt: 2,
-            },
-            {
-              permissionId: 'three',
-              status: 'approval-required',
-              title: 'external_directory /tmp/*',
-              detail: 'Outside the workspace.',
-              reviewer: 'TypeSafe / Jev latest',
-              createdAt: 3,
-            },
-            {
-              permissionId: 'four',
-              status: 'auto-review-failed',
-              title: 'npm publish',
-              detail: 'Matches a prior rejection.',
-              createdAt: 4,
-            },
-            {
-              permissionId: 'five',
-              status: 'manually-approved',
-              title: 'npm install',
-              createdAt: 5,
-            },
-            {
-              permissionId: 'six',
-              status: 'manually-rejected',
-              title: 'rm -rf build',
-              createdAt: 6,
-            },
-          ]}
-          judgeModel={{ providerName: 'OpenAI', modelName: 'GPT-5.6' }}
-          showPicker={false}
-          showLabel={true}
-          onToggle={onToggle}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <PermissionModePicker
+        mode="auto"
+        activity={[
+          {
+            permissionId: 'old',
+            status: 'auto-approved',
+            title: 'old completed request',
+            createdAt: 0,
+          },
+          {
+            permissionId: 'one',
+            status: 'reviewing',
+            title: 'npm test',
+            createdAt: 1,
+          },
+          {
+            permissionId: 'two',
+            status: 'auto-approved',
+            title: 'edit src/app.ts',
+            detail: 'Workspace file edit.',
+            createdAt: 2,
+          },
+          {
+            permissionId: 'three',
+            status: 'approval-required',
+            title: 'external_directory /tmp/*',
+            detail: 'Outside the workspace.',
+            reviewer: 'TypeSafe / Jev latest',
+            createdAt: 3,
+          },
+          {
+            permissionId: 'four',
+            status: 'auto-review-failed',
+            title: 'npm publish',
+            detail: 'Matches a prior rejection.',
+            createdAt: 4,
+          },
+          {
+            permissionId: 'five',
+            status: 'manually-approved',
+            title: 'npm install',
+            createdAt: 5,
+          },
+          {
+            permissionId: 'six',
+            status: 'manually-rejected',
+            title: 'rm -rf build',
+            createdAt: 6,
+          },
+        ]}
+        judgeModel={{ providerName: 'OpenAI', modelName: 'GPT-5.6' }}
+        showPicker={false}
+        showLabel={true}
+        onToggle={onToggle}
+        onSelect={vi.fn()}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
     const activity = container?.querySelector<HTMLElement>('.permission-activity');
@@ -627,38 +571,25 @@ describe('ToolbarPickers', () => {
   });
 
   it('omits the activity strip when no permission activity exists', () => {
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="auto"
-          activity={[]}
-          showPicker={false}
-          showLabel={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <PermissionModePicker
+        mode="auto"
+        activity={[]}
+        showPicker={false}
+        showLabel={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     expect(container?.querySelector('.permission-activity')).toBeNull();
   });
 
   it('explains full access when the permission picker is closed', async () => {
     vi.useFakeTimers();
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="full"
-          showPicker={false}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <PermissionModePicker mode="full" showPicker={false} onToggle={vi.fn()} onSelect={vi.fn()} />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
 
@@ -676,19 +607,15 @@ describe('ToolbarPickers', () => {
   });
 
   it('renders a labeled permission button when requested', () => {
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="default"
-          showPicker={false}
-          showLabel={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <PermissionModePicker
+        mode="default"
+        showPicker={false}
+        showLabel={true}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
 
@@ -701,27 +628,23 @@ describe('ToolbarPickers', () => {
   it('limits the permission popover to the input frame', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
     let boundary: HTMLDivElement | undefined;
-    cleanup = render(
-      () => (
-        <div
-          ref={(el) => {
-            boundary = el;
-          }}
-          class="chat-input-frame"
-        >
-          <PermissionModePicker
-            boundaryRef={boundary}
-            mode="default"
-            showPicker={true}
-            showLabel={true}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-          />
-        </div>
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <div
+        ref={(el) => {
+          boundary = el;
+        }}
+        class="chat-input-frame"
+      >
+        <PermissionModePicker
+          boundaryRef={boundary}
+          mode="default"
+          showPicker={true}
+          showLabel={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      </div>
+    ));
     const popup = container?.querySelector<HTMLElement>('.permission-mode-popover');
     const parent = popup?.parentElement;
     vi.spyOn(popup!, 'offsetParent', 'get').mockReturnValue(parent ?? null);
@@ -748,27 +671,23 @@ describe('ToolbarPickers', () => {
   it('aligns permissions to its trigger and centers it when space is limited', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(700);
     let boundary: HTMLDivElement | undefined;
-    cleanup = render(
-      () => (
-        <div
-          ref={(el) => {
-            boundary = el;
-          }}
-        >
-          <PermissionModePicker
-            boundaryRef={boundary}
-            alignToTriggerWhenPossible={true}
-            mode="default"
-            showPicker={true}
-            showLabel={true}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-          />
-        </div>
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <div
+        ref={(el) => {
+          boundary = el;
+        }}
+      >
+        <PermissionModePicker
+          boundaryRef={boundary}
+          alignToTriggerWhenPossible={true}
+          mode="default"
+          showPicker={true}
+          showLabel={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      </div>
+    ));
     const popup = container?.querySelector<HTMLElement>('.permission-mode-popover');
     const parent = popup?.parentElement;
     vi.spyOn(popup!, 'offsetParent', 'get').mockReturnValue(parent ?? null);
@@ -813,24 +732,20 @@ describe('ToolbarPickers', () => {
       createAgent({ name: 'reviewer', description: 'Reviews work' }),
     ];
 
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={agents}
-          selectedAgent="reviewer"
-          selectedLabel="Reviewer"
-          focusIndex={0}
-          showPicker={true}
-          getLabel={(agent) => agent.name.toUpperCase()}
-          getDetail={(agent) => agent.description ?? 'No description'}
-          onToggle={onToggle}
-          onSelect={onSelect}
-          onFocusIndex={onFocusIndex}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <AgentPicker
+        agents={agents}
+        selectedAgent="reviewer"
+        selectedLabel="Reviewer"
+        focusIndex={0}
+        showPicker={true}
+        getLabel={(agent) => agent.name.toUpperCase()}
+        getDetail={(agent) => agent.description ?? 'No description'}
+        onToggle={onToggle}
+        onSelect={onSelect}
+        onFocusIndex={onFocusIndex}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     const options =
@@ -859,24 +774,20 @@ describe('ToolbarPickers', () => {
   });
 
   it('marks the agent picker trigger when Plan is selected', () => {
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={[createAgent({ name: 'plan' })]}
-          selectedAgent="plan"
-          selectedLabel="Plan"
-          focusIndex={0}
-          showPicker={false}
-          getLabel={(agent) => agent.name}
-          getDetail={(agent) => agent.description ?? 'No description'}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onFocusIndex={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <AgentPicker
+        agents={[createAgent({ name: 'plan' })]}
+        selectedAgent="plan"
+        selectedLabel="Plan"
+        focusIndex={0}
+        showPicker={false}
+        getLabel={(agent) => agent.name}
+        getDetail={(agent) => agent.description ?? 'No description'}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+        onFocusIndex={vi.fn()}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
 
@@ -891,25 +802,21 @@ describe('ToolbarPickers', () => {
       createAgent({ name: 'reviewer', mode: 'primary', builtIn: false }),
     ];
 
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={agents}
-          selectedAgent="ask"
-          selectedLabel="A"
-          compact={true}
-          focusIndex={0}
-          showPicker={true}
-          getLabel={(agent) => agent.name}
-          getDetail={(agent) => agent.description ?? 'No description'}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onFocusIndex={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <AgentPicker
+        agents={agents}
+        selectedAgent="ask"
+        selectedLabel="A"
+        compact={true}
+        focusIndex={0}
+        showPicker={true}
+        getLabel={(agent) => agent.name}
+        getDetail={(agent) => agent.description ?? 'No description'}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+        onFocusIndex={vi.fn()}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     const options = container?.querySelectorAll('.agent-popover .toolbar-popover-item') ?? [];
@@ -928,25 +835,21 @@ describe('ToolbarPickers', () => {
   });
 
   it('keeps built-in agent icons out of full-size values', () => {
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={[createAgent({ name: 'build', mode: 'primary' })]}
-          selectedAgent="build"
-          selectedLabel="Build"
-          compact={false}
-          focusIndex={0}
-          showPicker={false}
-          getLabel={(agent) => agent.name}
-          getDetail={(agent) => agent.description ?? 'No description'}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onFocusIndex={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <AgentPicker
+        agents={[createAgent({ name: 'build', mode: 'primary' })]}
+        selectedAgent="build"
+        selectedLabel="Build"
+        compact={false}
+        focusIndex={0}
+        showPicker={false}
+        getLabel={(agent) => agent.name}
+        getDetail={(agent) => agent.description ?? 'No description'}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+        onFocusIndex={vi.fn()}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     expect(toggleButton?.querySelector('.agent-picker-value-icon')).toBeNull();
@@ -956,27 +859,23 @@ describe('ToolbarPickers', () => {
   it.each([undefined, 'not-an-icon', '../../cube', 42])(
     'uses the cube fallback for a custom agent with icon %s',
     (icon) => {
-      cleanup = render(
-        () => (
-          <AgentPicker
-            agents={[
-              createAgent({ name: 'reviewer', mode: 'primary', builtIn: false, options: { icon } }),
-            ]}
-            selectedAgent="reviewer"
-            selectedLabel="R"
-            compact={true}
-            focusIndex={0}
-            showPicker={false}
-            getLabel={(agent) => agent.name}
-            getDetail={(agent) => agent.description ?? 'No description'}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-            onFocusIndex={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <AgentPicker
+          agents={[
+            createAgent({ name: 'reviewer', mode: 'primary', builtIn: false, options: { icon } }),
+          ]}
+          selectedAgent="reviewer"
+          selectedLabel="R"
+          compact={true}
+          focusIndex={0}
+          showPicker={false}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ));
 
       const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
       expect(
@@ -990,25 +889,21 @@ describe('ToolbarPickers', () => {
 
   it('updates configured icons in the compact value and picker options after loading', async () => {
     const [icon, setIcon] = createSignal('binocular');
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={[createAgent({ name: 'build', options: { icon: icon() } })]}
-          selectedAgent="build"
-          selectedLabel="B"
-          compact={true}
-          focusIndex={0}
-          showPicker={true}
-          getLabel={(agent) => agent.name}
-          getDetail={() => ''}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onFocusIndex={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <AgentPicker
+        agents={[createAgent({ name: 'build', options: { icon: icon() } })]}
+        selectedAgent="build"
+        selectedLabel="B"
+        compact={true}
+        focusIndex={0}
+        showPicker={true}
+        getLabel={(agent) => agent.name}
+        getDetail={() => ''}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+        onFocusIndex={vi.fn()}
+      />
+    ));
 
     await vi.dynamicImportSettled();
     flushSolid();
@@ -1035,25 +930,21 @@ describe('ToolbarPickers', () => {
     'shows the agent description with queue-only note %s',
     async (queueOnly) => {
       vi.useFakeTimers();
-      cleanup = render(
-        () => (
-          <AgentPicker
-            agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
-            selectedAgent="reviewer"
-            selectedLabel="Reviewer"
-            queueOnly={queueOnly}
-            focusIndex={0}
-            showPicker={false}
-            getLabel={(agent) => agent.name}
-            getDetail={(agent) => agent.description ?? 'No description'}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-            onFocusIndex={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <AgentPicker
+          agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
+          selectedAgent="reviewer"
+          selectedLabel="Reviewer"
+          queueOnly={queueOnly}
+          focusIndex={0}
+          showPicker={false}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ));
 
       const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
       toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
@@ -1086,24 +977,20 @@ describe('ToolbarPickers', () => {
       vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(viewportWidth);
       const description =
         'Investigates the codebase and provides a detailed review without changing files';
-      cleanup = render(
-        () => (
-          <AgentPicker
-            agents={[createAgent({ name: 'reviewer', description })]}
-            selectedAgent="reviewer"
-            selectedLabel="Reviewer"
-            focusIndex={0}
-            showPicker={true}
-            getLabel={(agent) => agent.name}
-            getDetail={(agent) => agent.description ?? 'No description'}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-            onFocusIndex={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <AgentPicker
+          agents={[createAgent({ name: 'reviewer', description })]}
+          selectedAgent="reviewer"
+          selectedLabel="Reviewer"
+          focusIndex={0}
+          showPicker={true}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ));
 
       const option = container?.querySelector<HTMLButtonElement>(
         '.agent-popover .toolbar-popover-item'
@@ -1129,24 +1016,20 @@ describe('ToolbarPickers', () => {
   );
 
   it('does not show agent details when its description fits', () => {
-    cleanup = render(
-      () => (
-        <AgentPicker
-          agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
-          selectedAgent="reviewer"
-          selectedLabel="Reviewer"
-          focusIndex={0}
-          showPicker={true}
-          getLabel={(agent) => agent.name}
-          getDetail={(agent) => agent.description ?? 'No description'}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-          onFocusIndex={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <AgentPicker
+        agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
+        selectedAgent="reviewer"
+        selectedLabel="Reviewer"
+        focusIndex={0}
+        showPicker={true}
+        getLabel={(agent) => agent.name}
+        getDetail={(agent) => agent.description ?? 'No description'}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+        onFocusIndex={vi.fn()}
+      />
+    ));
 
     const option = container?.querySelector<HTMLButtonElement>(
       '.agent-popover .toolbar-popover-item'
@@ -1164,26 +1047,22 @@ describe('ToolbarPickers', () => {
 
   it('limits the agent popover to the input host', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
-    cleanup = render(
-      () => (
-        <div class="chat-input-container">
-          <AgentPicker
-            agents={[createAgent()]}
-            selectedAgent="planner"
-            selectedLabel="Planner"
-            focusIndex={0}
-            showPicker={true}
-            getLabel={(agent) => agent.name}
-            getDetail={(agent) => agent.description ?? 'No description'}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-            onFocusIndex={vi.fn()}
-          />
-        </div>
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <div class="chat-input-container">
+        <AgentPicker
+          agents={[createAgent()]}
+          selectedAgent="planner"
+          selectedLabel="Planner"
+          focusIndex={0}
+          showPicker={true}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      </div>
+    ));
     const boundary = container?.querySelector<HTMLElement>('.chat-input-container');
     const popup = container?.querySelector<HTMLElement>('.agent-popover');
     const trigger = container?.querySelector<HTMLElement>('.toolbar-picker');
@@ -1219,21 +1098,17 @@ describe('ToolbarPickers', () => {
     const onSelect = vi.fn();
     const [showPicker, setShowPicker] = createSignal(false);
 
-    cleanup = render(
-      () => (
-        <VariantPicker
-          variants={['low', 'high']}
-          selectedVariant="high"
-          selectedLabel="High"
-          showPicker={showPicker()}
-          getLabel={(variant) => variant.toUpperCase()}
-          onToggle={onToggle}
-          onSelect={onSelect}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <VariantPicker
+        variants={['low', 'high']}
+        selectedVariant="high"
+        selectedLabel="High"
+        showPicker={showPicker()}
+        getLabel={(variant) => variant.toUpperCase()}
+        onToggle={onToggle}
+        onSelect={onSelect}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     expect(toggleButton?.getAttribute('aria-label')).toBe('Thinking level');
@@ -1267,21 +1142,17 @@ describe('ToolbarPickers', () => {
     ['Xhigh', 'Extra-high'],
   ])('warns when %s reasoning is selected', async (variant, level) => {
     vi.useFakeTimers();
-    cleanup = render(
-      () => (
-        <VariantPicker
-          variants={['low', variant]}
-          selectedVariant={variant}
-          selectedLabel={variant}
-          showPicker={false}
-          getLabel={(value) => value.toUpperCase()}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <VariantPicker
+        variants={['low', variant]}
+        selectedVariant={variant}
+        selectedLabel={variant}
+        showPicker={false}
+        getLabel={(value) => value.toUpperCase()}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
 
@@ -1302,22 +1173,18 @@ describe('ToolbarPickers', () => {
     'explains why active-turn %s reasoning requires queueing',
     async (variant) => {
       vi.useFakeTimers();
-      cleanup = render(
-        () => (
-          <VariantPicker
-            variants={['high', 'xhigh']}
-            selectedVariant={variant}
-            selectedLabel={variant}
-            showPicker={false}
-            queueOnly={true}
-            getLabel={(value) => value}
-            onToggle={vi.fn()}
-            onSelect={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <VariantPicker
+          variants={['high', 'xhigh']}
+          selectedVariant={variant}
+          selectedLabel={variant}
+          showPicker={false}
+          queueOnly={true}
+          getLabel={(value) => value}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ));
       const button = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
       expect(button?.disabled).toBe(false);
       button?.dispatchEvent(new MouseEvent('mouseenter'));
@@ -1338,23 +1205,19 @@ describe('ToolbarPickers', () => {
     document.body.appendChild(boundary);
     const [showPicker, setShowPicker] = createSignal(false);
 
-    cleanup = render(
-      () => (
-        <VariantPicker
-          boundaryRef={boundary}
-          alignTo="right"
-          variants={['low', 'high']}
-          selectedVariant="high"
-          selectedLabel="High"
-          showPicker={showPicker()}
-          getLabel={(variant) => variant.toUpperCase()}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <VariantPicker
+        boundaryRef={boundary}
+        alignTo="right"
+        variants={['low', 'high']}
+        selectedVariant="high"
+        selectedLabel="High"
+        showPicker={showPicker()}
+        getLabel={(variant) => variant.toUpperCase()}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    ));
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const wrapper = container?.querySelector('.toolbar-picker')
@@ -1400,19 +1263,15 @@ describe('ToolbarPickers', () => {
   it('renders the model picker fallback when no model is selected', () => {
     const onToggle = vi.fn();
 
-    cleanup = render(
-      () => (
-        <ModelPickerButton
-          providerID={null}
-          providerName="OpenAI"
-          modelName=""
-          canEllipsize={false}
-          onToggle={onToggle}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <ModelPickerButton
+        providerID={null}
+        providerName="OpenAI"
+        modelName=""
+        canEllipsize={false}
+        onToggle={onToggle}
+      />
+    ));
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
 
@@ -1429,20 +1288,16 @@ describe('ToolbarPickers', () => {
   });
 
   it('renders the model picker icon and full title when a model is selected', () => {
-    cleanup = render(
-      () => (
-        <ModelPickerButton
-          providerID="openai"
-          modelID="gpt-4.1"
-          providerName="OpenAI"
-          modelName="gpt-4.1"
-          canEllipsize={true}
-          onToggle={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <ModelPickerButton
+        providerID="openai"
+        modelID="gpt-4.1"
+        providerName="OpenAI"
+        modelName="gpt-4.1"
+        canEllipsize={true}
+        onToggle={vi.fn()}
+      />
+    ));
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     const providerIcon = container?.querySelector<HTMLElement>('.provider-icon');
@@ -1465,19 +1320,15 @@ describe('ToolbarPickers', () => {
     'renders %s Fast models with regular styling and the cost tooltip',
     async (providerID, providerName, modelName, formattedName) => {
       vi.useFakeTimers();
-      cleanup = render(
-        () => (
-          <ModelPickerButton
-            providerID={providerID}
-            providerName={providerName}
-            modelName={modelName}
-            canEllipsize={false}
-            onToggle={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <ModelPickerButton
+          providerID={providerID}
+          providerName={providerName}
+          modelName={modelName}
+          canEllipsize={false}
+          onToggle={vi.fn()}
+        />
+      ));
 
       const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
       expect(button?.getAttribute('aria-label')).toBe(`${providerName} / ${modelName}`);
@@ -1511,19 +1362,15 @@ describe('ToolbarPickers', () => {
     'renders %s with two clustered flash icons and the original fast warning styling',
     async (modelName) => {
       vi.useFakeTimers();
-      cleanup = render(
-        () => (
-          <ModelPickerButton
-            providerID="openai"
-            providerName="OpenAI"
-            modelName={modelName}
-            canEllipsize={false}
-            onToggle={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <ModelPickerButton
+          providerID="openai"
+          providerName="OpenAI"
+          modelName={modelName}
+          canEllipsize={false}
+          onToggle={vi.fn()}
+        />
+      ));
       const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
       expect(button?.classList.contains('ultrafast-model-selected')).toBe(true);
       expect(button?.classList.contains('fast-model-selected')).toBe(false);
@@ -1556,8 +1403,7 @@ describe('ToolbarPickers', () => {
 
   it('groups two clustered ultrafast flash icons under one cost tooltip in model lists', async () => {
     vi.useFakeTimers();
-    cleanup = render(() => <FormattedModelName name="GPT-6 Astra Ultrafast" />, container!);
-    flushSolid();
+    renderAndFlush(() => <FormattedModelName name="GPT-6 Astra Ultrafast" />);
     const symbols = container?.querySelectorAll(
       '[aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
@@ -1611,21 +1457,17 @@ describe('ToolbarPickers', () => {
           },
         },
       ];
-      cleanup = render(
-        () => (
-          <ModelPickerButton
-            providerID="openai"
-            modelID="gpt-6.1-sol-fast"
-            providerName="OpenAI"
-            modelName="GPT-6.1 Sol Fast"
-            providers={providers}
-            canEllipsize={false}
-            onToggle={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <ModelPickerButton
+          providerID="openai"
+          modelID="gpt-6.1-sol-fast"
+          providerName="OpenAI"
+          modelName="GPT-6.1 Sol Fast"
+          providers={providers}
+          canEllipsize={false}
+          onToggle={vi.fn()}
+        />
+      ));
       expect(
         container?.querySelector('.model-picker-btn')?.classList.contains('fast-model-selected')
       ).toBe(warning);
@@ -1639,41 +1481,37 @@ describe('ToolbarPickers', () => {
     { label: 'incomplete catalog pricing', pricing: { input: 10 }, warning: false },
   ])('uses $label when subscription provider rates are zero', async ({ pricing, warning }) => {
     vi.mocked(client.config.modelPricing).mockResolvedValue(pricing);
-    cleanup = render(
-      () => (
-        <ModelPickerButton
-          providerID="openai"
-          providerName="OpenAI"
-          modelID="gpt-6-astra-fast"
-          modelName="GPT-6 Astra Fast"
-          providers={[
-            {
-              id: 'openai',
-              name: 'OpenAI',
-              source: 'api',
-              models: {
-                'gpt-6-astra': {
-                  id: 'gpt-6-astra',
-                  name: 'GPT-6 Astra',
-                  capabilities: { toolcall: true },
-                  cost: { input: 0, output: 0 },
-                },
-                'gpt-6-astra-fast': {
-                  id: 'gpt-6-astra-fast',
-                  name: 'GPT-6 Astra Fast',
-                  capabilities: { toolcall: true },
-                  cost: { input: 100, output: 100 },
-                },
+    renderAndFlush(() => (
+      <ModelPickerButton
+        providerID="openai"
+        providerName="OpenAI"
+        modelID="gpt-6-astra-fast"
+        modelName="GPT-6 Astra Fast"
+        providers={[
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            source: 'api',
+            models: {
+              'gpt-6-astra': {
+                id: 'gpt-6-astra',
+                name: 'GPT-6 Astra',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+              },
+              'gpt-6-astra-fast': {
+                id: 'gpt-6-astra-fast',
+                name: 'GPT-6 Astra Fast',
+                capabilities: { toolcall: true },
+                cost: { input: 100, output: 100 },
               },
             },
-          ]}
-          canEllipsize={false}
-          onToggle={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+          },
+        ]}
+        canEllipsize={false}
+        onToggle={vi.fn()}
+      />
+    ));
     expect(container?.querySelector('.fast-model-selected')).toBeNull();
     await flushMicrotasks();
     flushSolid();
@@ -1693,41 +1531,37 @@ describe('ToolbarPickers', () => {
         : Promise.resolve({ input: 5, output: 25 })
     );
     const [model, setModel] = createSignal('Astra');
-    cleanup = render(
-      () => (
-        <ModelPickerButton
-          providerID="openai"
-          providerName="OpenAI"
-          modelID={`${model().toLowerCase()}-fast`}
-          modelName={`GPT-6 ${model()} Fast`}
-          providers={[
-            {
-              id: 'openai',
-              name: 'OpenAI',
-              source: 'api',
-              models: {
-                astra: {
-                  id: 'astra',
-                  name: 'GPT-6 Astra',
-                  capabilities: { toolcall: true },
-                  cost: { input: 0, output: 0 },
-                },
-                sol: {
-                  id: 'sol',
-                  name: 'GPT-6 Sol',
-                  capabilities: { toolcall: true },
-                  cost: { input: 0, output: 0 },
-                },
+    renderAndFlush(() => (
+      <ModelPickerButton
+        providerID="openai"
+        providerName="OpenAI"
+        modelID={`${model().toLowerCase()}-fast`}
+        modelName={`GPT-6 ${model()} Fast`}
+        providers={[
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            source: 'api',
+            models: {
+              astra: {
+                id: 'astra',
+                name: 'GPT-6 Astra',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
+              },
+              sol: {
+                id: 'sol',
+                name: 'GPT-6 Sol',
+                capabilities: { toolcall: true },
+                cost: { input: 0, output: 0 },
               },
             },
-          ]}
-          canEllipsize={false}
-          onToggle={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+          },
+        ]}
+        canEllipsize={false}
+        onToggle={vi.fn()}
+      />
+    ));
     setModel('Sol');
     flushSolid();
     await flushMicrotasks();
@@ -1756,21 +1590,17 @@ describe('ToolbarPickers', () => {
         },
       },
     ]);
-    cleanup = render(
-      () => (
-        <ModelPickerButton
-          providerID="anthropic"
-          modelID="opus-priority"
-          providerName="Anthropic"
-          modelName="Claude Opus 5 Fast"
-          providers={providers()}
-          canEllipsize={false}
-          onToggle={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <ModelPickerButton
+        providerID="anthropic"
+        modelID="opus-priority"
+        providerName="Anthropic"
+        modelName="Claude Opus 5 Fast"
+        providers={providers()}
+        canEllipsize={false}
+        onToggle={vi.fn()}
+      />
+    ));
     const button = () => container?.querySelector('.model-picker-btn');
     expect(button()?.classList.contains('fast-model-selected')).toBe(false);
     setProviders([
@@ -1795,35 +1625,31 @@ describe('ToolbarPickers', () => {
   });
 
   it('does not color an expensive non-fast model red', () => {
-    cleanup = render(
-      () => (
-        <ModelPickerButton
-          providerID="openai"
-          modelID="gpt-6.1-sol"
-          providerName="OpenAI"
-          modelName="GPT-6.1 Sol"
-          providers={[
-            {
-              id: 'openai',
-              name: 'OpenAI',
-              source: 'api',
-              models: {
-                'gpt-6.1-sol': {
-                  id: 'gpt-6.1-sol',
-                  name: 'GPT-6.1 Sol',
-                  capabilities: { toolcall: true },
-                  cost: { input: 10, output: 30 },
-                },
+    renderAndFlush(() => (
+      <ModelPickerButton
+        providerID="openai"
+        modelID="gpt-6.1-sol"
+        providerName="OpenAI"
+        modelName="GPT-6.1 Sol"
+        providers={[
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            source: 'api',
+            models: {
+              'gpt-6.1-sol': {
+                id: 'gpt-6.1-sol',
+                name: 'GPT-6.1 Sol',
+                capabilities: { toolcall: true },
+                cost: { input: 10, output: 30 },
               },
             },
-          ]}
-          canEllipsize={false}
-          onToggle={vi.fn()}
-        />
-      ),
-      container!
-    );
-    flushSolid();
+          },
+        ]}
+        canEllipsize={false}
+        onToggle={vi.fn()}
+      />
+    ));
     expect(container?.querySelector('.fast-model-selected')).toBeNull();
   });
 
@@ -1831,20 +1657,16 @@ describe('ToolbarPickers', () => {
     'explains why active-turn %s model selection requires queueing',
     async (modelName) => {
       vi.useFakeTimers();
-      cleanup = render(
-        () => (
-          <ModelPickerButton
-            providerID="openai"
-            providerName="OpenAI"
-            modelName={modelName}
-            canEllipsize={false}
-            queueOnly={true}
-            onToggle={vi.fn()}
-          />
-        ),
-        container!
-      );
-      flushSolid();
+      renderAndFlush(() => (
+        <ModelPickerButton
+          providerID="openai"
+          providerName="OpenAI"
+          modelName={modelName}
+          canEllipsize={false}
+          queueOnly={true}
+          onToggle={vi.fn()}
+        />
+      ));
       const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
       expect(button?.disabled).toBe(false);
       button?.dispatchEvent(new MouseEvent('mouseenter'));
@@ -1863,11 +1685,7 @@ describe('ToolbarPickers', () => {
   );
 
   it('omits the provider limit chip when no label is available', () => {
-    cleanup = render(
-      () => <ProviderLimitChip badges={[]} title={null} onClick={vi.fn()} />,
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => <ProviderLimitChip badges={[]} title={null} onClick={vi.fn()} />);
 
     expect(container?.querySelector('button')).toBeNull();
   });
@@ -1875,28 +1693,24 @@ describe('ToolbarPickers', () => {
   it('renders the provider limit chip interactions and cycle guard paths', () => {
     const onClick = vi.fn();
 
-    cleanup = render(
-      () => (
-        <div>
-          <ProviderLimitChip
-            badges={[
-              { label: '0%', tone: 'error' },
-              { label: '12%', tone: 'warning' },
-            ]}
-            title="Daily requests remaining"
-            onClick={onClick}
-          />
-          <ProviderLimitChip
-            badges={[{ label: '40%', tone: 'default' }]}
-            title={null}
-            ariaLabel={null}
-            onClick={vi.fn()}
-          />
-        </div>
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <div>
+        <ProviderLimitChip
+          badges={[
+            { label: '0%', tone: 'error' },
+            { label: '12%', tone: 'warning' },
+          ]}
+          title="Daily requests remaining"
+          onClick={onClick}
+        />
+        <ProviderLimitChip
+          badges={[{ label: '40%', tone: 'default' }]}
+          title={null}
+          ariaLabel={null}
+          onClick={vi.fn()}
+        />
+      </div>
+    ));
 
     const buttons = container?.querySelectorAll<HTMLButtonElement>('.toolbar-limit-chip') ?? [];
     expect(buttons).toHaveLength(2);
@@ -1923,21 +1737,15 @@ describe('ToolbarPickers', () => {
   it('handles provider limit clicks before bubbling can be interrupted', () => {
     const onClick = vi.fn();
 
-    cleanup = render(
-      () => (
-        <div
-          ref={(element) => element.addEventListener('click', (event) => event.stopPropagation())}
-        >
-          <ProviderLimitChip
-            badges={[{ label: '40%', tone: 'default' }]}
-            title="Daily requests remaining"
-            onClick={onClick}
-          />
-        </div>
-      ),
-      container!
-    );
-    flushSolid();
+    renderAndFlush(() => (
+      <div ref={(element) => element.addEventListener('click', (event) => event.stopPropagation())}>
+        <ProviderLimitChip
+          badges={[{ label: '40%', tone: 'default' }]}
+          title="Daily requests remaining"
+          onClick={onClick}
+        />
+      </div>
+    ));
 
     container
       ?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')

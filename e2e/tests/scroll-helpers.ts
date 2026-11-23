@@ -1,12 +1,12 @@
 import type { Page } from '@playwright/test';
 
-type StreamingPartTarget = {
+export type StreamingPartTarget = {
   sessionID: string;
   messageID: string;
   partID: string;
 };
 
-async function appendStreamingDelta(page: Page, target: StreamingPartTarget, delta: string) {
+export async function appendStreamingDelta(page: Page, target: StreamingPartTarget, delta: string) {
   await page.evaluate(
     ({ part, nextDelta }) => {
       window.postMessage(

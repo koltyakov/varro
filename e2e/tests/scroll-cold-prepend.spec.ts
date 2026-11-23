@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { getScrollMetrics, getVisibleMessageAnchor, waitForAnimationFrames } from './helpers';
+import {
+  getListDistanceFromBottom,
+  getScrollMetrics,
+  getVisibleMessageAnchor,
+  waitForAnimationFrames,
+} from './helpers';
 
 // Headless Chromium otherwise hides the native scrollbar and makes thumb input inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
@@ -21,9 +26,7 @@ async function openColdHistory(page: Page) {
   );
   const list = page.locator('.interactive-list');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   const thumb = await list.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const track = element.clientHeight;

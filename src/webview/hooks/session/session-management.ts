@@ -6,79 +6,13 @@ import type {
 import type { SelectedModel } from '../../lib/app-state-types';
 import type { PermissionRule, Session, SessionStatus } from '../../types';
 
-type SessionManagementDependencies = {
-  getActiveSessionId(): string | null;
-  getWorkspaceGeneration?(): number;
-  getSessionSelectionGeneration?(): number;
-  getNewChatDraftGeneration(): number;
-  createRemoteSession(
-    body: { title?: string; permission?: PermissionRule[] },
-    workspaceTarget?: SessionWorkspaceTarget
-  ): Promise<Session>;
-  updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
-  forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
-  getPermissionModeForSession(sessionId: string): PermissionMode;
-  isPermissionModeStable?(sessionId: string): boolean;
-  buildCreatePermission(mode: PermissionMode): PermissionRule[];
-  upsertSession(session: Session): void;
-  resetToolCallExpansionState(): void;
-  setActiveSessionId(sessionId: string): void;
-  clearDraftCurrentDocumentState(): void;
-  adoptDraftCurrentDocumentState(sessionId: string): void;
-  setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
-  setSessionUsageLimit(sessionId: string, notice: null): void;
-  persistActiveSessionId(sessionId: string): void;
-  markSessionSeen(sessionId: string): void;
-  getDefaultSelectedModel(): SelectedModel | null;
-  getEffectiveSessionModel(sessionId: string): SelectedModel | null;
-  setSelectedModel(
-    model: SelectedModel | null,
-    options?: { sessionId?: string | null; persistGlobal?: boolean }
-  ): void;
-  publishSessionModel(sessionId: string, model: SelectedModel | null): void;
-  resolveDefaultAgent(): string | null;
-  setSelectedAgent(
-    agent: string | null,
-    options?: { sessionId?: string | null; persistGlobal?: boolean }
-  ): void;
-  getInitialMcpNames(): string[] | null;
-  setSelectedMcpsForSession(sessionId: string, names: string[]): void;
-  resetDraftSelectedMcps(): void;
-  setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
-  setPendingSessionPermissionMode?(
-    sessionId: string,
-    mode: PermissionMode | null,
-    generation?: number
-  ): number | null;
-  persistConfirmedPermissionModeForSession?(
-    sessionId: string,
-    mode: PermissionMode,
-    directory?: string
-  ): Promise<void>;
-  resetDraftPermissionMode(): void;
-  resetTodoSync(): void;
-  clearMessages(): void;
-  stopLoading(): void;
-  setError(message: string): void;
-  getSessions(): Session[];
-  getDeletedSessionTreeIds(rootId: string, sessions: Session[]): Set<string>;
-  getNextSessionIdAfterDeletion(sessions: Session[]): string | null;
-  deleteRemoteSession(sessionId: string): Promise<void | boolean | object>;
-  hideDeletedSessionTree(sessionId: string): void;
-  loadRecycleBin(): Promise<void | boolean | object>;
-  selectSession(
-    sessionId: string,
-    options?: { markSeen?: boolean }
-  ): Promise<void | boolean | object>;
-  logError(context: string, cause: unknown): void;
-  restoreRecycleBinEntry(rootID: string): Promise<void | boolean | object>;
-  loadSessions(): Promise<void | boolean | object>;
-  hydrateSessionStatuses(): Promise<void | boolean | object>;
-  getRecycleBinEntries(): RecycleBinEntry[];
-  deleteRecycleBinEntry(rootID: string): Promise<void | boolean | object>;
-  clearDeletedSessionState(sessionId: string): void;
-  emptyRecycleBin(): Promise<void | boolean | object>;
-};
+type SessionManagementDependencies = Parameters<typeof createSessionWithDependencies>[0] &
+  Parameters<typeof forkSessionWithDependencies>[0] &
+  Omit<Parameters<typeof renameSessionWithDependencies>[0], 'isCurrentRequest'> &
+  Parameters<typeof deleteSessionWithDependencies>[0] &
+  Parameters<typeof restoreSessionWithDependencies>[0] &
+  Parameters<typeof deleteSessionPermanentlyWithDependencies>[0] &
+  Parameters<typeof emptyRecycleBinWithDependencies>[0];
 
 export class SessionManagementOperations {
   private readonly renameGenerations = new Map<string, number>();
@@ -95,38 +29,9 @@ export class SessionManagementOperations {
   ) => {
     return createSessionWithDependencies(
       {
-        getActiveSessionId: this.deps.getActiveSessionId,
-        getWorkspaceGeneration: this.deps.getWorkspaceGeneration,
-        getNewChatDraftGeneration: this.deps.getNewChatDraftGeneration,
-        createRemoteSession: this.deps.createRemoteSession,
-        buildCreatePermission: this.deps.buildCreatePermission,
-        upsertSession: this.deps.upsertSession,
-        resetToolCallExpansionState: this.deps.resetToolCallExpansionState,
-        setActiveSessionId: this.deps.setActiveSessionId,
-        clearDraftCurrentDocumentState: this.deps.clearDraftCurrentDocumentState,
-        adoptDraftCurrentDocumentState: this.deps.adoptDraftCurrentDocumentState,
-        setSessionStatusEntry: this.deps.setSessionStatusEntry,
-        setSessionUsageLimit: this.deps.setSessionUsageLimit,
-        persistActiveSessionId: this.deps.persistActiveSessionId,
-        markSessionSeen: this.deps.markSessionSeen,
+        ...this.deps,
         getDefaultSelectedModel: () =>
           selectedModel === undefined ? this.deps.getDefaultSelectedModel() : selectedModel,
-        setSelectedModel: this.deps.setSelectedModel,
-        publishSessionModel: this.deps.publishSessionModel,
-        resolveDefaultAgent: this.deps.resolveDefaultAgent,
-        setSelectedAgent: this.deps.setSelectedAgent,
-        getInitialMcpNames: this.deps.getInitialMcpNames,
-        setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
-        resetDraftSelectedMcps: this.deps.resetDraftSelectedMcps,
-        setPermissionModeForSession: this.deps.setPermissionModeForSession,
-        setPendingSessionPermissionMode: this.deps.setPendingSessionPermissionMode,
-        persistConfirmedPermissionModeForSession:
-          this.deps.persistConfirmedPermissionModeForSession,
-        resetDraftPermissionMode: this.deps.resetDraftPermissionMode,
-        resetTodoSync: this.deps.resetTodoSync,
-        clearMessages: this.deps.clearMessages,
-        stopLoading: this.deps.stopLoading,
-        setError: this.deps.setError,
       },
       title,
       initialPermissionMode,
@@ -148,30 +53,7 @@ export class SessionManagementOperations {
     const pending = this.pendingForks.get(key);
     if (pending) return pending;
 
-    const fork = forkSessionWithDependencies(
-      {
-        getActiveSessionId: this.deps.getActiveSessionId,
-        getWorkspaceGeneration: this.deps.getWorkspaceGeneration,
-        getSessionSelectionGeneration: this.deps.getSessionSelectionGeneration,
-        getNewChatDraftGeneration: this.deps.getNewChatDraftGeneration,
-        forkRemoteSession: this.deps.forkRemoteSession,
-        getEffectiveSessionModel: this.deps.getEffectiveSessionModel,
-        setSelectedModel: this.deps.setSelectedModel,
-        publishSessionModel: this.deps.publishSessionModel,
-        getPermissionModeForSession: this.deps.getPermissionModeForSession,
-        isPermissionModeStable: this.deps.isPermissionModeStable,
-        setPermissionModeForSession: this.deps.setPermissionModeForSession,
-        setPendingSessionPermissionMode: this.deps.setPendingSessionPermissionMode,
-        persistConfirmedPermissionModeForSession:
-          this.deps.persistConfirmedPermissionModeForSession,
-        upsertSession: this.deps.upsertSession,
-        selectSession: this.deps.selectSession,
-        setError: this.deps.setError,
-      },
-      id,
-      messageID,
-      options
-    ).finally(() => {
+    const fork = forkSessionWithDependencies(this.deps, id, messageID, options).finally(() => {
       this.pendingForks.delete(key);
     });
     this.pendingForks.set(key, fork);
@@ -185,10 +67,7 @@ export class SessionManagementOperations {
     try {
       return await renameSessionWithDependencies(
         {
-          updateRemoteSession: this.deps.updateRemoteSession,
-          getSessions: this.deps.getSessions,
-          upsertSession: this.deps.upsertSession,
-          setError: this.deps.setError,
+          ...this.deps,
           isCurrentRequest: () => this.renameGenerations.get(id) === generation,
         },
         id,
@@ -200,64 +79,52 @@ export class SessionManagementOperations {
   };
 
   readonly deleteSession = async (id: string) => {
-    await deleteSessionWithDependencies(
-      {
-        getSessions: this.deps.getSessions,
-        getActiveSessionId: this.deps.getActiveSessionId,
-        getWorkspaceGeneration: this.deps.getWorkspaceGeneration,
-        getSessionSelectionGeneration: this.deps.getSessionSelectionGeneration,
-        getNewChatDraftGeneration: this.deps.getNewChatDraftGeneration,
-        getDeletedSessionTreeIds: this.deps.getDeletedSessionTreeIds,
-        getNextSessionIdAfterDeletion: this.deps.getNextSessionIdAfterDeletion,
-        deleteRemoteSession: this.deps.deleteRemoteSession,
-        hideDeletedSessionTree: this.deps.hideDeletedSessionTree,
-        loadRecycleBin: this.deps.loadRecycleBin,
-        selectSession: this.deps.selectSession,
-        setError: this.deps.setError,
-        logError: this.deps.logError,
-      },
-      id
-    );
+    await deleteSessionWithDependencies(this.deps, id);
   };
 
   readonly restoreSession = async (rootID: string) => {
-    await restoreSessionWithDependencies(
-      {
-        restoreRecycleBinEntry: this.deps.restoreRecycleBinEntry,
-        loadSessions: this.deps.loadSessions,
-        loadRecycleBin: this.deps.loadRecycleBin,
-        hydrateSessionStatuses: this.deps.hydrateSessionStatuses,
-        setError: this.deps.setError,
-        logError: this.deps.logError,
-      },
-      rootID
-    );
+    await restoreSessionWithDependencies(this.deps, rootID);
   };
 
   readonly deleteSessionPermanently = async (rootID: string) => {
-    await deleteSessionPermanentlyWithDependencies(
-      {
-        getRecycleBinEntries: this.deps.getRecycleBinEntries,
-        deleteRecycleBinEntry: this.deps.deleteRecycleBinEntry,
-        loadRecycleBin: this.deps.loadRecycleBin,
-        clearDeletedSessionState: this.deps.clearDeletedSessionState,
-        setError: this.deps.setError,
-        logError: this.deps.logError,
-      },
-      rootID
-    );
+    await deleteSessionPermanentlyWithDependencies(this.deps, rootID);
   };
 
   readonly emptyRecycleBin = async () => {
-    await emptyRecycleBinWithDependencies({
-      getRecycleBinEntries: this.deps.getRecycleBinEntries,
-      emptyRecycleBin: this.deps.emptyRecycleBin,
-      loadRecycleBin: this.deps.loadRecycleBin,
-      clearDeletedSessionState: this.deps.clearDeletedSessionState,
-      setError: this.deps.setError,
-      logError: this.deps.logError,
-    });
+    await emptyRecycleBinWithDependencies(this.deps);
   };
+}
+
+// Keeps a new session's non-default mode pending until the host confirms it. A failed save reports
+// an error only while this call still owns the pending mode.
+async function applyNewSessionPermissionMode(
+  deps: Pick<
+    SessionManagementDependencies,
+    | 'setPendingSessionPermissionMode'
+    | 'setPermissionModeForSession'
+    | 'persistConfirmedPermissionModeForSession'
+    | 'setError'
+  >,
+  session: Session,
+  mode: PermissionMode
+) {
+  const pendingGeneration = deps.setPendingSessionPermissionMode?.(session.id, mode);
+  deps.setPermissionModeForSession(session.id, mode);
+  try {
+    await deps.persistConfirmedPermissionModeForSession?.(session.id, mode, session.directory);
+    deps.setPendingSessionPermissionMode?.(session.id, null, pendingGeneration ?? undefined);
+  } catch (err) {
+    const clearedGeneration = deps.setPendingSessionPermissionMode?.(
+      session.id,
+      null,
+      pendingGeneration ?? undefined
+    );
+    if (pendingGeneration === undefined || clearedGeneration === pendingGeneration) {
+      deps.setError(
+        err instanceof Error ? err.message : 'Permission mode was not saved; select a mode to retry'
+      );
+    }
+  }
 }
 
 export async function createSessionWithDependencies(
@@ -347,32 +214,7 @@ export async function createSessionWithDependencies(
     deps.setSessionUsageLimit(session.id, null);
     if (initialMcpNames) deps.setSelectedMcpsForSession(session.id, initialMcpNames);
     if (initialPermissionMode !== 'default') {
-      const pendingGeneration = deps.setPendingSessionPermissionMode?.(
-        session.id,
-        initialPermissionMode
-      );
-      deps.setPermissionModeForSession(session.id, initialPermissionMode);
-      try {
-        await deps.persistConfirmedPermissionModeForSession?.(
-          session.id,
-          initialPermissionMode,
-          session.directory
-        );
-        deps.setPendingSessionPermissionMode?.(session.id, null, pendingGeneration ?? undefined);
-      } catch (err) {
-        const clearedGeneration = deps.setPendingSessionPermissionMode?.(
-          session.id,
-          null,
-          pendingGeneration ?? undefined
-        );
-        if (pendingGeneration === undefined || clearedGeneration === pendingGeneration) {
-          deps.setError(
-            err instanceof Error
-              ? err.message
-              : 'Permission mode was not saved; select a mode to retry'
-          );
-        }
-      }
+      await applyNewSessionPermissionMode(deps, session, initialPermissionMode);
     }
     if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
     deps.publishSessionModel(session.id, defaultModel);
@@ -484,29 +326,7 @@ export async function forkSessionWithDependencies(
     }
     deps.upsertSession(session);
     if (permissionMode !== 'default') {
-      const pendingGeneration = deps.setPendingSessionPermissionMode?.(session.id, permissionMode);
-      deps.setPermissionModeForSession(session.id, permissionMode);
-      try {
-        await deps.persistConfirmedPermissionModeForSession?.(
-          session.id,
-          permissionMode,
-          session.directory
-        );
-        deps.setPendingSessionPermissionMode?.(session.id, null, pendingGeneration ?? undefined);
-      } catch (err) {
-        const clearedGeneration = deps.setPendingSessionPermissionMode?.(
-          session.id,
-          null,
-          pendingGeneration ?? undefined
-        );
-        if (pendingGeneration === undefined || clearedGeneration === pendingGeneration) {
-          deps.setError(
-            err instanceof Error
-              ? err.message
-              : 'Permission mode was not saved; select a mode to retry'
-          );
-        }
-      }
+      await applyNewSessionPermissionMode(deps, session, permissionMode);
     }
     if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
     if (sourceModel) {

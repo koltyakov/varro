@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { AssistantMessage, MessageEntry, Session } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import {
+  getListDistanceFromBottom,
+  getScrollMetrics,
+  installPlaybackCapture,
+  waitForAnimationFrames,
+} from './helpers';
 
 for (const shortHistory of [false, true]) {
   for (const followAction of ['none', 'down', 'up', 'up-before'] as const) {
@@ -86,22 +91,12 @@ for (const shortHistory of [false, true]) {
             })),
           ],
         };
-        await page.addInitScript(
-          (fixture) => {
-            // SAFETY: The isolated E2E page reads this fixture before mounting.
-            (
-              window as typeof window & { varroPlaybackCapture: typeof fixture }
-            ).varroPlaybackCapture = fixture;
-          },
-          { session, initialMessages: [user, assistant] }
-        );
+        await installPlaybackCapture(page, { session, initialMessages: [user, assistant] });
         await page.goto('/e2e/harness/index.html?scenario=session-playback');
         const list = page.locator('.interactive-list');
         const summary = page.locator('.assistant-activity-summary').last();
         await expect(summary).toHaveAttribute('aria-expanded', 'false');
-        await expect
-          .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-          .toBeLessThan(2);
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
         await page.evaluate((assistantInfo) => {
           // SAFETY: This page owns the isolated E2E event transport.
           const harness = (
@@ -151,11 +146,7 @@ for (const shortHistory of [false, true]) {
           await page.mouse.wheel(0, followAction === 'down' ? 2000 : -80);
           await waitForAnimationFrames(page, 8);
           if (followAction === 'down') {
-            await expect
-              .poll(() =>
-                getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom)
-              )
-              .toBeLessThan(2);
+            await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
           }
         }
 
@@ -273,11 +264,7 @@ for (const shortHistory of [false, true]) {
             ),
             JSON.stringify(samples)
           ).toBe(true);
-          await expect
-            .poll(() =>
-              getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom)
-            )
-            .toBeLessThan(2);
+          await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(2);
           await expect(page.getByText(/^Finding 20\./)).toBeInViewport();
         } else {
           expect(

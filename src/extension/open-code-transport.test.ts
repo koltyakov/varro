@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These transport tests deliberately model malformed HTTP values, stream readers, and module-boundary logging. */
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These transport tests deliberately model malformed HTTP values, stream readers, and module-boundary logging. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -786,14 +786,7 @@ describe('OpenCodeTransport reconnect delay', () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network failed')));
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
-      getWorkspaceCwd: () => undefined,
-      getStatus: () => ({ state: 'stopped' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
-    });
+    const transport = createTransport({ getStatus: () => ({ state: 'stopped' }) });
 
     await transport.startEventStream();
     await vi.advanceTimersByTimeAsync(10_001);
@@ -1066,14 +1059,7 @@ describe('OpenCodeTransport event stream path', () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
-      getWorkspaceCwd: () => undefined,
-      getStatus: () => ({ state: 'stopped' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
-    });
+    const transport = createTransport({ getStatus: () => ({ state: 'stopped' }) });
 
     await transport.startEventStream();
 
@@ -1084,13 +1070,9 @@ describe('OpenCodeTransport event stream path', () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('stop'));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
+    const transport = createTransport({
       getWorkspaceCwd: () => '/repo',
       getStatus: () => ({ state: 'stopped' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
 
     await transport.startEventStream();
@@ -1351,14 +1333,7 @@ describe('OpenCodeTransport event stream path', () => {
       return Promise.resolve(createPendingEventResponse(eventSignal));
     });
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
-      getWorkspaceCwd: () => '/repo-a',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
-    });
+    const transport = createTransport({ getWorkspaceCwd: () => '/repo-a' });
 
     void transport.startEventStream();
     await vi.waitFor(() => expect(eventRequests).toBe(1));
@@ -1397,14 +1372,7 @@ describe('OpenCodeTransport event stream path', () => {
       });
     });
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
-      getWorkspaceCwd: () => '/repo-a',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
-    });
+    const transport = createTransport({ getWorkspaceCwd: () => '/repo-a' });
 
     void transport.startEventStream();
     await vi.waitFor(() => expect(resolveEventStream).toBeTypeOf('function'));
@@ -1431,14 +1399,7 @@ describe('OpenCodeTransport event stream path', () => {
       return Promise.resolve(createPendingEventResponse(init!.signal as AbortSignal));
     });
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
-      getWorkspaceCwd: () => '/repo-a',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
-    });
+    const transport = createTransport({ getWorkspaceCwd: () => '/repo-a' });
 
     void transport.startEventStream();
     await vi.waitFor(() => expect(eventRequests).toBe(1));
@@ -1462,14 +1423,7 @@ describe('OpenCodeTransport event stream path', () => {
       'fetch',
       vi.fn(async (_input, init) => createPendingEventResponse(init!.signal as AbortSignal))
     );
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
-      getWorkspaceCwd: () => '/repo-a',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
-    }) as unknown as {
+    const transport = createTransport({ getWorkspaceCwd: () => '/repo-a' }) as unknown as {
       startEventStream(): Promise<void>;
       stopEventStream(): void;
       rescopeEventStream(directory: string): Promise<unknown>;
@@ -1605,13 +1559,9 @@ describe('OpenCodeTransport health', () => {
       return new Response(JSON.stringify({ healthy: true, version: '1.18.33' }));
     });
     vi.stubGlobal('fetch', fetchMock);
-    const transport = new OpenCodeTransport({
+    const transport = createTransport({
       getUrl: () => url,
-      getWorkspaceCwd: () => undefined,
       getStatus: () => ({ state: 'running', url }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
     await transport.readHealthInfo();
     url = 'http://localhost:4097';
@@ -2013,13 +1963,8 @@ describe('OpenCodeTransport request scoping', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
+    const transport = createTransport({
       getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
 
     await transport.request('GET', '/session');
@@ -2049,13 +1994,8 @@ describe('OpenCodeTransport request scoping', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
+    const transport = createTransport({
       getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
 
     await transport.request('GET', '/session');
@@ -2094,13 +2034,8 @@ describe('OpenCodeTransport request scoping', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
+    const transport = createTransport({
       getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
 
     await transport.request('GET', '/session/session-1');
@@ -2127,13 +2062,8 @@ describe('OpenCodeTransport request scoping', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '[]' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
+    const transport = createTransport({
       getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
 
     await transport.request('GET', '/session/session-1');
@@ -2166,13 +2096,8 @@ describe('OpenCodeTransport request scoping', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
+    const transport = createTransport({
       getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
 
     await transport.request('POST', '/session/session-1/prompt_async', { parts: [] });
@@ -2190,14 +2115,7 @@ describe('OpenCodeTransport request scoping', () => {
   it('uses a request-specific workspace directory instead of the global workspace', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
-      getWorkspaceCwd: () => '/repo-a',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
-    });
+    const transport = createTransport({ getWorkspaceCwd: () => '/repo-a' });
 
     await transport.request(
       'POST',
@@ -2221,13 +2139,8 @@ describe('OpenCodeTransport request scoping', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
-    const transport = new OpenCodeTransport({
-      getUrl: () => 'http://localhost:4096',
+    const transport = createTransport({
       getWorkspaceCwd: () => 'C:\\Users\\Andrew\\Projects\\Varro',
-      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
-      isDisposing: () => false,
-      updateEventStreamState: updateEventStreamStateMock,
-      emitEvent: emitEventMock,
     });
 
     await transport.request('POST', '/session', {});

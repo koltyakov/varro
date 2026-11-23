@@ -20,10 +20,10 @@ import {
   unsupportedProviderStatus,
   providerErrorStatus,
   VARRO_USER_AGENT,
+  OPENCODE_OAUTH_DUMMY_KEY,
 } from '../adapter-utils';
 
 const COPILOT_USER_ENDPOINT = 'https://api.github.com/copilot_internal/user';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 // Mirrors gh's own config-dir resolution: GH_CONFIG_DIR, then XDG_CONFIG_HOME,
 // then %AppData%\GitHub CLI on Windows, then ~/.config/gh.

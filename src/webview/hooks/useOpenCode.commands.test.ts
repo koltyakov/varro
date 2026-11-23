@@ -15,6 +15,29 @@ type SessionSendAsync = typeof client.session.sendAsync;
 const sessionSendAsync = vi.fn<SessionSendAsync>();
 Object.assign(clientMocks, { sessionSendAsync });
 
+function detailedGpt4oProvider() {
+  return provider('openai', {
+    'gpt-4o': {
+      id: 'gpt-4o',
+      name: 'GPT-4o',
+      options: {},
+      headers: {},
+      limit: { context: 1, output: 1 },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      capabilities: {
+        temperature: true,
+        reasoning: true,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: true, video: false, pdf: false },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+      },
+      status: 'active',
+      api: { id: 'openai', url: '', npm: '' },
+    },
+  });
+}
+
 describe('command helpers', () => {
   it.each([
     ['control', 'skill'],
@@ -371,30 +394,7 @@ describe('command helpers', () => {
 
     stateModule.setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            options: {},
-            headers: {},
-            limit: { context: 1, output: 1 },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-            capabilities: {
-              temperature: true,
-              reasoning: true,
-              attachment: true,
-              toolcall: true,
-              input: { text: true, audio: false, image: true, video: false, pdf: false },
-              output: { text: true, audio: false, image: false, video: false, pdf: false },
-            },
-            status: 'active',
-            api: { id: 'openai', url: '', npm: '' },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [detailedGpt4oProvider()]));
     flushSolid();
     stateModule.setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
     flushSolid();
@@ -424,30 +424,7 @@ describe('command helpers', () => {
 
     stateModule.setState(storePath('activeSessionId', null));
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            options: {},
-            headers: {},
-            limit: { context: 1, output: 1 },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-            capabilities: {
-              temperature: true,
-              reasoning: true,
-              attachment: true,
-              toolcall: true,
-              input: { text: true, audio: false, image: true, video: false, pdf: false },
-              output: { text: true, audio: false, image: false, video: false, pdf: false },
-            },
-            status: 'active',
-            api: { id: 'openai', url: '', npm: '' },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [detailedGpt4oProvider()]));
     flushSolid();
     stateModule.setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
     flushSolid();
@@ -475,30 +452,7 @@ describe('command helpers', () => {
 
     stateModule.setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    stateModule.setState(
-      storePath('providers', [
-        provider('openai', {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            options: {},
-            headers: {},
-            limit: { context: 1, output: 1 },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-            capabilities: {
-              temperature: true,
-              reasoning: true,
-              attachment: true,
-              toolcall: true,
-              input: { text: true, audio: false, image: true, video: false, pdf: false },
-              output: { text: true, audio: false, image: false, video: false, pdf: false },
-            },
-            status: 'active',
-            api: { id: 'openai', url: '', npm: '' },
-          },
-        }),
-      ])
-    );
+    stateModule.setState(storePath('providers', [detailedGpt4oProvider()]));
     flushSolid();
     stateModule.setState(storePath('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' }));
     flushSolid();

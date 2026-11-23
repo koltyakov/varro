@@ -3,7 +3,7 @@ import { projectV2Message } from '../../src/extension/opencode-v2-projection';
 import { formatSkillAttachment } from '../../src/shared/skill-reference';
 import type { MessageEntry, Session } from '../../src/webview/types';
 import { fixture } from '../../src/webview/test-fixtures';
-import { waitForHarnessStartup } from './helpers';
+import { installPlaybackCapture, waitForHarnessStartup } from './helpers';
 
 for (const width of [360, 1100]) {
   test(`skill prompts keep their bubbles beside generated activity at ${width}px`, async ({
@@ -75,14 +75,7 @@ for (const width of [360, 1100]) {
         )
       );
     }
-    await page.addInitScript(
-      (capture) => {
-        // SAFETY: The isolated playback harness consumes these synthetic messages.
-        (window as typeof window & { varroPlaybackCapture: typeof capture }).varroPlaybackCapture =
-          capture;
-      },
-      { session, initialMessages, goal: null }
-    );
+    await installPlaybackCapture(page, { session, initialMessages, goal: null });
     await page.goto('/e2e/harness/index.html?scenario=session-playback');
     await waitForHarnessStartup(page);
     await expect(page.locator('.user-message-card')).toHaveCount(prompts.length);

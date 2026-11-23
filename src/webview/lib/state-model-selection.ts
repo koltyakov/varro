@@ -17,6 +17,7 @@ import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 import { writeStoredSelectedModelForWorkspace } from './state-stored-values';
 import { isActiveSessionWorking, isSessionTreeStatusWorking } from './state-session-lifecycle';
+import { reconcileStoreField } from './store-reconcile';
 
 export { LARGE_MODEL_CATALOG_THRESHOLD } from '../../shared/provider-order';
 const MANAGED_MODEL_CATALOG_MARKER = '*';
@@ -132,13 +133,7 @@ export function setSelectedModel(
   }
 
   if (!modelsEqual(state.selectedModel, model)) {
-    setState((draft) => {
-      const current = draft['selectedModel'];
-      const incoming = (model ? { ...model } : null) satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['selectedModel'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setState((draft) => reconcileStoreField(draft, 'selectedModel', model ? { ...model } : null));
   }
   if (persistGlobal) {
     writeStoredSelectedModelForWorkspace(state.editorContext.workspacePath, model);
@@ -147,18 +142,7 @@ export function setSelectedModel(
       options?.rememberLastSelected !== false &&
       !modelsEqual(state.lastSelectedModel, model)
     ) {
-      setState((draft) => {
-        const current = draft['lastSelectedModel'];
-        const incoming = { ...model } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['lastSelectedModel'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setState((draft) => reconcileStoreField(draft, 'lastSelectedModel', { ...model }));
       writeStored(STORAGE_KEYS.lastSelectedModel, model);
       preferencesChanged = true;
     }
@@ -213,13 +197,7 @@ export function applySessionSelectedModelsSnapshot(
     if (pending) models[sessionId] = { ...pending };
   }
   if (!selectedModelRecordsEqual(state.sessionSelectedModels, models)) {
-    setState((draft) => {
-      const current = draft['sessionSelectedModels'];
-      const incoming = models satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionSelectedModels'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setState((draft) => reconcileStoreField(draft, 'sessionSelectedModels', models));
     writeStored(STORAGE_KEYS.sessionSelectedModels, models);
   }
   const sessionId = showSessionPicker() ? null : state.activeSessionId;
@@ -234,13 +212,7 @@ export function setMcpStatus(status: Record<string, McpStatus>) {
 }
 
 export function setMcpDefaults(defaults: McpDefaults) {
-  setState((draft) => {
-    const current = draft['mcpDefaults'];
-    const incoming = defaults satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['mcpDefaults'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setState((draft) => reconcileStoreField(draft, 'mcpDefaults', defaults));
 }
 
 export function getAvailableMcpNames() {
@@ -344,13 +316,7 @@ export function hydrateSessionSelectedAgents(agents: Record<string, string>) {
   }
   if (!changed) return;
 
-  setState((draft) => {
-    const current = draft['sessionSelectedAgents'];
-    const incoming = nextAgents satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['sessionSelectedAgents'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setState((draft) => reconcileStoreField(draft, 'sessionSelectedAgents', nextAgents));
   writeStored(STORAGE_KEYS.sessionSelectedAgents, nextAgents);
 }
 
@@ -746,86 +712,30 @@ export function getModelPreferencesSnapshot(source = state): ModelPreferences {
 }
 
 export function applyModelPreferencesSnapshot(preferences: ModelPreferences) {
-  setState((draft) => {
-    const current = draft['lastSelectedModel'];
-    const incoming = (
+  setState((draft) =>
+    reconcileStoreField(
+      draft,
+      'lastSelectedModel',
       preferences.lastSelectedModel ? { ...preferences.lastSelectedModel } : null
-    ) satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['lastSelectedModel'] = incoming;
-    else reconcile(incoming)(current);
-  });
+    )
+  );
   writeStored(STORAGE_KEYS.lastSelectedModel, preferences.lastSelectedModel ?? null);
-  setState((draft) => {
-    const current = draft['modelVariantSelections'];
-    const incoming = preferences.modelVariantSelections satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['modelVariantSelections'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['providerOrder'];
-    const incoming = preferences.providerOrder satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerOrder'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['providerLimitPins'];
-    const incoming = (preferences.providerLimitPins ?? {}) satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['providerLimitPins'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['modelOrder'];
-    const incoming = preferences.modelOrder satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['modelOrder'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['hiddenProviders'];
-    const incoming = preferences.hiddenProviders satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['hiddenProviders'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['hiddenModels'];
-    const incoming = preferences.hiddenModels satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['hiddenModels'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['addedModels'];
-    const incoming = preferences.addedModels satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['addedModels'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['removedModels'];
-    const incoming = (preferences.removedModels ?? []) satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['removedModels'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['pinnedModels'];
-    const incoming = preferences.pinnedModels satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['pinnedModels'] = incoming;
-    else reconcile(incoming)(current);
-  });
-  setState((draft) => {
-    const current = draft['modelDisplayNames'];
-    const incoming = preferences.modelDisplayNames satisfies typeof current;
-    if (incoming === null || incoming === undefined || current === null || current === undefined)
-      draft['modelDisplayNames'] = incoming;
-    else reconcile(incoming)(current);
-  });
+  setState((draft) =>
+    reconcileStoreField(draft, 'modelVariantSelections', preferences.modelVariantSelections)
+  );
+  setState((draft) => reconcileStoreField(draft, 'providerOrder', preferences.providerOrder));
+  setState((draft) =>
+    reconcileStoreField(draft, 'providerLimitPins', preferences.providerLimitPins ?? {})
+  );
+  setState((draft) => reconcileStoreField(draft, 'modelOrder', preferences.modelOrder));
+  setState((draft) => reconcileStoreField(draft, 'hiddenProviders', preferences.hiddenProviders));
+  setState((draft) => reconcileStoreField(draft, 'hiddenModels', preferences.hiddenModels));
+  setState((draft) => reconcileStoreField(draft, 'addedModels', preferences.addedModels));
+  setState((draft) => reconcileStoreField(draft, 'removedModels', preferences.removedModels ?? []));
+  setState((draft) => reconcileStoreField(draft, 'pinnedModels', preferences.pinnedModels));
+  setState((draft) =>
+    reconcileStoreField(draft, 'modelDisplayNames', preferences.modelDisplayNames)
+  );
   writeStored(STORAGE_KEYS.modelVariantSelections, preferences.modelVariantSelections);
   writeStored(STORAGE_KEYS.providerOrder, preferences.providerOrder);
   writeStored(STORAGE_KEYS.providerLimitPins, preferences.providerLimitPins ?? {});

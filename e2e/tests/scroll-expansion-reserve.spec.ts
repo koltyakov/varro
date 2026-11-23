@@ -1,7 +1,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The isolated harness exposes typed fixture mutation methods for this regression. */
 import { expect, test } from '@playwright/test';
 import type { MessageEntry, Part } from '../../src/webview/types';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getListDistanceFromBottom, waitForAnimationFrames } from './helpers';
 
 test('opening and closing Explored during an activity exit preserves its painted summary', async ({
   page,
@@ -12,9 +12,7 @@ test('opening and closing Explored during an activity exit preserves its painted
   );
   await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
   await page.waitForTimeout(2100);
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   await page.evaluate(() => {
     const harness = (
       window as Window & {

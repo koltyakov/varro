@@ -119,5 +119,3 @@ export const uiStore = {
   requestSessionSearchFocus,
   requestMessageListScrollToBottom,
 };
-
-export type UiStore = typeof uiStore;

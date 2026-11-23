@@ -8,7 +8,11 @@ import type {
 } from '../../shared/protocol';
 import { resolveOpenCodeDataDirectory } from '../../shared/opencode-data-directory';
 import { asRecord, getString } from '../../shared/type-utils';
-import { VARRO_USER_AGENT } from '../provider-limits/adapter-utils';
+import {
+  resolveProviderAuthToken,
+  toLabel,
+  VARRO_USER_AGENT,
+} from '../provider-limits/adapter-utils';
 
 export type ProviderAuthRecord =
   | {
@@ -34,8 +38,6 @@ export type ProviderMetadata = {
   models: Record<string, ProviderModel>;
   [key: string]: unknown;
 };
-
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 const PROVIDER_LIMIT_PROBE_BASES: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
@@ -423,19 +425,6 @@ function usesOfficialProviderApiHost(provider: ProviderMetadata) {
   return true;
 }
 
-function resolveProviderAuthToken(
-  provider: ProviderMetadata,
-  authStore: Record<string, ProviderAuthRecord>
-) {
-  const auth = authStore[provider.id];
-  if (auth?.type === 'oauth') return auth.access;
-  if (auth && 'key' in auth) return auth.key;
-
-  const apiKey = getString(asRecord(provider.options)?.apiKey);
-  if (!apiKey || apiKey === OPENCODE_OAUTH_DUMMY_KEY) return null;
-  return apiKey;
-}
-
 function parseDurationMs(value: string) {
   const matches = [...value.matchAll(/(\d+(?:\.\d+)?)(ms|s|m|h|d)/g)];
   if (matches.length === 0 || matches.map((match) => match[0]).join('') !== value) {
@@ -488,14 +477,5 @@ function parseWindowPercent(record: Record<string, unknown>) {
     parseFiniteNumber(record.usagePercent) ??
     parseFiniteNumber(record.utilizationPercent) ??
     parseFiniteNumber(record.usedPercent)
-  );
-}
-
-function toLabel(value: string) {
-  return (
-    value
-      .replace(/[_-]+/g, ' ')
-      .trim()
-      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Limit'
   );
 }

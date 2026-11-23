@@ -1,4 +1,4 @@
-import { flush as flushSolid, reconcile, untrack } from 'solid-js';
+import { flush as flushSolid, untrack } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { render } from '@solidjs/web';
@@ -32,6 +32,18 @@ import {
   textPart,
   toolPart,
   userMessage,
+  setStateRecord,
+  flushFrame,
+  installTrackedResizeObservers,
+  captureResizeObserverCallbacks,
+  notifyResizeObservers,
+  mockElementRects,
+  mockTrackRects,
+  assistantRows,
+  promptAndResponse,
+  conversationTurns,
+  defineLayoutMetrics,
+  backScrollTop,
 } from './MessageList.test-utils';
 import { fixture } from '../test-fixtures';
 import { navArrowDownIcon } from '../lib/ui-icons';
@@ -51,6 +63,98 @@ installMessageListTestEnvironment({
     cleanup = nextCleanup;
   },
 });
+
+/** Mounts MessageList into the test container and returns its scroll container. */
+function mountList(): HTMLDivElement {
+  cleanup = render(() => MessageList(), container!);
+  flushSolid();
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+  return container?.querySelector('.interactive-list') as HTMLDivElement;
+}
+
+/**
+ * Mounts 50 assistant rows in a 400 px viewport with tracked resize observers. Row geometry
+ * follows the mutable `rowHeights` (100 px each) and the scroll position in `scrollTop`.
+ */
+function mountResizableAssistantRows(
+  listMetrics: { clientWidth?: number; offsetWidth?: number } = {}
+) {
+  const animationFrames = installQueuedAnimationFrameMocks();
+  flushSolid();
+  const observers = installTrackedResizeObservers();
+
+  const rowHeights = Array.from({ length: 50 }, () => 100);
+  const rowTop = (index: number) =>
+    rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+  let list: HTMLDivElement | null = null;
+  const scrollTop = { value: 0 };
+  mockElementRects((element) => {
+    if (element === list || element.classList.contains('interactive-list')) {
+      return new DOMRect(0, 0, 500, 400);
+    }
+    if (element.classList.contains('interactive-list-track')) {
+      return new DOMRect(
+        0,
+        0,
+        500,
+        rowHeights.reduce((total, height) => total + height, 0)
+      );
+    }
+    if (element.dataset.msgId?.startsWith('assistant-')) {
+      const index = Number(element.dataset.msgId.replace('assistant-', ''));
+      return new DOMRect(0, rowTop(index) - scrollTop.value, 500, rowHeights[index]);
+    }
+    return new DOMRect(0, 0, 500, 40);
+  });
+
+  setState(storePath('activeSessionId', 'session-1'));
+  flushSolid();
+  replaceMessages(assistantRows(50));
+  flushSolid();
+
+  list = mountList();
+  defineLayoutMetrics(
+    list,
+    { clientHeight: 400, ...listMetrics },
+    { scrollHeight: () => rowHeights.reduce((total, height) => total + height, 0) }
+  );
+  backScrollTop(list, scrollTop);
+  return { animationFrames, observers, rowHeights, list, scrollTop };
+}
+
+/**
+ * Mounts one prompt/response turn in a 400 px viewport whose track and scroll heights the
+ * test drives through `layout` (both start at 1200 px). Resize callbacks are captured and
+ * every scrollTop assignment is recorded; the initial bottom scroll is still pending.
+ */
+function mountFollowedTurn(listMetrics: { clientWidth?: number; offsetWidth?: number } = {}) {
+  const animationFrames = installQueuedAnimationFrameMocks();
+  flushSolid();
+  const resizeCallbacks = captureResizeObserverCallbacks();
+  const layout = { trackHeight: 1200, scrollHeight: 1200 };
+  mockTrackRects(() => layout.trackHeight);
+
+  setState(storePath('activeSessionId', 'session-1'));
+  flushSolid();
+  replaceMessages(promptAndResponse('Prompt 1', 'Initial response'));
+  flushSolid();
+
+  mountList();
+
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+  const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+  expect(list).toBeInstanceOf(HTMLDivElement);
+
+  const scrollTop = { value: 0 };
+  const assignedScrollTops: number[] = [];
+  defineLayoutMetrics(
+    list!,
+    { clientHeight: 400, ...listMetrics },
+    { scrollHeight: () => layout.scrollHeight }
+  );
+  backScrollTop(list!, scrollTop, (value) => assignedScrollTops.push(value));
+  return { animationFrames, resizeCallbacks, layout, list, scrollTop, assignedScrollTops };
+}
 
 describe('MessageList auto-scroll', () => {
   it.each([
@@ -96,27 +200,20 @@ describe('MessageList auto-scroll', () => {
           container?.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.style.height ??
             '0'
         );
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
+      mockElementRects((element) => {
         return new DOMRect(
           0,
           0,
           500,
-          this.classList.contains('interactive-list-track')
+          element.classList.contains('interactive-list-track')
             ? contentHeight + reserveHeight()
             : viewportHeight
         );
       });
       setState(storePath('activeSessionId', 'session-1'));
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const list = mountList();
       const track = list.querySelector<HTMLElement>('.interactive-list-track')!;
       Object.defineProperty(list, 'clientHeight', {
         configurable: true,
@@ -142,9 +239,7 @@ describe('MessageList auto-scroll', () => {
         );
       for (let frame = 0; frame < 4; frame++) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       expect(list.scrollTop).toBe(799);
       notifyResize([list]);
@@ -192,33 +287,16 @@ describe('MessageList auto-scroll', () => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
       let height = 1200;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          this.classList.contains('interactive-list-track') ? height : 400
-        );
-      });
+      mockTrackRects(() => height);
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      const list = mountList();
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       expect(list.scrollTop).toBe(800);
       const pointer = (type: string) => {
@@ -249,9 +327,7 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       height += 200;
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(list.scrollTop).toBe(796);
       touch(endEvent);
       expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(false);
@@ -263,9 +339,7 @@ describe('MessageList auto-scroll', () => {
       height += 200;
       for (let frame = 0; frame < 8; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
         expect(list.scrollTop).toBe(500);
       }
       requestMessageListScrollToBottom();
@@ -292,33 +366,16 @@ describe('MessageList auto-scroll', () => {
       let hidden = false;
       vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
       let height = 1200;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          this.classList.contains('interactive-list-track') ? height : 400
-        );
-      });
+      mockTrackRects(() => height);
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      const list = mountList();
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       expect(list.scrollTop).toBe(800);
       if (detached) {
@@ -350,9 +407,7 @@ describe('MessageList auto-scroll', () => {
       height += 300;
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
         expect(list.scrollTop).toBe(detached ? 200 : height - 400);
       }
 
@@ -367,9 +422,7 @@ describe('MessageList auto-scroll', () => {
         startLoading();
         flushSolid();
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
         expect(list.scrollTop).toBeGreaterThanOrEqual(previousTop);
         expect(list.scrollTop).toBeLessThan(height - 400);
         settleBottomFollow(animationFrames, list);
@@ -388,33 +441,16 @@ describe('MessageList auto-scroll', () => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
       let height = 1200;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          this.classList.contains('interactive-list-track') ? height : 400
-        );
-      });
+      mockTrackRects(() => height);
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      const list = mountList();
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       expect(list.scrollTop).toBe(800);
       startLoading();
@@ -465,26 +501,19 @@ describe('MessageList auto-scroll', () => {
       globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
       let height = 1200;
       let viewportHeight = 400;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
+      mockElementRects((element) => {
         return new DOMRect(
           0,
           0,
           500,
-          this.classList.contains('interactive-list-track') ? height : viewportHeight
+          element.classList.contains('interactive-list-track') ? height : viewportHeight
         );
       });
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const list = mountList();
       const track = list.querySelector<HTMLElement>('.interactive-list-track')!;
       Object.defineProperty(list, 'clientHeight', {
         configurable: true,
@@ -499,9 +528,7 @@ describe('MessageList auto-scroll', () => {
         );
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       notifyResize([list]);
       animationFrames.flush();
@@ -554,35 +581,18 @@ describe('MessageList auto-scroll', () => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
       let height = enabled ? 1200 : 2400;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          this.classList.contains('interactive-list-track') ? height : 400
-        );
-      });
+      mockTrackRects(() => height);
       setShowFileDiffs(!enabled);
       flushSolid();
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      const list = mountList();
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       expect(list.scrollTop).toBe(height - 400);
       if (detached) {
@@ -619,9 +629,7 @@ describe('MessageList auto-scroll', () => {
       startLoading();
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       if (detached || interrupted) {
         expect(list.scrollTop).toBe(previousTop);
       } else {
@@ -641,28 +649,14 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     const height = 1200;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return new DOMRect(
-        0,
-        0,
-        500,
-        this.classList.contains('interactive-list-track') ? height : 400
-      );
-    });
+    mockTrackRects(() => height);
     setShowFileDiffs(false);
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-    ]);
+    replaceMessages(promptAndResponse('Prompt', 'Response'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    const list = mountList();
     let releaseDuringMeasurement = false;
     let released = 0;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
@@ -678,9 +672,7 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     expect(list.scrollTop).toBe(800);
     releaseDuringMeasurement = true;
@@ -702,34 +694,17 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let height = 1200;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      return new DOMRect(
-        0,
-        0,
-        500,
-        this.classList.contains('interactive-list-track') ? height : 400
-      );
-    });
+    mockTrackRects(() => height);
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-    ]);
+    replaceMessages(promptAndResponse('Prompt', 'Response'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+    const list = mountList();
+    defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     expect(list.scrollTop).toBe(800);
 
     // ResizeObserver can deliver the hydrated row geometry after the first frame callback.
@@ -747,28 +722,13 @@ describe('MessageList auto-scroll', () => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
       let height = initialHeight;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          this.classList.contains('interactive-list-track') ? height : 400
-        );
-      });
+      mockTrackRects(() => height);
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      const list = mountList();
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
       await Promise.resolve();
       flushSolid();
       for (let frame = 0; frame < 20; frame += 1) animationFrames.flush();
@@ -789,9 +749,7 @@ describe('MessageList auto-scroll', () => {
       startLoading();
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(list.scrollTop).toBeGreaterThanOrEqual(previousBottom);
       expect(list.scrollTop).toBeLessThan(height - 400);
       settleBottomFollow(animationFrames, list);
@@ -812,13 +770,11 @@ describe('MessageList auto-scroll', () => {
       let height = initialHeight;
       let userRowsStartTop = initialHeight;
       let list: HTMLDivElement | null = null;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this.classList.contains('interactive-list-track'))
+      mockElementRects((element) => {
+        if (element.classList.contains('interactive-list-track'))
           return new DOMRect(0, 0, 500, height);
-        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
-        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        if (element.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 400);
+        const messageId = element.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
         const rowTop = messageId?.startsWith('assistant-')
           ? Number(messageId.slice('assistant-'.length)) * rowHeight
           : userRowsStartTop + (messageId === 'user-next' ? 200 : 0);
@@ -838,16 +794,11 @@ describe('MessageList auto-scroll', () => {
         }))
       );
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      list = mountList();
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
       for (let frame = 0; frame < 20; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       if (messageCount >= 50) await measureTranscriptRows(list, animationFrames);
       flushSolid();
@@ -873,9 +824,7 @@ describe('MessageList auto-scroll', () => {
       await Promise.resolve();
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(list.scrollTop).toBe(200);
       const existingBottom = height - 400;
       (() => {
@@ -891,9 +840,7 @@ describe('MessageList auto-scroll', () => {
       await Promise.resolve();
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(list.scrollTop).toBeGreaterThanOrEqual(existingBottom);
       expect(list.scrollTop).toBeLessThan(height - 400);
       settleBottomFollow(animationFrames, list);
@@ -923,9 +870,7 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
         expect(list.scrollTop).toBe(destination);
       }
       animationFrames.restore();
@@ -940,23 +885,15 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
       startLoading();
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const list = mountList();
       let height = 1200;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(list.scrollTop).toBe(800);
 
       const scrollAway = () => {
@@ -975,9 +912,7 @@ describe('MessageList auto-scroll', () => {
         ]);
       })();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(container!.querySelector('[data-msg-id="steer-1"]')).toBeNull();
       expect(list.scrollTop).toBe(detach === 'before steering' ? 400 : 800);
       if (detach === 'before admission') scrollAway();
@@ -1004,9 +939,7 @@ describe('MessageList auto-scroll', () => {
       height = 1600;
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
         expect(list.scrollTop).toBe(detachedTop);
       }
       animationFrames.restore();
@@ -1019,21 +952,13 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-    ]);
+    replaceMessages(promptAndResponse('Prompt', 'Response'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    const list = mountList();
     let height = 1200;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+    defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => height });
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     expect(list.scrollTop).toBe(800);
 
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
@@ -1042,16 +967,12 @@ describe('MessageList auto-scroll', () => {
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     expect(list.scrollTop).toBe(400);
 
     requestMessageListScrollToBottom('user-2');
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     expect(list.scrollTop).toBe(800);
 
     height = 1400;
@@ -1072,17 +993,11 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt', 'Response'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const list = mountList();
       let top = 0;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
+      defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 1200 });
       Object.defineProperty(list, 'scrollTop', {
         configurable: true,
         get: () => top,
@@ -1091,9 +1006,7 @@ describe('MessageList auto-scroll', () => {
         },
       });
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(top).toBe(800);
 
       let diff: HTMLDivElement | undefined;
@@ -1131,9 +1044,7 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
         expect(top).toBe(destination);
       }
       animationFrames.restore();
@@ -1146,8 +1057,7 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     replaceMessages([
       { info: userMessage('user-first'), parts: [textPart('text-first', 'First prompt')] },
@@ -1168,7 +1078,7 @@ describe('MessageList auto-scroll', () => {
     expect(alignmentCallIndex).toBeGreaterThanOrEqual(0);
     const alignmentRafId = requestFrame.mock.results[alignmentCallIndex]?.value;
 
-    cleanup();
+    cleanup!();
     flushSolid();
     cleanup = undefined;
     expect(globalThis.cancelAnimationFrame).toHaveBeenCalledWith(alignmentRafId);
@@ -1182,50 +1092,27 @@ describe('MessageList auto-scroll', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 60 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [
-            {
-              ...textPart(`text-${index}`, `Response ${index}`),
-              messageID: messageId,
-            },
-          ],
-        };
-      })
-    );
+    replaceMessages(assistantRows(60));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 7200 });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => 7200 });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
-    expect(scrollTopValue).toBe(6800);
+    expect(scrollTop.value).toBe(6800);
     const firstRenderedMessageId =
       container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId;
     expect(firstRenderedMessageId).not.toBe('assistant-0');
@@ -1243,47 +1130,24 @@ describe('MessageList auto-scroll', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 60 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [
-            {
-              ...textPart(`text-${index}`, `Response ${index}`),
-              messageID: messageId,
-            },
-          ],
-        };
-      })
-    );
+    replaceMessages(assistantRows(60));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 7200 });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => 7200 });
+    backScrollTop(list!, scrollTop);
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-item-container')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-item-container')) {
         return new DOMRect(0, 0, 500, 120);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 7200);
       }
       return new DOMRect(0, 0, 500, 400);
@@ -1292,9 +1156,7 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -1310,14 +1172,12 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let rowMeasurementCount = 0;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-item-container')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-item-container')) {
         rowMeasurementCount += 1;
-        return new DOMRect(0, 0, 500, this.dataset.msgId === 'assistant-0' ? 0 : 120);
+        return new DOMRect(0, 0, 500, element.dataset.msgId === 'assistant-0' ? 0 : 120);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 7200);
       }
       return new DOMRect(0, 0, 500, 400);
@@ -1325,39 +1185,20 @@ describe('MessageList auto-scroll', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 60 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
+    replaceMessages(assistantRows(60));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     const measurementsAfterBootstrap = rowMeasurementCount;
 
     animationFrames.flush();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     expect(rowMeasurementCount).toBe(measurementsAfterBootstrap);
     animationFrames.restore();
@@ -1368,24 +1209,11 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, 800);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => 800);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages([
       {
@@ -1395,8 +1223,7 @@ describe('MessageList auto-scroll', () => {
     ]);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
@@ -1429,30 +1256,17 @@ describe('MessageList auto-scroll', () => {
       };
       let trackHeight = 1200;
       let viewportHeight = 400;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
+      mockElementRects((element) => {
         return new DOMRect(
           0,
           0,
           500,
-          this.classList.contains('interactive-list-track') ? trackHeight : viewportHeight
+          element.classList.contains('interactive-list-track') ? trackHeight : viewportHeight
         );
       });
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
       flushSolid();
       replaceMessages([
         {
@@ -1465,9 +1279,7 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       setState(storePath('streamingText', trigger === 'part' ? '' : 'Paused'));
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      const list = mountList();
       const track = container!.querySelector<HTMLDivElement>('.interactive-list-track')!;
       Object.defineProperty(list, 'clientHeight', { get: () => viewportHeight });
       Object.defineProperty(list, 'scrollHeight', { get: () => trackHeight });
@@ -1538,19 +1350,13 @@ describe('MessageList auto-scroll', () => {
     async (mutation) => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
-      const baseMessages = Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      });
+      const baseMessages = assistantRows(50);
       const heightById = new Map(
         baseMessages.map((message, index) => [message.info.id, 70 + (index % 4) * 25])
       );
       let layoutIds = baseMessages.map((message) => message.info.id);
       let list: HTMLDivElement | null = null;
-      let scrollTopValue = 0;
+      const scrollTop = { value: 0 };
       const rowTop = (messageId: string) => {
         const index = layoutIds.indexOf(messageId);
         return layoutIds
@@ -1560,18 +1366,21 @@ describe('MessageList auto-scroll', () => {
       const totalHeight = () =>
         layoutIds.reduce((total, id) => total + (heightById.get(id) ?? 0), 0);
 
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this === list || this.classList.contains('interactive-list')) {
+      mockElementRects((element) => {
+        if (element === list || element.classList.contains('interactive-list')) {
           return new DOMRect(0, 0, 500, 400);
         }
-        if (this.classList.contains('interactive-list-track')) {
+        if (element.classList.contains('interactive-list-track')) {
           return new DOMRect(0, 0, 500, totalHeight());
         }
-        const messageId = this.dataset.msgId;
+        const messageId = element.dataset.msgId;
         if (messageId && heightById.has(messageId)) {
-          return new DOMRect(0, rowTop(messageId) - scrollTopValue, 500, heightById.get(messageId));
+          return new DOMRect(
+            0,
+            rowTop(messageId) - scrollTop.value,
+            500,
+            heightById.get(messageId)
+          );
         }
         return new DOMRect(0, 0, 500, 40);
       });
@@ -1580,39 +1389,22 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       replaceMessages(baseMessages);
       flushSolid();
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      list = container?.querySelector('.interactive-list') as HTMLDivElement;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'scrollHeight', {
-        configurable: true,
-        get: totalHeight,
-      });
-      Object.defineProperty(list, 'scrollTop', {
-        configurable: true,
-        get: () => scrollTopValue,
-        set: (value: number) => {
-          scrollTopValue = value;
-        },
-      });
+      list = mountList();
+      defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: totalHeight });
+      backScrollTop(list, scrollTop);
 
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
       const anchorId = 'assistant-25';
       list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
       flushSolid();
-      scrollTopValue = rowTop(anchorId) + 20;
+      scrollTop.value = rowTop(anchorId) + 20;
       list.dispatchEvent(new Event('scroll'));
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -1648,9 +1440,7 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       layoutIds = nextMessages.map((message) => message.info.id);
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -1666,104 +1456,22 @@ describe('MessageList auto-scroll', () => {
   );
 
   it('preserves the visible row for one mixed resize batch above, at, and below it', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-
-    const rowHeights = Array.from({ length: 50 }, () => 100);
-    const rowTop = (index: number) =>
-      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
-    let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
-        return new DOMRect(0, 0, 500, 400);
-      }
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          rowHeights.reduce((total, height) => total + height, 0)
-        );
-      }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-      }
-      return new DOMRect(0, 0, 500, 40);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => rowHeights.reduce((total, height) => total + height, 0),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const { animationFrames, observers, rowHeights, list, scrollTop } =
+      mountResizableAssistantRows();
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 2000;
+    scrollTop.value = 2000;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -1794,7 +1502,7 @@ describe('MessageList auto-scroll', () => {
       fixture<ResizeObserver>(rowObserver)
     );
 
-    expect(scrollTopValue).toBe(2010);
+    expect(scrollTop.value).toBe(2010);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
 
     const belowRow = changedRows[3]!;
@@ -1809,7 +1517,7 @@ describe('MessageList auto-scroll', () => {
       ],
       fixture<ResizeObserver>(rowObserver)
     );
-    expect(scrollTopValue).toBe(2010);
+    expect(scrollTop.value).toBe(2010);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
     animationFrames.restore();
     flushSolid();
@@ -1818,79 +1526,36 @@ describe('MessageList auto-scroll', () => {
   it('ignores delayed resize entries from unmounted rows', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     const rowHeight = 100;
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    const scrollTop = { value: 0 };
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 50 * rowHeight);
       }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, index * rowHeight - scrollTopValue, 500, rowHeight);
+      if (element.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * rowHeight - scrollTop.value, 500, rowHeight);
       }
       return new DOMRect(0, 0, 500, 40);
     });
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
+    replaceMessages(assistantRows(50));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 50 * rowHeight });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 50 * rowHeight });
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const staleRow = container?.querySelector('[data-msg-id="assistant-49"]') as HTMLDivElement;
@@ -1900,13 +1565,11 @@ describe('MessageList auto-scroll', () => {
 
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 0;
+    scrollTop.value = 0;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-49"]')).toBeNull();
@@ -1938,103 +1601,21 @@ describe('MessageList auto-scroll', () => {
   });
 
   it('yields pending width measurement anchoring to direct user scroll input', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-
-    const rowHeights = Array.from({ length: 50 }, () => 100);
-    const rowTop = (index: number) =>
-      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
-    let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
-        return new DOMRect(0, 0, 500, 400);
-      }
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          rowHeights.reduce((total, height) => total + height, 0)
-        );
-      }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-      }
-      return new DOMRect(0, 0, 500, 40);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
+    const { animationFrames, observers, rowHeights, list, scrollTop } = mountResizableAssistantRows(
+      { clientWidth: 500, offsetWidth: 500 }
     );
-    flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => rowHeights.reduce((total, height) => total + height, 0),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 2000;
+    scrollTop.value = 2000;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     vi.advanceTimersByTime(600);
@@ -2062,26 +1643,26 @@ describe('MessageList auto-scroll', () => {
     publishWidthMeasurement(120, 420);
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
     flushSolid();
-    scrollTopValue += 120;
+    scrollTop.value += 120;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
-    const wheelOwnedTop = scrollTopValue;
+    const wheelOwnedTop = scrollTop.value;
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(wheelOwnedTop);
+    expect(scrollTop.value).toBe(wheelOwnedTop);
 
     vi.advanceTimersByTime(600);
     flushSolid();
     publishWidthMeasurement(140, 380);
     list.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'PageDown' }));
     flushSolid();
-    scrollTopValue += 200;
+    scrollTop.value += 200;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
-    const keyboardOwnedTop = scrollTopValue;
+    const keyboardOwnedTop = scrollTop.value;
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(keyboardOwnedTop);
+    expect(scrollTop.value).toBe(keyboardOwnedTop);
 
     vi.advanceTimersByTime(600);
     flushSolid();
@@ -2090,125 +1671,43 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     expect(list.style.overflowAnchor).toBe('none');
     expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(true);
-    scrollTopValue += 100;
+    scrollTop.value += 100;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
     flushSolid();
     expect(list.style.overflowAnchor).toBe('');
     expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(false);
-    const pointerOwnedTop = scrollTopValue;
+    const pointerOwnedTop = scrollTop.value;
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(pointerOwnedTop);
+    expect(scrollTop.value).toBe(pointerOwnedTop);
     animationFrames.restore();
     flushSolid();
   });
 
   it('anchors width reflow to the visible row instead of a stale mounted row', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-
-    const rowHeights = Array.from({ length: 50 }, () => 100);
-    const rowTop = (index: number) =>
-      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
-    let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
-        return new DOMRect(0, 0, 500, 400);
-      }
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(
-          0,
-          0,
-          500,
-          rowHeights.reduce((total, height) => total + height, 0)
-        );
-      }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-      }
-      return new DOMRect(0, 0, 500, 40);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
+    const { animationFrames, observers, rowHeights, list, scrollTop } = mountResizableAssistantRows(
+      { clientWidth: 500, offsetWidth: 500 }
     );
-    flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => rowHeights.reduce((total, height) => total + height, 0),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     // Remember row 19 while it intersects the viewport, then let geometry move before the
     // ResizeObserver width batch. It remains mounted in overscan but row 20 is now first visible.
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 1975;
+    scrollTop.value = 1975;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
-    scrollTopValue = 2010;
+    scrollTop.value = 2010;
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const staleRow = container?.querySelector('[data-msg-id="assistant-19"]') as HTMLDivElement;
@@ -2237,9 +1736,7 @@ describe('MessageList auto-scroll', () => {
       fixture<ResizeObserver>(rowObserver)
     );
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2257,23 +1754,23 @@ describe('MessageList auto-scroll', () => {
     const rowHeight = 300;
     let markerOffset = 140;
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    const scrollTop = { value: 0 };
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, hostWidth, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, hostWidth, 50 * rowHeight);
       }
-      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const row = element.dataset.msgId
+        ? element
+        : (element.closest<HTMLElement>('[data-msg-id]') ?? null);
       const messageId = row?.dataset.msgId;
       if (messageId?.startsWith('assistant-')) {
         const index = Number(messageId.replace('assistant-', ''));
-        const rowTop = index * rowHeight - scrollTopValue;
-        if (this.matches('.rendered-markdown p')) {
-          const offset = this.textContent?.startsWith('Earlier block') ? 20 : markerOffset;
+        const rowTop = index * rowHeight - scrollTop.value;
+        if (element.matches('.rendered-markdown p')) {
+          const offset = element.textContent?.startsWith('Earlier block') ? 20 : markerOffset;
           return new DOMRect(0, rowTop + offset, hostWidth, 20);
         }
         return new DOMRect(0, rowTop, hostWidth, rowHeight);
@@ -2298,58 +1795,42 @@ describe('MessageList auto-scroll', () => {
       })
     );
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'clientWidth', { configurable: true, get: () => hostWidth });
-    Object.defineProperty(list, 'offsetWidth', { configurable: true, get: () => hostWidth });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 50 * rowHeight });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 400, scrollHeight: 50 * rowHeight },
+      { clientWidth: () => hostWidth, offsetWidth: () => hostWidth }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 20 * rowHeight;
+    scrollTop.value = 20 * rowHeight;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     list.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
     flushSolid();
 
-    scrollTopValue = 22 * rowHeight;
+    scrollTop.value = 22 * rowHeight;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2360,7 +1841,7 @@ describe('MessageList auto-scroll', () => {
 
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 22 }));
     flushSolid();
-    scrollTopValue += 22;
+    scrollTop.value += 22;
     expect(marker?.getBoundingClientRect().top).toBe(118);
 
     markerOffset = 162;
@@ -2385,21 +1866,19 @@ describe('MessageList auto-scroll', () => {
     let scrollTopValue = 0;
     vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
     vi.spyOn(window, 'devicePixelRatio', 'get').mockImplementation(() => pixelRatio);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) {
         return new DOMRect(0, listTop, hostWidth, 631);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, listTop - scrollTopValue, hostWidth, 15000);
       }
-      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const row = element.dataset.msgId ? element : element.closest<HTMLElement>('[data-msg-id]');
       const messageId = row?.dataset.msgId;
       if (messageId?.startsWith('assistant-')) {
         const index = Number(messageId.replace('assistant-', ''));
         const top = listTop + index * 300 + reflowOffset - scrollTopValue;
-        if (this.matches('.rendered-markdown p')) {
+        if (element.matches('.rendered-markdown p')) {
           return new DOMRect(0, top + 24, hostWidth, 22.28);
         }
         return new DOMRect(0, top, hostWidth, 300);
@@ -2423,9 +1902,7 @@ describe('MessageList auto-scroll', () => {
       })
     );
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    const list = mountList();
     Object.defineProperties(list, {
       clientHeight: { configurable: true, value: 631 },
       clientWidth: { configurable: true, get: () => hostWidth },
@@ -2441,9 +1918,7 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
@@ -2454,9 +1929,7 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     const paragraph = container!.querySelector<HTMLElement>(
       '[data-msg-id="assistant-20"] .rendered-markdown p'
@@ -2480,9 +1953,7 @@ describe('MessageList auto-scroll', () => {
     expect(paragraph.getBoundingClientRect().top - listTop).toBeCloseTo(24, 4);
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(paragraph.getBoundingClientRect().top - listTop).toBeCloseTo(24, 4);
     }
     animationFrames.restore();
@@ -2497,17 +1968,15 @@ describe('MessageList auto-scroll', () => {
     let offset = 0;
     let reflowOnCorrection = false;
     vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => width);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list')) return new DOMRect(0, 37, width, 631);
-      if (this.classList.contains('interactive-list-track'))
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-list')) return new DOMRect(0, 37, width, 631);
+      if (element.classList.contains('interactive-list-track'))
         return new DOMRect(0, 37 - top, width, 18000);
-      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const row = element.dataset.msgId ? element : element.closest<HTMLElement>('[data-msg-id]');
       const id = row?.dataset.msgId;
       if (id?.startsWith('assistant-')) {
         const y = 37 + Number(id.slice('assistant-'.length)) * 300 + offset - top;
-        return this.matches('.rendered-markdown p')
+        return element.matches('.rendered-markdown p')
           ? new DOMRect(0, y + 24, width, 23)
           : new DOMRect(0, y, width, 300);
       }
@@ -2525,9 +1994,7 @@ describe('MessageList auto-scroll', () => {
       })
     );
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+    const list = mountList();
     Object.defineProperties(list, {
       clientHeight: { configurable: true, value: 631 },
       clientWidth: { configurable: true, get: () => width },
@@ -2547,9 +2014,7 @@ describe('MessageList auto-scroll', () => {
     });
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
@@ -2560,9 +2025,7 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     const paragraph = container!.querySelector<HTMLElement>(
       '[data-msg-id="assistant-20"] .rendered-markdown p'
@@ -2582,28 +2045,7 @@ describe('MessageList auto-scroll', () => {
     vi.useFakeTimers();
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     const rowHeights: number[] = Array.from({ length: 50 }, (_, index) =>
       index % 2 === 0 ? 82 : 65
@@ -2621,15 +2063,13 @@ describe('MessageList auto-scroll', () => {
         .slice(0, index)
         .reduce((total, _height, rowIndex) => total + rowHeight(rowIndex), 0);
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     let listWidth = 486;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, listWidth, 631);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(
           0,
           0,
@@ -2637,13 +2077,15 @@ describe('MessageList auto-scroll', () => {
           rowHeights.reduce((total, _height, index) => total + rowHeight(index), 0)
         );
       }
-      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const row = element.dataset.msgId
+        ? element
+        : (element.closest<HTMLElement>('[data-msg-id]') ?? null);
       const messageId = row?.dataset.msgId;
       if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
         const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
-        const top = rowTop(index) - scrollTopValue;
-        if (this.dataset.assistantRenderKey) return new DOMRect(0, top + 6, listWidth, 22);
-        if (this.classList.contains('user-message-card')) {
+        const top = rowTop(index) - scrollTop.value;
+        if (element.dataset.assistantRenderKey) return new DOMRect(0, top + 6, listWidth, 22);
+        if (element.classList.contains('user-message-card')) {
           return new DOMRect(0, top + 6, listWidth, Math.max(1, rowHeights[index]! - 12));
         }
         return new DOMRect(0, top, listWidth, rowHeight(index));
@@ -2666,36 +2108,28 @@ describe('MessageList auto-scroll', () => {
       })
     );
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = mountList();
     for (const row of container?.querySelectorAll<HTMLElement>('[data-msg-id]') ?? []) {
       const messageId = row.dataset.msgId;
       if (!messageId) continue;
       rowElements.set(Number(messageId.slice(messageId.lastIndexOf('-') + 1)), row);
       flushSolid();
     }
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 631 });
-    Object.defineProperty(list, 'clientWidth', { configurable: true, get: () => listWidth });
-    Object.defineProperty(list, 'offsetWidth', { configurable: true, get: () => listWidth });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => rowHeights.reduce((total, _height, index) => total + rowHeight(index), 0),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 631 },
+      {
+        clientWidth: () => listWidth,
+        offsetWidth: () => listWidth,
+        scrollHeight: () =>
+          rowHeights.reduce((total, _height, index) => total + rowHeight(index), 0),
+      }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     await measureTranscriptRows(list, animationFrames);
@@ -2704,13 +2138,11 @@ describe('MessageList auto-scroll', () => {
     const assistantIndex = 21;
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = rowTop(userIndex) + 14;
+    scrollTop.value = rowTop(userIndex) + 14;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     // Leave the next coalesced refresh pending so local reflow can precede it.
@@ -2756,9 +2188,7 @@ describe('MessageList auto-scroll', () => {
     );
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(assistantRow.getBoundingClientRect().top).toBe(68);
     }
 
@@ -2781,9 +2211,7 @@ describe('MessageList auto-scroll', () => {
     );
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(assistantRow.getBoundingClientRect().top).toBe(68);
     }
     animationFrames.restore();
@@ -2793,41 +2221,18 @@ describe('MessageList auto-scroll', () => {
   it('preserves the wheel destination when width reflow precedes the native scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     const rowHeights = Array.from({ length: 60 }, () => 100);
     const rowTop = (index: number) =>
       rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    const scrollTop = { value: 0 };
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 786);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(
           0,
           0,
@@ -2835,12 +2240,14 @@ describe('MessageList auto-scroll', () => {
           rowHeights.reduce((total, height) => total + height, 0)
         );
       }
-      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const row = element.dataset.msgId
+        ? element
+        : (element.closest<HTMLElement>('[data-msg-id]') ?? null);
       const messageId = row?.dataset.msgId;
       if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
         const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
-        const top = rowTop(index) - scrollTopValue;
-        return this.classList.contains('user-message-card')
+        const top = rowTop(index) - scrollTop.value;
+        return element.classList.contains('user-message-card')
           ? new DOMRect(0, top + 6, 500, 40)
           : new DOMRect(0, top, 500, rowHeights[index]);
       }
@@ -2859,43 +2266,28 @@ describe('MessageList auto-scroll', () => {
       })
     );
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 786 });
-    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => rowHeights.reduce((total, height) => total + height, 0),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 786, clientWidth: 500, offsetWidth: 500 },
+      { scrollHeight: () => rowHeights.reduce((total, height) => total + height, 0) }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 1976;
+    scrollTop.value = 1976;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -2913,7 +2305,7 @@ describe('MessageList auto-scroll', () => {
 
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 22 }));
     flushSolid();
-    scrollTopValue += 22;
+    scrollTop.value += 22;
     expect(anchorCard.getBoundingClientRect().top).toBe(8);
 
     rowHeights[19] = 122;
@@ -2935,9 +2327,7 @@ describe('MessageList auto-scroll', () => {
     // later correction hides.
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       expect(anchorCard.getBoundingClientRect().top).toBe(8);
     }
     await Promise.resolve();
@@ -2955,28 +2345,7 @@ describe('MessageList auto-scroll', () => {
   it('does not reverse an upward wheel for a delayed stale measurement above its user anchor', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     const rowHeights: number[] = Array.from({ length: 60 }, (_, index) =>
       index % 2 === 0 ? 65 : 82
@@ -2984,14 +2353,12 @@ describe('MessageList auto-scroll', () => {
     const rowTop = (index: number) =>
       rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    const scrollTop = { value: 0 };
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 720, 514);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(
           0,
           0,
@@ -2999,12 +2366,14 @@ describe('MessageList auto-scroll', () => {
           rowHeights.reduce((total, height) => total + height, 0)
         );
       }
-      const row = this.dataset.msgId ? this : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+      const row = element.dataset.msgId
+        ? element
+        : (element.closest<HTMLElement>('[data-msg-id]') ?? null);
       const messageId = row?.dataset.msgId;
       if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
         const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
-        const top = rowTop(index) - scrollTopValue;
-        return this.classList.contains('user-message-card')
+        const top = rowTop(index) - scrollTop.value;
+        return element.classList.contains('user-message-card')
           ? new DOMRect(0, top, 720, 40)
           : new DOMRect(0, top, 720, rowHeights[index]);
       }
@@ -3023,40 +2392,25 @@ describe('MessageList auto-scroll', () => {
       })
     );
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 514 });
-    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 720 });
-    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 720 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => rowHeights.reduce((total, height) => total + height, 0),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 514, clientWidth: 720, offsetWidth: 720 },
+      { scrollHeight: () => rowHeights.reduce((total, height) => total + height, 0) }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = rowTop(20) + 23;
+    scrollTop.value = rowTop(20) + 23;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3065,10 +2419,10 @@ describe('MessageList auto-scroll', () => {
     rowHeights[20] = rowHeights[20]! + 2;
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -180 }));
     flushSolid();
-    scrollTopValue -= 180;
+    scrollTop.value -= 180;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
-    const wheelDestination = scrollTopValue;
+    const wheelDestination = scrollTop.value;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchorCard = container?.querySelector(
       '[data-msg-id="user-21"] .user-message-card'
@@ -3099,7 +2453,7 @@ describe('MessageList auto-scroll', () => {
       fixture<ResizeObserver>(rowObserver)
     );
 
-    expect(scrollTopValue).toBe(wheelDestination);
+    expect(scrollTop.value).toBe(wheelDestination);
     expect(anchorCard.getBoundingClientRect().top).toBe(anchorTop);
 
     // A stale remembered position can also outlive an unrelated layout shift. An unchanged
@@ -3114,7 +2468,7 @@ describe('MessageList auto-scroll', () => {
       ],
       fixture<ResizeObserver>(rowObserver)
     );
-    expect(scrollTopValue).toBe(wheelDestination);
+    expect(scrollTop.value).toBe(wheelDestination);
     animationFrames.restore();
     flushSolid();
   });
@@ -3131,21 +2485,19 @@ describe('MessageList auto-scroll', () => {
     });
     const rowIndex = new Map(rowIds.map((id, index) => [id, index]));
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, -scrollTopValue, 500, 6000);
+      if (element.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, -scrollTop.value, 500, 6000);
       }
-      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const row = element.dataset.msgId ? element : element.closest<HTMLElement>('[data-msg-id]');
       const index = row?.dataset.msgId ? rowIndex.get(row.dataset.msgId) : undefined;
       if (index !== undefined) {
-        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        return new DOMRect(0, index * 100 - scrollTop.value, 500, 100);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -3212,46 +2564,31 @@ describe('MessageList auto-scroll', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
     replaceMessages(messagesWith(running));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     // SAFETY: The rendered MessageList fixture always provides its transcript element.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 6000 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
+    defineLayoutMetrics(list, {
+      clientHeight: 400,
+      clientWidth: 500,
+      offsetWidth: 500,
+      scrollHeight: 6000,
     });
+    backScrollTop(list, scrollTop);
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 2000;
+    scrollTop.value = 2000;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await vi.advanceTimersByTimeAsync(500);
     flushSolid();
 
@@ -3259,8 +2596,8 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -64 }));
     flushSolid();
-    scrollTopValue -= 64;
-    const wheelDestination = scrollTopValue;
+    scrollTop.value -= 64;
+    const wheelDestination = scrollTop.value;
     const anchor = container?.querySelector<HTMLElement>(
       '[data-msg-id="user-active"] .user-message-card'
     );
@@ -3268,19 +2605,15 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 12; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
-      expect(scrollTopValue).toBe(wheelDestination);
+      flushFrame(animationFrames);
+      expect(scrollTop.value).toBe(wheelDestination);
       expect(anchor?.getBoundingClientRect().top).toBe(anchorDestination);
     }
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(wheelDestination);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(wheelDestination);
     animationFrames.restore();
     flushSolid();
   });
@@ -3288,28 +2621,7 @@ describe('MessageList auto-scroll', () => {
   it('does not treat a visible row below pre-message chrome as above the viewport', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     const chromeHeight = 48;
     const rowHeights: number[] = Array.from({ length: 50 }, (_, index) => (index === 0 ? 20 : 100));
@@ -3318,22 +2630,20 @@ describe('MessageList auto-scroll', () => {
     const totalHeight = () =>
       chromeHeight + rowHeights.reduce((total, height) => total + height, 0);
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    const scrollTop = { value: 0 };
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, -scrollTopValue, 500, totalHeight());
+      if (element.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, -scrollTop.value, 500, totalHeight());
       }
-      if (this.classList.contains('message-history-banner')) {
-        return new DOMRect(0, 14 - scrollTopValue, 500, 22);
+      if (element.classList.contains('message-history-banner')) {
+        return new DOMRect(0, 14 - scrollTop.value, 500, 22);
       }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+      if (element.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, rowTop(index) - scrollTop.value, 500, rowHeights[index]);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -3341,51 +2651,29 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     setSessionHistoryCursor('session-1', 'cursor-older');
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
+    replaceMessages(assistantRows(50));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = mountList();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const historyBanner = container?.querySelector('.message-history-banner') as HTMLDivElement;
     track.style.paddingTop = '14px';
     historyBanner.style.marginBottom = '12px';
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: totalHeight });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: totalHeight });
+    backScrollTop(list, scrollTop);
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 30;
+    scrollTop.value = 30;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3409,7 +2697,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     expect(firstRow.getBoundingClientRect().top).toBe(topBefore);
-    expect(scrollTopValue).toBe(30);
+    expect(scrollTop.value).toBe(30);
     animationFrames.restore();
     flushSolid();
   });
@@ -3418,20 +2706,18 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 5000);
       }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      if (element.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTop.value, 500, 100);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -3457,34 +2743,20 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 5000 });
+    backScrollTop(list, scrollTop);
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 0;
+    scrollTop.value = 0;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3516,20 +2788,18 @@ describe('MessageList auto-scroll', () => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
       let list: HTMLDivElement | null = null;
-      let scrollTopValue = 0;
+      const scrollTop = { value: 0 };
 
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this === list || this.classList.contains('interactive-list')) {
+      mockElementRects((element) => {
+        if (element === list || element.classList.contains('interactive-list')) {
           return new DOMRect(0, 0, 500, 400);
         }
-        if (this.classList.contains('interactive-list-track')) {
+        if (element.classList.contains('interactive-list-track')) {
           return new DOMRect(0, 0, 500, 5000);
         }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        if (element.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(element.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * 100 - scrollTop.value, 500, 100);
         }
         return new DOMRect(0, 0, 500, 40);
       });
@@ -3552,18 +2822,7 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      setState((draft) => {
-        const current = draft['sessionStatus'];
-        const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-        if (
-          incoming === null ||
-          incoming === undefined ||
-          current === null ||
-          current === undefined
-        )
-          draft['sessionStatus'] = incoming;
-        else reconcile(incoming)(current);
-      });
+      setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
       flushSolid();
       replaceMessages(
         Array.from({ length: 50 }, (_, index) => {
@@ -3582,36 +2841,23 @@ describe('MessageList auto-scroll', () => {
       for (let mount = 0; mount < (reopened ? 2 : 1); mount += 1) {
         if (mount > 0) cleanup?.();
         flushSolid();
-        cleanup = render(() => MessageList(), container!);
-        flushSolid();
-        list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
-        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-        Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
-        Object.defineProperty(list, 'scrollTop', {
-          configurable: true,
-          get: () => scrollTopValue,
-          set: (value: number) => {
-            scrollTopValue = value;
-          },
-        });
+        list = mountList();
+        defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 5000 });
+        backScrollTop(list, scrollTop);
         for (let frame = 0; frame < 4; frame += 1) {
           await Promise.resolve();
-          flushSolid();
-          animationFrames.flush();
-          flushSolid();
+          flushFrame(animationFrames);
         }
         if (mount === 0) await measureTranscriptRows(list, animationFrames);
         flushSolid();
       }
       list!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
       flushSolid();
-      scrollTopValue = 4000;
+      scrollTop.value = 4000;
       list!.dispatchEvent(new Event('scroll'));
       flushSolid();
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
       await Promise.resolve();
       flushSolid();
 
@@ -3644,15 +2890,13 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     const rowHeights = Array.from({ length: 50 }, () => 100);
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(
           0,
           0,
@@ -3660,8 +2904,8 @@ describe('MessageList auto-scroll', () => {
           rowHeights.reduce((sum, height) => sum + height, 0)
         );
       }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+      if (element.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
         const mountedIndexes = [
           ...(container?.querySelectorAll<HTMLElement>('[data-msg-id^="assistant-"]') || []),
         ].map((row) => Number(row.dataset.msgId!.replace('assistant-', '')));
@@ -3674,7 +2918,7 @@ describe('MessageList auto-scroll', () => {
           .reduce((sum, height) => sum + height, 0);
         return new DOMRect(
           0,
-          topPad + mountedHeightBefore - scrollTopValue,
+          topPad + mountedHeightBefore - scrollTop.value,
           500,
           rowHeights[index]
         );
@@ -3703,40 +2947,27 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => rowHeights.reduce((sum, height) => sum + height, 0),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 400 },
+      { scrollHeight: () => rowHeights.reduce((sum, height) => sum + height, 0) }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 2000;
+    scrollTop.value = 2000;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -3752,9 +2983,7 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     expect(anchor.isConnected).toBe(true);
@@ -3767,7 +2996,7 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     let clientHeight = 100;
     let thinkingVisible = true;
     let hostWidth = 500;
@@ -3781,18 +3010,16 @@ describe('MessageList auto-scroll', () => {
       return thinkingVisible ? 76 : 65;
     };
     const rowTop = (index: number) => {
-      let top = -scrollTopValue;
+      let top = -scrollTop.value;
       for (let rowIndex = 0; rowIndex < index; rowIndex += 1) top += rowHeight(rowIndex);
       return top;
     };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, hostWidth, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(
           0,
           0,
@@ -3803,10 +3030,10 @@ describe('MessageList auto-scroll', () => {
           )
         );
       }
-      const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
+      const row = element.dataset.msgId ? element : element.closest<HTMLElement>('[data-msg-id]');
       const messageId = row?.dataset.msgId;
-      if (collectingAnchorReads && this.tagName === 'P') {
-        anchorReads.set(this, (anchorReads.get(this) ?? 0) + 1);
+      if (collectingAnchorReads && element.tagName === 'P') {
+        anchorReads.set(element, (anchorReads.get(element) ?? 0) + 1);
       }
       if (!row || !messageId) return new DOMRect(0, 0, hostWidth, 40);
       const index =
@@ -3816,11 +3043,11 @@ describe('MessageList auto-scroll', () => {
             ? 21
             : Number(messageId.replace('assistant-', ''));
       const top = rowTop(index);
-      if (this === row) return new DOMRect(0, top, hostWidth, rowHeight(index));
-      if (this.classList.contains('user-message-card')) {
+      if (element === row) return new DOMRect(0, top, hostWidth, rowHeight(index));
+      if (element.classList.contains('user-message-card')) {
         return new DOMRect(0, top + 6, hostWidth, 69);
       }
-      if (this.tagName === 'P') return new DOMRect(0, top + paragraphOffset, hostWidth, 39);
+      if (element.tagName === 'P') return new DOMRect(0, top + paragraphOffset, hostWidth, 39);
       return new DOMRect(0, top, hostWidth, rowHeight(index));
     });
 
@@ -3854,10 +3081,7 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = mountList();
     Object.defineProperty(list, 'clientHeight', {
       configurable: true,
       get: () => clientHeight,
@@ -3878,32 +3102,22 @@ describe('MessageList auto-scroll', () => {
           0
         ),
     });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    backScrollTop(list, scrollTop);
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 1998;
+    scrollTop.value = 1998;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     const anchor = container?.querySelector<HTMLElement>(
@@ -3934,9 +3148,7 @@ describe('MessageList auto-scroll', () => {
     }
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     expect(anchor?.getBoundingClientRect().top).toBe(84);
@@ -3948,21 +3160,19 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 4900);
       }
-      if (this.dataset.msgId) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+      if (element.dataset.msgId) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
         const height = index === 0 ? 0 : 100;
-        return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+        return new DOMRect(0, index * 100 - scrollTop.value, 500, height);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -3982,25 +3192,13 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 4900 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 4900 });
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     expect(
       container?.querySelector('.interactive-list-track')?.classList.contains('virtualized')
@@ -4010,13 +3208,11 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 3000;
+    scrollTop.value = 3000;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4030,70 +3226,29 @@ describe('MessageList auto-scroll', () => {
   it('retains the prior height when a rendered nonempty row reports a transient zero', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    const scrollTop = { value: 0 };
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, 5000);
       }
-      if (this.dataset.msgId) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      if (element.dataset.msgId) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTop.value, 500, 100);
       }
       return new DOMRect(0, 0, 500, 40);
     });
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
+    replaceMessages(assistantRows(50));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(list, { clientHeight: 400, scrollHeight: 5000 });
+    backScrollTop(list, scrollTop);
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
@@ -4102,9 +3257,7 @@ describe('MessageList auto-scroll', () => {
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const firstRow = container?.querySelector('[data-msg-id="assistant-0"]') as HTMLDivElement;
     const rowObserver = observers.find((observer) => observer.targets.has(firstRow));
@@ -4123,19 +3276,15 @@ describe('MessageList auto-scroll', () => {
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     flushSolid();
-    scrollTopValue = 3000;
+    scrollTop.value = 3000;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4150,28 +3299,26 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
+    mockElementRects((element) => {
       // Fake geometry reads the store like a measurement: untracked.
       const zeroRowHasContent = untrack(
         () =>
           state.messages.find((message) => message.info.id === 'assistant-30')?.parts.length !== 0
       );
       const trackHeight = zeroRowHasContent ? 5000 : 4900;
-      if (this === list || this.classList.contains('interactive-list')) {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, trackHeight);
       }
-      if (this.dataset.msgId) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+      if (element.dataset.msgId) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
         const height = index === 30 && !zeroRowHasContent ? 0 : 100;
         const documentTop = index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
-        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+        return new DOMRect(0, documentTop - scrollTop.value, 500, height);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -4191,10 +3338,7 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = mountList();
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
       configurable: true,
@@ -4203,31 +3347,21 @@ describe('MessageList auto-scroll', () => {
           ? 5000
           : 4900,
     });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
     flushSolid();
-    scrollTopValue = 4450;
+    scrollTop.value = 4450;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
@@ -4256,9 +3390,7 @@ describe('MessageList auto-scroll', () => {
     });
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(emptyRowRemounted).toBe(false);
@@ -4269,9 +3401,7 @@ describe('MessageList auto-scroll', () => {
     });
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4285,24 +3415,22 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
+    mockElementRects((element) => {
       const hasModelChange = hasAssistantModelChangeBetween('assistant-29', 'assistant-30');
       const trackHeight = hasModelChange ? 5000 : 4900;
-      if (this === list || this.classList.contains('interactive-list')) {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, trackHeight);
       }
-      if (this.dataset.msgId) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+      if (element.dataset.msgId) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
         const height = index === 30 && !hasModelChange ? 0 : 100;
         const documentTop = index <= 30 ? index * 100 : index * 100 - (hasModelChange ? 0 : 100);
-        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+        return new DOMRect(0, documentTop - scrollTop.value, 500, height);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -4322,40 +3450,30 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => (hasAssistantModelChangeBetween('assistant-29', 'assistant-30') ? 5000 : 4900),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 400 },
+      {
+        scrollHeight: () =>
+          hasAssistantModelChangeBetween('assistant-29', 'assistant-30') ? 5000 : 4900,
+      }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
     flushSolid();
-    scrollTopValue = 4450;
+    scrollTop.value = 4450;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
@@ -4375,9 +3493,7 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4392,11 +3508,9 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
+    mockElementRects((element) => {
       // Fake geometry reads the store like a measurement: untracked.
       const zeroRowHasContent = untrack(
         () =>
@@ -4407,17 +3521,17 @@ describe('MessageList auto-scroll', () => {
             )
       );
       const trackHeight = zeroRowHasContent ? 5000 : 4900;
-      if (this === list || this.classList.contains('interactive-list')) {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, trackHeight);
       }
-      if (this.dataset.msgId) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+      if (element.dataset.msgId) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
         const height = index === 30 && !zeroRowHasContent ? 0 : 100;
         const documentTop = index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
-        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+        return new DOMRect(0, documentTop - scrollTop.value, 500, height);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -4439,10 +3553,7 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = mountList();
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
       configurable: true,
@@ -4453,31 +3564,21 @@ describe('MessageList auto-scroll', () => {
           ? 5000
           : 4900,
     });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
     flushSolid();
-    scrollTopValue = 4450;
+    scrollTop.value = 4450;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
@@ -4488,9 +3589,7 @@ describe('MessageList auto-scroll', () => {
     });
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -4505,7 +3604,7 @@ describe('MessageList auto-scroll', () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     let diffRequested = false;
     vi.spyOn(client.session, 'diff').mockImplementation(async () => {
       diffRequested = true;
@@ -4519,20 +3618,18 @@ describe('MessageList auto-scroll', () => {
         },
       ];
     });
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, diffRequested ? 5000 : 4900);
       }
-      if (this.dataset.msgId) {
-        const index = Number(this.dataset.msgId.replace('message-', ''));
+      if (element.dataset.msgId) {
+        const index = Number(element.dataset.msgId.replace('message-', ''));
         const height = index === 30 && !diffRequested ? 0 : 100;
         const documentTop = index <= 30 ? index * 100 : index * 100 - (diffRequested ? 0 : 100);
-        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+        return new DOMRect(0, documentTop - scrollTop.value, 500, height);
       }
       return new DOMRect(0, 0, 500, 40);
     });
@@ -4555,40 +3652,27 @@ describe('MessageList auto-scroll', () => {
     );
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => (diffRequested ? 5000 : 4900),
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 400 },
+      { scrollHeight: () => (diffRequested ? 5000 : 4900) }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
     flushSolid();
-    scrollTopValue = 4450;
+    scrollTop.value = 4450;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
     expect(container?.querySelector('[data-msg-id="message-30"]')).toBeNull();
@@ -4607,9 +3691,7 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
 
     expect(client.session.diff).toHaveBeenCalledWith('session-1', 'message-30', {
@@ -4623,37 +3705,14 @@ describe('MessageList auto-scroll', () => {
   });
 
   it('cancels pending width work when async initial messages arrive or the list unmounts', async () => {
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     let listWidth = 500;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-item-container')) {
+    mockElementRects((element) => {
+      if (element.classList.contains('interactive-item-container')) {
         return new DOMRect(0, 0, listWidth, 120);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, listWidth, 6000);
       }
       return new DOMRect(0, 0, listWidth, 500);
@@ -4661,8 +3720,7 @@ describe('MessageList auto-scroll', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     const list = container!.querySelector('.interactive-list')!;
     const track = container!.querySelector('.interactive-list-track')!;
     const layoutObserver = observers.find(
@@ -4673,15 +3731,7 @@ describe('MessageList auto-scroll', () => {
     listWidth = 420;
     // SAFETY: The fixture provides the unknown fields read by this statement.
     layoutObserver!.callback([], fixture<ResizeObserver>(layoutObserver));
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
+    replaceMessages(assistantRows(50));
     flushSolid();
     await Promise.resolve();
     flushSolid();
@@ -4699,7 +3749,7 @@ describe('MessageList auto-scroll', () => {
     // SAFETY: The fixture provides the unknown fields read by this statement.
     layoutObserver!.callback([], fixture<ResizeObserver>(layoutObserver));
     expect(vi.getTimerCount()).toBeGreaterThan(timersBeforeResize);
-    cleanup();
+    cleanup!();
     flushSolid();
     cleanup = undefined;
     expect(vi.getTimerCount()).toBeLessThanOrEqual(timersBeforeResize);
@@ -4714,56 +3764,30 @@ describe('MessageList auto-scroll', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 60 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [
-            {
-              ...textPart(`text-${index}`, `Response ${index}`),
-              messageID: messageId,
-            },
-          ],
-        };
-      })
-    );
+    replaceMessages(assistantRows(60));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     let scrollHeightValue = 7200;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
-    expect(scrollTopValue).toBe(6800);
+    expect(scrollTop.value).toBe(6800);
 
-    scrollTopValue = 6800;
+    scrollTop.value = 6800;
     scrollHeightValue = 7440;
     replaceMessages(
       Array.from({ length: 60 }, (_, index) => {
@@ -4787,15 +3811,13 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(7040);
+    expect(scrollTop.value).toBe(7040);
     animationFrames.restore();
     flushSolid();
   });
@@ -4805,50 +3827,29 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-    ]);
+    replaceMessages(conversationTurns(1));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
     scrollHeightValue = 1700;
     trackHeight = 1200;
@@ -4857,7 +3858,7 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1300);
+    expect(scrollTop.value).toBe(1300);
     animationFrames.restore();
     flushSolid();
   });
@@ -4867,50 +3868,29 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-    ]);
+    replaceMessages(conversationTurns(1));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 80, bubbles: true }));
     flushSolid();
@@ -4921,7 +3901,7 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1200);
+    expect(scrollTop.value).toBe(1200);
     animationFrames.restore();
     flushSolid();
   });
@@ -4931,47 +3911,26 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-    ]);
+    replaceMessages(conversationTurns(1));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
     trackHeight = 1600;
     scrollHeightValue = 1600;
@@ -4986,7 +3945,7 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1200);
+    expect(scrollTop.value).toBe(1200);
     animationFrames.flush();
     flushSolid();
     animationFrames.restore();
@@ -4998,14 +3957,10 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
+    replaceMessages(promptAndResponse('Prompt 1', 'Initial response'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     await Promise.resolve();
     flushSolid();
 
@@ -5013,16 +3968,9 @@ describe('MessageList auto-scroll', () => {
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1200 });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => 1200 });
+    backScrollTop(list!, scrollTop);
 
     Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1700 });
     replaceMessages([
@@ -5041,92 +3989,33 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1300);
+    expect(scrollTop.value).toBe(1300);
     animationFrames.restore();
     flushSolid();
   });
 
   it('eases bottom scroll to the new destination when rendered content resizes', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    const { animationFrames, resizeCallbacks, list, scrollTop, layout } = mountFollowedTurn();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
-
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     // Finish initial positioning before testing smooth follow for later content growth.
     animationFrames.flush();
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
-    trackHeight = 1700;
-    scrollHeightValue = 1700;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1700;
+    layout.scrollHeight = 1700;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush(performance.now() + 16);
     flushSolid();
 
-    expect(scrollTopValue).toBeGreaterThan(800);
-    expect(scrollTopValue).toBeLessThan(1300);
+    expect(scrollTop.value).toBeGreaterThan(800);
+    expect(scrollTop.value).toBeLessThan(1300);
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1300);
+    expect(scrollTop.value).toBe(1300);
     animationFrames.restore();
     flushSolid();
   });
@@ -5136,14 +4025,7 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
@@ -5152,31 +4034,20 @@ describe('MessageList auto-scroll', () => {
       { info: assistantMessage('assistant-1'), parts: [toolPart('tool-1', 'assistant-1')] },
     ]);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
     animationFrames.flush();
     flushSolid();
 
@@ -5187,7 +4058,7 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1300);
+    expect(scrollTop.value).toBe(1300);
     animationFrames.restore();
     flushSolid();
   });
@@ -5197,14 +4068,7 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     const userEntry = {
       info: userMessage('user-1'),
@@ -5224,33 +4088,20 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     setState(storePath('streamingText', 'Initial response'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     setMessagesIncremental([
       userEntry,
@@ -5278,7 +4129,7 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1400);
+    expect(scrollTop.value).toBe(1400);
     animationFrames.restore();
     flushSolid();
   });
@@ -5288,57 +4139,28 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    setState((draft) => {
-      const current = draft['sessionStatus'];
-      const incoming = { 'session-1': { type: 'busy' } } satisfies typeof current;
-      if (incoming === null || incoming === undefined || current === null || current === undefined)
-        draft['sessionStatus'] = incoming;
-      else reconcile(incoming)(current);
-    });
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Explain the result')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Committed response')] },
-    ]);
+    replaceMessages(promptAndResponse('Explain the result', 'Committed response'));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     trackHeight = 1800;
     scrollHeightValue = 1800;
@@ -5347,7 +4169,7 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1400);
+    expect(scrollTop.value).toBe(1400);
     animationFrames.restore();
     flushSolid();
   });
@@ -5357,60 +4179,35 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Explain the result')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Final response')] },
-    ]);
+    replaceMessages(promptAndResponse('Explain the result', 'Final response'));
     flushSolid();
     startLoading(1);
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const scrollTop = { value: 0 };
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop);
 
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
+    flushFrame(animationFrames);
     animationFrames.flush();
     flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
     stopLoading();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     trackHeight = 1800;
     scrollHeightValue = 1800;
@@ -5419,7 +4216,7 @@ describe('MessageList auto-scroll', () => {
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1400);
+    expect(scrollTop.value).toBe(1400);
     animationFrames.restore();
     flushSolid();
   });
@@ -5427,37 +4224,22 @@ describe('MessageList auto-scroll', () => {
   it('synchronizes a browser bottom clamp when grouped activity shrinks during follow', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
+    const resizeCallbacks = captureResizeObserverCallbacks();
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     let scrollHeightValue = 5000;
     let trackHeight = 5000;
 
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, trackHeight);
       }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      if (element.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTop.value, 500, 100);
       }
       return new DOMRect(0, 0, 500, 400);
     });
@@ -5477,31 +4259,15 @@ describe('MessageList auto-scroll', () => {
       })
     );
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    list = mountList();
+    defineLayoutMetrics(list, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
-    expect(scrollTopValue).toBe(4600);
+    expect(scrollTop.value).toBe(4600);
     for (const callback of resizeCallbacks) {
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([fixture<ResizeObserverEntry>({ target: list })], {} as ResizeObserver);
@@ -5516,20 +4282,15 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(5100);
+    expect(scrollTop.value).toBe(5100);
 
     trackHeight = 1000;
     scrollHeightValue = 1000;
     // Chrome clamps to the new bottom during layout, before it necessarily dispatches scroll.
-    scrollTopValue = 600;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    scrollTop.value = 600;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     await Promise.resolve();
     flushSolid();
 
@@ -5541,308 +4302,120 @@ describe('MessageList auto-scroll', () => {
   });
 
   it('does not auto-scroll again when the track bounces back to an already-followed height', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    const { animationFrames, resizeCallbacks, list, scrollTop, assignedScrollTops, layout } =
+      mountFollowedTurn();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
-
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
-    trackHeight = 1700;
-    scrollHeightValue = 1700;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1700;
+    layout.scrollHeight = 1700;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1300);
+    expect(scrollTop.value).toBe(1300);
 
     const assignmentCountAfterGrowth = assignedScrollTops.length;
 
-    trackHeight = 1688;
-    scrollHeightValue = 1688;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1688;
+    layout.scrollHeight = 1688;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterGrowth);
 
-    trackHeight = 1700;
-    scrollHeightValue = 1700;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1700;
+    layout.scrollHeight = 1700;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterGrowth);
-    expect(scrollTopValue).toBe(1300);
+    expect(scrollTop.value).toBe(1300);
     animationFrames.restore();
     flushSolid();
   });
 
   it('keeps following when non-scroll pointer input precedes a layout clamp', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'clientWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
+    const { animationFrames, resizeCallbacks, list, scrollTop, layout } = mountFollowedTurn({
+      clientWidth: 500,
+      offsetWidth: 500,
     });
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
-    scrollHeightValue = 400;
+    layout.scrollHeight = 400;
     list?.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 }));
     flushSolid();
-    scrollHeightValue = 1200;
+    layout.scrollHeight = 1200;
     list?.firstElementChild?.dispatchEvent(
       new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 })
     );
     flushSolid();
     // The browser can clamp scrollTop while content briefly shrinks, then deliver the scroll
     // event only after the old bottom target has returned.
-    scrollTopValue = 760;
+    scrollTop.value = 760;
     list?.dispatchEvent(new Event('scroll'));
     flushSolid();
 
-    trackHeight = 1400;
-    scrollHeightValue = 1400;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1400;
+    layout.scrollHeight = 1400;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1000);
+    expect(scrollTop.value).toBe(1000);
     animationFrames.restore();
     flushSolid();
   });
 
   it('yields bottom follow before a delayed in-list Shift+Space scroll event', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const { animationFrames, resizeCallbacks, list, scrollTop, layout } = mountFollowedTurn();
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     const externalButton = document.createElement('button');
     container?.appendChild(externalButton);
     externalButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
     flushSolid();
-    scrollTopValue = 500;
+    scrollTop.value = 500;
     list?.dispatchEvent(new Event('scroll'));
     flushSolid();
 
-    trackHeight = 1400;
-    scrollHeightValue = 1400;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1400;
+    layout.scrollHeight = 1400;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1000);
+    expect(scrollTop.value).toBe(1000);
 
     list?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', shiftKey: true, bubbles: true }));
     flushSolid();
-    const keyboardOwnedTop = scrollTopValue;
+    const keyboardOwnedTop = scrollTop.value;
 
-    trackHeight = 1600;
-    scrollHeightValue = 1600;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1600;
+    layout.scrollHeight = 1600;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
-    expect(scrollTopValue).toBe(keyboardOwnedTop);
+    expect(scrollTop.value).toBe(keyboardOwnedTop);
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(keyboardOwnedTop);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(keyboardOwnedTop);
     animationFrames.restore();
     flushSolid();
   });
@@ -5851,166 +4424,48 @@ describe('MessageList auto-scroll', () => {
     { name: 'classic', clientWidth: 484 },
     { name: 'overlay', clientWidth: 500 },
   ])('stops following after $name scrollbar pointer-originated upward scrolling', async (args) => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'clientWidth', {
-      configurable: true,
-      value: args.clientWidth,
-    });
-    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 500 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
+    const { animationFrames, resizeCallbacks, list, scrollTop, layout } = mountFollowedTurn({
+      clientWidth: args.clientWidth,
+      offsetWidth: 500,
     });
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     list?.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 }));
     flushSolid();
-    scrollTopValue = 500;
+    scrollTop.value = 500;
     list?.dispatchEvent(new Event('scroll'));
     flushSolid();
 
-    trackHeight = 1400;
-    scrollHeightValue = 1400;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1400;
+    layout.scrollHeight = 1400;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
-    expect(scrollTopValue).toBe(500);
+    expect(scrollTop.value).toBe(500);
     animationFrames.restore();
     flushSolid();
   });
 
   it('resumes after nested diff input without outer movement but not after diff keyboard scrolling', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    const { animationFrames, resizeCallbacks, list, scrollTop, layout } = mountFollowedTurn();
 
     const diffViewport = document.createElement('div');
     diffViewport.className = 'diff-view-lines';
     diffViewport.tabIndex = 0;
     diffViewport.style.overflowY = 'auto';
-    Object.defineProperty(diffViewport, 'clientHeight', { configurable: true, value: 100 });
-    Object.defineProperty(diffViewport, 'scrollHeight', { configurable: true, value: 400 });
+    defineLayoutMetrics(diffViewport, { clientHeight: 100, scrollHeight: 400 });
     diffViewport.scrollTop = 120;
     list?.appendChild(diffViewport);
     const externalButton = document.createElement('button');
     container?.appendChild(externalButton);
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     diffViewport.focus();
     flushSolid();
@@ -6022,27 +4477,22 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
-    trackHeight = 1400;
-    scrollHeightValue = 1400;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1400;
+    layout.scrollHeight = 1400;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(1000);
+    expect(scrollTop.value).toBe(1000);
 
     diffViewport.focus();
     flushSolid();
     diffViewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
     flushSolid();
-    scrollTopValue = 700;
+    scrollTop.value = 700;
     list?.dispatchEvent(new Event('scroll'));
     flushSolid();
     externalButton.focus();
@@ -6052,190 +4502,65 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     flushSolid();
 
-    trackHeight = 1600;
-    scrollHeightValue = 1600;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1600;
+    layout.scrollHeight = 1600;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
-    expect(scrollTopValue).toBe(700);
+    expect(scrollTop.value).toBe(700);
     animationFrames.restore();
     flushSolid();
   });
 
   it('does not rewrite scrollTop when resize leaves the list already at bottom', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    const { animationFrames, resizeCallbacks, scrollTop, assignedScrollTops, layout } =
+      mountFollowedTurn();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
-
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     const assignmentCountAfterInitialScroll = assignedScrollTops.length;
-    trackHeight = 1700;
-    scrollHeightValue = 1700;
-    scrollTopValue = 1300;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1700;
+    layout.scrollHeight = 1700;
+    scrollTop.value = 1300;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterInitialScroll);
-    expect(scrollTopValue).toBe(1300);
+    expect(scrollTop.value).toBe(1300);
     animationFrames.restore();
     flushSolid();
   });
 
   it('does not snap back to bottom after a small upward scroll near the threshold', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    const { animationFrames, resizeCallbacks, list, scrollTop, assignedScrollTops, layout } =
+      mountFollowedTurn();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
-
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
     flushSolid();
-    scrollTopValue = 760;
+    scrollTop.value = 760;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     const assignmentCountAfterUserScroll = assignedScrollTops.length;
 
-    trackHeight = 1240;
-    scrollHeightValue = 1240;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1240;
+    layout.scrollHeight = 1240;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
-    expect(scrollTopValue).toBe(760);
+    expect(scrollTop.value).toBe(760);
     animationFrames.restore();
     flushSolid();
   });
@@ -6246,260 +4571,112 @@ describe('MessageList auto-scroll', () => {
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
+    replaceMessages(promptAndResponse('Prompt 1', 'Initial response'));
     flushSolid();
     startLoading(1);
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1200 });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => 1200 });
+    backScrollTop(list!, scrollTop, (value) => assignedScrollTops.push(value));
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
     flushSolid();
-    scrollTopValue = 760;
+    scrollTop.value = 760;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     const assignmentCountAfterUserScroll = assignedScrollTops.length;
 
     stopLoading();
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterUserScroll);
-    expect(scrollTopValue).toBe(760);
+    expect(scrollTop.value).toBe(760);
     animationFrames.restore();
     flushSolid();
   });
 
   it('keeps auto-scroll enabled when the bottom target shifts before a near-bottom scroll event', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    const { animationFrames, resizeCallbacks, list, scrollTop, assignedScrollTops, layout } =
+      mountFollowedTurn();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
-
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
-    scrollHeightValue = 1240;
-    scrollTopValue = 800;
+    layout.scrollHeight = 1240;
+    scrollTop.value = 800;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
-    trackHeight = 1240;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1240;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
     expect(assignedScrollTops.at(-1)).toBe(840);
-    expect(scrollTopValue).toBe(840);
+    expect(scrollTop.value).toBe(840);
     animationFrames.restore();
     flushSolid();
   });
 
   it('releases the send-triggered follow lock after bottom scroll stabilizes', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-    flushSolid();
-
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    const { animationFrames, resizeCallbacks, list, scrollTop, assignedScrollTops, layout } =
+      mountFollowedTurn();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
-
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
     flushSolid();
-    scrollTopValue = 400;
+    scrollTop.value = 400;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
     animationFrames.flush();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     animationFrames.flush();
     flushSolid();
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
     flushSolid();
-    scrollTopValue = 760;
+    scrollTop.value = 760;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
-    trackHeight = 1240;
-    scrollHeightValue = 1240;
-    for (const callback of resizeCallbacks) {
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      callback([], {} as ResizeObserver);
-    }
+    layout.trackHeight = 1240;
+    layout.scrollHeight = 1240;
+    notifyResizeObservers(resizeCallbacks);
     animationFrames.flush();
     flushSolid();
 
     expect(assignedScrollTops.at(-1)).toBe(800);
-    expect(scrollTopValue).toBe(760);
+    expect(scrollTop.value).toBe(760);
     animationFrames.restore();
     flushSolid();
   });
@@ -6509,32 +4686,24 @@ describe('MessageList auto-scroll', () => {
     async (input) => {
       const animationFrames = installQueuedAnimationFrameMocks();
       flushSolid();
-      const baseMessages = Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      });
+      const baseMessages = assistantRows(50);
       let list: HTMLDivElement | null = null;
-      let scrollTopValue = 0;
+      const scrollTop = { value: 0 };
       let scrollHeightValue = 5000;
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this === list || this.classList.contains('interactive-list')) {
+      mockElementRects((element) => {
+        if (element === list || element.classList.contains('interactive-list')) {
           return new DOMRect(0, 0, 500, 400);
         }
-        if (this.classList.contains('interactive-list-track')) {
+        if (element.classList.contains('interactive-list-track')) {
           return new DOMRect(0, 0, 500, scrollHeightValue);
         }
-        if (this.dataset.msgId) {
+        if (element.dataset.msgId) {
           const index =
-            this.dataset.msgId === 'assistant-appended'
+            element.dataset.msgId === 'assistant-appended'
               ? 50
-              : Number(this.dataset.msgId.replace('assistant-', ''));
+              : Number(element.dataset.msgId.replace('assistant-', ''));
           const height = index === 50 ? 200 : 100;
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+          return new DOMRect(0, index * 100 - scrollTop.value, 500, height);
         }
         return new DOMRect(0, 0, 500, 40);
       });
@@ -6543,31 +4712,18 @@ describe('MessageList auto-scroll', () => {
       replaceMessages(baseMessages);
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
-      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-      list = container?.querySelector('.interactive-list') as HTMLDivElement;
-      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
-      Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
-      Object.defineProperty(list, 'scrollHeight', {
-        configurable: true,
-        get: () => scrollHeightValue,
-      });
-      Object.defineProperty(list, 'scrollTop', {
-        configurable: true,
-        get: () => scrollTopValue,
-        set: (value: number) => {
-          scrollTopValue = value;
-        },
-      });
+      list = mountList();
+      defineLayoutMetrics(
+        list,
+        { clientHeight: 400, clientWidth: 500, offsetWidth: 500 },
+        { scrollHeight: () => scrollHeightValue }
+      );
+      backScrollTop(list, scrollTop);
       for (let frame = 0; frame < 4; frame += 1) {
         await Promise.resolve();
-        flushSolid();
-        animationFrames.flush();
-        flushSolid();
+        flushFrame(animationFrames);
       }
-      expect(scrollTopValue).toBe(4600);
+      expect(scrollTop.value).toBe(4600);
 
       if (input === 'scrollbar held before append') {
         list.dispatchEvent(
@@ -6604,32 +4760,32 @@ describe('MessageList auto-scroll', () => {
           );
           flushSolid();
         } else {
-          expect(scrollTopValue).toBe(4600);
+          expect(scrollTop.value).toBe(4600);
         }
         flushSolid();
-        const grabbedTop = scrollTopValue;
+        const grabbedTop = scrollTop.value;
         animationFrames.flush(60);
         flushSolid();
-        expect(scrollTopValue).toBe(grabbedTop);
-        scrollTopValue -= 100;
-        const userOwnedTop = scrollTopValue;
+        expect(scrollTop.value).toBe(grabbedTop);
+        scrollTop.value -= 100;
+        const userOwnedTop = scrollTop.value;
         list.dispatchEvent(new Event('scroll'));
         flushSolid();
         document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
         flushSolid();
         animationFrames.flush(90);
         flushSolid();
-        expect(scrollTopValue).toBe(userOwnedTop);
+        expect(scrollTop.value).toBe(userOwnedTop);
       } else {
         list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
         flushSolid();
-        scrollTopValue += 100;
-        const userOwnedTop = scrollTopValue;
+        scrollTop.value += 100;
+        const userOwnedTop = scrollTop.value;
         list.dispatchEvent(new Event('scroll'));
         flushSolid();
         animationFrames.flush(60);
         flushSolid();
-        expect(scrollTopValue).toBeGreaterThanOrEqual(userOwnedTop);
+        expect(scrollTop.value).toBeGreaterThanOrEqual(userOwnedTop);
       }
       flushSolid();
       animationFrames.restore();
@@ -6642,72 +4798,44 @@ describe('MessageList auto-scroll', () => {
     flushSolid();
     let trackHeight = 1200;
 
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
+    replaceMessages(promptAndResponse('Prompt 1', 'Initial response'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
     let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop, (value) => assignedScrollTops.push(value));
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
     flushSolid();
-    scrollTopValue = 400;
+    scrollTop.value = 400;
     list?.dispatchEvent(new Event('scroll'));
     flushSolid();
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     settleBottomFollow(animationFrames, list!);
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
 
     animationFrames.flush();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     trackHeight = 1600;
     scrollHeightValue = 1600;
@@ -6719,14 +4847,12 @@ describe('MessageList auto-scroll', () => {
     ]);
     flushSolid();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     settleBottomFollow(animationFrames, list!);
     flushSolid();
     expect(assignedScrollTops.at(-1)).toBe(1200);
-    expect(scrollTopValue).toBe(1200);
+    expect(scrollTop.value).toBe(1200);
     animationFrames.restore();
     flushSolid();
   });
@@ -6734,40 +4860,16 @@ describe('MessageList auto-scroll', () => {
   it('re-attaches to bottom again on the next explicit scroll request', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
+    const resizeCallbacks = captureResizeObserverCallbacks();
     const trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
+    mockTrackRects(() => trackHeight);
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
+    replaceMessages(promptAndResponse('Prompt 1', 'Initial response'));
     flushSolid();
 
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
+    mountList();
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
@@ -6775,59 +4877,40 @@ describe('MessageList auto-scroll', () => {
     expect(list).toBeInstanceOf(HTMLDivElement);
 
     const scrollHeightValue = 1200;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     const assignedScrollTops: number[] = [];
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-        assignedScrollTops.push(value);
-      },
-    });
+    defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+    backScrollTop(list!, scrollTop, (value) => assignedScrollTops.push(value));
 
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
-    expect(scrollTopValue).toBe(800);
+    flushFrame(animationFrames);
+    expect(scrollTop.value).toBe(800);
 
     animationFrames.flush();
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
     animationFrames.flush();
     flushSolid();
 
-    scrollTopValue = 760;
+    scrollTop.value = 760;
     list?.dispatchEvent(new Event('scroll'));
-    flushSolid();
-    animationFrames.flush();
-    flushSolid();
+    flushFrame(animationFrames);
 
     const assignmentCountAfterNearBottomScroll = assignedScrollTops.length;
 
     requestMessageListScrollToBottom();
     await Promise.resolve();
     flushSolid();
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
     settleBottomFollow(animationFrames, list!);
     flushSolid();
     expect(assignedScrollTops.length).toBeGreaterThan(assignmentCountAfterNearBottomScroll);
     expect(assignedScrollTops.at(-1)).toBe(800);
-    expect(scrollTopValue).toBe(800);
+    expect(scrollTop.value).toBe(800);
     animationFrames.restore();
     flushSolid();
   });
@@ -6835,92 +4918,50 @@ describe('MessageList auto-scroll', () => {
   it('reacts to trailing permission growth when jump-to-latest crosses its threshold', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     flushSolid();
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    const observers = installTrackedResizeObservers();
 
     let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
+    const scrollTop = { value: 0 };
     let trailingHeight = 0;
     const messageHeight = 100;
     const messageTrackHeight = 50 * messageHeight;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (this === list || this.classList.contains('interactive-list')) {
+    mockElementRects((element) => {
+      if (element === list || element.classList.contains('interactive-list')) {
         return new DOMRect(0, 0, 500, 400);
       }
-      if (this.classList.contains('interactive-list-track')) {
+      if (element.classList.contains('interactive-list-track')) {
         return new DOMRect(0, 0, 500, messageTrackHeight + trailingHeight);
       }
-      if (this.dataset.msgId?.startsWith('assistant-')) {
-        const index = Number(this.dataset.msgId.replace('assistant-', ''));
-        return new DOMRect(0, index * messageHeight - scrollTopValue, 500, messageHeight);
+      if (element.dataset.msgId?.startsWith('assistant-')) {
+        const index = Number(element.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * messageHeight - scrollTop.value, 500, messageHeight);
       }
       return new DOMRect(0, 0, 500, 40);
     });
 
     setState(storePath('activeSessionId', 'session-1'));
     flushSolid();
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
+    replaceMessages(assistantRows(50));
     flushSolid();
-    cleanup = render(() => MessageList(), container!);
-    flushSolid();
-    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = mountList();
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', {
-      configurable: true,
-      get: () => messageTrackHeight + trailingHeight,
-    });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 400 },
+      { scrollHeight: () => messageTrackHeight + trailingHeight }
+    );
+    backScrollTop(list, scrollTop);
 
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
+      flushFrame(animationFrames);
     }
     await measureTranscriptRows(list, animationFrames);
     flushSolid();
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     flushSolid();
-    scrollTopValue = messageTrackHeight - list.clientHeight - 220;
+    scrollTop.value = messageTrackHeight - list.clientHeight - 220;
     list.dispatchEvent(new Event('scroll'));
     flushSolid();
     await Promise.resolve();
@@ -6966,56 +5007,33 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       const trackHeight = 1200;
 
-      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, trackHeight);
-        }
-        return new DOMRect(0, 0, 500, 400);
-      });
+      mockTrackRects(() => trackHeight);
 
       setState(storePath('activeSessionId', 'session-1'));
       flushSolid();
-      replaceMessages([
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-      ]);
+      replaceMessages(promptAndResponse('Prompt 1', 'Initial response'));
       flushSolid();
 
-      cleanup = render(() => MessageList(), container!);
-      flushSolid();
+      mountList();
 
       // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
       expect(list).toBeInstanceOf(HTMLDivElement);
 
       const scrollHeightValue = 1200;
-      let scrollTopValue = 0;
-      Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-      Object.defineProperty(list!, 'scrollHeight', {
-        configurable: true,
-        get: () => scrollHeightValue,
-      });
-      Object.defineProperty(list!, 'scrollTop', {
-        configurable: true,
-        get: () => scrollTopValue,
-        set: (value: number) => {
-          scrollTopValue = value;
-        },
-      });
+      const scrollTop = { value: 0 };
+      defineLayoutMetrics(list!, { clientHeight: 400 }, { scrollHeight: () => scrollHeightValue });
+      backScrollTop(list!, scrollTop);
 
       await Promise.resolve();
-      flushSolid();
-      animationFrames.flush();
-      flushSolid();
-      expect(scrollTopValue).toBe(800);
+      flushFrame(animationFrames);
+      expect(scrollTop.value).toBe(800);
       expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
       for (let frame = 0; frame < 20; frame += 1) animationFrames.flush();
 
       list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
       flushSolid();
-      scrollTopValue = 200;
+      scrollTop.value = 200;
       list?.dispatchEvent(new Event('scroll'));
       flushSolid();
       await Promise.resolve();
@@ -7056,7 +5074,7 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
       await Promise.resolve();
       flushSolid();
-      expect(scrollTopValue).toBe(800);
+      expect(scrollTop.value).toBe(800);
       expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
       animationFrames.restore();
       flushSolid();

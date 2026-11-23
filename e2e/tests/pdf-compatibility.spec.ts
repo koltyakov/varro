@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { nativePdfFixture } from '../../src/shared/native-pdf.test-support';
+import { postWebviewMessage } from './helpers';
 
 for (const width of [380, 1280]) {
   test(`PDFs with unknown model support remain in the draft at ${width}px`, async ({ page }) => {
@@ -7,10 +8,7 @@ for (const width of [380, 1280]) {
     await page.goto('/e2e/harness/index.html?scenario=blank');
     const composer = page.getByRole('textbox', { name: 'Message composer' }).first();
     await composer.fill('Keep my PDF draft');
-    await page.evaluate(
-      (pdf) => window.postMessage({ type: 'pdfs/picked', payload: [pdf] }, '*'),
-      nativePdfFixture()
-    );
+    await postWebviewMessage(page, { type: 'pdfs/picked', payload: [nativePdfFixture()] });
     const chip = page.locator('.chat-attachment-chip').filter({ hasText: 'text.pdf' });
     await expect(chip).toContainText('PDF');
     await expect(page.getByLabel('Send (Enter)', { exact: true })).toBeDisabled();

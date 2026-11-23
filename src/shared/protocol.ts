@@ -23,11 +23,6 @@ export interface WorkspaceFolderContext {
   path: string;
 }
 
-export type SessionLocator = {
-  id: string;
-  directory: string;
-};
-
 export interface EditorTextContext {
   kind: 'selection' | 'dirty-buffer';
   path: string | null;
@@ -782,9 +777,27 @@ function parseServerEventRecord(record: UnknownRecord | null): ServerEvent | nul
     : getSyncServerEventName(record.type, record.name);
   if (!eventType) return null;
 
-  const properties = asRecord(
-    isServerEventName(record.type) ? (record.properties ?? record.data) : record.data
+  return buildServerEvent(
+    record,
+    eventType,
+    asRecord(isServerEventName(record.type) ? (record.properties ?? record.data) : record.data)
   );
+}
+
+function parseSyncEventRecord(record: UnknownRecord | null): ServerEvent | null {
+  if (!record) return null;
+
+  const eventType = getVersionedServerEventName(record.type);
+  if (!eventType) return null;
+
+  return buildServerEvent(record, eventType, asRecord(record.data));
+}
+
+function buildServerEvent(
+  record: UnknownRecord,
+  eventType: ServerEventName,
+  properties: UnknownRecord | null
+): ServerEvent {
   const id = getServerEventId(record);
   const sequenceOnly = record.sequenceOnly === true;
   const sequenceStart =
@@ -796,34 +809,6 @@ function parseServerEventRecord(record: UnknownRecord | null): ServerEvent | nul
     : undefined;
   // Current `/api/event` payloads put the durable cursor under `durable.seq`;
   // transitional/legacy sync wrappers may still expose it at the top level.
-  const seq = getServerEventSeq(record);
-  const event: ParsedServerEvent = { type: eventType };
-  if (id !== undefined) event.id = id;
-  if (sequenceOnly) event.sequenceOnly = true;
-  if (sequenceStart !== undefined) event.sequenceStart = sequenceStart;
-  if (workspaceDirectory) event.workspaceDirectory = workspaceDirectory;
-  if (seq !== undefined) event.seq = seq;
-  if (properties) event.properties = properties;
-  // SAFETY: eventType was normalized against SERVER_EVENT_NAMES; property payloads remain intentionally shallow-validated.
-  return event as ServerEvent;
-}
-
-function parseSyncEventRecord(record: UnknownRecord | null): ServerEvent | null {
-  if (!record) return null;
-
-  const eventType = getVersionedServerEventName(record.type);
-  if (!eventType) return null;
-
-  const properties = asRecord(record.data);
-  const id = getServerEventId(record);
-  const sequenceOnly = record.sequenceOnly === true;
-  const sequenceStart =
-    isNumber(record.sequenceStart) && Number.isFinite(record.sequenceStart)
-      ? record.sequenceStart
-      : undefined;
-  const workspaceDirectory = isString(record.workspaceDirectory)
-    ? record.workspaceDirectory
-    : undefined;
   const seq = getServerEventSeq(record);
   const event: ParsedServerEvent = { type: eventType };
   if (id !== undefined) event.id = id;

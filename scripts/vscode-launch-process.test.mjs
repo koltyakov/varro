@@ -42,7 +42,8 @@ class FakeSocket {
   }
 }
 
-test('never types a command into an editor when the palette did not receive focus', async (t) => {
+/** Serves one fake workbench target and answers each CDP request with `respond(request)`. */
+function mockWorkbench(t, respond) {
   const sent = [];
   t.mock.method(globalThis, 'fetch', async () => ({
     json: async () => [
@@ -65,17 +66,20 @@ test('never types a command into an editor when the palette did not receive focu
     send(value) {
       const request = JSON.parse(value);
       sent.push(request);
+      const result = respond(request);
       queueMicrotask(() =>
-        this.emit('message', {
-          data: JSON.stringify({
-            id: request.id,
-            result: request.method === 'Runtime.evaluate' ? { result: { value: false } } : {},
-          }),
-        })
+        this.emit('message', { data: JSON.stringify({ id: request.id, result }) })
       );
     }
     close() {}
   };
+  return sent;
+}
+
+test('never types a command into an editor when the palette did not receive focus', async (t) => {
+  const sent = mockWorkbench(t, (request) =>
+    request.method === 'Runtime.evaluate' ? { result: { value: false } } : {}
+  );
 
   await assert.rejects(
     executeVscodeCommand(12345, 'View: Close Editor'),
@@ -106,47 +110,20 @@ for (const scenario of [
   },
 ]) {
   test(scenario.name, async (t) => {
-    const sent = [];
-    t.mock.method(globalThis, 'fetch', async () => ({
-      json: async () => [
-        {
-          type: 'page',
-          title: '[Extension Development Host]',
-          webSocketDebuggerUrl: 'ws://127.0.0.1/test',
-        },
-      ],
-    }));
     let now = 0;
     t.mock.method(Date, 'now', () => (now += 1_000));
-    const originalWebSocket = globalThis.WebSocket;
-    t.after(() => {
-      globalThis.WebSocket = originalWebSocket;
+    const sent = mockWorkbench(t, (request) => {
+      const expression = request.params.expression ?? '';
+      return request.method === 'Runtime.evaluate'
+        ? {
+            result: {
+              value: expression.includes('a[aria-label="Varro"]')
+                ? scenario.point
+                : !expression.includes('.quick-input-list'),
+            },
+          }
+        : {};
     });
-    globalThis.WebSocket = class extends FakeSocket {
-      constructor() {
-        super();
-        queueMicrotask(() => this.emit('open'));
-      }
-      send(value) {
-        const request = JSON.parse(value);
-        sent.push(request);
-        const expression = request.params.expression ?? '';
-        const result =
-          request.method === 'Runtime.evaluate'
-            ? {
-                result: {
-                  value: expression.includes('a[aria-label="Varro"]')
-                    ? scenario.point
-                    : !expression.includes('.quick-input-list'),
-                },
-              }
-            : {};
-        queueMicrotask(() =>
-          this.emit('message', { data: JSON.stringify({ id: request.id, result }) })
-        );
-      }
-      close() {}
-    };
     if (scenario.clicks) await executeVscodeCommand(12345, scenario.label);
     else
       await assert.rejects(
@@ -173,45 +150,15 @@ for (const scenario of [
 
 for (const alreadyEnabled of [false, true]) {
   test(`file-diff setup handles an ${alreadyEnabled ? 'enabled' : 'disabled'} setting without guessing from mounted previews`, async (t) => {
-    const sent = [];
-    t.mock.method(globalThis, 'fetch', async () => ({
-      json: async () => [
-        {
-          type: 'page',
-          title: '[Extension Development Host]',
-          webSocketDebuggerUrl: 'ws://127.0.0.1/test',
-        },
-      ],
-    }));
     let now = 0;
     t.mock.method(Date, 'now', () => (now += 1_000));
-    const originalWebSocket = globalThis.WebSocket;
-    t.after(() => {
-      globalThis.WebSocket = originalWebSocket;
+    const sent = mockWorkbench(t, (request) => {
+      const expression = request.params.expression ?? '';
+      const available =
+        !expression.includes('.quick-input-list') ||
+        (expression.includes('Varro: Hide File Diffs') ? alreadyEnabled : !alreadyEnabled);
+      return request.method === 'Runtime.evaluate' ? { result: { value: available } } : {};
     });
-    globalThis.WebSocket = class extends FakeSocket {
-      constructor() {
-        super();
-        queueMicrotask(() => this.emit('open'));
-      }
-      send(value) {
-        const request = JSON.parse(value);
-        sent.push(request);
-        const expression = request.params.expression ?? '';
-        const available =
-          !expression.includes('.quick-input-list') ||
-          (expression.includes('Varro: Hide File Diffs') ? alreadyEnabled : !alreadyEnabled);
-        queueMicrotask(() =>
-          this.emit('message', {
-            data: JSON.stringify({
-              id: request.id,
-              result: request.method === 'Runtime.evaluate' ? { result: { value: available } } : {},
-            }),
-          })
-        );
-      }
-      close() {}
-    };
     const result = await executeVscodeCommand(12345, 'Varro: Show File Diffs', {
       alreadySelectedCommand: 'Varro: Hide File Diffs',
     });

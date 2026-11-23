@@ -161,10 +161,8 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
         }
         // Resolve the native snapshot and message fallback as one visible update.
         // An empty intermediate list would unmount the panel and replay its entrance animation.
-        (() => {
-          setStateTodos(todos, { preserveAdvancedStatuses: true });
-          advanceTodosFromMessages(messages);
-        })();
+        setStateTodos(todos, { preserveAdvancedStatuses: true });
+        advanceTodosFromMessages(messages);
       }
     } catch {
       if (!isCurrent()) return;
@@ -241,15 +239,9 @@ export function extractTodos<T>(raw: T): NormalizedTodo[] | null {
   return null;
 }
 
-export function deriveTodosFromMessages(messages: MessageEntry[]): NormalizedTodo[] {
-  let lastUserMessageIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]!.info.role === 'user') {
-      lastUserMessageIndex = index;
-      break;
-    }
-  }
-
+// Scans the current turn, after the last user message, from the newest assistant part backward.
+function findLatestTurnTodos(messages: MessageEntry[]) {
+  const lastUserMessageIndex = messages.findLastIndex((entry) => entry.info.role === 'user');
   for (
     let messageIndex = messages.length - 1;
     messageIndex > lastUserMessageIndex;
@@ -260,11 +252,15 @@ export function deriveTodosFromMessages(messages: MessageEntry[]): NormalizedTod
 
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
       const todos = extractTodosFromPart(message.parts[partIndex]!);
-      if (todos) return todos;
+      if (todos) return { messageId: message.info.id, todos };
     }
   }
 
-  return [];
+  return null;
+}
+
+export function deriveTodosFromMessages(messages: MessageEntry[]): NormalizedTodo[] {
+  return findLatestTurnTodos(messages)?.todos ?? [];
 }
 
 export function syncTodosFromMessages<T>(
@@ -466,14 +462,7 @@ function areTodosEqual(left: NormalizedTodo[], right: NormalizedTodo[]) {
 function getLatestAssistantMessageInTurn(
   messages: MessageEntry[]
 ): MessageEntry<AssistantMessage> | undefined {
-  let lastUserMessageIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]!.info.role === 'user') {
-      lastUserMessageIndex = index;
-      break;
-    }
-  }
-
+  const lastUserMessageIndex = messages.findLastIndex((entry) => entry.info.role === 'user');
   return messages
     .slice(lastUserMessageIndex + 1)
     .findLast(
@@ -482,27 +471,5 @@ function getLatestAssistantMessageInTurn(
 }
 
 function getLatestTodoMessageId(messages: MessageEntry[]) {
-  let lastUserMessageIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]!.info.role === 'user') {
-      lastUserMessageIndex = index;
-      break;
-    }
-  }
-
-  for (
-    let messageIndex = messages.length - 1;
-    messageIndex > lastUserMessageIndex;
-    messageIndex -= 1
-  ) {
-    const message = messages[messageIndex]!;
-    if (message.info.role !== 'assistant') continue;
-
-    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const todos = extractTodosFromPart(message.parts[partIndex]!);
-      if (todos) return message.info.id;
-    }
-  }
-
-  return null;
+  return findLatestTurnTodos(messages)?.messageId ?? null;
 }

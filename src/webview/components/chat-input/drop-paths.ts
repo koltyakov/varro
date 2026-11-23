@@ -140,24 +140,15 @@ function parseCodeEditorsDrop(value: string): string[] {
 }
 
 function parseCodeFilesDrop(value: string): string[] {
-  if (!value) return [];
-
-  try {
-    // SAFETY: The surrounding shape or discriminator check establishes the unknown contract used below.
-    const parsed = JSON.parse(value) as unknown[];
-    const paths = new Set<string>();
-    for (const item of parsed) {
-      if (!isString(item)) continue;
-      const decoded = decodeDroppedCandidate(item);
-      if (decoded) paths.add(decoded);
-    }
-    return Array.from(paths);
-  } catch {
-    return [];
-  }
+  return parseJsonStringListDrop(value) ?? [];
 }
 
 function parseResourceListDrop(value: string): string[] {
+  return parseJsonStringListDrop(value) ?? parseUriListDrop(value);
+}
+
+/** Decodes a JSON list of dropped strings; null when the value cannot be parsed as one. */
+function parseJsonStringListDrop(value: string): string[] | null {
   if (!value) return [];
 
   try {
@@ -171,7 +162,7 @@ function parseResourceListDrop(value: string): string[] {
     }
     return Array.from(paths);
   } catch {
-    return parseUriListDrop(value);
+    return null;
   }
 }
 

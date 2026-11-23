@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { AssistantMessage, MessageEntry, UserMessage } from '../../src/webview/types';
-import { waitForAnimationFrames } from './helpers';
+import { installPlaybackCapture, waitForAnimationFrames } from './helpers';
 
 for (const theme of ['dark', 'light']) {
   test(`resume steering uses a compact themed control (${theme})`, async ({ page }) => {
@@ -25,24 +25,17 @@ for (const theme of ['dark', 'light']) {
         },
       ],
     };
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated E2E harness consumes this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'test',
+        directory: '/workspace',
+        title: 'Pending steering',
+        version: '1',
+        time: { created: 1, updated: 1 },
       },
-      {
-        session: {
-          id: sessionID,
-          projectID: 'test',
-          directory: '/workspace',
-          title: 'Pending steering',
-          version: '1',
-          time: { created: 1, updated: 1 },
-        },
-        initialMessages: [message],
-      }
-    );
+      initialMessages: [message],
+    });
     await page.goto(`/e2e/harness/index.html?scenario=session-playback&theme=${theme}`);
     const resume = page.getByRole('button', { name: 'Resume steering', exact: true });
     await expect(resume).toBeVisible();
@@ -161,25 +154,17 @@ for (const theme of ['dark', 'light']) {
         },
         prompt('queued-follow-up', 8),
       ];
-      await page.addInitScript(
-        (fixture) => {
-          // SAFETY: The isolated E2E harness consumes this fixture before mounting.
-          (
-            window as typeof window & { varroPlaybackCapture: typeof fixture }
-          ).varroPlaybackCapture = fixture;
+      await installPlaybackCapture(page, {
+        session: {
+          id: sessionID,
+          projectID: 'test',
+          directory: '/workspace',
+          title: 'Steering colors',
+          version: '1',
+          time: { created: 1, updated: 7 },
         },
-        {
-          session: {
-            id: sessionID,
-            projectID: 'test',
-            directory: '/workspace',
-            title: 'Steering colors',
-            version: '1',
-            time: { created: 1, updated: 7 },
-          },
-          initialMessages: messages,
-        }
-      );
+        initialMessages: messages,
+      });
       await page.goto(`/e2e/harness/index.html?scenario=session-playback&theme=${theme}`);
       const list = page.locator('.interactive-list');
       const ordinary = page.locator('[data-msg-id="prompt"] .user-message-card');

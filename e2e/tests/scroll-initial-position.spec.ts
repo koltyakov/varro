@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { MessageEntry, Session } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 for (const windowed of [false, true]) {
   test(`opens ${windowed ? 'paginated' : 'complete'} history at its settled bottom from the first painted frame`, async ({
@@ -88,14 +89,7 @@ for (const windowed of [false, true]) {
               ],
       });
     }
-    await page.addInitScript(
-      (fixture) => {
-        // SAFETY: The isolated E2E page reads this fixture before mounting.
-        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-          fixture;
-      },
-      { session, initialMessages }
-    );
+    await installPlaybackCapture(page, { session, initialMessages });
     await page.addInitScript(() => {
       const samples: Array<{ top: number; bottom: number; distance: number; reserved: number }> =
         [];

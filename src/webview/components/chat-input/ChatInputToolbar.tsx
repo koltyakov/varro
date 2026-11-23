@@ -57,7 +57,7 @@ type SessionTokensInfo = {
   cacheWrite: number;
 };
 
-type ToolbarSharedProps = {
+export type ToolbarSharedProps = {
   compactTight: boolean;
   inputFrameRef?: HTMLElement;
   showPermissionControl: boolean;

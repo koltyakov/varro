@@ -16,6 +16,8 @@ import { isolateVarroTestState } from './varro-test-state.mjs';
 import {
   createCdpRequestClient,
   executeVscodeCommand,
+  isVscodeWorkbenchTarget,
+  listCdpTargets,
   reserveLoopbackPort,
   reloadVscodeWindow,
   writeVscodeLaunchMetadata,
@@ -508,12 +510,8 @@ let input='';process.stdin.on('data',chunk=>{input+=chunk;let n;while((n=input.i
     });
   }
   async function workbenchRead(expression) {
-    const targets = await fetch(`http://127.0.0.1:${host.remoteDebuggingPort}/json/list`).then(
-      (response) => response.json()
-    );
-    const workbenches = targets.filter(
-      (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
-    );
+    const targets = await listCdpTargets(host.remoteDebuggingPort);
+    const workbenches = targets.filter(isVscodeWorkbenchTarget);
     assert.equal(workbenches.length, 1, 'Read only the exact isolated workbench');
     const socket = new WebSocket(workbenches[0].webSocketDebuggerUrl);
     await once(socket, 'open');

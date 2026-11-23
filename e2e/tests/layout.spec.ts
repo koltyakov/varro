@@ -6,11 +6,12 @@ import type { ExtensionMessage, ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
 import {
   getE2EState,
-  getScrollMetrics,
+  getListDistanceFromBottom,
   getStickyMessageAlignment,
   getVisibleMessageAnchor,
   installOuterScrollSentinel,
   sampleMessageTopAcrossFrames,
+  scrollToBottom,
 } from './helpers';
 
 type StickyAppendObservation = {
@@ -33,9 +34,7 @@ test('switches full-screen layouts without a capped or squeezed transcript frame
   await page.setViewportSize({ width: 486, height: 900 });
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-  await expect
-    .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-    .toBeLessThan(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
   await page.evaluate(() => {
     const samples: Array<{ viewport: number; root: number; chat: number }> = [];
     (
@@ -56,9 +55,7 @@ test('switches full-screen layouts without a capped or squeezed transcript frame
   for (const width of [1670, 486, 1280, 1670, 486]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(page.locator('#root')).toHaveCSS('max-width', 'none');
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(1);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
     await expect(page.locator('.chat-session-sidebar')).toBeVisible({ visible: width >= 1400 });
   }
   const samples = await page.evaluate(
@@ -360,11 +357,7 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
     );
   });
 
-  await expect
-    .poll(() =>
-      getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
-    )
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThanOrEqual(1);
   const header = trayItems.locator('.tool-invocation-header');
   await header.click();
   await expect(header).toHaveAttribute('aria-expanded', 'true');
@@ -1557,10 +1550,7 @@ test('reveals user and sticky message timestamps on hover', async ({ page }) => 
   await expect(userTimestamp).toHaveCSS('filter', 'blur(0px)');
 
   const list = page.locator('.interactive-list');
-  await list.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event('scroll'));
-  });
+  await scrollToBottom(list);
   await page.getByRole('textbox', { name: 'Message composer' }).hover();
 
   const sticky = page.locator('.latest-user-message-sticky');
@@ -2423,10 +2413,7 @@ test('the first image message does not overlap the sticky prompt', async ({ page
       '.interactive-item-entering.measured-entrance-active { animation-play-state: paused !important; }',
   });
   const list = page.locator('.interactive-list');
-  await list.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event('scroll'));
-  });
+  await scrollToBottom(list);
   await expect(page.locator('.latest-user-message-sticky')).toBeVisible();
 
   await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
@@ -2640,10 +2627,7 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
     expect(gaps.promptGap).toBeGreaterThanOrEqual(0);
   }
 
-  await list.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event('scroll'));
-  });
+  await scrollToBottom(list);
 
   await expect(sticky).toBeVisible();
   await expect(nextPrompt).toBeVisible();

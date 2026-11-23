@@ -23,6 +23,7 @@ import {
   hasInlineProblemsForFile,
 } from '../../lib/editor-problems';
 import type { IssueAttachment } from '../../lib/editor-problems';
+import type { SessionPromptBody } from '../../lib/client';
 import type {
   DroppedFile,
   EditorContext,
@@ -110,23 +111,7 @@ type ComposerState = {
   visionDelegationAvailable?: boolean;
 };
 
-export type SessionSendBody = {
-  followupTitle?: string;
-  messageID?: string;
-  parts: Array<{
-    type: string;
-    text?: string;
-    mime?: string;
-    filename?: string;
-    url?: string;
-  }>;
-  model?: { providerID: string; modelID: string };
-  agent?: string;
-  noReply?: boolean;
-  delivery?: 'steer' | 'queue';
-  variant?: string;
-  queuedMessageDispatch?: { itemId: string; lease: number };
-};
+export type SessionSendBody = SessionPromptBody & { followupTitle?: string };
 
 type SendFlowOptions = {
   noReply?: boolean;
@@ -1396,36 +1381,34 @@ export async function sendMessageWithDependencies(
     options?.optimisticModel,
     optimisticImages
   );
-  (() => {
-    if (optimisticMessage) deps.beforeOptimisticPublish?.();
-    if (expectsAssistantReply) {
-      deps.setSessionFailed(sessionId, false);
-      deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
-    }
-    if (expectsAssistantReply && deps.getActiveSessionId() === sessionId) {
-      deps.startLoading();
-    }
-    if (deps.getActiveSessionId() === sessionId) deps.setError(null);
-    if (effectiveModel && deps.getActiveSessionId() === sessionId) {
-      deps.applyEffectiveModel(effectiveModel, sessionId);
-    }
+  if (optimisticMessage) deps.beforeOptimisticPublish?.();
+  if (expectsAssistantReply) {
+    deps.setSessionFailed(sessionId, false);
+    deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
+  }
+  if (expectsAssistantReply && deps.getActiveSessionId() === sessionId) {
+    deps.startLoading();
+  }
+  if (deps.getActiveSessionId() === sessionId) deps.setError(null);
+  if (effectiveModel && deps.getActiveSessionId() === sessionId) {
+    deps.applyEffectiveModel(effectiveModel, sessionId);
+  }
 
-    deps.clearSessionUsageLimit(sessionId);
-    // Steering continues the current turn and must not reattach a detached reader,
-    // including when admission arrives after they scroll away from the pending steer.
-    if (
-      !isSteerDelivery &&
-      deps.getActiveSessionId() === sessionId &&
-      !options?.preserveScrollPosition
-    ) {
-      deps.requestMessageListScrollToBottom(
-        expectsAssistantReply && optimisticMessage ? messageId : undefined
-      );
-    }
-    if (optimisticMessage) {
-      deps.appendOptimisticMessage?.(optimisticMessage);
-    }
-  })();
+  deps.clearSessionUsageLimit(sessionId);
+  // Steering continues the current turn and must not reattach a detached reader,
+  // including when admission arrives after they scroll away from the pending steer.
+  if (
+    !isSteerDelivery &&
+    deps.getActiveSessionId() === sessionId &&
+    !options?.preserveScrollPosition
+  ) {
+    deps.requestMessageListScrollToBottom(
+      expectsAssistantReply && optimisticMessage ? messageId : undefined
+    );
+  }
+  if (optimisticMessage) {
+    deps.appendOptimisticMessage?.(optimisticMessage);
+  }
 
   const shouldClearComposer = deps.shouldClearComposerAfterSend();
   const canClearComposerBeforeSend =

@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These refresh tests inspect controlled provider internals and model opaque server and filesystem results. */
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These refresh tests inspect controlled provider internals and model opaque server and filesystem results. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodeModelRouting } from '../shared/opencode-types';
 import type { ProviderLimitUpdate } from '../shared/protocol';
@@ -6,6 +6,7 @@ import {
   attachTestView,
   createServer,
   createSidebarProviderInstance,
+  createStoredWorkspaceState,
   getLoggerMock,
   getProviderSignatureFileSystemMock,
   getVscodeMock,
@@ -37,6 +38,25 @@ type ProviderRefreshAccess = {
   startProviderFileObservation(): void;
   providerAuthChanged(): Promise<void>;
 };
+
+// Provider file watchers are created in this order: config.json, opencode.json, opencode.jsonc,
+// auth.json (asserted by the observation tests below).
+const CONFIG_WATCHER = 0;
+const AUTH_WATCHER = 3;
+
+/** Fires the change listener of the provider file watcher created at `index`, if it exists. */
+function fireWatcherChange(index: number) {
+  const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[index]?.value as
+    | { onDidChange: ReturnType<typeof vi.fn> }
+    | undefined;
+  watcher?.onDidChange.mock.calls[0]?.[0]();
+}
+
+/** Makes every provider file a regular six-byte file with the given content and mtime. */
+function mockRegularProviderFiles(content: string, mtimeMs: number) {
+  providerFileSystem.stat.mockResolvedValue({ ino: 1, isFile: () => true, mtimeMs, size: 6 });
+  providerFileSystem.readFile.mockResolvedValue(Buffer.from(content));
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -101,17 +121,8 @@ describe('SidebarProvider provider refresh', () => {
     ]);
 
     posted.length = 0;
-    providerFileSystem.stat.mockResolvedValue({
-      ino: 1,
-      isFile: () => true,
-      mtimeMs: 1,
-      size: 6,
-    });
-    providerFileSystem.readFile.mockResolvedValue(Buffer.from('logout'));
-    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
-      | { onDidChange: ReturnType<typeof vi.fn> }
-      | undefined;
-    authWatcher?.onDidChange.mock.calls[0]?.[0]();
+    mockRegularProviderFiles('logout', 1);
+    fireWatcherChange(AUTH_WATCHER);
     await vi.advanceTimersByTimeAsync(300);
 
     expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
@@ -194,17 +205,8 @@ describe('SidebarProvider provider refresh', () => {
     access.startProviderFileObservation();
     await vi.advanceTimersByTimeAsync(0);
     posted.length = 0;
-    providerFileSystem.stat.mockResolvedValue({
-      ino: 1,
-      isFile: () => true,
-      mtimeMs: 2,
-      size: 6,
-    });
-    providerFileSystem.readFile.mockResolvedValue(Buffer.from('reauth'));
-    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
-      | { onDidChange: ReturnType<typeof vi.fn> }
-      | undefined;
-    authWatcher?.onDidChange.mock.calls[0]?.[0]();
+    mockRegularProviderFiles('reauth', 2);
+    fireWatcherChange(AUTH_WATCHER);
 
     await provider.handleMessage({ type: 'providers/auth-changed' });
     await vi.advanceTimersByTimeAsync(1_000);
@@ -267,17 +269,8 @@ describe('SidebarProvider provider refresh', () => {
     access.startProviderFileObservation();
     await vi.advanceTimersByTimeAsync(0);
     posted.length = 0;
-    providerFileSystem.stat.mockResolvedValue({
-      ino: 1,
-      isFile: () => true,
-      mtimeMs: 2,
-      size: 6,
-    });
-    providerFileSystem.readFile.mockResolvedValue(Buffer.from('reauth'));
-    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
-      | { onDidChange: ReturnType<typeof vi.fn> }
-      | undefined;
-    authWatcher?.onDidChange.mock.calls[0]?.[0]();
+    mockRegularProviderFiles('reauth', 2);
+    fireWatcherChange(AUTH_WATCHER);
     await vi.advanceTimersByTimeAsync(300);
 
     expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
@@ -309,15 +302,7 @@ describe('SidebarProvider provider refresh', () => {
         },
       ],
     ]);
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        values.has(key) ? values.get(key) : fallback
-      ),
-      update: vi.fn(async (key: string, value: unknown) => {
-        if (value === undefined) values.delete(key);
-        else values.set(key, value);
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(values);
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) =>
         path === '/session/status' ? { active: { type: 'busy' } } : []
@@ -354,21 +339,9 @@ describe('SidebarProvider provider refresh', () => {
 
     access.startProviderFileObservation();
     await vi.advanceTimersByTimeAsync(0);
-    providerFileSystem.stat.mockResolvedValue({
-      ino: 1,
-      isFile: () => true,
-      mtimeMs: 2,
-      size: 6,
-    });
-    providerFileSystem.readFile.mockResolvedValue(Buffer.from('changed'));
-    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
-      | { onDidChange: ReturnType<typeof vi.fn> }
-      | undefined;
-    const configWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as
-      | { onDidChange: ReturnType<typeof vi.fn> }
-      | undefined;
-    authWatcher?.onDidChange.mock.calls[0]?.[0]();
-    configWatcher?.onDidChange.mock.calls[0]?.[0]();
+    mockRegularProviderFiles('changed', 2);
+    fireWatcherChange(AUTH_WATCHER);
+    fireWatcherChange(CONFIG_WATCHER);
 
     await provider.handleMessage({ type: 'providers/auth-changed' });
 
@@ -436,10 +409,7 @@ describe('SidebarProvider provider refresh', () => {
 
     mtimeMs = 20;
     const second = await access.providerFileRefresh.readFilesSignature();
-    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as
-      | { onDidChange: ReturnType<typeof vi.fn> }
-      | undefined;
-    watcher?.onDidChange.mock.calls[0]?.[0]();
+    fireWatcherChange(CONFIG_WATCHER);
     await vi.advanceTimersByTimeAsync(300);
 
     expect(first).toContain('oversized:size=1048577:mtime=10:ino=42');
@@ -655,15 +625,7 @@ describe('SidebarProvider provider refresh', () => {
   it('restores and completes a deferred provider refresh after a window reload', async () => {
     vi.useFakeTimers();
     const values = new Map<string, unknown>();
-    const workspaceState = {
-      get: vi.fn((key: string, fallback?: unknown) =>
-        values.has(key) ? values.get(key) : fallback
-      ),
-      update: vi.fn(async (key: string, value: unknown) => {
-        if (value === undefined) values.delete(key);
-        else values.set(key, value);
-      }),
-    };
+    const workspaceState = createStoredWorkspaceState(values);
     const busyServer = createServer({
       request: vi.fn(async (_method: string, path: string) =>
         path === '/session/status' ? { active: { type: 'busy' } } : []
@@ -785,13 +747,7 @@ describe('SidebarProvider provider refresh', () => {
   it('resumes pending managed invalidation when provider watching is reopened', async () => {
     vi.useFakeTimers();
     let idle = false;
-    providerFileSystem.stat.mockResolvedValue({
-      ino: 1,
-      isFile: () => true,
-      mtimeMs: 1,
-      size: 6,
-    });
-    providerFileSystem.readFile.mockResolvedValue(Buffer.from('config'));
+    mockRegularProviderFiles('config', 1);
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) => {
         if (path === '/question' || path === '/permission') return [];
@@ -905,17 +861,14 @@ describe('SidebarProvider provider refresh', () => {
     const access = provider as unknown as ProviderRefreshAccess;
     access.startProviderFileObservation();
     await vi.advanceTimersByTimeAsync(0);
-    const configWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as
-      | { onDidChange: ReturnType<typeof vi.fn> }
-      | undefined;
 
     content = 'first';
-    configWatcher?.onDidChange.mock.calls[0]?.[0]();
+    fireWatcherChange(CONFIG_WATCHER);
     await vi.advanceTimersByTimeAsync(300);
     expect(disposeCount).toBe(1);
 
     content = 'second';
-    configWatcher?.onDidChange.mock.calls[0]?.[0]();
+    fireWatcherChange(CONFIG_WATCHER);
     await vi.advanceTimersByTimeAsync(300);
     expect(disposeCount).toBe(1);
 

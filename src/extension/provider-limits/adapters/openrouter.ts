@@ -1,28 +1,24 @@
 /* oxlint-disable anti-slop/no-unknown-parameters -- OpenRouter API payloads are decoded before quota extraction. */
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
-import type { ProviderAuthRecord, ProviderMetadata } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
   asRecord,
-  getString,
   parseFiniteNumber,
   clampPercent,
   readBoundedResponseJson,
   unsupportedProviderStatus,
   providerErrorStatus,
+  resolveProviderAuthToken,
   VARRO_USER_AGENT,
 } from '../adapter-utils';
 
 const OPENROUTER_AUTH_KEY_ENDPOINT = 'https://openrouter.ai/api/v1/auth/key';
-const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 export function createOpenRouterAdapter(): ProviderLimitAdapter {
   return {
     id: 'openrouter',
     matches(provider, authStore) {
-      return (
-        provider.id === 'openrouter' && resolveOpenRouterAuthToken(provider, authStore) != null
-      );
+      return provider.id === 'openrouter' && resolveProviderAuthToken(provider, authStore) != null;
     },
     async fetch({
       provider,
@@ -31,7 +27,7 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
       checkedAt,
       coordinate,
     }: ProviderLimitAdapterContext) {
-      const token = resolveOpenRouterAuthToken(provider, authStore);
+      const token = resolveProviderAuthToken(provider, authStore);
       if (!token) {
         return unsupportedProviderStatus(
           provider.id,
@@ -135,17 +131,4 @@ function extractOpenRouterSpendWindow(payload: unknown): ProviderLimitWindow | n
   };
   if (percent != null) window.percent = percent;
   return window;
-}
-
-export function resolveOpenRouterAuthToken(
-  provider: ProviderMetadata,
-  authStore: Record<string, ProviderAuthRecord>
-) {
-  const auth = authStore[provider.id];
-  if (auth?.type === 'oauth') return auth.access;
-  if (auth && 'key' in auth) return auth.key;
-
-  const apiKey = getString(asRecord(provider.options)?.apiKey);
-  if (!apiKey || apiKey === OPENCODE_OAUTH_DUMMY_KEY) return null;
-  return apiKey;
 }

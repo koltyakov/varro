@@ -22,8 +22,9 @@ import {
   state,
 } from '../lib/state';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
-import { checkIcon, xmarkIcon } from '../lib/ui-icons';
+import { checkIcon } from '../lib/ui-icons';
 import { PickerManageIcon } from './PickerManageIcon';
+import { DialogCloseButton } from './DialogCloseButton';
 import { UiIcon } from './UiIcon';
 
 function statusLabel(status: McpStatus['status']) {
@@ -221,11 +222,7 @@ export function McpPicker(props: {
     if (showSearch()) searchInputRef?.focus();
     else menuRef?.focus();
 
-    if (!menuRef)
-      return () => {
-        for (const cleanup of cleanups.toReversed()) cleanup();
-      };
-    cleanups.push(observePopupViewport(menuRef, reposition));
+    if (menuRef) cleanups.push(observePopupViewport(menuRef, reposition));
 
     return () => {
       for (const cleanup of cleanups.toReversed()) cleanup();
@@ -658,14 +655,7 @@ function McpAuthDialog(props: {
               </div>
               <div class="provider-connect-subtitle">{props.server.name}</div>
             </div>
-            <button
-              type="button"
-              class="provider-connect-close"
-              onClick={props.onClose}
-              aria-label="Close"
-            >
-              <UiIcon source={xmarkIcon} width={16} height={16} aria-hidden="true" />
-            </button>
+            <DialogCloseButton onClick={props.onClose} />
           </div>
           <div class="provider-connect-body">
             <Show

@@ -12,8 +12,14 @@ import {
   getCompactActivityDisclosureLayoutSignatures,
   getRenderEmptyMessageIds,
 } from '../components/message-list/row-layout';
-import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
-import { settlePerfEffects } from './harness';
+import type { Message, Part } from '../types';
+import {
+  settlePerfEffects,
+  createAssistantMessage,
+  createTextPart,
+  createUserMessage,
+  entry,
+} from './harness';
 
 const { messageRowPassCounts } = vi.hoisted(() => ({
   messageRowPassCounts: new Map<string, number>(),
@@ -63,52 +69,6 @@ let originalGlobalRequestAnimationFrame: typeof globalThis.requestAnimationFrame
 let originalWindowRequestAnimationFrame: typeof window.requestAnimationFrame | undefined;
 let originalGlobalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
 let originalWindowCancelAnimationFrame: typeof window.cancelAnimationFrame | undefined;
-
-function createAssistantMessage(id: string): AssistantMessage {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'assistant',
-    time: { created: 1, completed: 2 },
-    parentID: 'parent-1',
-    modelID: 'gpt-4o',
-    providerID: 'openai',
-    mode: 'default',
-    path: { cwd: '/workspace', root: '/workspace' },
-    cost: 0,
-    tokens: {
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache: { read: 0, write: 0 },
-    },
-  };
-}
-
-function createUserMessage(id: string): UserMessage {
-  return {
-    id,
-    sessionID: 'session-1',
-    role: 'user',
-    time: { created: 1 },
-    agent: 'build',
-    model: { providerID: 'openai', modelID: 'gpt-4o' },
-  };
-}
-
-function createTextPart(id: string, messageID: string, text: string): TextPart {
-  return {
-    id,
-    sessionID: 'session-1',
-    messageID,
-    type: 'text',
-    text,
-  };
-}
-
-function entry(info: Message, parts: Part[]) {
-  return { info, parts };
-}
 
 describe('MessageList perf guards', () => {
   beforeEach(() => {

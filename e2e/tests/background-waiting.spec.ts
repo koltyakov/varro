@@ -5,6 +5,7 @@ import { parseServerEvent } from '../../src/shared/protocol';
 import type { ExtensionMessage, ServerEvent } from '../../src/shared/protocol';
 import type { UnknownRecord } from '../../src/shared/type-utils';
 import type { AssistantMessage, MessageEntry, Session } from '../../src/webview/types';
+import { installPlaybackCapture } from './helpers';
 
 test('shows a background process card until the resumed response finishes', async ({
   page,
@@ -54,14 +55,7 @@ test('shows a background process card until the resumed response finishes', asyn
       ],
     },
   ];
-  await page.addInitScript(
-    (fixture) => {
-      // SAFETY: The isolated playback harness reads this fixture before mounting.
-      (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
-        fixture;
-    },
-    { session, initialMessages }
-  );
+  await installPlaybackCapture(page, { session, initialMessages });
   await page.goto('/e2e/harness/index.html?scenario=session-playback');
   await expect(page.locator('.user-message-card')).toContainText('Run the tests');
   await page.evaluate(() =>

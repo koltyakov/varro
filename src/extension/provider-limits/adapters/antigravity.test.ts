@@ -15,6 +15,9 @@ const provider: ProviderMetadata = {
   },
 };
 
+const fetchStatus = (overrides: Partial<Parameters<typeof adapter.fetch>[0]> = {}) =>
+  adapter.fetch({ provider, authStore: {}, modelID: null, checkedAt: 1_000, ...overrides });
+
 async function listen(server: ReturnType<typeof createServer>) {
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve());
@@ -96,12 +99,7 @@ describe('createAntigravityAdapter', () => {
       vi.stubEnv('ANTIGRAVITY_BASE_URL', `http://127.0.0.1:${port}`);
       vi.stubEnv('ANTIGRAVITY_CSRF_TOKEN', 'csrf-token');
 
-      const status = await adapter.fetch({
-        provider,
-        authStore: {},
-        modelID: 'claude-4-5-sonnet',
-        checkedAt: 1_000,
-      });
+      const status = await fetchStatus({ modelID: 'claude-4-5-sonnet' });
 
       expect(status).toEqual({
         providerID: 'antigravity',
@@ -138,12 +136,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        const status = await adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: null,
-          checkedAt: 1_000,
-        });
+        const status = await fetchStatus();
 
         expect(status).toEqual({
           providerID: 'antigravity',
@@ -166,12 +159,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        const status = await adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: 'claude-4-5-sonnet',
-          checkedAt: 1_000,
-        });
+        const status = await fetchStatus({ modelID: 'claude-4-5-sonnet' });
 
         expect(status).toEqual({
           providerID: 'antigravity',
@@ -194,12 +182,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        const status = await adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: null,
-          checkedAt: 1_000,
-        });
+        const status = await fetchStatus();
 
         expect(status).toEqual({
           providerID: 'antigravity',
@@ -222,12 +205,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        const status = await adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: null,
-          checkedAt: 1_000,
-        });
+        const status = await fetchStatus();
 
         expect(status).toEqual({
           providerID: 'antigravity',
@@ -254,14 +232,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        await expect(
-          adapter.fetch({
-            provider,
-            authStore: {},
-            modelID: null,
-            checkedAt: 1_000,
-          })
-        ).resolves.toEqual({
+        await expect(fetchStatus()).resolves.toEqual({
           providerID: 'antigravity',
           modelID: null,
           status: 'error',
@@ -297,12 +268,7 @@ describe('createAntigravityAdapter', () => {
       },
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
-        const status = adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: null,
-          checkedAt: 1_000,
-        });
+        const status = fetchStatus();
 
         await started;
         await vi.advanceTimersByTimeAsync(10_001);
@@ -343,12 +309,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        const status = await adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: 'claude-4-5-sonnet',
-          checkedAt: 1_000,
-        });
+        const status = await fetchStatus({ modelID: 'claude-4-5-sonnet' });
 
         expect(status).toEqual({
           providerID: 'antigravity',
@@ -395,12 +356,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        const status = await adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: null,
-          checkedAt: 1_000,
-        });
+        const status = await fetchStatus();
 
         expect(status).toEqual({
           providerID: 'antigravity',
@@ -457,12 +413,7 @@ describe('createAntigravityAdapter', () => {
       async (baseURL) => {
         vi.stubEnv('ANTIGRAVITY_BASE_URL', baseURL);
 
-        const status = await adapter.fetch({
-          provider,
-          authStore: {},
-          modelID: null,
-          checkedAt: 1_000,
-        });
+        const status = await fetchStatus();
 
         expect(status).toEqual({
           providerID: 'antigravity',

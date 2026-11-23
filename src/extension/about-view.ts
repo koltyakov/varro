@@ -34,7 +34,6 @@ export type AboutViewData = {
   updateTitle?: string;
   updateNotice?: string;
   diagnostics?: string;
-  diagnosticsWithPaths?: string;
 };
 
 export function renderAboutHtml(data: AboutViewData, cspSource: string): string {
