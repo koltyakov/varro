@@ -275,6 +275,29 @@ describe('AppRoot', () => {
     expect(container?.textContent).toContain('may be separate');
   });
 
+  it('does not reopen provider setup when a loaded catalog later becomes empty', () => {
+    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
+    flushSolid();
+    setState(storePath('providersLoaded', true));
+    flushSolid();
+    setState(storePath('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models: {} }]));
+    flushSolid();
+    mountAppRoot();
+    flushSolid();
+    setConnectionInitialized(true);
+    flushSolid();
+
+    setState(storePath('providersLoaded', false));
+    flushSolid();
+    setState(storePath('providers', []));
+    flushSolid();
+    setState(storePath('providersLoaded', true));
+    flushSolid();
+
+    expect(showModels()).toBe(false);
+    expect(providerConnectionRequest()).toBeNull();
+  });
+
   it('does not open provider setup for configured providers', () => {
     setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
     flushSolid();

@@ -909,7 +909,7 @@ describe('useOpenCode initialization', () => {
       });
       document.dispatchEvent(new Event('visibilitychange'));
       flushSolid();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
       flushSolid();
 
       expect(clientMocks.providerLimit).toHaveBeenCalledWith('openai', 'gpt-4o');

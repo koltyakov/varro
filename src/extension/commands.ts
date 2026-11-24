@@ -78,24 +78,23 @@ export function registerCommands(
           )
             return [];
           // The Problems view includes contributed quick fixes in its context menu.
-          return [
-            {
-              title: 'Varro: Add to Context',
-              kind: vscode.CodeActionKind.QuickFix,
-              diagnostics: [...actionContext.diagnostics],
-              command: {
-                title: 'Varro: Add to Context',
-                command: 'varro.chat.addProblemsToContext',
-                arguments: [
-                  {
-                    diagnostics: actionContext.diagnostics.map((diagnostic) =>
-                      toEditorDiagnostic(document.uri.fsPath, diagnostic)
-                    ),
-                  },
-                ],
+          const action = new vscode.CodeAction(
+            'Varro: Add to Context',
+            vscode.CodeActionKind.QuickFix
+          );
+          action.diagnostics = [...actionContext.diagnostics];
+          action.command = {
+            title: 'Varro: Add to Context',
+            command: 'varro.chat.addProblemsToContext',
+            arguments: [
+              {
+                diagnostics: actionContext.diagnostics.map((diagnostic) =>
+                  toEditorDiagnostic(document.uri.fsPath, diagnostic)
+                ),
               },
-            },
-          ];
+            ],
+          };
+          return [action];
         },
       },
       { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }

@@ -120,7 +120,8 @@ export default defineConfig({
   },
   overrides: [
     {
-      // Async mock implementations and fixture servers are intentional in tests.
+      // Async mock implementations and fixture servers are intentional in tests,
+      // as are plain-object stand-ins for VS Code and Node classes.
       files: [
         '**/*.test.ts',
         '**/*.test.tsx',
@@ -128,7 +129,10 @@ export default defineConfig({
         '**/*.test-support.ts',
         '**/*.test-utils.ts',
       ],
-      rules: { 'typescript/no-misused-promises': 'off' },
+      rules: {
+        'typescript/no-misused-promises': 'off',
+        'typescript/no-unsafe-class-instance-assignment': 'off',
+      },
     },
     {
       files: ['scripts/**/*.test.mjs'],

@@ -367,6 +367,57 @@ describe('data loaders', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('confirms an empty provider catalog before replacing loaded providers', async () => {
+    vi.useFakeTimers();
+    const deps = createLoaderDeps({
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockResolvedValueOnce({ providers: [provider('openai', {})], default: {} })
+        .mockResolvedValueOnce({ providers: [], default: {} })
+        .mockResolvedValue({ providers: [provider('openai', {})], default: {} }),
+    });
+    const operations = createDataLoaderOperations(deps);
+    await operations.refreshRoutingState();
+    flushSolid();
+
+    const refresh = operations.refreshRoutingState();
+    await vi.advanceTimersByTimeAsync(1_500);
+    flushSolid();
+    await refresh;
+    flushSolid();
+
+    expect(deps.listProviders).toHaveBeenCalledTimes(3);
+    expect(deps.setProviders).toHaveBeenCalledTimes(2);
+    expect(
+      vi.mocked(deps.setProviders).mock.calls.every(([providers]) => providers.length > 0)
+    ).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('applies an empty provider catalog once repeated reads confirm it', async () => {
+    vi.useFakeTimers();
+    const deps = createLoaderDeps({
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockResolvedValueOnce({ providers: [provider('openai', {})], default: {} })
+        .mockResolvedValue({ providers: [], default: {} }),
+    });
+    const operations = createDataLoaderOperations(deps);
+    await operations.refreshRoutingState();
+    flushSolid();
+
+    const refresh = operations.refreshRoutingState();
+    await vi.advanceTimersByTimeAsync(3_000);
+    flushSolid();
+    await refresh;
+    flushSolid();
+
+    expect(deps.listProviders).toHaveBeenCalledTimes(4);
+    expect(deps.setProviders).toHaveBeenLastCalledWith([], {}, []);
+    expect(deps.setProvidersLoaded).toHaveBeenLastCalledWith(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('shares essential in-flight snapshots and reports failed and superseded readiness', async () => {
     const pending = deferred<Session[]>();
     const deps = createLoaderDeps({ listSessions: vi.fn(() => pending.promise) });

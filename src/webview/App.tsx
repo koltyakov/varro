@@ -104,7 +104,9 @@ function hasWrappedCause(err: Error): err is Error & { cause: unknown } {
 export function App() {
   useOpenCode();
 
-  let providerSetupOpened = false;
+  // First-run setup only: once providers have loaded, a later empty catalog is a
+  // transient server state (such as waking from sleep), not a missing setup.
+  let providerSetupSettled = false;
   createEffect(
     () => ({
       hasProviders: defaultAppState.state.providers.length > 0,
@@ -116,11 +118,11 @@ export function App() {
     }),
     ({ hasProviders, initialized, status, reconnecting, blocked, loaded }) => {
       if (hasProviders) {
-        providerSetupOpened = false;
+        providerSetupSettled = true;
         return;
       }
       if (
-        providerSetupOpened ||
+        providerSetupSettled ||
         !initialized ||
         status !== 'running' ||
         reconnecting ||
@@ -129,7 +131,7 @@ export function App() {
       ) {
         return;
       }
-      providerSetupOpened = true;
+      providerSetupSettled = true;
       defaultAppState.setShowModels(true);
       requestProviderConnection();
     }

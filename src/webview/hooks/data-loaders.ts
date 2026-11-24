@@ -53,6 +53,10 @@ const WORKSPACE_CATALOG_RELOAD_ATTEMPTS = 2;
 const WORKSPACE_CATALOG_LOAD_TIMEOUT_MS = 10_000;
 const STARTUP_CATALOG_TIMEOUT_MS = 60_000;
 const STARTUP_CATALOG_RETRY_MS = 500;
+// A reused server waking from sleep can briefly report no providers. Confirm an
+// empty catalog before it replaces a non-empty one.
+const EMPTY_PROVIDER_CATALOG_READS = 3;
+const EMPTY_PROVIDER_CATALOG_RETRY_MS = 1_500;
 
 function isPluginActivationPending(error: unknown): error is Error {
   return (
@@ -255,6 +259,7 @@ export function createDataLoaderOperations(deps: {
   let startupCatalog: StartupCatalogReload | null = null;
   let startupCatalogError: string | null = null;
   let knownProviderIDs: Set<string> | null = null;
+  let hasAppliedProviders = false;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
   const sessionSnapshots = createMutationAwareSnapshotReconciler(deps.getSessions);
 
@@ -376,8 +381,26 @@ export function createDataLoaderOperations(deps: {
       loadProvidersWithDependencies(
         {
           ...deps,
-          listProviders: () => deps.listProviders(signal),
+          listProviders: async () => {
+            for (let read = 1; ; read += 1) {
+              const response = await deps.listProviders(signal);
+              if (
+                response.providers.length > 0 ||
+                !hasAppliedProviders ||
+                read >= EMPTY_PROVIDER_CATALOG_READS ||
+                !isCurrent()
+              ) {
+                return response;
+              }
+              await waitForCatalogRetry(
+                signal ?? controller.signal,
+                EMPTY_PROVIDER_CATALOG_RETRY_MS
+              );
+              if (!isCurrent()) return response;
+            }
+          },
           setProviders: (providers, defaults) => {
+            hasAppliedProviders = providers.length > 0;
             const knownProviders = knownProviderIDs;
             const newlyConnectedProviderIDs = knownProviders
               ? providers
@@ -457,7 +480,7 @@ export function createDataLoaderOperations(deps: {
       signal?.throwIfAborted();
       if (agentsLoaded && commandsLoaded && providersLoaded) break;
       if (signal && agentsLoaded && commandsLoaded && startupCatalog?.activationError) {
-        await waitForStartupCatalogRetry(signal);
+        await waitForCatalogRetry(signal, STARTUP_CATALOG_RETRY_MS);
         continue;
       }
       if (attempt + 1 >= WORKSPACE_CATALOG_RELOAD_ATTEMPTS) break;
@@ -765,7 +788,7 @@ async function runWorkspaceCatalogLoadWithTimeout(load: () => Promise<boolean>) 
   }
 }
 
-function waitForStartupCatalogRetry(signal: AbortSignal): Promise<void> {
+function waitForCatalogRetry(signal: AbortSignal, delayMs: number): Promise<void> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const abort = () => {
@@ -776,7 +799,7 @@ function waitForStartupCatalogRetry(signal: AbortSignal): Promise<void> {
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', abort);
       resolve();
-    }, STARTUP_CATALOG_RETRY_MS);
+    }, delayMs);
     signal.addEventListener('abort', abort, { once: true });
   });
 }

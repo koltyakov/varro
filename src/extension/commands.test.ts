@@ -21,6 +21,14 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
       ),
     },
     CodeActionKind: { QuickFix: { value: 'quickfix' } },
+    CodeAction: class {
+      diagnostics?: VSCode.Diagnostic[];
+      command?: VSCode.Command;
+      constructor(
+        readonly title: string,
+        readonly kind?: { value: string }
+      ) {}
+    },
     CodeActionTriggerKind: { Invoke: 1, Automatic: 2 },
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
     commands: {
