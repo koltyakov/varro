@@ -121,6 +121,84 @@ for (const width of [360, 1042]) {
   }
 }
 
+test('stacks V2 chip-only prompts flush right with the standard prompt gap', async ({ page }) => {
+  await page.setViewportSize({ width: 460, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+  await waitForHarnessStartup(page);
+  await page.evaluate(() => {
+    // SAFETY: Synthetic events affect only the isolated E2E harness.
+    const harness = (
+      window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+    ).__varroE2E;
+    if (!harness) throw new Error('Missing E2E harness');
+    const created = Date.now();
+    const prompts = [
+      { id: 'stacked-text-0', text: 'First steer' },
+      { id: 'stacked-text-1', text: 'Second steer' },
+      { id: 'stacked-annotation-0', file: 'annotation-1234abc0.txt', note: 'How about height?' },
+      { id: 'stacked-annotation-1', file: 'annotation-1234abc1.txt', note: 'Only started' },
+    ];
+    for (const [index, prompt] of prompts.entries()) {
+      const info: UserMessage = {
+        id: prompt.id,
+        sessionID: 'session-todo-queue',
+        role: 'user',
+        agent: 'build',
+        delivery: 'steer',
+        model: { providerID: 'openai', modelID: 'test-model' },
+        time: { created: created + index },
+      };
+      harness.replayServerEvent({ type: 'message.updated', properties: { info } });
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `${prompt.id}-text`,
+            sessionID: info.sessionID,
+            messageID: info.id,
+            type: 'text',
+            // V2 keeps the composer's trailing space after an annotation reference.
+            text: prompt.file ? `@${prompt.file} ` : prompt.text!,
+          },
+        },
+      });
+      if (!prompt.file) continue;
+      harness.replayServerEvent({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `${prompt.id}-file`,
+            sessionID: info.sessionID,
+            messageID: info.id,
+            type: 'file',
+            mime: 'text/plain',
+            filename: prompt.file,
+            url: `data:text/plain;charset=utf-8,${encodeURIComponent(
+              `Chat annotation\n\nSelected text:\n> Selected passage\n\nComment:\n${prompt.note}`
+            )}`,
+          },
+        },
+      });
+    }
+  });
+  const box = (selector: string) =>
+    page.locator(selector).evaluate((element) => {
+      const { top, right, bottom } = element.getBoundingClientRect();
+      return { top, right, bottom };
+    });
+  const firstText = await box('[data-msg-id="stacked-text-0"] .user-message-card');
+  const secondText = await box('[data-msg-id="stacked-text-1"] .user-message-card');
+  const firstChip = await box('[data-msg-id="stacked-annotation-0"] .inline-chip');
+  const secondChip = await box('[data-msg-id="stacked-annotation-1"] .inline-chip');
+  const card = await box('[data-msg-id="stacked-annotation-1"] .user-message-card');
+
+  expect(Math.abs(firstChip.right - card.right)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(secondChip.right - card.right)).toBeLessThanOrEqual(0.5);
+  expect(
+    Math.abs(secondChip.top - firstChip.bottom - (secondText.top - firstText.bottom))
+  ).toBeLessThanOrEqual(1);
+});
+
 for (const resizeTarget of ['viewport', 'container'] as const) {
   for (const initialWidth of [360, 1042]) {
     test(`recalculates standalone annotation capacity after resizing ${resizeTarget} from ${initialWidth}px`, async ({

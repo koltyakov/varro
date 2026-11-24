@@ -919,6 +919,8 @@ input:focus-visible {
 
 .user-message-card.user-message-card-wrapperless {
   padding: 0;
+  /* An invisible border would still widen the gap between stacked chip-only prompts. */
+  border-width: 0;
   border-color: transparent;
   background: transparent;
   box-shadow: none;

@@ -3183,6 +3183,28 @@ kbd {
   text-align: right;
 }
 
+/* Chip-only prompts: whitespace between or after chips (V2 keeps the composer's
+   trailing space) must not offset the right edge, and prose line-height must not
+   pad the row beyond the chips. */
+.user-message-card-wrapperless
+  > .rendered-markdown
+  > .user-message-text-scroll
+  > p.user-message-text {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+}
+
+.user-message-card-wrapperless
+  > .rendered-markdown
+  > .user-message-text-scroll
+  > p.user-message-text
+  > .inline-chip {
+  margin: 0;
+}
+
 .user-message-card:hover .user-message-text-scroll {
   --scrollbar-thumb-color: color-mix(in srgb, var(--color-vscode-fg) 16%, transparent);
 }
