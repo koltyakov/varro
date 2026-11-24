@@ -639,7 +639,8 @@ for (const [kind, selector, label] of [
       );
     });
     const unselected = await icon.screenshot();
-    const selectedText = await reference.evaluate((element, fullParagraph) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await reference.evaluate((element, fullParagraph) => {
       const range = document.createRange();
       const target = fullParagraph ? (element.parentElement ?? element) : element;
       range.selectNodeContents(target);
@@ -649,8 +650,11 @@ for (const [kind, selector, label] of [
       const selection = window.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(range);
-      return selection?.toString();
     }, kind === 'PDF');
+    // Truncated paths use flex layout, so check the copied text rather than Selection.toString().
+    await page.keyboard.press('ControlOrMeta+C');
+    const selectedText = await page.evaluate(() => navigator.clipboard.readText());
+    await expect(page.locator('html')).not.toHaveClass(/is-copying-truncated-paths/);
     expect(selectedText).toBe(
       kind === 'PDF'
         ? `dev ${label} using the server credentials. Verified its SHA-256 matches the original.`

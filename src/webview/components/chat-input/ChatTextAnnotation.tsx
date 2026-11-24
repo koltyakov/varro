@@ -5,6 +5,7 @@ import type { DroppedFile } from '../../../shared/protocol';
 import { observePopupViewport } from '../../lib/popup-position';
 import { selectionMarkdown } from '../../lib/selection-markdown';
 import { writeClipboard } from '../../lib/write-clipboard';
+import { selectionText } from '../markdown-path-truncation';
 
 type AnnotationSelection = {
   sessionId: string;
@@ -71,7 +72,7 @@ export function ChatTextAnnotation(props: {
     };
     if (!inMessage(range.startContainer) || !inMessage(range.endContainer)) return;
     if (!range.intersectsNode(event.target)) return;
-    const text = selected.toString().trim();
+    const text = selectionText(selected).trim();
     if (!text) return;
     event.preventDefault();
     event.stopPropagation();

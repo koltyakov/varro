@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { middleTruncatePathLabel } from './markdown-path-truncation';
+import { middleTruncatePathLabel, selectionText } from './markdown-path-truncation';
 
 function createLink(label: string, rest = ''): HTMLAnchorElement {
   const anchor = document.createElement('a');
@@ -73,6 +73,28 @@ describe('middleTruncatePathLabel', () => {
 
       expect(anchor.innerHTML).toBe(html);
     }
+  });
+
+  it('reads selection text with inline layout and reverts it synchronously', () => {
+    const anchor = createLink('src/shared/protocol.ts');
+    middleTruncatePathLabel(anchor);
+    const root = document.documentElement;
+    const selection = window.getSelection()!;
+    selection.selectAllChildren(anchor);
+    let copyingDuringRead = false;
+    const read = selection.toString.bind(selection);
+    selection.toString = () => {
+      copyingDuringRead = root.classList.contains('is-copying-truncated-paths');
+      return read();
+    };
+
+    try {
+      expect(selectionText(selection)).toBe('src/shared/protocol.ts');
+    } finally {
+      Reflect.deleteProperty(selection, 'toString');
+    }
+    expect(copyingDuringRead).toBe(true);
+    expect(root.classList).not.toContain('is-copying-truncated-paths');
   });
 
   it('restores inline layout only while a selected path is copied', async () => {

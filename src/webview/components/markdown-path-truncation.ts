@@ -3,8 +3,7 @@ const WRAPPER_SELECTOR = '.path-middle-truncate';
 
 let serializationBound = false;
 
-function selectionHasTruncatedPath(): boolean {
-  const selection = window.getSelection();
+function selectionHasTruncatedPath(selection = window.getSelection()): boolean {
   if (!selection || selection.isCollapsed) return false;
   for (let index = 0; index < selection.rangeCount; index += 1) {
     const node = selection.getRangeAt(index).commonAncestorContainer;
@@ -22,6 +21,22 @@ function restoreInlineLayoutForSerialization(): void {
   if (root.classList.contains(COPYING_CLASS) || !selectionHasTruncatedPath()) return;
   root.classList.add(COPYING_CLASS);
   requestAnimationFrame(() => root.classList.remove(COPYING_CLASS));
+}
+
+/**
+ * Read selection text as it would be copied. Inline layout is applied and reverted
+ * synchronously, so it never paints or reaches resize observers.
+ */
+export function selectionText(selection: Selection): string {
+  const root = document.documentElement;
+  if (root.classList.contains(COPYING_CLASS) || !selectionHasTruncatedPath(selection))
+    return selection.toString();
+  root.classList.add(COPYING_CLASS);
+  try {
+    return selection.toString();
+  } finally {
+    root.classList.remove(COPYING_CLASS);
+  }
 }
 
 function bindSerialization(): void {
