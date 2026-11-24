@@ -39,14 +39,18 @@ export function createProviderSetupPrompt(deps: {
   };
 
   createEffect(
-    () => ({ hasProviders: deps.hasProviders(), ready: deps.isReady() }),
-    ({ hasProviders, ready }) => {
+    () => ({
+      hasProviders: deps.hasProviders(),
+      ready: deps.isReady(),
+      confirmed: confirmedEmpty(),
+    }),
+    ({ hasProviders, ready, confirmed }) => {
       if (hasProviders) {
         cancelCheck();
         setConfirmedEmpty(false);
         return;
       }
-      if (!ready || check || confirmedEmpty()) return;
+      if (!ready || check || confirmed) return;
       const current = { cancelled: false };
       check = current;
       void runCheck(current);
