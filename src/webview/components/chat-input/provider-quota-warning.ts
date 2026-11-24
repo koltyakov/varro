@@ -87,7 +87,7 @@ export function getLowQuotaWindows(
     .filter((window) => {
       const scope = `${window.id} ${window.label}`.toLowerCase().replace(/[_-]/g, ' ');
       if (/\b(code review|review requests|mcp|cowork|omelette)\b/.test(scope)) return false;
-      const family = /\b(sonnet|opus|haiku)\b/.exec(scope)?.[1];
+      const family = /\b(sonnet|opus|haiku|fable)\b/.exec(scope)?.[1];
       if (family && !model.includes(family)) return false;
       const remaining = getProviderLimitWindowRemainingPercent(window);
       return (

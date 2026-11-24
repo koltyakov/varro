@@ -476,6 +476,91 @@ describe.skipIf(process.platform === 'win32')('ProviderQuotaCoordinator', () => 
     }
   );
 
+  it('shares cached weekly Fable windows between editors', async () => {
+    const poll = vi.fn(async (): Promise<ProviderLimitStatus> => ({
+      providerID: 'claude-agent',
+      status: 'available',
+      source: 'provider',
+      checkedAt: now,
+      windows: [
+        {
+          id: 'seven_day_fable',
+          label: 'Weekly Fable',
+          unit: 'unknown',
+          remaining: 60,
+          limit: 100,
+          resetAt: null,
+          percent: 40,
+        },
+      ],
+    }));
+    const first = await new ProviderQuotaCoordinator(root).get('fable', null, poll, 'claude-agent');
+    expect(
+      await new ProviderQuotaCoordinator(root).get('fable', null, poll, 'claude-agent')
+    ).toEqual(first);
+    expect(first).toMatchObject({ windows: [{ id: 'seven_day_fable', label: 'Weekly Fable' }] });
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps weekly Fable when an older editor publishes Anthropic quota without it', async () => {
+    await fs.mkdir(join(auth.home, '.claude'), { recursive: true });
+    await fs.writeFile(
+      join(auth.home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'claude-token' } })
+    );
+    const legacyPoll = vi.fn(async (): Promise<ProviderLimitStatus> => ({
+      providerID: 'claude-agent',
+      status: 'available',
+      source: 'provider',
+      checkedAt: now,
+      windows: [
+        {
+          id: 'seven_day',
+          label: 'Weekly All-Model',
+          unit: 'unknown',
+          remaining: 76,
+          limit: 100,
+          resetAt: null,
+        },
+      ],
+    }));
+    await new ProviderQuotaCoordinator(root).get(
+      JSON.stringify(['https://api.anthropic.com/api/oauth/usage', 'claude-token']),
+      null,
+      legacyPoll,
+      'claude-agent'
+    );
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        seven_day: { utilization: 24 },
+        limits: [
+          {
+            kind: 'weekly_scoped',
+            group: 'weekly',
+            percent: 54,
+            scope: { model: { display_name: 'Fable' } },
+          },
+        ],
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const coordinator = new ProviderQuotaCoordinator(root);
+
+    const status = await createAnthropicAdapter().fetch({
+      provider: { id: 'claude-agent', models: {} },
+      authStore: {},
+      modelID: null,
+      checkedAt: now,
+      coordinate: (identity, poll) =>
+        coordinator.get(JSON.stringify(identity), null, poll, 'claude-agent'),
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(status).toMatchObject({
+      windows: [{ id: 'seven_day' }, { id: 'seven_day_fable', percent: 54 }],
+    });
+  });
+
   it('isolates credit-aware Codex snapshots from older editors sharing the same credentials', async () => {
     const legacyIdentity = JSON.stringify([
       'https://chatgpt.com/backend-api/wham/usage',

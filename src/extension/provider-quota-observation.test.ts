@@ -92,7 +92,13 @@ describe.skipIf(process.platform === 'win32')('shared quota observation', () => 
     expect(observe).not.toHaveBeenCalled();
     const oldKey = createHash('sha256')
       .update('anthropic\0')
-      .update(JSON.stringify(['https://api.anthropic.com/api/oauth/usage', 'account-a']))
+      .update(
+        JSON.stringify([
+          'anthropic-usage-v2',
+          'https://api.anthropic.com/api/oauth/usage',
+          'account-a',
+        ])
+      )
       .digest('hex');
     await expect(fs.stat(join(root, oldKey, 'snapshot.json'))).rejects.toThrow();
     expect(await first.service.get('anthropic', 'a')).toMatchObject({
@@ -102,7 +108,11 @@ describe.skipIf(process.platform === 'win32')('shared quota observation', () => 
     expect(observe.mock.calls[0]?.[2]).toContain('account-b');
     const oldPoll = vi.fn(async () => ({ ...available(9), providerID: 'anthropic' }));
     await get(
-      JSON.stringify(['https://api.anthropic.com/api/oauth/usage', 'account-a']),
+      JSON.stringify([
+        'anthropic-usage-v2',
+        'https://api.anthropic.com/api/oauth/usage',
+        'account-a',
+      ]),
       'a',
       oldPoll,
       'anthropic'

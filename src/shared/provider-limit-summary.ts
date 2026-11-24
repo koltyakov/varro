@@ -3,6 +3,14 @@ import type { ProviderLimitStatus, ProviderLimitWindow } from './protocol';
 /** Starts the note on a quota snapshot kept after a failed refresh. */
 export const LAST_SUCCESSFUL_QUOTA_SNAPSHOT_NOTE = 'Showing the last successful quota snapshot';
 
+// Model-scoped windows stay in the limits popover but out of inline summaries.
+const POPOVER_ONLY_WINDOW_IDS = new Set(['seven_day_fable']);
+
+/** Whether a window belongs in inline limit summaries such as the footer and status bar. */
+export function isProviderLimitWindowInline(window: ProviderLimitWindow) {
+  return !POPOVER_ONLY_WINDOW_IDS.has(window.id);
+}
+
 export function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
   const id = window.id.toLowerCase();
   const label = window.label.toLowerCase();
@@ -36,7 +44,7 @@ export function getProviderLimitWindowUsedPercent(window: ProviderLimitWindow): 
 export function formatProviderLimitStatusBar(status: ProviderLimitStatus): string {
   if (status.status !== 'available') return '';
   const periods = ['5h', 'D', 'W', 'M'];
-  const windows = status.windows.toSorted((a, b) => {
+  const windows = status.windows.filter(isProviderLimitWindowInline).toSorted((a, b) => {
     const aIndex = periods.indexOf(getProviderLimitWindowPeriodLabel(a));
     const bIndex = periods.indexOf(getProviderLimitWindowPeriodLabel(b));
     return (aIndex < 0 ? periods.length : aIndex) - (bIndex < 0 ? periods.length : bIndex);

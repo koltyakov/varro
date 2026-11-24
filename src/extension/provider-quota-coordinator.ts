@@ -23,6 +23,7 @@ const WINDOW_LABELS = new Map(
     seven_day_opus: 'Weekly Opus',
     seven_day_oauth_apps: 'Weekly Apps',
     seven_day_cowork: 'Weekly Cowork',
+    seven_day_fable: 'Weekly Fable',
     monthly_limit: 'Monthly Limit',
     extra_usage: 'Extra Usage',
     spark_five_hour: '5-Hour Limit (Spark)',

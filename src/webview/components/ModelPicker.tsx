@@ -20,6 +20,7 @@ import {
   getOrderedProviderLimitWindows,
   getProviderLimitWindowRemainingPercent,
 } from '../lib/format';
+import { isProviderLimitWindowInline } from '../../shared/provider-limit-summary';
 import { refreshProviderLimit } from '../hooks/useOpenCode';
 import {
   observePopupViewport,
@@ -53,7 +54,11 @@ function providerHeaderLimit(providerID: string | undefined) {
 function providerHeaderBadges(providerID: string | undefined) {
   const limit = providerHeaderLimit(providerID);
   const badges = getOrderedProviderLimitWindows(limit)
-    .filter((window) => getProviderLimitWindowRemainingPercent(window) != null)
+    .filter(
+      (window) =>
+        isProviderLimitWindowInline(window) &&
+        getProviderLimitWindowRemainingPercent(window) != null
+    )
     .map((window) => ({
       prefix: formatProviderLimitCompactPrefix(limit, window).toLowerCase(),
       value: formatProviderLimitCompact(limit, window),

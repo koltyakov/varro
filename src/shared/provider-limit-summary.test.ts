@@ -19,6 +19,18 @@ describe('status-bar provider limits', () => {
     ).toBe('5h 50%, w 78%');
   });
 
+  it('keeps popover-only model windows out of the status bar', () => {
+    expect(
+      formatProviderLimitStatusBar({
+        providerID: 'claude-agent',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [window('five_hour', 20), window('seven_day', 30), window('seven_day_fable', 40)],
+      })
+    ).toBe('5h 80%, w 70%');
+  });
+
   it('computes percentages from amounts and clamps explicit percentages', () => {
     expect(
       formatProviderLimitStatusBar({

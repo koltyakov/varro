@@ -490,6 +490,16 @@ describe('ProviderQuotaWarning', () => {
     expect(banner()?.textContent).not.toContain('seven_day_opus');
   });
 
+  it('warns about the weekly Fable limit only for Fable models', () => {
+    const windows = [quota('five_hour', 50), quota('seven_day_fable', 3)];
+    expect(
+      getLowQuotaWindows(snapshot(windows), 'claude-fable-5-2', 'Fable 5.2').map(
+        (window) => window.id
+      )
+    ).toEqual(['seven_day_fable']);
+    expect(getLowQuotaWindows(snapshot(windows), 'claude-opus-5-5', 'Opus 5.5')).toEqual([]);
+  });
+
   it('uses Spark windows only for Spark models', () => {
     const windows = [quota('five_hour', 2), quota('spark_seven_day', 8)];
     expect(

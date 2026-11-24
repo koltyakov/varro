@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderLimitStatus } from '../../shared/protocol';
+import type { ProviderLimitStatus, ProviderLimitWindow } from '../../shared/protocol';
 import {
   formatAgentInitial,
   formatAgentLabel,
@@ -413,6 +413,31 @@ describe('format helpers', () => {
       { label: '87%', tone: 'default' },
       { label: '98%', tone: 'default' },
     ]);
+  });
+
+  it('keeps the weekly Fable limit out of compact badges', () => {
+    const window = (id: string, percent: number): ProviderLimitWindow => ({
+      id,
+      label: id,
+      unit: 'unknown',
+      remaining: 100 - percent,
+      limit: 100,
+      resetAt: null,
+      percent,
+    });
+    const limit = availableLimit([
+      window('five_hour', 22),
+      window('seven_day', 76),
+      window('seven_day_fable', 54),
+    ]);
+
+    expect(getProviderLimitCompactBadges(limit)).toEqual([
+      { label: '78%', tone: 'default' },
+      { label: '24%', tone: 'warning' },
+    ]);
+    expect(getOrderedProviderLimitWindows(limit).map((item) => item.id)).toContain(
+      'seven_day_fable'
+    );
   });
 
   it('orders Ollama Cloud session before weekly and includes both compact badges', () => {

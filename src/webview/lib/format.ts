@@ -4,6 +4,7 @@ import { getProviderLimitDisplay } from './provider-limit-display';
 import {
   getProviderLimitWindowPeriodLabel,
   getProviderLimitWindowUsedPercent as getWindowPercent,
+  isProviderLimitWindowInline,
 } from '../../shared/provider-limit-summary';
 
 export function formatVariantLabel(variant: string) {
@@ -207,7 +208,7 @@ export function getProviderLimitCompactBadges(
 
   const preferredPeriods = options?.preferredPeriods ?? ['5h', 'W', 'M'];
   const fallbackCount = options?.fallbackCount ?? 1;
-  const windows = getOrderedProviderLimitWindows(limit);
+  const windows = getOrderedProviderLimitWindows(limit).filter(isProviderLimitWindowInline);
   const preferred = windows.filter((window) => {
     const prefix = formatProviderLimitCompactPrefix(limit, window);
     return preferredPeriods.includes(prefix);

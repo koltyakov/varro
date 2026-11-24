@@ -113,6 +113,7 @@ describe('createAnthropicAdapter', () => {
       checkedAt: 1_000,
       coordinate: async (identity, poll, observation) => {
         expect(identity).toEqual([
+          'anthropic-usage-v2',
           'https://api.anthropic.com/api/oauth/usage',
           'claude-code-token',
         ]);
@@ -142,6 +143,71 @@ describe('createAnthropicAdapter', () => {
       ],
     });
     expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('reads the weekly Fable limit from the usage endpoint limits list', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ claudeAiOauth: { accessToken: 'claude-code-token' } })
+    );
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        five_hour: { utilization: 20 },
+        seven_day: { utilization: 30 },
+        seven_day_overage_included: { utilization: 99 },
+        extra_usage: { is_enabled: true, utilization: 5, monthly_limit: 100, used_credits: 5 },
+        limits: [
+          { kind: 'session', group: 'session', percent: 20 },
+          {
+            kind: 'weekly_scoped',
+            group: 'weekly',
+            percent: 41.5,
+            resets_at: '2026-11-30T00:00:00Z',
+            scope: { model: { display_name: 'Fable' } },
+          },
+        ],
+      })
+    );
+
+    const status = await fetchStatus({ provider: { id: 'claude-agent', models: {} } });
+
+    expect(status).toMatchObject({
+      status: 'available',
+      windows: [
+        { id: 'five_hour' },
+        { id: 'seven_day' },
+        {
+          id: 'seven_day_fable',
+          label: 'Weekly Fable',
+          remaining: 58.5,
+          limit: 100,
+          percent: 41.5,
+          resetAt: Date.parse('2026-11-30T00:00:00Z'),
+        },
+        { id: 'extra_usage' },
+      ],
+    });
+  });
+
+  it('falls back to the legacy Fable weekly key without a limits list', async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ claudeAiOauth: { accessToken: 'claude-code-token' } })
+    );
+    vi.mocked(fetch).mockResolvedValue(
+      Response.json({
+        five_hour: { utilization: 20 },
+        seven_day_overage_included: { utilization: 12 },
+      })
+    );
+
+    const status = await fetchStatus({ provider: { id: 'claude-agent', models: {} } });
+
+    expect(status).toMatchObject({
+      status: 'available',
+      windows: [
+        { id: 'five_hour' },
+        { id: 'seven_day_fable', label: 'Weekly Fable', remaining: 88 },
+      ],
+    });
   });
 
   it('does not substitute Anthropic credentials when Claude Agent has no Claude Code login', async () => {
@@ -325,7 +391,9 @@ describe('createAnthropicAdapter', () => {
       },
     });
     expect(status.status).toBe('unsupported');
-    expect(identities).toEqual([['https://api.anthropic.com/api/oauth/usage', 'original']]);
+    expect(identities).toEqual([
+      ['anthropic-usage-v2', 'https://api.anthropic.com/api/oauth/usage', 'original'],
+    ]);
     expect(fetch).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
     expect(mkdir).not.toHaveBeenCalled();
