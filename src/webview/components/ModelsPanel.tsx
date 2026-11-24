@@ -34,6 +34,7 @@ import {
   setProviderOrder,
   setProviderLimitPin,
   setProviderLimit,
+  requestComposerFocus,
   setProviderVisible,
   setShowModels,
   setState,
@@ -729,10 +730,13 @@ export function ModelsPanel() {
             <Tooltip content="Back">
               <button
                 class="chat-header-btn"
-                onClick={() => setShowModels(false)}
+                onClick={() => {
+                  setShowModels(false);
+                  requestComposerFocus();
+                }}
                 aria-label="Back"
               >
-                <NavArrowLeftControlIcon class="models-header-back-icon" />
+                <NavArrowLeftControlIcon class="chat-header-back-icon" />
               </button>
             </Tooltip>
             <span class="models-header-title">Models</span>
@@ -953,6 +957,12 @@ export function ModelsPanel() {
                       modelsReorderable={!normalizedQuery()}
                       dragging={draggedProviderID() === providerID}
                       dragOver={dragOverProviderID() === providerID}
+                      contextMenuModelID={
+                        contextMenu()?.providerID === providerID
+                          ? (contextMenu()?.modelID ?? null)
+                          : null
+                      }
+                      providerContextMenuOpen={providerContextMenu()?.providerID === providerID}
                       onDragStart={(event) => startProviderDrag(event, providerID)}
                       onDragOver={(event) => dragOverProvider(event, providerID)}
                       onDragLeave={() => {
@@ -1666,6 +1676,9 @@ function ProviderSection(props: {
   modelsReorderable: boolean;
   dragging: boolean;
   dragOver: boolean;
+  /** Model whose context menu is open, so its row stays identified while the menu covers it. */
+  contextMenuModelID: string | null;
+  providerContextMenuOpen: boolean;
   onDragStart: (event: DragEvent) => void;
   onDragOver: (event: DragEvent) => void;
   onDragLeave: () => void;
@@ -1796,7 +1809,7 @@ function ProviderSection(props: {
       onDrop={props.onDrop}
     >
       <div
-        class="models-provider-header"
+        class={`models-provider-header${props.providerContextMenuOpen ? ' is-context-target' : ''}`}
         onContextMenu={(event) => {
           event.preventDefault();
           props.onOpenProviderContextMenu({
@@ -1919,7 +1932,7 @@ function ProviderSection(props: {
 
                 return (
                   <label
-                    class={`models-model-row${draggedModelID() === model.id ? ' is-dragging' : ''}${dragOverModelID() === model.id ? ' is-drag-over' : ''}`}
+                    class={`models-model-row${draggedModelID() === model.id ? ' is-dragging' : ''}${dragOverModelID() === model.id ? ' is-drag-over' : ''}${props.contextMenuModelID === model.id ? ' is-context-target' : ''}`}
                     onDragEnter={(event) => dragOverModel(event, model.id)}
                     onDragOver={(event) => dragOverModel(event, model.id)}
                     onDragLeave={(event) => {

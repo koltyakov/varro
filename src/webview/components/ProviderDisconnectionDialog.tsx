@@ -183,7 +183,11 @@ export function ProviderDisconnectionDialog(props: {
                           )}
                         </For>
                         <Show when={filteredProviders().length === 0}>
-                          <div class="provider-connect-empty">No connected providers found.</div>
+                          <div class="provider-connect-empty">
+                            {query().trim()
+                              ? 'No matching connected providers.'
+                              : 'No connected providers found.'}
+                          </div>
                         </Show>
                       </div>
                     </div>

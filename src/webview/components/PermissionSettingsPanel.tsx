@@ -24,16 +24,21 @@ import {
   isScalarConfigPermission,
 } from '../../shared/permission-rules';
 import { client } from '../lib/client';
-import { getPermissionModeForSession, setShowPermissionSettings, state } from '../lib/state';
+import {
+  getPermissionModeForSession,
+  requestComposerFocus,
+  setShowPermissionSettings,
+  state,
+} from '../lib/state';
 import {
   checkIcon,
   editPencilIcon,
   navArrowDownIcon,
-  navArrowLeftIcon,
   plusIcon,
   trashIcon,
   xmarkIcon,
 } from '../lib/ui-icons';
+import { NavArrowLeftControlIcon } from './ControlIcons';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
 
@@ -1016,12 +1021,15 @@ export function PermissionSettingsPanel() {
                 type="button"
                 class="chat-header-btn"
                 aria-label="Back"
-                onClick={() => setShowPermissionSettings(false)}
+                onClick={() => {
+                  setShowPermissionSettings(false);
+                  requestComposerFocus();
+                }}
               >
-                <UiIcon source={navArrowLeftIcon} width={16} height={16} />
+                <NavArrowLeftControlIcon class="chat-header-back-icon" />
               </button>
             </Tooltip>
-            <span>Permissions</span>
+            <h1>Permissions</h1>
           </div>
         </div>
       </header>
@@ -1203,7 +1211,7 @@ export function PermissionSettingsPanel() {
                                     when={editingServerRule()?.id === rule.id}
                                     fallback={
                                       <>
-                                        <code>{rule.permission}</code>
+                                        <code title={rule.permission}>{rule.permission}</code>
                                         <code title={rule.pattern}>{rule.pattern}</code>
                                       </>
                                     }

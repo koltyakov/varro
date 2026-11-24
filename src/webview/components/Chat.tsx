@@ -827,10 +827,12 @@ export function Chat() {
         }
         if (showPermissionSettings()) {
           setShowPermissionSettings(false);
+          requestComposerFocus();
           return;
         }
         if (showModels()) {
           setShowModels(false);
+          requestComposerFocus();
           return;
         }
         if (showSessionPicker()) return;

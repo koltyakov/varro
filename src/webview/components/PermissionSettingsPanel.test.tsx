@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodePermissionConfig } from '../../shared/protocol';
 import type { PermissionRule } from '../../shared/opencode-types';
 import { getSessionPermissionRulesForMode } from '../../shared/permission-rules';
-import { setState } from '../lib/state';
+import {
+  composerFocusKey,
+  setShowPermissionSettings,
+  setState,
+  showPermissionSettings,
+} from '../lib/state';
 import { PermissionSettingsPanel } from './PermissionSettingsPanel';
 
 const mocks = vi.hoisted(() => ({
@@ -154,6 +159,24 @@ describe('PermissionSettingsPanel', () => {
     flushSolid();
     expect(mocks.saveGlobal).toHaveBeenLastCalledWith([]);
     expect(global.textContent).toContain('No rules in this global config file');
+  });
+
+  it('returns focus to the composer when closed from its back button', async () => {
+    setShowPermissionSettings(true);
+    flushSolid();
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    flushSolid();
+    await flush();
+    const focusKey = composerFocusKey();
+
+    container.querySelector<HTMLButtonElement>('button[aria-label="Back"]')!.click();
+    flushSolid();
+
+    expect(showPermissionSettings()).toBe(false);
+    expect(composerFocusKey()).toBe(focusKey + 1);
+    expect(container.querySelector('.permission-settings-header h1')?.textContent).toBe(
+      'Permissions'
+    );
   });
 
   it('shows editable, inherited, and effective rules', async () => {

@@ -15,8 +15,7 @@ import {
   setState,
   state,
 } from '../lib/state';
-import { navArrowLeftIcon } from '../lib/ui-icons';
-import { UiIcon } from './UiIcon';
+import { NavArrowLeftControlIcon } from './ControlIcons';
 
 type McpScope = McpConfigScope;
 
@@ -251,7 +250,7 @@ export function McpSettingsPanel() {
               requestComposerFocus();
             }}
           >
-            <UiIcon source={navArrowLeftIcon} width={16} height={16} />
+            <NavArrowLeftControlIcon class="chat-header-back-icon" />
           </button>
           <h1>MCP settings</h1>
           <Show when={activity()}>
@@ -348,7 +347,7 @@ export function McpSettingsPanel() {
               </Show>
               <Show
                 when={names().length > 0}
-                fallback={<p class="mcp-settings-note">No MCP servers configured.</p>}
+                fallback={<p class="mcp-settings-empty">No MCP servers configured.</p>}
               >
                 <div class="mcp-settings-servers" aria-busy={ariaBoolean(saving() || loading())}>
                   <For each={names()}>

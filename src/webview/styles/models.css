@@ -1074,7 +1074,8 @@
   background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
 }
 
-.models-provider-header:hover {
+.models-provider-header:hover,
+.models-provider-header.is-context-target {
   background: var(--color-vscode-hover);
 }
 
@@ -1295,7 +1296,8 @@
   -webkit-user-select: none;
 }
 
-.models-model-row:hover:not(:focus-within) {
+.models-model-row:hover:not(:focus-within),
+.models-model-row.is-context-target {
   background: var(--color-vscode-hover);
 }
 

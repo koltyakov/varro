@@ -476,6 +476,7 @@ export function ProviderConnectionDialog(props: {
                         providers={filteredProviders()}
                         activeIndex={activeProviderIndex()}
                         selectedProviderID={providerID()}
+                        filtered={providerQuery().trim().length > 0}
                         onActivate={setActiveProviderIndex}
                         onSelect={chooseProvider}
                       />
@@ -877,6 +878,7 @@ function ProviderOptions(props: {
   providers: Array<{ id: string; name: string; methods: ProviderAuthMethod[] }>;
   activeIndex: number;
   selectedProviderID: string | null;
+  filtered: boolean;
   onActivate: (index: number) => void;
   onSelect: (providerID: string) => void;
 }) {
@@ -955,7 +957,9 @@ function ProviderOptions(props: {
           )}
         </For>
         <Show when={props.providers.length === 0}>
-          <div class="provider-connect-empty">No matching providers.</div>
+          <div class="provider-connect-empty">
+            {props.filtered ? 'No matching providers.' : 'No providers available.'}
+          </div>
         </Show>
       </div>
       <Show when={thumbHeight() > 0}>

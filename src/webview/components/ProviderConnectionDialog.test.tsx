@@ -389,6 +389,20 @@ describe('ProviderConnectionDialog provider list', () => {
     expect(optionByName('Openai')).toBeInstanceOf(HTMLButtonElement);
   });
 
+  it('does not describe an unfiltered empty list as a search miss', () => {
+    // Replace rather than merge, so no auth-plugin fallback providers remain.
+    applyState((draft) => {
+      draft.providerAuthMethods = {};
+    });
+    applyState(storePath('providers', []));
+
+    renderDialog({ catalogProviders: [] });
+
+    expect(optionElements()).toHaveLength(0);
+    expect(dialog()?.textContent).toContain('No providers available.');
+    expect(dialog()?.textContent).not.toContain('No matching providers.');
+  });
+
   it('filters providers by name or id and reports empty results', () => {
     renderDialog({
       catalogProviders: [

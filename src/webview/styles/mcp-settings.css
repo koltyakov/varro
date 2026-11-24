@@ -66,6 +66,15 @@
   font-size: 11px;
 }
 
+.mcp-settings-content .mcp-settings-empty {
+  padding: 14px 12px;
+  border: 1px dashed var(--color-vscode-border);
+  border-radius: var(--radius-card);
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
 .mcp-settings-notice {
   padding: 10px 12px;
   border: 1px solid var(--color-vscode-border);

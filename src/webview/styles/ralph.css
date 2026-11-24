@@ -408,11 +408,19 @@
     padding-inline: var(--chat-horizontal-padding);
   }
 
+  /* Both-edge gutters keep the track centered, so it only needs to give back the
+     gutter space the fixed header does not reserve once the capped width no longer fits. */
   .ralph-dashboard-list-track {
-    padding-left: var(--chat-horizontal-padding);
-    padding-right: max(
+    padding-inline: max(
       0px,
-      calc(var(--chat-horizontal-padding) - var(--ralph-dashboard-scrollbar-inset))
+      calc(
+        var(--chat-horizontal-padding) -
+          clamp(
+            0px,
+            (var(--chat-content-max-width) - 100%) / 2,
+            var(--ralph-dashboard-scrollbar-inset) / 2
+          )
+      )
     );
   }
 }
@@ -778,6 +786,9 @@
   container-type: inline-size;
   flex: 1 1 auto;
   min-width: 0;
+  /* The track pads by the fade width; pull the leading edge into the row gap so
+     the first pill keeps its spacing and is never faded while at rest. */
+  margin-left: calc(var(--space-6) * -1);
   overflow-x: hidden;
   overflow-y: hidden;
   white-space: nowrap;
@@ -803,6 +814,7 @@
   display: inline-flex;
   gap: 4px;
   min-width: max-content;
+  padding-inline: var(--space-6);
   animation: ralph-verdict-marquee 14s linear infinite alternate;
 }
 

@@ -49,6 +49,23 @@ describe('RestartBlocked', () => {
     vi.useRealTimers();
   });
 
+  it('wraps long directories between path segments without changing their text', () => {
+    setState(
+      storePath('restartBlocked', {
+        totalSessionCount: 1,
+        directories: [{ directory: '/Users/dev/very-long-project/packages/web', sessionCount: 1 }],
+      })
+    );
+    flushSolid();
+
+    const path = container.querySelector<HTMLElement>(
+      '[title="/Users/dev/very-long-project/packages/web"]'
+    );
+    expect(path?.textContent).toBe('/Users/dev/very-long-project/packages/web');
+    // One break opportunity after each separator: "/", "Users/", "dev/", ... "packages/".
+    expect(path?.querySelectorAll('wbr')).toHaveLength(5);
+  });
+
   it('renders directory counts and periodically checks again', async () => {
     expect(container.textContent).toContain('3 sessions are still running');
     expect(container.textContent).toContain('/repo-a');

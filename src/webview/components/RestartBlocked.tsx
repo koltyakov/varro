@@ -7,6 +7,23 @@ import { xmarkIcon } from '../lib/ui-icons';
 import { UiIcon } from './UiIcon';
 
 const RECHECK_INTERVAL_MS = 3000;
+
+/** Offers line breaks after path separators so long paths wrap between segments. */
+function PathText(props: { path: string }) {
+  const segments = () => props.path.split(/(?<=[/\\])/);
+  return (
+    <For each={segments()}>
+      {(segment, index) => (
+        <>
+          <Show when={index() > 0}>
+            <wbr />
+          </Show>
+          {segment}
+        </>
+      )}
+    </For>
+  );
+}
 const blockers = () => defaultAppState.state.restartBlocked;
 let nextCheckId = 1;
 
@@ -50,9 +67,9 @@ export function RestartBlocked() {
       <div class="server-status-content">
         <UiIcon
           source={statusIcons.clock}
-          class="h-5 w-5 text-vscode-accent"
-          width={20}
-          height={20}
+          class="h-6 w-6 shrink-0 text-vscode-accent"
+          width={24}
+          height={24}
         />
 
         <div class="w-full">
@@ -71,8 +88,11 @@ export function RestartBlocked() {
           <For each={blockers()?.directories ?? []}>
             {(row) => (
               <div class="flex items-center gap-3 rounded-md border border-vscode-border-soft px-3 py-2.5">
-                <span class="min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-vscode-fg">
-                  {row.directory ?? 'Unknown directory'}
+                <span
+                  class="min-w-0 flex-1 font-mono text-[11px] leading-relaxed text-vscode-fg wrap-anywhere"
+                  title={row.directory ?? undefined}
+                >
+                  <PathText path={row.directory ?? 'Unknown directory'} />
                 </span>
                 <span
                   class="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-vscode-badge-bg px-1.5 text-[11px] font-medium text-vscode-badge-fg"

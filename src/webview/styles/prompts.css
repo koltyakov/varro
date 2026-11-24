@@ -454,7 +454,7 @@ body.vscode-light .question-custom-input {
 
 .server-status-command {
   width: 100%;
-  max-width: 300px;
+  max-width: 340px;
   min-width: 0;
   text-align: left;
 }
@@ -479,13 +479,13 @@ body.vscode-light .question-custom-input {
   background: transparent;
   color: var(--color-vscode-fg);
   font-family: var(--font-mono);
-  overflow: hidden;
   font-size: 11px;
   font-weight: 400;
   line-height: 1.45;
-  white-space: pre;
-  text-overflow: ellipsis;
+  /* Wrap instead of truncating: the command must stay readable before it is run or copied. */
+  white-space: pre-wrap;
   word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 .server-status-command-button {
