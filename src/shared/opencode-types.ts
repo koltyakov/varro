@@ -3,6 +3,7 @@ import type { UnknownRecord } from './type-utils';
 import type { FileChange } from './tool-file-change';
 import type { NativeForm } from './native-form';
 import type { SessionGoal } from './session-goal';
+import type { BackgroundWorkKind } from './background-process';
 
 export type OutputFormatText = {
   type: 'text';
@@ -495,6 +496,10 @@ export type SessionStatus =
       background?: boolean;
       backgroundStartedAt?: number;
       backgroundCommand?: string;
+      /** Kind of the work named by `backgroundCommand`; unset for shell processes. */
+      backgroundKind?: BackgroundWorkKind;
+      /** Child session running the work named by `backgroundCommand`, for sub-agents. */
+      backgroundSessionID?: string;
       backgroundServices?: number;
     };
 

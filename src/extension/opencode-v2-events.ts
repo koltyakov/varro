@@ -36,6 +36,8 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     background: true,
     backgroundStartedAt: context.backgroundStartedAt,
     backgroundCommand: context.backgroundCommand,
+    backgroundKind: context.backgroundKind,
+    backgroundSessionID: context.backgroundSessionID,
     backgroundServices: context.backgroundServices,
   };
   const serviceStatus =

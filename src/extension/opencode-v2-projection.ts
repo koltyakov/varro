@@ -16,6 +16,7 @@ import { formatSkillAttachment } from '../shared/skill-reference';
 import { parseNativeForm } from '../shared/native-form';
 import { pastedTextDataUrl } from '../shared/pasted-text';
 import { splitPromptTextAttachments } from '../shared/prompt-text-attachments';
+import type { BackgroundWorkKind } from '../shared/background-process';
 import type { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
 
 export function v2PartId(messageID: string, type: string, ordinal: number): string {
@@ -222,6 +223,8 @@ export type V2MessageContext = {
   backgroundPending?: boolean;
   backgroundStartedAt?: number;
   backgroundCommand?: string;
+  backgroundKind?: BackgroundWorkKind;
+  backgroundSessionID?: string;
   backgroundServices?: number;
   error?: SessionStructuredError;
   generationTiming?: OpenCodeV2GenerationTiming;

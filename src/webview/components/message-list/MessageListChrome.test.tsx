@@ -7,8 +7,13 @@ import {
   backgroundProcessView,
   closeBackgroundProcessView,
 } from '../../lib/background-process-view';
+import {
+  clearSubagentSessionsRequest,
+  subagentSessionsRequest,
+} from '../../lib/subagent-sessions-view';
 import { attachmentIcon, hourglassIcon, mediaImageIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
+import { DEFAULT_TOOLTIP_DELAY } from '../Tooltip';
 import type { Permission, QuestionRequest } from '../../types';
 import type { StickyUserMessagePreview } from './sticky-preview';
 
@@ -60,8 +65,10 @@ describe('MessageListChrome', () => {
     stopLoading();
     flushSolid();
     closeBackgroundProcessView();
+    clearSubagentSessionsRequest();
     flushSolid();
     setState(storePath('activeSessionId', null));
+    setState(storePath('sessions', []));
     flushSolid();
   });
 
@@ -143,6 +150,132 @@ describe('MessageListChrome', () => {
     expect(container!.querySelector('.background-process')).not.toBeNull();
     expect(container!.querySelector('.loading-indicator')).toBeNull();
   });
+  it('names sub-agent work and opens the session tree sub-agents instead of the process dialog', () => {
+    const session = (id: string, parentID?: string) => ({
+      id,
+      parentID,
+      projectID: 'project',
+      directory: '/repo',
+      version: '2',
+      title: id,
+      time: { created: 1, updated: 1 },
+    });
+    setState(storePath('sessions', [session('ses_root'), session('ses_mid', 'ses_root')]));
+    setState(storePath('activeSessionId', 'ses_mid'));
+    flushSolid();
+    startLoading();
+    flushSolid();
+    const [command, setCommand] = createSignal<string | undefined>('Secret destination binding');
+    cleanup = render(
+      () => (
+        <LoadingRow
+          compacting={false}
+          visible
+          waiting
+          waitingCommand={command()}
+          waitingKind="subagent"
+          waitingSessionID="ses_child"
+        />
+      ),
+      container!
+    );
+    flushSolid();
+    const title = () => container!.querySelector('.background-process .tool-invocation-title');
+    expect(title()?.textContent).toBe('Waiting for sub-agents');
+    const button = container!.querySelector<HTMLButtonElement>(
+      '[aria-label="View sub-agent sessions"]'
+    )!;
+    expect(button.hasAttribute('aria-haspopup')).toBe(false);
+    // The kind stays with the retained command through the resume handoff.
+    setCommand(undefined);
+    flushSolid();
+    expect(title()?.textContent).toBe('Waiting for sub-agents');
+    button.click();
+    flushSolid();
+    expect(subagentSessionsRequest()).toEqual({
+      rootSessionID: 'ses_root',
+      childSessionID: 'ses_child',
+    });
+    expect(backgroundProcessView()).toBeNull();
+  });
+
+  it('names other non-shell work as a background task', () => {
+    setState(storePath('activeSessionId', 'ses_background'));
+    flushSolid();
+    startLoading();
+    flushSolid();
+    cleanup = render(
+      () => (
+        <LoadingRow
+          compacting={false}
+          visible
+          waiting
+          waitingCommand="Render the demo"
+          waitingKind="task"
+        />
+      ),
+      container!
+    );
+    flushSolid();
+    expect(
+      container!.querySelector('.background-process .tool-invocation-title')?.textContent
+    ).toBe('Background task: Render the demo');
+  });
+
+  describe('waiting row tooltip', () => {
+    const hoverTooltip = async () => {
+      const trigger = container!.querySelector('.background-process .tool-invocation-header')!;
+      trigger.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(DEFAULT_TOOLTIP_DELAY);
+      flushSolid();
+      return document.querySelector('.themed-tooltip[role="tooltip"]');
+    };
+    const renderWaiting = (kind?: 'subagent') => {
+      vi.useFakeTimers();
+      setState(storePath('activeSessionId', 'ses_background'));
+      flushSolid();
+      startLoading();
+      flushSolid();
+      cleanup = render(
+        () => (
+          <LoadingRow
+            compacting={false}
+            visible
+            waiting
+            waitingCommand={kind ? 'Secret destination binding' : 'npm test'}
+            waitingKind={kind}
+          />
+        ),
+        container!
+      );
+      flushSolid();
+    };
+
+    it('shows the hidden sub-agent description in a row-wide goal-style panel', async () => {
+      renderWaiting('subagent');
+      expect(container!.querySelector('.background-process [title]')).toBeNull();
+      const tooltip = await hoverTooltip();
+      expect(tooltip?.classList.contains('panel')).toBe(true);
+      expect(tooltip?.querySelector('.chat-goal-tooltip-objective')?.textContent).toBe(
+        'Secret destination binding'
+      );
+    });
+
+    it('shows a process command only when the title clips it', async () => {
+      renderWaiting();
+      expect(await hoverTooltip()).toBeNull();
+      container!
+        .querySelector('.background-process .tool-invocation-header')!
+        .dispatchEvent(new MouseEvent('mouseleave'));
+      flushSolid();
+      Object.defineProperties(
+        container!.querySelector('.background-process .tool-invocation-title')!,
+        { scrollWidth: { value: 300 }, clientWidth: { value: 100 } }
+      );
+      expect((await hoverTooltip())?.textContent).toBe('npm test');
+    });
+  });
+
   it('shows the command and retains it during the resume handoff without leaking across sessions', () => {
     setState(storePath('activeSessionId', 'ses_background'));
     flushSolid();
@@ -156,7 +289,7 @@ describe('MessageListChrome', () => {
     flushSolid();
     const title = () => container!.querySelector('.background-process .tool-invocation-title');
     expect(title()?.textContent).toBe('Background process: python3 tools/serve.py 18765');
-    expect(title()?.getAttribute('title')).toBe('python3 tools/serve.py 18765');
+    expect(container!.querySelector('.background-process [title]')).toBeNull();
     setCommand(undefined);
     flushSolid();
     expect(title()?.textContent).toBe('Background process: python3 tools/serve.py 18765');

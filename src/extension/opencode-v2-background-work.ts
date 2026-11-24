@@ -1,8 +1,16 @@
 import type { JobInfo, ShellInfo } from '@opencode/client';
 import { BACKGROUND_COMMAND_SUMMARY_CHARS } from '../shared/background-process';
+import type { BackgroundWorkKind } from '../shared/background-process';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 
-type PendingBackgroundWork = { directory?: string; startedAt?: number; command?: string };
+/** The work a waiting session names: its command or title, kind, and sub-agent session. */
+export type BackgroundWorkSummary = {
+  command?: string;
+  kind?: BackgroundWorkKind;
+  childSessionID?: string;
+};
+
+type PendingBackgroundWork = BackgroundWorkSummary & { directory?: string; startedAt?: number };
 
 /** Background tools settle before their jobs and automatic follow-up turns do. */
 export class OpenCodeV2BackgroundWork {
@@ -20,7 +28,7 @@ export class OpenCodeV2BackgroundWork {
   private readonly sessionMutations = new Map<string, number>();
   private readonly waiting = new Map<
     string,
-    { directory?: string; endedAt: number | null; command?: string }
+    { directory?: string; endedAt: number | null; work?: BackgroundWorkSummary }
   >();
   private readonly stoppedSessions = new Set<string>();
   private readonly jobs = new Map<
@@ -63,7 +71,7 @@ export class OpenCodeV2BackgroundWork {
         const waiting = this.waiting.get(sessionID);
         if (waiting && !shell?.service && this.shellIDs(sessionID).length === 0) {
           waiting.endedAt = Date.now();
-          waiting.command = shell?.command ?? waiting.command;
+          if (shell?.command) waiting.work = { command: shell.command };
         }
       }
     }
@@ -79,7 +87,7 @@ export class OpenCodeV2BackgroundWork {
         this.waiting.set(data.sessionID, {
           directory: pending.directory,
           endedAt: null,
-          command: pending.command,
+          work: this.leadWork(data.sessionID),
         });
     }
     if (type === 'session.execution.started' || type === 'session.step.started')
@@ -146,11 +154,13 @@ export class OpenCodeV2BackgroundWork {
     return starts.length > 0 ? Math.min(...starts) : undefined;
   }
 
-  command(sessionID: string): string | undefined {
-    return (
-      this.pending(sessionID).find((work) => work.command)?.command ??
-      this.waiting.get(sessionID)?.command
-    );
+  describe(sessionID: string): BackgroundWorkSummary {
+    return this.leadWork(sessionID) ?? this.waiting.get(sessionID)?.work ?? {};
+  }
+
+  private leadWork(sessionID: string): BackgroundWorkSummary | undefined {
+    const work = this.pending(sessionID).find((candidate) => candidate.command);
+    return work && { command: work.command, kind: work.kind, childSessionID: work.childSessionID };
   }
 
   snapshotVersion(): number {
@@ -225,7 +235,7 @@ export class OpenCodeV2BackgroundWork {
       this.waiting.set(sessionID, {
         directory,
         endedAt: null,
-        command: this.command(sessionID),
+        work: this.describe(sessionID),
       });
     }
     for (const [sessionID, waiting] of this.waiting) {
@@ -265,22 +275,25 @@ export class OpenCodeV2BackgroundWork {
             return shell && !shell.service ? [{ ...shell, directory: native.directory }] : [];
           }
         }
-        return [
-          {
-            directory: native.directory,
-            startedAt: job.time.started,
-            command: summarizeCommand(
-              job.kind === 'shell'
-                ? job.command
-                : (job.title ??
-                    (job.kind === 'subagent'
-                      ? job.description
-                      : job.kind === 'image' || job.kind === 'video'
-                        ? job.path
-                        : 'Code Mode script'))
-            ),
-          },
-        ];
+        const work: PendingBackgroundWork = {
+          directory: native.directory,
+          startedAt: job.time.started,
+          command: summarizeCommand(
+            job.kind === 'shell'
+              ? job.command
+              : (job.title ??
+                  (job.kind === 'subagent'
+                    ? job.description
+                    : job.kind === 'image' || job.kind === 'video'
+                      ? job.path
+                      : 'Code Mode script'))
+          ),
+        };
+        if (job.kind === 'subagent') {
+          work.kind = 'subagent';
+          work.childSessionID = job.childSessionID;
+        } else if (job.kind !== 'shell') work.kind = 'task';
+        return [work];
       }),
       ...shells,
     ];

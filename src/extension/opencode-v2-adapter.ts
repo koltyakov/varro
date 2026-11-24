@@ -472,11 +472,14 @@ export class OpenCodeV2Adapter {
   }
 
   eventContext(sessionID: string): V2MessageContext | undefined {
+    const work = this.backgroundWork.describe(sessionID);
     return {
       ...this.contexts.get(sessionID),
       backgroundPending: this.backgroundWork.isWaiting(sessionID),
       backgroundStartedAt: this.backgroundWork.startedAt(sessionID),
-      backgroundCommand: this.backgroundWork.command(sessionID),
+      backgroundCommand: work.command,
+      backgroundKind: work.kind,
+      backgroundSessionID: work.childSessionID,
       backgroundServices: this.backgroundWork.serviceCount(sessionID),
       generationTiming: this.generationTiming,
     };
@@ -704,12 +707,15 @@ export class OpenCodeV2Adapter {
         }),
         ...waiting.map((id) => {
           const backgroundServices = this.backgroundWork.serviceCount(id);
+          const work = this.backgroundWork.describe(id);
           const projected: SessionStatus = {
             type: 'busy',
             background: true,
             backgroundStartedAt: this.backgroundWork.startedAt(id),
-            backgroundCommand: this.backgroundWork.command(id),
+            backgroundCommand: work.command,
           };
+          if (work.kind) projected.backgroundKind = work.kind;
+          if (work.childSessionID) projected.backgroundSessionID = work.childSessionID;
           if (backgroundServices > 0) projected.backgroundServices = backgroundServices;
           return [id, projected];
         }),

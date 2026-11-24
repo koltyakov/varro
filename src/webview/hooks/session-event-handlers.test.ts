@@ -4120,6 +4120,38 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
+  it('retains validated background work kinds and sub-agent sessions', () => {
+    const handlers = installHandlers();
+    flushSolid();
+    const setSessionStatusEntry = vi.fn();
+    registerSessionEventHandlers(
+      createDefaultDeps({ getActiveSessionId: () => 'session-1', setSessionStatusEntry })
+    );
+    for (const backgroundKind of ['subagent', 'task', 'shell'])
+      handlers.get('session.status')?.({
+        properties: {
+          sessionID: 'session-1',
+          status: {
+            type: 'busy',
+            background: true,
+            backgroundKind,
+            backgroundSessionID: 'ses_child',
+          },
+        },
+      });
+    flushSolid();
+    expect(setSessionStatusEntry.mock.calls.map(([, status]) => status)).toEqual([
+      {
+        type: 'busy',
+        background: true,
+        backgroundKind: 'subagent',
+        backgroundSessionID: 'ses_child',
+      },
+      { type: 'busy', background: true, backgroundKind: 'task' },
+      { type: 'busy', background: true },
+    ]);
+  });
+
   it.each(['idle', 'busy'] as const)('retains validated service counts in %s events', (type) => {
     const handlers = installHandlers();
     flushSolid();

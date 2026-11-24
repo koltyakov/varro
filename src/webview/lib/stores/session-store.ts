@@ -315,6 +315,8 @@ function isEqualSessionStatus(a: SessionStatus, b: SessionStatus): boolean {
       !!a.background === !!b.background &&
       a.backgroundStartedAt === b.backgroundStartedAt &&
       a.backgroundCommand === b.backgroundCommand &&
+      a.backgroundKind === b.backgroundKind &&
+      a.backgroundSessionID === b.backgroundSessionID &&
       a.backgroundServices === b.backgroundServices
     );
   if (a.type === 'retry' && b.type === 'retry') {

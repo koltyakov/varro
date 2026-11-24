@@ -3,6 +3,9 @@ import { asRecord, isBoolean, isNumber, isString } from './type-utils';
 export const BACKGROUND_OUTPUT_CHUNK_BYTES = 64 * 1024;
 export const BACKGROUND_COMMAND_SUMMARY_CHARS = 512;
 
+/** Non-shell background work a session waits on. Shell processes leave the kind unset. */
+export type BackgroundWorkKind = 'subagent' | 'task';
+
 export type BackgroundProcess = {
   id: string;
   status: 'running' | 'exited' | 'timeout' | 'killed';

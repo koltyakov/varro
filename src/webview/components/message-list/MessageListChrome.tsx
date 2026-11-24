@@ -12,10 +12,17 @@ import {
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { useSecondClock } from '../../lib/clock';
 import { openBackgroundProcessView } from '../../lib/background-process-view';
+import { openSubagentSessionsView } from '../../lib/subagent-sessions-view';
 import { logError } from '../../lib/log';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
-import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
+import {
+  getSessionTreeRootId,
+  loadingLastActivityAt,
+  loadingStartedAt,
+  state,
+  stopLoading,
+} from '../../lib/state';
 import {
   attachmentIcon,
   hourglassIcon,
@@ -25,6 +32,7 @@ import {
   navArrowRightIcon,
 } from '../../lib/ui-icons';
 import type { Part, Permission, QuestionRequest } from '../../types';
+import type { BackgroundWorkKind } from '../../../shared/background-process';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
 import { UiIcon } from '../UiIcon';
@@ -519,6 +527,10 @@ export function LoadingRow(props: {
   waitingStartedAt?: number;
   keepThinking?: boolean;
   waitingCommand?: string;
+  /** Kind of the work named by `waitingCommand`; unset for shell processes. */
+  waitingKind?: BackgroundWorkKind;
+  /** Sub-agent session running the work named by `waitingCommand`. */
+  waitingSessionID?: string;
   turnStartedAt?: number;
   elapsedStartedAt?: number;
   /** Active content owns the transcript's last line, so the hidden slot takes no space. */
@@ -580,18 +592,59 @@ export function LoadingRow(props: {
     sessionId: string | null;
     startedAt: number;
     command?: string;
+    kind?: BackgroundWorkKind;
+    childSessionId?: string;
   } | null>((previous = null) => {
     if (!waiting()) return null;
     const sessionId = state.activeSessionId;
+    const retained = previous?.sessionId === sessionId ? previous : null;
+    // The kind and child describe the named work, so they stay with its command.
+    const work =
+      props.waitingCommand === undefined
+        ? retained
+        : {
+            command: props.waitingCommand,
+            kind: props.waitingKind,
+            childSessionId: props.waitingSessionID,
+          };
     return {
       sessionId,
-      startedAt:
-        props.waitingStartedAt ??
-        (previous?.sessionId === sessionId ? previous.startedAt : Date.now()),
-      command:
-        props.waitingCommand ?? (previous?.sessionId === sessionId ? previous.command : undefined),
+      startedAt: props.waitingStartedAt ?? retained?.startedAt ?? Date.now(),
+      command: work?.command,
+      kind: work?.kind,
+      childSessionId: work?.childSessionId,
     };
   });
+  const waitingLabel = () => {
+    const kind = waitingClock()?.kind;
+    return kind === 'subagent'
+      ? 'Waiting for sub-agents'
+      : kind === 'task'
+        ? 'Background task'
+        : 'Background process';
+  };
+  // Sub-agent rows name only the wait, so the description lives in the tooltip.
+  const waitingCommandHidden = () => waitingClock()?.kind === 'subagent';
+  const [waitingTitleClipped, setWaitingTitleClipped] = createSignal(false);
+  // oxlint-disable-next-line no-unassigned-vars
+  let waitingCard: HTMLDivElement | undefined;
+  // oxlint-disable-next-line no-unassigned-vars
+  let waitingTitle: HTMLSpanElement | undefined;
+  const measureWaitingTitle = () =>
+    setWaitingTitleClipped(!!waitingTitle && waitingTitle.scrollWidth > waitingTitle.clientWidth);
+  const openWaitingDetails = () => {
+    const sessionID = state.activeSessionId;
+    if (!sessionID) return;
+    const clock = waitingClock();
+    if (clock?.kind === 'subagent') {
+      openSubagentSessionsView(getSessionTreeRootId(sessionID) || sessionID, clock.childSessionId);
+      return;
+    }
+    openBackgroundProcessView(
+      sessionID,
+      state.sessions.find((session) => session.id === sessionID)?.directory
+    );
+  };
 
   const isStale = () => {
     if (props.waiting || props.keepThinking) return false;
@@ -686,42 +739,51 @@ export function LoadingRow(props: {
         }
       >
         <div
+          ref={waitingCard}
           class="chat-tool-invocation-part background-process"
           role="status"
-          aria-label="Background process running"
+          aria-label={`${waitingLabel()} running`}
           aria-live="off"
         >
-          <button
-            type="button"
-            class="tool-invocation-header"
-            aria-label="View background process details"
-            aria-haspopup="dialog"
-            title="View commands, status, and output"
-            onClick={() => {
-              const sessionID = state.activeSessionId;
-              if (sessionID)
-                openBackgroundProcessView(
-                  sessionID,
-                  state.sessions.find((session) => session.id === sessionID)?.directory
-                );
-            }}
+          {/* Matches the goal row: a row-wide panel that only shows text the label hides. */}
+          <Tooltip
+            variant="panel"
+            anchor={() => waitingCard}
+            disabled={
+              !waitingClock()?.command || (!waitingCommandHidden() && !waitingTitleClipped())
+            }
+            content={<div class="chat-goal-tooltip-objective">{waitingClock()?.command}</div>}
           >
-            <UiIcon
-              source={hourglassIcon}
-              class="tool-call-icon tool-call-wait-icon tool-status-running"
-              width="16"
-              height="16"
-              aria-hidden="true"
-            />
-            <span class="tool-invocation-title shimmer-progress" title={waitingClock()?.command}>
-              Background process
-              <Show when={waitingClock()?.command}>{(command) => <>: {command()}</>}</Show>
-            </span>
-            <span class="tool-invocation-duration" title="Background process elapsed time">
-              {formatElapsed()}
-            </span>
-            <UiIcon source={navArrowRightIcon} width="14" height="14" aria-hidden="true" />
-          </button>
+            <button
+              type="button"
+              class="tool-invocation-header"
+              aria-label={
+                waitingClock()?.kind === 'subagent'
+                  ? 'View sub-agent sessions'
+                  : 'View background process details'
+              }
+              aria-haspopup={waitingClock()?.kind === 'subagent' ? undefined : 'dialog'}
+              onMouseEnter={measureWaitingTitle}
+              onFocus={measureWaitingTitle}
+              onClick={openWaitingDetails}
+            >
+              <UiIcon
+                source={hourglassIcon}
+                class="tool-call-icon tool-call-wait-icon tool-status-running"
+                width="16"
+                height="16"
+                aria-hidden="true"
+              />
+              <span ref={waitingTitle} class="tool-invocation-title shimmer-progress">
+                {waitingLabel()}
+                <Show when={!waitingCommandHidden() && waitingClock()?.command}>
+                  {(command) => <>: {command()}</>}
+                </Show>
+              </span>
+              <span class="tool-invocation-duration">{formatElapsed()}</span>
+              <UiIcon source={navArrowRightIcon} width="14" height="14" aria-hidden="true" />
+            </button>
+          </Tooltip>
         </div>
       </Show>
     </div>

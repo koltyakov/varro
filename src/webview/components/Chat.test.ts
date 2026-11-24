@@ -33,6 +33,7 @@ import {
 } from './Chat';
 import { client } from '../lib/client';
 import { openBackgroundProcessView } from '../lib/background-process-view';
+import { openSubagentSessionsView, subagentSessionsRequest } from '../lib/subagent-sessions-view';
 import { openSideQuestion, sideQuestionView } from '../lib/side-question';
 import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
@@ -2431,6 +2432,32 @@ describe('header status badges', () => {
     );
     const titles = trimmedTexts('.session-item-title');
     expect(titles).toEqual(['child-1', 'child-2']);
+  });
+
+  it('opens the sub-agents list when background sub-agent work asks for it', async () => {
+    applyState(
+      storePath('sessions', [
+        session('parent', 500),
+        session('child-1', 400, { parentID: 'parent' }),
+        session('child-2', 300, { parentID: 'parent' }),
+      ])
+    );
+    applyState(storePath('activeSessionId', 'parent'));
+    setShowSessionPicker(false);
+    flushSolid();
+    renderChat();
+
+    openSubagentSessionsView('parent', 'child-2');
+    flushSolid();
+    await Promise.resolve();
+    flushSolid();
+
+    expect(container?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
+      'Sub-agents for parent'
+    );
+    expect(trimmedTexts('.session-item-title')).toEqual(['child-1', 'child-2']);
+    expect(subagentSessionsRequest()).toBeNull();
+    expect(state.activeSessionId).toBe('parent');
   });
 
   it('hides the parent subagent button when the active session is a sub-agent', () => {

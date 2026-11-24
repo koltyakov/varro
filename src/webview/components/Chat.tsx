@@ -83,6 +83,10 @@ import { BackgroundProcessDialog } from './BackgroundProcessDialog';
 import { SideQuestionDialog } from './SideQuestionDialog';
 import { sideQuestionView, closeSideQuestion } from '../lib/side-question';
 import { backgroundProcessView, closeBackgroundProcessView } from '../lib/background-process-view';
+import {
+  clearSubagentSessionsRequest,
+  subagentSessionsRequest,
+} from '../lib/subagent-sessions-view';
 import { readWebviewInstanceContext } from '../lib/state-stored-values';
 import { isSessionTransferHidden } from '../lib/session-transfer';
 
@@ -923,6 +927,15 @@ export function Chat() {
     setSubagentParentId(parentSessionId);
     setShowSessionPicker(true);
   };
+
+  createEffect(subagentSessionsRequest, (request) => {
+    if (!request) return;
+    clearSubagentSessionsRequest();
+    // Editor tabs have no session list, so open the named sub-agent instead.
+    if (!isEditorSurface) openSubagentSessions(request.rootSessionID);
+    else if (request.childSessionID) void selectSession(request.childSessionID);
+  });
+  onCleanup(clearSubagentSessionsRequest);
 
   const openSidebarSubagentSessions = (parentSessionId: string) => {
     if (showSessionPicker()) {

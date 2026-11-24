@@ -204,6 +204,38 @@ describe('native v2 background jobs', () => {
     }
   );
 
+  it.each([
+    { job: shellJob, kind: undefined, childSessionID: undefined },
+    { job: subagentJob, kind: 'subagent', childSessionID: 'ses_child' },
+    { job: codeModeJob, kind: 'task', childSessionID: undefined },
+    { job: videoJob, kind: 'task', childSessionID: undefined },
+  ])('labels waiting $job.kind work by kind', async ({ job, kind, childSessionID }) => {
+    const { state, adapter, status } = fixture([job]);
+    state.shells = [];
+    const projected = await status();
+    expect(projected).toHaveProperty(['ses_root', 'type'], 'busy');
+    if (kind) expect(projected).toHaveProperty(['ses_root', 'backgroundKind'], kind);
+    else expect(projected).not.toHaveProperty(['ses_root', 'backgroundKind']);
+    if (childSessionID)
+      expect(projected).toHaveProperty(['ses_root', 'backgroundSessionID'], childSessionID);
+    else expect(projected).not.toHaveProperty(['ses_root', 'backgroundSessionID']);
+    expect(adapter.eventContext('ses_root')).toMatchObject({
+      backgroundKind: kind,
+      backgroundSessionID: childSessionID,
+    });
+  });
+
+  it('describes the work named by the status when shells and sub-agents mix', async () => {
+    const { status } = fixture([subagentJob, shellJob]);
+    expect(await status()).toMatchObject({
+      ses_root: {
+        backgroundCommand: subagentJob.description,
+        backgroundKind: 'subagent',
+        backgroundSessionID: 'ses_child',
+      },
+    });
+  });
+
   it('uses the native Code Mode title when available', async () => {
     const { status } = fixture([{ ...codeModeJob, title: 'Check the build' }]);
     expect(await status()).toMatchObject({

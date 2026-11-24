@@ -1904,6 +1904,10 @@ function parseSessionStatus<T>(value: T): SessionStatus | null {
         0,
         BACKGROUND_COMMAND_SUMMARY_CHARS
       );
+    if (status.backgroundKind === 'subagent' || status.backgroundKind === 'task')
+      pending.backgroundKind = status.backgroundKind;
+    if (pending.backgroundKind === 'subagent' && isString(status.backgroundSessionID))
+      pending.backgroundSessionID = status.backgroundSessionID;
     return pending;
   }
   if (
