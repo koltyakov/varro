@@ -19,7 +19,7 @@ Use this workflow when updating Varro's tested OpenCode versions. V2 is the reco
 
 V2 publishes `@opencode/cli` and `@opencode/client`. Keep the v1 SDK and support floor when updating the v2 client. Check both package families rather than interpreting the `opencode-ai` dist-tag as the latest v2 release.
 
-Run `npm run test:compatibility:adapters` after changing either adapter or the v2 dependency. It checks the actual published binaries and records observed versions. Use the served OpenAPI document and released package contracts when upstream `dev` or the documentation differs from the release. The v2.0.5 startup endpoint is `/api/status`; the newer documentation's `/api/info` is not available in that release.
+Run `npm run test:compatibility:adapters` after changing either adapter, a support floor, or the v2 dependency. It checks the actual published binaries and records observed versions. Use the served OpenAPI document and released package contracts when upstream `dev` or the documentation differs from the release. V2.0.6 added `/api/info` and `/api/location/reload`. The health fallback to `/api/status` still identifies older servers such as v2.0.5 so Varro can report the version without stopping the process.
 
 The runner's per-version manifest allows only that pinned CLI's install script,
 which npm 12 requires to replace the executable placeholder. Missing platform

@@ -1,6 +1,6 @@
 # OpenCode v1 and v2 support
 
-Research date: September 19, 2026. The implementation supports v1 from 1.16.0 and v2 from 2.0.5 through automatic extension-host adapters.
+Varro supports v1 from 1.16.0 and v2 from 2.0.6 through automatic extension-host adapters.
 
 V2 is recommended for new installations; v1 remains supported. See the [usage guide](usage.md#choose-and-update-opencode) for installation, version selection, updates, and configuration compatibility. Current packages both install `opencode`. Varro also recognizes older or custom `opencode2` installations and prefers that name during automatic discovery.
 
@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.6` and v2 `2.4.1`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.6` and v2 `2.4.1`, alongside the v1 `1.16.0` and v2 `2.0.6` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence and global reload, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -202,6 +202,28 @@ published-server check does not rerun or clear the startup failures recorded bel
 The full `npm run test` run passed 12,181 Vitest tests with 58 skipped, plus 284
 script tests with three skipped. There were no failures. Evidence is
 `artifacts/auxiliary-usage-all-tests.log`.
+
+### V2 minimum raised to 2.0.6
+
+Global provider configuration refresh calls `POST /api/location/reload`, first
+available in v2.0.6. V2.0.5 could not reload that configuration on an attached
+server. The v1 minimum and both SDK/client versions are unchanged.
+
+The focused v2.0.6 check changed a provider name in isolated global configuration
+and verified that OpenCode served the new name after Varro requested a reload,
+with the same server PID. This check is separate from the stream-timeout test,
+which still requires v2.0.20.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 28 | None | Yes, applicable automated cases |
+| v1.19.6 | 31 | 27 | None | Yes, applicable automated cases |
+| v2.0.6 | 48 | 10 | None | Yes, applicable automated cases |
+| v2.4.1 | 55 | 3 | None | Yes, applicable automated cases |
+
+The macOS ARM64 run passed all 164 applicable checks with no recovered server
+processes. Logs are in `artifacts/opencode-2.0.6-floor-adapters.log` and
+`artifacts/opencode-2.0.6-global-config-reload.log`.
 
 ### 2.4.1 compatibility review
 

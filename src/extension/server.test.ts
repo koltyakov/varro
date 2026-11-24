@@ -1249,7 +1249,7 @@ describe('automatic-port migration and admission', () => {
       const { api, children } = configureManagedStartup(server);
       const { processManager } = server as unknown as { processManager: OpenCodeProcess };
       vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
-      vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.5' });
+      vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.6' });
       vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
       vi.spyOn(processManager, 'hasCredentialVerifiedConnection', 'get').mockReturnValue(true);
       vi.spyOn(processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
@@ -1615,17 +1615,22 @@ describe('automatic-port migration and admission', () => {
     await server.disconnect();
   });
 
-  it('leaves an unsupported registered server running without applying an update', async () => {
-    const server = new OpenCodeServer('auto', true);
-    const { api, children } = configureManagedStartup(server);
-    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
-    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
-    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '1.15.13' });
-    const upgrade = vi.spyOn(processManager, 'upgradeCli');
-    await expect(server.start()).rejects.toThrow('left running');
-    expect(upgrade).not.toHaveBeenCalled();
-    expect(children).toHaveLength(0);
-  });
+  it.each(['1.15.13', '2.0.5'])(
+    'leaves an unsupported registered %s server running without applying an update',
+    async (version) => {
+      const server = new OpenCodeServer('auto', true);
+      const { api, children } = configureManagedStartup(server);
+      const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+      vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+      vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version });
+      const upgrade = vi.spyOn(processManager, 'upgradeCli');
+      const stop = vi.spyOn(processManager, 'stopServerForRestart');
+      await expect(server.start()).rejects.toThrow('left running');
+      expect(upgrade).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
+      expect(children).toHaveLength(0);
+    }
+  );
 
   it('does not probe or adopt the old default endpoint on a fresh automatic launch', async () => {
     const server = new OpenCodeServer('auto', true);
@@ -3974,7 +3979,7 @@ describe('OpenCodeServer compatibility gate', () => {
         prepareForHealthyExistingServer: typeof prepareForHealthyExistingServer;
       };
     };
-    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.5' });
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.6' });
     api.startEventStream = vi.fn(() => {
       expect(server.status.state).not.toBe('running');
       return Promise.resolve();

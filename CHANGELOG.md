@@ -4,6 +4,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.36.x - November 2026
 
+- Raised the OpenCode v2 minimum to 2.0.6, the first release that can reload global configuration without restarting. The v1 minimum is still 1.16.0.
 - Added per-follow-up token and cost reporting on subagent task cards, distinguishing shared, pending, and partial usage from session totals. Unavailable usage stays hidden; header token counts use compact notation while details retain exact totals.
 - Isolated composer drafts by view, workspace, and session. Sends and canceled edits stay attached to their original drafts, and restored attachment markers no longer bind to unrelated attachments.
 - Kept editor chat webviews alive across tab switches, preserving settled content and background updates. Older restored tabs need to be closed and reopened to enable this behavior after saving unsent drafts and attachments.
