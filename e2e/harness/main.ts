@@ -2311,12 +2311,15 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       state.mcpStatus = {
         atlassian: { status: 'connected' },
         'browser-bridge': { status: 'connected' },
+        control: { status: 'connected' },
+        lightpanda: { status: 'disabled' },
+        powerbi: { status: 'connected' },
       };
     }
     state.storedState = {
       sessionSelectedMcps: {
         [session.id]: new URLSearchParams(window.location.search).has('mcpAccount')
-          ? ['atlassian', 'browser-bridge']
+          ? ['atlassian', 'browser-bridge', 'control', 'powerbi']
           : ['chrome'],
       },
     };

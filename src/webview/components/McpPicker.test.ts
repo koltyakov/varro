@@ -498,7 +498,8 @@ describe('McpPicker', () => {
     const selectedIcon = items
       .find((item) => item.textContent?.includes('zeta'))
       ?.querySelector<HTMLElement>('.ui-icon');
-    expect(selectedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    expect(selectedIcon?.closest('.mcp-picker-checkbox')).not.toBeNull();
+    expect(selectedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('10px');
 
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })

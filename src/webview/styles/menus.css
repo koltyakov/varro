@@ -276,8 +276,33 @@
   color: color-mix(in srgb, var(--vscode-charts-blue, #75beff) 58%, var(--color-vscode-fg));
 }
 
+.mcp-status-tag {
+  --mcp-status-color: var(--color-vscode-muted);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  height: 16px;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mcp-status-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--mcp-status-color);
+}
+
 .mcp-status-tag.status-connected {
-  color: color-mix(in srgb, var(--color-vscode-muted) 70%, var(--color-vscode-success));
+  --mcp-status-color: var(--color-vscode-success);
+}
+
+.mcp-status-tag.status-disabled .mcp-status-dot {
+  border: 1px solid color-mix(in srgb, var(--color-vscode-muted) 80%, transparent);
+  background: transparent;
 }
 
 .mcp-picker-item {
@@ -292,12 +317,45 @@
   min-width: 0;
 }
 
+.mcp-picker-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+  border-radius: 3px;
+  color: var(--color-vscode-button-fg);
+  transition:
+    background-color 0.08s,
+    border-color 0.08s;
+}
+
+.mcp-picker-item.selected .mcp-picker-checkbox {
+  border-color: var(--color-vscode-button-bg);
+  background: var(--color-vscode-button-bg);
+}
+
+.mcp-picker-item:not(.selected) .dropdown-name {
+  color: color-mix(in srgb, var(--color-vscode-fg) 70%, transparent);
+}
+
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mcp-picker-checkbox {
+  border-color: var(--color-vscode-fg);
+}
+
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mcp-picker-item .dropdown-name {
+  color: var(--color-vscode-fg);
+}
+
 .mcp-picker-action {
   color: var(--color-vscode-accent);
   font-size: 11px;
 }
 
 .mcp-picker-error {
+  padding-left: 22px;
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -307,6 +365,18 @@
   align-items: center;
   gap: 10px;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.mcp-picker-server-line:is(:hover, .keyboard-focus, :focus-within) .mcp-picker-account-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .mcp-picker-account-actions {
+    opacity: 1;
+  }
 }
 
 .mcp-picker-server-line {
@@ -325,6 +395,11 @@
   flex: 1;
   min-width: 0;
   width: auto;
+}
+
+/* The line owns the hover fill; a second fill on the toggle would double it. */
+.mcp-picker-server-line .mcp-picker-item:is(:hover, .keyboard-focus) {
+  background: transparent;
 }
 
 .mcp-picker-controls {
@@ -361,15 +436,16 @@
   color: var(--color-vscode-error);
 }
 
-.mcp-status-tag.status-disabled {
-  color: var(--color-vscode-muted);
+.mcp-status-tag.status-failed,
+.mcp-status-tag.status-error {
+  --mcp-status-color: var(--color-vscode-error);
+  color: color-mix(in srgb, var(--color-vscode-muted) 60%, var(--color-vscode-error));
 }
 
-.mcp-status-tag.status-failed,
-.mcp-status-tag.status-error,
 .mcp-status-tag.status-needs_auth,
 .mcp-status-tag.status-needs_client_registration {
-  color: color-mix(in srgb, var(--color-vscode-muted) 76%, var(--color-vscode-warning));
+  --mcp-status-color: var(--color-vscode-warning);
+  color: color-mix(in srgb, var(--color-vscode-muted) 60%, var(--color-vscode-warning));
 }
 
 .dropdown-meta {

@@ -310,18 +310,18 @@ export function McpPicker(props: {
                         }}
                       >
                         <span class="mcp-picker-row">
+                          <span class="mcp-picker-checkbox" aria-hidden="true">
+                            <Show when={selectedNames().has(item.name)}>
+                              <UiIcon
+                                source={checkIcon}
+                                class="h-2.5 w-2.5"
+                                width={10}
+                                height={10}
+                              />
+                            </Show>
+                          </span>
                           <span class="dropdown-name-wrap">
                             <span class="dropdown-name">{item.name}</span>
-                            <span class="dropdown-check">
-                              <Show when={selectedNames().has(item.name)}>
-                                <UiIcon
-                                  source={checkIcon}
-                                  class="h-3 w-3 text-vscode-accent"
-                                  width={12}
-                                  height={12}
-                                />
-                              </Show>
-                            </span>
                           </span>
                         </span>
                         <Show when={item.error && item.status !== 'needs_auth'}>
@@ -379,8 +379,16 @@ export function McpPicker(props: {
                           </div>
                         </Show>
                         <Show when={item.status !== 'needs_auth'}>
-                          <span class={`model-capability-tag mcp-status-tag status-${item.status}`}>
-                            {statusLabel(item.status)}
+                          <span
+                            class={`mcp-status-tag status-${item.status}`}
+                            title={item.status === 'connected' ? 'Connected' : undefined}
+                          >
+                            <span class="mcp-status-dot" aria-hidden="true" />
+                            <span
+                              class={item.status === 'connected' ? 'sr-only' : 'mcp-status-label'}
+                            >
+                              {statusLabel(item.status)}
+                            </span>
                           </span>
                         </Show>
                       </div>
