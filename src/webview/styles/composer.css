@@ -2691,6 +2691,9 @@
 
 .chat-quota-warning-row {
   color: color-mix(in srgb, var(--quota-warning-color) 70%, var(--color-vscode-fg));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-quota-warning-reset {

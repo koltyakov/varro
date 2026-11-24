@@ -285,7 +285,7 @@ describe('ProviderQuotaWarning', () => {
   it('rotates quota and reset warnings in one panel', () => {
     mount({
       ...withResets([NOW + 4 * 24 * HOUR]),
-      windows: [quota('weekly', 0)],
+      windows: [quota('weekly', 0), quota('five_hour', 20)],
     });
     flushSolid();
     expect(container.querySelectorAll('.chat-quota-warning')).toHaveLength(1);
@@ -296,8 +296,13 @@ describe('ProviderQuotaWarning', () => {
     expect(banner()?.textContent).toContain('weekly: 0% left');
     vi.advanceTimersByTime(10_000);
     flushSolid();
-    expect(banner()?.textContent).toContain('Reset expires in');
+    expect(banner()?.textContent).toContain('five_hour: 20% left');
     expect(banner()?.textContent).not.toContain('weekly:');
+    expect(banner()?.classList.contains('error')).toBe(false);
+    vi.advanceTimersByTime(15_000);
+    flushSolid();
+    expect(banner()?.textContent).toContain('Reset expires in');
+    expect(banner()?.textContent).not.toContain('five_hour:');
     expect(banner()?.classList.contains('error')).toBe(false);
     vi.advanceTimersByTime(15_000);
     flushSolid();
@@ -307,7 +312,8 @@ describe('ProviderQuotaWarning', () => {
 
   it.each([
     { phase: 'quota', elapsed: 0, text: 'weekly: 0% left' },
-    { phase: 'reset expiration', elapsed: 15_000, text: 'Reset expires in' },
+    { phase: 'second quota', elapsed: 15_000, text: 'five_hour: 20% left' },
+    { phase: 'reset expiration', elapsed: 30_000, text: 'Reset expires in' },
   ])('dismisses both warnings from the $phase phase without rotating back', ({ elapsed, text }) => {
     const expiresAt = NOW + 4 * 24 * HOUR;
     const limit = {
@@ -380,6 +386,9 @@ describe('ProviderQuotaWarning', () => {
     setForceShow(true);
     flushSolid();
     expect(banner()?.textContent).toContain('weekly: 80% left');
+    expect(banner()?.textContent).not.toContain('five_hour:');
+    vi.advanceTimersByTime(15_000);
+    flushSolid();
     expect(banner()?.textContent).toContain('five_hour: 100% left');
     dismiss();
     expect(banner()).toBeNull();
@@ -424,30 +433,37 @@ describe('ProviderQuotaWarning', () => {
   ])('selects low windows and severity for $windows', ({ windows, labels, critical }) => {
     mount(snapshot(windows));
     flushSolid();
-    expect(
-      Array.from(
-        container.querySelectorAll('.chat-quota-warning-row > span:first-child'),
-        (row) => row.textContent
-      )
-    ).toEqual(labels);
     expect(banner()?.classList.contains('error') ?? false).toBe(critical);
     expect(banner() !== null).toBe(labels.length > 0);
+    for (const label of labels) {
+      const rows = container.querySelectorAll('.chat-quota-warning-row > span:first-child');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.textContent).toBe(label);
+      vi.advanceTimersByTime(15_000);
+      flushSolid();
+    }
   });
 
-  it('orders the most depleted window first and associates each reset with its own label', () => {
-    mount(
-      snapshot([
-        { ...quota('five_hour', 15, NOW + 32 * 60_000), label: '5-hour limit' },
-        { ...quota('weekly', 8, NOW + 76 * HOUR), label: 'Weekly limit' },
-      ])
-    );
+  it('rotates one row starting with the most depleted quota even after polling', () => {
+    const windows = [
+      { ...quota('five_hour', 22, NOW + 31 * 60_000), label: '5-Hour Limit' },
+      { ...quota('weekly', 16, NOW + 281 * 60_000), label: 'Weekly All-Model' },
+    ];
+    const { setLimit } = mount(snapshot(windows));
     flushSolid();
-    expect(
-      Array.from(container.querySelectorAll('.chat-quota-warning-row'), (row) => row.textContent)
-    ).toEqual([
-      'Weekly limit: 8% left · resets in 3d 4h',
-      '5-hour limit: 15% left · resets in 32m',
-    ]);
+    const rows = () =>
+      Array.from(container.querySelectorAll('.chat-quota-warning-row'), (row) => row.textContent);
+    expect(rows()).toEqual(['Weekly All-Model: 16% left · resets in 4h 41m']);
+    vi.advanceTimersByTime(10_000);
+    setLimit(snapshot(windows.map((window) => ({ ...window }))));
+    flushSolid();
+    expect(rows()).toEqual(['Weekly All-Model: 16% left · resets in 4h 41m']);
+    vi.advanceTimersByTime(5_000);
+    flushSolid();
+    expect(rows()).toEqual(['5-Hour Limit: 22% left · resets in 31m']);
+    vi.advanceTimersByTime(15_000);
+    flushSolid();
+    expect(rows()).toEqual(['Weekly All-Model: 16% left · resets in 4h 41m']);
   });
 
   it('uses reported percentages with missing bounds and does not guess unknown usage', () => {
@@ -478,12 +494,15 @@ describe('ProviderQuotaWarning', () => {
     );
     const { setModel } = mount(limit, 'claude-opus-4-6');
     flushSolid();
-    expect(
-      Array.from(
-        container.querySelectorAll('.chat-quota-warning-row > span:first-child'),
-        (row) => row.textContent
-      )
-    ).toEqual(['seven_day_opus: 3% left', 'extra_usage: 4% left', 'seven_day: 12% left']);
+    for (const label of [
+      'seven_day_opus: 3% left',
+      'extra_usage: 4% left',
+      'seven_day: 12% left',
+    ]) {
+      expect(container.querySelector('.chat-quota-warning-row > span')?.textContent).toBe(label);
+      vi.advanceTimersByTime(15_000);
+      flushSolid();
+    }
     setModel('claude-sonnet-4-6');
     flushSolid();
     expect(banner()?.textContent).toContain('seven_day_sonnet: 2% left');

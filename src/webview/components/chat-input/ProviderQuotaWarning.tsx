@@ -1,5 +1,5 @@
 import { ariaBoolean } from '../../lib/aria';
-import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, onSettled, Show, untrack } from 'solid-js';
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import { DEFAULT_RESET_WARNING_DAYS } from '../../../shared/provider-limit-config';
 import { useSecondClock } from '../../lib/clock';
@@ -20,6 +20,8 @@ import {
   quotaWarningDismissals,
   resetWarningDismissals,
 } from './provider-quota-warning';
+
+const WARNING_ROTATION_MS = 15_000;
 
 export function ProviderQuotaWarning(props: {
   limit: ProviderLimitStatus | null;
@@ -81,6 +83,10 @@ export function ProviderQuotaWarning(props: {
           : !isQuotaWarningDismissed(dismissals(), props.limit!.providerID, window, now()))
     )
   );
+  const resetExpiration = createMemo(() => expiringResets()[0]?.[0]);
+  const warningCount = createMemo(
+    () => visibleWindows().length + Number(resetExpiration() !== undefined)
+  );
   const availableResets = createMemo(() => {
     const limit = props.limit;
     return limit?.status === 'available' ? (limit.usageLimitResets?.availableCount ?? 0) : 0;
@@ -91,8 +97,7 @@ export function ProviderQuotaWarning(props: {
   let resetPopupAnchor: HTMLDivElement | undefined;
   let resetPopupButton: HTMLButtonElement | undefined;
   createEffect(
-    () =>
-      availableResets() === 0 || (visibleWindows().length === 0 && expiringResets().length === 0),
+    () => availableResets() === 0 || warningCount() === 0,
     (empty) => {
       if (empty) setShowResetPopup(false);
     }
@@ -120,15 +125,31 @@ export function ProviderQuotaWarning(props: {
   const isCritical = createMemo(() =>
     visibleWindows().some((window) => getProviderLimitTone(props.limit, window) === 'error')
   );
-  const [showResetExpirations, setShowResetExpirations] = createSignal(false);
-  const warningMode = createMemo(() =>
-    visibleWindows().length === 0 ? 'resets' : expiringResets().length > 0 ? 'rotate' : 'quota'
-  );
-  createEffect(warningMode, (mode) => {
-    setShowResetExpirations(mode === 'resets');
-    if (mode !== 'rotate') return;
-    const timer = window.setInterval(() => setShowResetExpirations((value) => !value), 15_000);
+  const [warningIndex, setWarningIndex] = createSignal(0);
+  createEffect(warningCount, (count) => {
+    setWarningIndex(0);
+    if (count < 2) return;
+    const timer = window.setInterval(
+      () => setWarningIndex((index) => (index + 1) % count),
+      WARNING_ROTATION_MS
+    );
     return () => window.clearInterval(timer);
+  });
+  const activeQuota = createMemo(() => visibleWindows()[warningIndex()]);
+  const activeQuotaLabel = createMemo(() => {
+    const quota = activeQuota();
+    return quota ? formatQuotaWarning(quota) : '';
+  });
+  const activeCountdown = createMemo(() => {
+    const quota = activeQuota();
+    const end = quota ? quota.resetAt : resetExpiration();
+    return end == null ? '' : formatQuotaReset(end, now());
+  });
+  const activeIsCritical = createMemo(() => {
+    const quota = activeQuota();
+    return quota
+      ? getProviderLimitTone(props.limit, quota) === 'error'
+      : (resetExpiration() ?? Infinity) - now() <= 24 * 60 * 60_000;
   });
   const refreshedResets = new Set<string>();
 
@@ -179,47 +200,34 @@ export function ProviderQuotaWarning(props: {
   return (
     <>
       <CodexLoginWarning limit={props.limit} />
-      <Show when={visibleWindows().length > 0 || expiringResets().length > 0}>
-        <div
-          class={[
-            'chat-quota-warning',
-            {
-              error: showResetExpirations()
-                ? (expiringResets()[0]?.[0] ?? Infinity) - now() <= 24 * 60 * 60_000
-                : isCritical(),
-            },
-          ]}
-        >
+      <Show when={warningCount() > 0}>
+        <div class={['chat-quota-warning', { error: activeIsCritical() }]}>
           <div class="chat-quota-warning-copy" role="status" aria-live="polite">
-            <Show when={!showResetExpirations()}>
-              <For each={visibleWindows()}>
-                {(window) => (
-                  <div class="chat-quota-warning-row">
-                    <span>{formatQuotaWarning(window)}</span>
-                    <Show when={window.resetAt !== null}>
-                      <span class="chat-quota-warning-reset">
-                        {' '}
-                        · resets in {formatQuotaReset(window.resetAt!, now())}
-                      </span>
-                    </Show>
-                  </div>
-                )}
-              </For>
-            </Show>
-            <Show when={showResetExpirations()}>
-              <For each={expiringResets().slice(0, 1)}>
-                {([expiresAt]) => (
-                  <div class="chat-quota-warning-row">
-                    <span>
-                      Reset expires in{' '}
-                      <span class="chat-quota-warning-reset">
-                        {formatQuotaReset(expiresAt, now())}
-                      </span>
-                    </span>
-                  </div>
-                )}
-              </For>
-            </Show>
+            <div
+              class="chat-quota-warning-row"
+              title={
+                activeQuota()
+                  ? activeCountdown()
+                    ? `${activeQuotaLabel()} · resets in ${activeCountdown()}`
+                    : activeQuotaLabel()
+                  : `Reset expires in ${activeCountdown()}`
+              }
+            >
+              <Show
+                when={activeQuota()}
+                fallback={
+                  <span>
+                    Reset expires in{' '}
+                    <span class="chat-quota-warning-reset">{activeCountdown()}</span>
+                  </span>
+                }
+              >
+                <span>{activeQuotaLabel()}</span>
+                <Show when={activeCountdown()}>
+                  <span class="chat-quota-warning-reset"> · resets in {activeCountdown()}</span>
+                </Show>
+              </Show>
+            </div>
           </div>
           <div class="chat-quota-warning-actions">
             <Show when={availableResets() > 0}>

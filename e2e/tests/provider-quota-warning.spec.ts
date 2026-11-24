@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import type { ExtensionMessage, ProviderLimitWindow } from '../../src/shared/protocol';
 
 async function updateQuota(page: Page, windows: ProviderLimitWindow[]) {
+  const checkedAt = await page.evaluate(() => Date.now());
   const message: ExtensionMessage = {
     type: 'provider-limit/updated',
     payload: {
@@ -12,7 +13,7 @@ async function updateQuota(page: Page, windows: ProviderLimitWindow[]) {
         modelID: 'gpt-5-mini',
         status: 'available',
         source: 'provider',
-        checkedAt: Date.now(),
+        checkedAt,
         usageLimitResets: { availableCount: 3, credits: null },
         windows,
       },
@@ -29,6 +30,7 @@ for (const theme of ['dark', 'light']) {
     test(`quota warning fits ${width}px ${theme} composer and persists dismissal`, async ({
       page,
     }, testInfo) => {
+      await page.clock.install();
       await page.setViewportSize({ width, height: 800 });
       await page.goto(`/e2e/harness/index.html?scenario=blank&theme=${theme}`);
       await expect(page.locator('.rich-composer')).toBeVisible();
@@ -60,12 +62,20 @@ for (const theme of ['dark', 'light']) {
         ).toBeLessThanOrEqual(1);
       }
 
+      const initialWarningHeight = (await warning.boundingBox())!.height;
       fiveHour.remaining = 15;
       await updateQuota(page, [fiveHour, weekly]);
-      await expect(warning.locator('.chat-quota-warning-row')).toHaveCount(2);
+      const row = warning.locator('.chat-quota-warning-row');
+      await expect(row).toHaveCount(1);
+      await expect(row).toContainText('Weekly limit: 8% left');
+      await page.clock.fastForward(15_000);
+      await expect(row).toHaveCount(1);
+      await expect(row).toContainText('5-hour limit: 15% left');
+      await expect(warning).not.toContainText('Weekly limit');
       const warningBox = await warning.boundingBox();
       const composerBox = await page.locator('.chat-input-container').boundingBox();
       expect(warningBox).not.toBeNull();
+      expect(warningBox!.height).toBe(initialWarningHeight);
       expect(composerBox).not.toBeNull();
       expect(warningBox!.x).toBeGreaterThanOrEqual(0);
       expect(warningBox!.x + warningBox!.width).toBeLessThanOrEqual(width);
