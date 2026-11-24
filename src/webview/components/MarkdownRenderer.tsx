@@ -56,6 +56,7 @@ import { RemoteMarkdownImage } from './RemoteMarkdownImage';
 import { LocalMarkdownImage } from './LocalMarkdownImage';
 import { MarkdownCitationLinks } from './markdown-citation-links';
 import { markdownCitationSelection } from './markdown-citation-selection';
+import { middleTruncatePathLabel } from './markdown-path-truncation';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 
 interface MarkdownProps {
@@ -928,6 +929,7 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
     anchor.removeAttribute('data-external');
     if (anchor.classList.contains('file-path-link')) {
       prependLinkIcon(anchor, createFileTypeIconElement(reference.path), true);
+      middleTruncatePathLabel(anchor);
     }
     return;
   }

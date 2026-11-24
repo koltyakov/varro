@@ -3044,8 +3044,11 @@ $$`,
     expect(link?.querySelector('code')).toBeNull();
     expect(link?.getAttribute('href')).toBe('/repo/src/shared/protocol.ts');
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
-    expect(link?.firstElementChild?.classList).toContain('link-leading-content');
-    expect(link?.querySelector('.link-leading-label')?.textContent).toBe('src/shared/protocol.ts');
+    const truncation = link?.firstElementChild;
+    expect(truncation?.classList).toContain('path-middle-truncate');
+    expect(truncation?.firstElementChild?.classList).toContain('link-leading-content');
+    expect(link?.querySelector('.link-leading-label')?.textContent).toBe('src/shared');
+    expect(link?.querySelector('.link-trailing-label')?.textContent).toBe('/protocol.ts');
     expect(container?.querySelector('pre a.file-path-link')).toBeNull();
     expect(container?.textContent).toContain('spotlight');
 
