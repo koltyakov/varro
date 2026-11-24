@@ -415,6 +415,10 @@ export function SessionActionsMenu(props: {
         >
           <form
             class="session-item-rename-form"
+            onKeyDown={(event) => {
+              // Keep the session list's Enter shortcut from cancelling native form submission.
+              if (event.key === 'Enter') event.stopPropagation();
+            }}
             onSubmit={(event) => {
               event.preventDefault();
               void submitRename();

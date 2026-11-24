@@ -68,6 +68,25 @@ for (const width of [800, 486, 280]) {
   });
 }
 
+test('saves a session rename with Enter without opening the session', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=session-search');
+  await page
+    .locator('.session-item')
+    .filter({ hasText: 'Beta rollout notes' })
+    .click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
+
+  const input = page.getByLabel('Session name', { exact: true });
+  await expect(input).toBeFocused();
+  await input.fill('Updated rollout notes');
+  await input.press('Enter');
+
+  await expect(input).toHaveCount(0);
+  await expect(
+    page.locator('.session-item-title').getByText('Updated rollout notes')
+  ).toBeVisible();
+});
+
 test('host new-session command opens a draft chat and creates the session on first send', async ({
   page,
 }) => {

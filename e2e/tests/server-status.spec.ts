@@ -87,16 +87,34 @@ test('finishes startup when catalog events supersede the first routing loads', a
     .toBeGreaterThanOrEqual(2);
 });
 
-test('opens provider management and add dialog directly when no providers are configured', async ({
+test('offers provider setup inline only after empty provider reads are confirmed', async ({
   page,
 }) => {
   await page.goto('/e2e/harness/index.html?scenario=no-providers');
+  const banner = page.locator('.chat-provider-setup-banner');
 
-  await expect(page.locator('.models-panel')).toBeVisible();
+  await expect(page.getByLabel('Back to sessions')).toBeVisible();
+  await expect(banner).toHaveCount(0);
+  await expect(page.locator('.models-panel')).toHaveCount(0);
+  await expect(page.locator('.provider-connect-dialog')).toHaveCount(0);
+
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('No providers connected');
+  expect(
+    await getE2EState(page, () => {
+      const state = (window as Window & { __varroE2E?: { requests: Array<{ path: string }> } })
+        .__varroE2E;
+      return state?.requests.filter((request) => request.path === '/config/providers').length ?? 0;
+    })
+  ).toBeGreaterThanOrEqual(4);
+  await expect(page.locator('.models-panel')).toHaveCount(0);
   await expect(page.locator('.server-status-surface')).toHaveCount(0);
   await expect(page.getByText('opencode auth login', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Provider setup docs/ })).toHaveCount(0);
 
+  await banner.getByRole('button', { name: 'Connect provider', exact: true }).click();
+  await expect(page.locator('.models-panel')).toBeVisible();
+  await expect(banner).toHaveCount(0);
   await expect(page.getByLabel('Search providers')).toBeVisible();
   await page
     .locator('.provider-connect-dialog')
