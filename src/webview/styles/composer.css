@@ -2798,6 +2798,36 @@
   gap: 2px;
 }
 
+.chat-provider-setup-banner {
+  align-items: center;
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 24%, var(--color-vscode-border));
+  background: color-mix(in srgb, var(--color-vscode-accent) 7%, var(--color-vscode-surface-softer));
+}
+
+.chat-provider-setup-banner .chat-transport-copy {
+  flex: 1;
+}
+
+.chat-provider-setup-banner .chat-transport-title {
+  color: var(--color-vscode-fg);
+}
+
+.chat-provider-setup-action {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--color-vscode-button-bg);
+  color: var(--color-vscode-button-fg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-provider-setup-action:hover {
+  background: var(--color-vscode-button-hover);
+}
+
 .message-history-banner {
   display: flex;
   align-items: center;

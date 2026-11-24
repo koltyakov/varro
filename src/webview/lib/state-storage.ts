@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   sessionSelectedModels: 'varro.sessionSelectedModels',
   modelVariantSelections: 'varro.modelVariantSelections',
   providerOrder: 'varro.providerOrder',
+  providersConnected: 'varro.providersConnected',
   providerLimitPins: 'varro.providerLimitPins',
   quotaWarningDismissals: 'varro.quotaWarningDismissals',
   resetWarningDismissals: 'varro.resetWarningDismissals',

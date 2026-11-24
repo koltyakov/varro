@@ -394,6 +394,28 @@ describe('data loaders', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('confirms an empty first provider catalog when providers were connected before', async () => {
+    vi.useFakeTimers();
+    const deps = createLoaderDeps({
+      hadConnectedProviders: () => true,
+      listProviders: vi
+        .fn<DataLoaderDependencies['listProviders']>()
+        .mockResolvedValueOnce({ providers: [], default: {} })
+        .mockResolvedValue({ providers: [provider('openai', {})], default: {} }),
+    });
+    const operations = createDataLoaderOperations(deps);
+
+    const refresh = operations.refreshRoutingState();
+    await vi.advanceTimersByTimeAsync(1_500);
+    flushSolid();
+    await refresh;
+    flushSolid();
+
+    expect(deps.listProviders).toHaveBeenCalledTimes(2);
+    expect(deps.setProviders).toHaveBeenCalledExactlyOnceWith([provider('openai', {})], {}, []);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('applies an empty provider catalog once repeated reads confirm it', async () => {
     vi.useFakeTimers();
     const deps = createLoaderDeps({

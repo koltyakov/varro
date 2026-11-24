@@ -11,6 +11,10 @@ export function logError<T>(context: string, err: T): void {
   });
 }
 
+export function logInfo(message: string): void {
+  postMessage({ type: 'log', payload: { msg: message, level: 'info' } });
+}
+
 export function logWarn<T>(context: string, detail?: T): void {
   postMessage({
     type: 'log',

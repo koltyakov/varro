@@ -24,7 +24,6 @@ import { statusIcons } from './lib/status-icons';
 import { wifiIcon } from './lib/ui-icons';
 import { UiIcon } from './components/UiIcon';
 import { RalphForm } from './components/ralph/RalphForm';
-import { requestProviderConnection } from './lib/provider-connection-state';
 
 function renderAppError(error: Accessor<unknown>) {
   return <AppErrorFallback error={error} />;
@@ -103,39 +102,6 @@ function hasWrappedCause(err: Error): err is Error & { cause: unknown } {
 
 export function App() {
   useOpenCode();
-
-  // First-run setup only: once providers have loaded, a later empty catalog is a
-  // transient server state (such as waking from sleep), not a missing setup.
-  let providerSetupSettled = false;
-  createEffect(
-    () => ({
-      hasProviders: defaultAppState.state.providers.length > 0,
-      initialized: connectionInitialized(),
-      status: defaultAppState.state.serverStatus.state,
-      reconnecting: defaultAppState.state.serverReconnecting,
-      blocked: defaultAppState.state.restartBlocked,
-      loaded: defaultAppState.state.providersLoaded,
-    }),
-    ({ hasProviders, initialized, status, reconnecting, blocked, loaded }) => {
-      if (hasProviders) {
-        providerSetupSettled = true;
-        return;
-      }
-      if (
-        providerSetupSettled ||
-        !initialized ||
-        status !== 'running' ||
-        reconnecting ||
-        blocked ||
-        !loaded
-      ) {
-        return;
-      }
-      providerSetupSettled = true;
-      defaultAppState.setShowModels(true);
-      requestProviderConnection();
-    }
-  );
 
   onSettled(() => {
     const cleanups: Array<() => void> = [];

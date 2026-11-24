@@ -84,6 +84,8 @@ export function ChatWorkspace(props: {
   showPermissionSettings: boolean;
   showMcpSettings: boolean;
   showReconnectBanner: boolean;
+  showProviderSetupBanner: boolean;
+  onConnectProvider: () => void;
   slowApiRequests: readonly SlowApiRequest[];
   sessionFilter: SessionListFilter | null;
   subagentParentId: string | null;
@@ -348,6 +350,28 @@ export function ChatWorkspace(props: {
               Chat actions still work, but session status may lag until the event stream recovers.
             </span>
           </div>
+        </div>
+      </Show>
+
+      <Show when={props.showProviderSetupBanner}>
+        <div
+          class={`chat-transport-banner chat-provider-setup-banner ${props.shouldRenderWorkspace ? 'chat-main-column' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div class="chat-transport-copy">
+            <span class="chat-transport-title">No providers connected</span>
+            <span class="chat-transport-message">
+              Connect a provider to choose a model and chat.
+            </span>
+          </div>
+          <button
+            type="button"
+            class="chat-provider-setup-action"
+            onClick={props.onConnectProvider}
+          >
+            Connect provider
+          </button>
         </div>
       </Show>
 

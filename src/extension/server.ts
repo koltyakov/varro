@@ -2955,6 +2955,11 @@ export class OpenCodeServer extends EventEmitter {
     this.processManager.updateLaunchSettings(options);
   }
 
+  /** Which host runs the connected server: this window, another Varro window, or neither. */
+  get serverOwnership(): OpenCodeServerOwnership {
+    return this.processManager.serverOwnership;
+  }
+
   /** Attach-only endpoints may be Docker ports or tunnels, even on loopback. */
   get isAttachOnly(): boolean {
     return (

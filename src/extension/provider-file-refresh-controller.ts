@@ -34,7 +34,7 @@ type ProviderFileRefreshDependencies = {
     OpenCodeServer,
     'status' | 'request' | 'restart' | 'readServerInfo' | 'readRestartBlockers' | 'on' | 'off'
   > &
-    Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
+    Partial<Pick<OpenCodeServer, 'isAttachOnly' | 'serverOwnership'>>;
   persistence: Pick<Persistence, 'get' | 'set' | 'remove'>;
   clearProviderLimitCache(): void;
   postRefresh(options?: { revalidateAuth: true }): void;
@@ -88,6 +88,7 @@ export class ProviderFileRefreshController {
   private persistenceOperation: Promise<void> = Promise.resolve();
   private authIdleCandidate: { generation: number; since: number } | null = null;
   private unmanagedServerSynchronized = false;
+  private pendingReason = 'pending provider refresh';
   private disposed = false;
   private readonly handleServerStatus = (status: ServerStatus) => {
     if (
@@ -249,6 +250,7 @@ export class ProviderFileRefreshController {
       }
       this.pendingWorkspaceDirectories.add(directory);
     }
+    this.pendingReason = 'workspace model routing changed';
     await this.markRefreshPending('workspace');
     if (this.disposed || generation !== this.refreshGeneration) return;
     this.dependencies.postRefresh();
@@ -274,6 +276,7 @@ export class ProviderFileRefreshController {
       return;
     }
     this.pendingAuthOnlyInvalidation = this.pendingScope ? this.pendingAuthOnlyInvalidation : true;
+    this.pendingReason = 'provider sign-in completed';
     await this.markRefreshPending('global');
     if (this.disposed || generation !== this.refreshGeneration) return;
     this.postStatus();
@@ -291,6 +294,7 @@ export class ProviderFileRefreshController {
       this.authChangePending = false;
       this.configChangePending = false;
       this.dependencies.clearProviderLimitCache();
+      this.pendingReason = 'provider files changed before observation started';
       await this.markRefreshPending('global');
       this.dependencies.postRefresh();
       await this.maybeInvalidate(generation, 0);
@@ -303,8 +307,27 @@ export class ProviderFileRefreshController {
       }
       return;
     }
+    const changedFiles = describeChangedProviderFiles(this.observedFilesSignature, signature);
     this.dependencies.clearProviderLimitCache();
     this.observedFilesSignature = signature;
+    if (
+      requireSignatureChange &&
+      !this.pendingScope &&
+      this.dependencies.server.serverOwnership === 'other-host'
+    ) {
+      // Every Varro window watches these files. The window that owns the shared
+      // server reloads it once; reloading from each window would rebuild every
+      // workspace repeatedly and briefly empty the provider list everywhere.
+      const revalidateAuth = this.authChangePending;
+      this.authChangePending = false;
+      this.configChangePending = false;
+      logger.info(
+        `OpenCode provider files changed (${changedFiles}); the Varro window that owns the shared server reloads it`
+      );
+      this.dependencies.postRefresh(revalidateAuth ? { revalidateAuth: true } : undefined);
+      return;
+    }
+    this.pendingReason = `${changedFiles} changed`;
     this.updatePendingInvalidationSource(requireSignatureChange);
     this.authRevalidationPending ||= this.authChangePending;
     this.authChangePending = false;
@@ -389,9 +412,11 @@ export class ProviderFileRefreshController {
 
     const changed =
       this.observedFilesSignature !== null && signature !== this.observedFilesSignature;
+    const changedFiles = describeChangedProviderFiles(this.observedFilesSignature, signature);
     this.observedFilesSignature = signature;
     if (changed) {
       this.dependencies.clearProviderLimitCache();
+      this.pendingReason = `${changedFiles} changed while not observed`;
       await this.markRefreshPending('global');
     } else if (
       !this.unmanagedServerSynchronized &&
@@ -399,7 +424,10 @@ export class ProviderFileRefreshController {
     ) {
       const managedProcess = await this.readManagedServerState();
       if (this.disposed || generation !== this.refreshGeneration) return;
-      if (managedProcess === false) await this.markRefreshPending('global');
+      if (managedProcess === false) {
+        this.pendingReason = 'synchronizing an unmanaged server';
+        await this.markRefreshPending('global');
+      }
     }
     this.dependencies.postRefresh();
     if (this.pendingScope) {
@@ -478,6 +506,7 @@ export class ProviderFileRefreshController {
       const revalidateAuth = this.authRevalidationPending;
       if (pendingScope === 'workspace') {
         const directories = [...this.pendingWorkspaceDirectories];
+        logger.info(`Reloading OpenCode workspace provider state (${this.pendingReason})`);
         if (directories.length === 0) {
           await this.dependencies.server.request('POST', '/instance/dispose');
         } else {
@@ -493,9 +522,13 @@ export class ProviderFileRefreshController {
         const managedState = revalidateAuth ? await this.readManagedServerState() : false;
         if (this.disposed || generation !== this.refreshGeneration) return;
         if (managedState === true) {
+          logger.info(
+            `Restarting the managed OpenCode server to reload provider credentials (${this.pendingReason})`
+          );
           await this.dependencies.server.restart();
         } else {
           try {
+            logger.info(`Reloading OpenCode provider state (${this.pendingReason})`);
             await this.dependencies.server.request('POST', '/global/dispose');
           } catch (disposeError) {
             const fallbackManagedState = await this.readManagedServerState();
@@ -512,6 +545,7 @@ export class ProviderFileRefreshController {
       this.busyRetryMs = ProviderFileRefreshController.RETRY_MS;
       if (pendingRevision === this.pendingRevision) {
         this.pendingScope = null;
+        this.pendingReason = 'pending provider refresh';
         this.pendingWorkspaceDirectories.clear();
         this.workspaceRoutingBaselines.clear();
         this.pendingAuthOnlyInvalidation = false;
@@ -767,4 +801,16 @@ function isPersistedPendingState(value: unknown): value is PersistedPendingRefre
       (Array.isArray(record.workspaceDirectories) &&
         record.workspaceDirectories.every((directory) => typeof directory === 'string')))
   );
+}
+
+/** Names the provider files whose content differs between two observed signatures. */
+function describeChangedProviderFiles(previous: string | null, next: string): string {
+  if (previous === null) return 'provider files';
+  const paths = [...getOpenCodeConfigPaths(), getOpenCodeAuthFilePath()];
+  const before = previous.split('|');
+  const after = next.split('|');
+  const changed = paths
+    .filter((_path, index) => before[index] !== after[index])
+    .map((path) => basename(path));
+  return changed.length > 0 ? changed.join(', ') : 'provider files';
 }

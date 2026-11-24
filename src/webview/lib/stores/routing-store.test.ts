@@ -1,10 +1,11 @@
 import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, WebviewMessage } from '../../../shared/protocol';
 import { ModelPreferencesStore } from '../../../extension/model-preferences-store';
 import type { Agent, Command, Provider } from '../../types';
 import { registerHostExtension } from '../../host/extensions';
+import { STORAGE_KEYS, writeStored } from '../state-storage';
 import { routingStore } from './routing-store';
 import {
   applyModelPreferencesSnapshot,
@@ -377,5 +378,28 @@ describe('routingStore', () => {
     expect(routingStore.isModelVisible('provider-1', 'model-1')).toBe(true);
     expect(routingStore.isModelVisible('provider-1', 'model-2')).toBe(false);
     expect(routingStore.isModelVisible('provider-1', 'model-3')).toBe(true);
+  });
+});
+
+describe('routingStore provider history', () => {
+  afterEach(() => {
+    writeStored(STORAGE_KEYS.providersConnected, null);
+    resetDefaultAppState();
+    flushSolid();
+  });
+
+  it('remembers that providers were connected, even after an empty catalog', () => {
+    writeStored(STORAGE_KEYS.providersConnected, null);
+    expect(routingStore.hadConnectedProviders()).toBe(false);
+
+    routingStore.setProviders([]);
+    flushSolid();
+    expect(routingStore.hadConnectedProviders()).toBe(false);
+
+    routingStore.setProviders([createProvider('openai')]);
+    flushSolid();
+    routingStore.setProviders([]);
+    flushSolid();
+    expect(routingStore.hadConnectedProviders()).toBe(true);
   });
 });

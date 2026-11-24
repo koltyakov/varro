@@ -3,7 +3,7 @@ import type { Agent, Command, Provider } from '../../types';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
 import { postMessage } from '../bridge';
 import { getSupersededModelIds } from '../model-ordering';
-import { STORAGE_KEYS, writeStored } from '../state-storage';
+import { STORAGE_KEYS, readStored, writeStored } from '../state-storage';
 import {
   clearSelectedAgentForSession,
   clearSelectedMcpsForSession,
@@ -147,6 +147,11 @@ export const routingStore = {
       writeStored(STORAGE_KEYS.hiddenModels, hiddenModels);
     }
     setState(storePath('providers', providers));
+    if (providers.length > 0) writeStored(STORAGE_KEYS.providersConnected, true);
+  },
+  /** Whether this machine has ever loaded a non-empty provider catalog. */
+  hadConnectedProviders() {
+    return readStored<boolean>(STORAGE_KEYS.providersConnected) === true;
   },
   setProviderDefaults(defaults: Record<string, string>) {
     setState(storePath('providerDefaults', defaults));

@@ -29,6 +29,7 @@ vi.mock('./lib/bridge', () => ({
 
 vi.mock('./lib/log', () => ({
   logError: appMocks.logError,
+  logInfo: vi.fn(),
 }));
 
 vi.mock('./components/Chat', () => ({
@@ -55,7 +56,6 @@ import {
   setError,
   setErrorRetry,
   setState,
-  setShowModels,
   showModels,
   state,
 } from './lib/state';
@@ -202,7 +202,7 @@ describe('AppRoot', () => {
     expect(container?.textContent).toContain('New Chat');
   });
 
-  it('opens provider management and add dialog only after empty-provider startup is ready', () => {
+  it('never opens provider management or the add dialog for an empty catalog', () => {
     setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
     flushSolid();
     setState(storePath('providersLoaded', true));
@@ -211,33 +211,13 @@ describe('AppRoot', () => {
     flushSolid();
     mountAppRoot();
     flushSolid();
-
-    expect(showModels()).toBe(false);
-    expect(providerConnectionRequest()).toBeNull();
-    expect(appMocks.chatMountCount).toBe(0);
-
     setConnectionInitialized(true);
     flushSolid();
 
     expect(appMocks.chatMountCount).toBe(1);
     expect(container?.textContent).not.toContain('No providers configured');
-    expect(showModels()).toBe(true);
-    const request = providerConnectionRequest();
-    expect(request).not.toBeNull();
-
-    setShowModels(false);
-    flushSolid();
-    setState(storePath('serverReconnecting', true));
-    flushSolid();
-    setConnectionInitialized(false);
-    flushSolid();
-    setConnectionInitialized(true);
-    flushSolid();
-    setState(storePath('serverReconnecting', false));
-    flushSolid();
     expect(showModels()).toBe(false);
-    expect(providerConnectionRequest()).toBe(request);
-    expect(appMocks.chatMountCount).toBe(1);
+    expect(providerConnectionRequest()).toBeNull();
   });
 
   it('shows plugin activation waiting without exposing an uninitialized chat', () => {
@@ -273,29 +253,6 @@ describe('AppRoot', () => {
     flushSolid();
     expect(container?.textContent).toContain('MCP "atlassian" timed out');
     expect(container?.textContent).toContain('may be separate');
-  });
-
-  it('does not reopen provider setup when a loaded catalog later becomes empty', () => {
-    setState(storePath('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' }));
-    flushSolid();
-    setState(storePath('providersLoaded', true));
-    flushSolid();
-    setState(storePath('providers', [{ id: 'openai', name: 'OpenAI', source: 'api', models: {} }]));
-    flushSolid();
-    mountAppRoot();
-    flushSolid();
-    setConnectionInitialized(true);
-    flushSolid();
-
-    setState(storePath('providersLoaded', false));
-    flushSolid();
-    setState(storePath('providers', []));
-    flushSolid();
-    setState(storePath('providersLoaded', true));
-    flushSolid();
-
-    expect(showModels()).toBe(false);
-    expect(providerConnectionRequest()).toBeNull();
   });
 
   it('does not open provider setup for configured providers', () => {

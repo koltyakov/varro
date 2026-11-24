@@ -32,9 +32,10 @@ import {
   setShowMcpSettings,
   requestComposerFocus,
 } from '../lib/state';
-import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
+import { selectSession, deleteSessionImmediately, refreshRoutingState } from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { ChatWorkspace } from './chat/ChatWorkspace';
+import { createProviderSetupPrompt } from './chat/provider-setup-prompt';
 import { ralphStore } from '../lib/stores/ralph-store';
 import { getDiscardableActiveBlankSessionId, startNewChatDraft } from '../lib/new-chat-draft';
 import {
@@ -66,6 +67,7 @@ import { compareSessionsForDisplay } from '../lib/session-order';
 import {
   consumeProviderConnectionRequest,
   providerConnectionRequest,
+  requestProviderConnection,
 } from '../lib/provider-connection-state';
 import { client } from '../lib/client';
 import { createPendingBackgroundSessionIds } from '../lib/background-session-status';
@@ -204,6 +206,22 @@ export function Chat() {
   const [sidebarSubagentParentId, setSidebarSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
+  // An inline prompt instead of opening provider setup: a server that briefly
+  // reports no providers must not take over the view.
+  const providerSetupNeeded = createProviderSetupPrompt({
+    isReady: () =>
+      connectionInitialized() &&
+      state.serverStatus.state === 'running' &&
+      !state.serverReconnecting &&
+      state.providersLoaded,
+    hasProviders: () => state.providers.length > 0,
+    refreshProviders: refreshRoutingState,
+  });
+  const showProviderSetupBanner = () => providerSetupNeeded() && !showModels();
+  const openProviderSetup = () => {
+    setShowModels(true);
+    requestProviderConnection();
+  };
   const [slowApiRequests, setSlowApiRequests] = createSignal<readonly SlowApiRequest[]>([]);
   const [sessionListNow, setSessionListNow] = createSignal(Date.now());
   const pendingBackgroundIds = createPendingBackgroundSessionIds(() => state.sessionStatus);
@@ -1025,6 +1043,8 @@ export function Chat() {
         showPermissionSettings={showPermissionSettings()}
         showMcpSettings={showMcpSettings()}
         showReconnectBanner={showReconnectBanner()}
+        showProviderSetupBanner={showProviderSetupBanner()}
+        onConnectProvider={openProviderSetup}
         slowApiRequests={slowApiRequests()}
         sessionFilter={sessionFilter()}
         subagentParentId={subagentParentId()}

@@ -82,6 +82,7 @@ function createHarness(
   options: {
     files?: Record<string, string>;
     managedProcess?: boolean;
+    serverOwnership?: 'current-host' | 'other-host' | 'unmanaged';
     persisted?: unknown;
     workspaceDirectories?: string[];
   } = {}
@@ -90,6 +91,7 @@ function createHarness(
   let idle = true;
   const server = {
     isAttachOnly: false,
+    serverOwnership: options.serverOwnership,
     status: { state: 'running', url: 'http://127.0.0.1:4096' } as ServerStatus,
     on: vi.fn(),
     off: vi.fn(),
@@ -417,6 +419,46 @@ describe('ProviderFileRefreshController', () => {
 
       expect(loggerMock.warn).toHaveBeenCalledWith(
         'Failed to activate provider file observation: config paths unavailable'
+      );
+    });
+
+    it('leaves a watched file change to the Varro window that owns the shared server', async () => {
+      const h = createHarness({
+        files: { [CONFIG_PATHS[0]]: 'v1' },
+        managedProcess: false,
+        serverOwnership: 'other-host',
+      });
+      await activateWatching(h);
+      resetCalls(h);
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+      expect(globalDisposeCallCount(h)).toBe(0);
+      expect(h.server.restart).not.toHaveBeenCalled();
+      expect(h.persistence.set).not.toHaveBeenCalled();
+      expect(h.clearProviderLimitCache).toHaveBeenCalledOnce();
+      expect(h.postRefresh).toHaveBeenCalledOnce();
+      expect(loggerMock.info).toHaveBeenCalledWith(
+        expect.stringContaining('the Varro window that owns the shared server reloads it')
+      );
+    });
+
+    it('reloads the shared server once from the owning window and logs why', async () => {
+      const h = createHarness({
+        files: { [CONFIG_PATHS[0]]: 'v1' },
+        serverOwnership: 'current-host',
+      });
+      await activateWatching(h);
+      resetCalls(h);
+      loggerMock.info.mockClear();
+      h.fileSystem.files.set(CONFIG_PATHS[0], 'v2');
+      fireWatcherEvent(0);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+      expect(globalDisposeCallCount(h)).toBe(1);
+      expect(loggerMock.info).toHaveBeenCalledWith(
+        expect.stringMatching(/^Reloading OpenCode provider state \(.+ changed\)$/)
       );
     });
 

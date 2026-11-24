@@ -7,6 +7,7 @@ import { routingStore } from '../lib/stores/routing-store';
 import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
 import { clearQueuedMessagesForSession } from '../lib/state-queued-messages';
+import { logInfo } from '../lib/log';
 import {
   getEffectiveComposerSessionId,
   syncNewChatComposerAgentModel,
@@ -53,8 +54,8 @@ const WORKSPACE_CATALOG_RELOAD_ATTEMPTS = 2;
 const WORKSPACE_CATALOG_LOAD_TIMEOUT_MS = 10_000;
 const STARTUP_CATALOG_TIMEOUT_MS = 60_000;
 const STARTUP_CATALOG_RETRY_MS = 500;
-// A reused server waking from sleep can briefly report no providers. Confirm an
-// empty catalog before it replaces a non-empty one.
+// A reused server waking from sleep, or shared with a starting window, can briefly
+// report no providers. Confirm an empty catalog when providers were seen before.
 const EMPTY_PROVIDER_CATALOG_READS = 3;
 const EMPTY_PROVIDER_CATALOG_RETRY_MS = 1_500;
 
@@ -119,6 +120,8 @@ export function createStateBoundDataLoaderOperations(deps: {
     readStartupDiagnostics: (signal) => client.config.startupDiagnostics(signal),
     setProvidersLoaded: routingStore.setProvidersLoaded,
     setProviders: routingStore.setProviders,
+    hadConnectedProviders: routingStore.hadConnectedProviders,
+    logInfo,
     setProviderDefaults: routingStore.setProviderDefaults,
     getSelectedModel: () => appStore.state.selectedModel,
     getLastSelectedModel: () => appStore.state.lastSelectedModel,
@@ -190,6 +193,10 @@ export function createDataLoaderOperations(deps: {
   }>;
   readStartupDiagnostics?(signal: AbortSignal): Promise<StartupAddonFailure[]>;
   setProvidersLoaded(value: boolean): void;
+  /** Persisted across reloads so a fresh webview also confirms an empty first catalog. */
+  hadConnectedProviders?(): boolean;
+  /** Records provider catalog changes so transient empty catalogs can be traced in the output log. */
+  logInfo?(message: string): void;
   setProviders(
     providers: Provider[],
     defaults?: Record<string, string>,
@@ -259,7 +266,8 @@ export function createDataLoaderOperations(deps: {
   let startupCatalog: StartupCatalogReload | null = null;
   let startupCatalogError: string | null = null;
   let knownProviderIDs: Set<string> | null = null;
-  let hasAppliedProviders = false;
+  let hasAppliedProviders = deps.hadConnectedProviders?.() ?? false;
+  let appliedProviderIDs: string | null = null;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
   const sessionSnapshots = createMutationAwareSnapshotReconciler(deps.getSessions);
 
@@ -384,6 +392,13 @@ export function createDataLoaderOperations(deps: {
           listProviders: async () => {
             for (let read = 1; ; read += 1) {
               const response = await deps.listProviders(signal);
+              if (response.providers.length === 0 && isCurrent()) {
+                deps.logInfo?.(
+                  hasAppliedProviders
+                    ? `Provider catalog returned no providers (read ${read} of ${EMPTY_PROVIDER_CATALOG_READS})`
+                    : 'Provider catalog returned no providers'
+                );
+              }
               if (
                 response.providers.length > 0 ||
                 !hasAppliedProviders ||
@@ -401,6 +416,13 @@ export function createDataLoaderOperations(deps: {
           },
           setProviders: (providers, defaults) => {
             hasAppliedProviders = providers.length > 0;
+            const providerIDs = providers.map((provider) => provider.id).join(', ') || 'none';
+            if (providerIDs !== appliedProviderIDs) {
+              deps.logInfo?.(
+                `Provider catalog applied: ${providers.length} provider${providers.length === 1 ? '' : 's'} (${providerIDs})`
+              );
+              appliedProviderIDs = providerIDs;
+            }
             const knownProviders = knownProviderIDs;
             const newlyConnectedProviderIDs = knownProviders
               ? providers
