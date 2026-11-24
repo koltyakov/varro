@@ -1499,6 +1499,18 @@ type TaskUsageDisplay = {
 };
 
 // Usage views are small plain records rebuilt on every shared cache write.
+// Mirrors OpenCode's Model.Ref.parse for subagent `model` input: "providerID/modelID#variant".
+function parseTaskModelRef(value: string) {
+  const input = value.trim();
+  const providerEnd = input.indexOf('/');
+  if (providerEnd <= 0) return null;
+  const variantStart = input.indexOf('#', providerEnd + 1);
+  const modelID = input.slice(providerEnd + 1, variantStart === -1 ? undefined : variantStart);
+  const variant = variantStart === -1 ? undefined : input.slice(variantStart + 1);
+  if (!modelID || (variant !== undefined && (!variant || variant.includes('#')))) return null;
+  return { providerID: input.slice(0, providerEnd), modelID, variant };
+}
+
 function sameJson<T extends FollowupUsageView | TaskUsageDisplay | null>(a: T, b: T) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -1638,7 +1650,11 @@ function GenericToolCall(props: {
   });
   const taskExecutionEntries = createMemo<Array<[string, unknown]>>(() => {
     const sessionId = taskSessionId();
+    const state = props.state;
+    const launchStart = 'time' in state ? state.time.start : undefined;
+    const launchEnd = nextLaunch();
     let latest: AssistantMessage | null = null;
+    let launchLatest: AssistantMessage | null = null;
     if (sessionId) {
       for (const entry of getMessageLookup().bySessionId.get(sessionId) ?? []) {
         const info = entry.info;
@@ -1650,8 +1666,27 @@ function GenericToolCall(props: {
         )
           continue;
         if (!latest || info.time.created >= latest.time.created) latest = info;
+        if (
+          launchStart !== undefined &&
+          info.time.created >= launchStart &&
+          info.time.created < launchEnd &&
+          (!launchLatest || info.time.created >= launchLatest.time.created)
+        )
+          launchLatest = info;
       }
     }
+    // A follow-up can switch the child's model. Its earlier messages describe the previous
+    // launch, so an explicit model input wins until this launch produces its own message.
+    const requestedModel = state.input?.model;
+    const requested =
+      !launchLatest && isString(requestedModel) ? parseTaskModelRef(requestedModel) : null;
+    if (requested) {
+      return [
+        ['model', `${requested.providerID}/${requested.modelID}`],
+        ['reasoning', requested.variant || 'default'],
+      ];
+    }
+    if (launchLatest) latest = launchLatest;
 
     const type = taskAgent();
     const agent =

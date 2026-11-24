@@ -1577,6 +1577,71 @@ describe('ToolCall', () => {
     }
   );
 
+  it('uses the requested model variant for a follow-up until its own child message arrives', () => {
+    applyState(
+      storePath('sessions', [
+        session('subagent-session-1', {
+          parentID: 'session-1',
+          time: { created: 500, updated: 500 },
+        }),
+      ])
+    );
+    const part = toolPart('task', {
+      status: 'running',
+      input: {
+        agent: 'general',
+        model: 'openai/gpt-6.2-astra#xhigh',
+        sessionID: 'subagent-session-1',
+      },
+      metadata: {},
+      time: { start: 1_100 },
+    });
+    const parent = {
+      info: assistantMessage('message-1', {
+        providerID: 'openai',
+        modelID: 'gpt-6.1-sol-fast',
+        variant: 'low',
+        time: { created: 1_000 },
+      }),
+      parts: [part],
+    };
+    const earlierChild = {
+      info: assistantMessage('child-message-1', {
+        sessionID: 'subagent-session-1',
+        providerID: 'openai',
+        modelID: 'gpt-6.2-astra',
+        time: { created: 600 },
+      }),
+      parts: [],
+    };
+    applyState(storePath('messages', [parent, earlierChild]));
+
+    renderToolCall(part);
+    toggleHeader();
+
+    const detail = () => container?.querySelector('.structured-tool-card')?.textContent || '';
+    expect(detail()).toContain('modelopenai/gpt-6.2-astra#xhigh');
+    expect(detail()).toContain('reasoningxhigh');
+
+    applyState(
+      storePath('messages', [
+        parent,
+        earlierChild,
+        {
+          info: assistantMessage('child-message-2', {
+            sessionID: 'subagent-session-1',
+            providerID: 'openai',
+            modelID: 'gpt-6.2-astra',
+            variant: 'high',
+            time: { created: 1_200 },
+          }),
+          parts: [],
+        },
+      ])
+    );
+    expect(detail()).toContain('reasoninghigh');
+  });
+
   it('uses the native agent model before child session details arrive', () => {
     applyState(
       storePath('allAgents', [
