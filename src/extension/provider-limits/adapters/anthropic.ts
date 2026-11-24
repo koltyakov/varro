@@ -72,7 +72,16 @@ type AnthropicCredentials = {
   refreshToken: string | null;
   credentialsFilePath: string | null;
   origin: 'opencode-auth' | 'claude-credentials' | 'claude-keychain' | 'claude-env';
+  planName?: string;
 };
+
+const ANTHROPIC_PLAN_NAMES = new Map([
+  ['free', 'Free'],
+  ['pro', 'Pro'],
+  ['max', 'Max'],
+  ['team', 'Team'],
+  ['enterprise', 'Enterprise'],
+]);
 
 export function createAnthropicAdapter(): ProviderLimitAdapter {
   return {
@@ -245,7 +254,10 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
               }
             )
           : await poll();
-        return mergeAnthropicStatuses(combinedStatus, apiStatus) ?? apiStatus;
+        const status = mergeAnthropicStatuses(combinedStatus, apiStatus) ?? apiStatus;
+        // The plan comes from the local login, so cached quota snapshots never need to carry it.
+        const planName = credentials?.planName;
+        return status.status === 'available' && planName ? { ...status, planName } : status;
       } catch (error) {
         if (!(error instanceof ProviderQuotaIdentityChanged)) throw error;
         return (
@@ -698,15 +710,26 @@ function parseAnthropicCredentials(
     const refreshToken = getString(oauth.refreshToken) || null;
     if (!accessToken && !refreshToken) return null;
 
-    return {
+    const credentials: AnthropicCredentials = {
       accessToken,
       refreshToken,
       credentialsFilePath,
       origin: 'claude-credentials',
     };
+    const planName = getAnthropicPlanName(oauth.subscriptionType, oauth.rateLimitTier);
+    if (planName) credentials.planName = planName;
+    return credentials;
   } catch {
     return null;
   }
+}
+
+/** Maps Claude Code's subscription and rate-limit tier to a known plan label. */
+function getAnthropicPlanName(subscriptionType: unknown, rateLimitTier: unknown) {
+  const plan = ANTHROPIC_PLAN_NAMES.get(getString(subscriptionType).toLowerCase());
+  if (plan !== 'Max') return plan;
+  const multiplier = /max_(5|20)x\b/i.exec(getString(rateLimitTier))?.[1];
+  return multiplier ? `Max ${multiplier}x` : plan;
 }
 
 async function fetchAnthropicUsage(token: string) {

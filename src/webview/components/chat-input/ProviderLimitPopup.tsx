@@ -36,6 +36,9 @@ export function ProviderLimitPopup(props: {
   const limit = createProviderLimitDisplay(() => props.limit);
   const [resetCreditsExpanded, setResetCreditsExpanded] = createSignal(false);
   const windows = () => getOrderedProviderLimitWindows(limit());
+  // Claude Agent quotas belong to the Claude Code subscription, so name the account source.
+  const providerName = () =>
+    limit()?.providerID === 'claude-agent' ? 'Claude Code' : props.providerName;
   const planName = () => {
     const current = limit();
     return current?.status === 'available' ? current.planName || null : null;
@@ -215,9 +218,9 @@ export function ProviderLimitPopup(props: {
         }}
       </Show>
 
-      <Show when={!props.resetsOnly && props.providerName}>
+      <Show when={!props.resetsOnly && providerName()}>
         <div class="provider-limit-popup-provider">
-          {props.providerName}
+          {providerName()}
           <Show when={planName()}>{(name) => <> · {name()}</>}</Show>
         </div>
       </Show>

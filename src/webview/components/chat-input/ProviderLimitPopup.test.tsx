@@ -65,6 +65,33 @@ describe('ProviderLimitPopup', () => {
     }
   );
 
+  it('names Claude Agent quotas after the Claude Code subscription', () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    dispose = render(
+      () => (
+        <ProviderLimitPopup
+          providerName="Claude Agent"
+          onClose={() => {}}
+          limit={{
+            providerID: 'claude-agent',
+            status: 'available',
+            source: 'provider',
+            checkedAt: 1,
+            planName: 'Max 5x',
+            windows: [],
+          }}
+        />
+      ),
+      container
+    );
+    flushSolid();
+
+    expect(container.querySelector('.provider-limit-popup-provider')?.textContent).toBe(
+      'Claude Code · Max 5x'
+    );
+  });
+
   it('shows the empty state when the credit balance is zero and there are no quotas', () => {
     container = document.createElement('div');
     document.body.append(container);

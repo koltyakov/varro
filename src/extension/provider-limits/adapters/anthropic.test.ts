@@ -188,6 +188,29 @@ describe('createAnthropicAdapter', () => {
     });
   });
 
+  it.each([
+    ['max', 'default_claude_max_5x', 'Max 5x'],
+    ['max', 'default_claude_max_20x', 'Max 20x'],
+    ['max', undefined, 'Max'],
+    ['pro', 'default_claude_pro', 'Pro'],
+    ['constructor', undefined, undefined],
+  ])(
+    'reports the Claude Code %s subscription with tier %s as %s',
+    async (subscriptionType, rateLimitTier, planName) => {
+      vi.mocked(readFile).mockResolvedValue(
+        JSON.stringify({
+          claudeAiOauth: { accessToken: 'claude-code-token', subscriptionType, rateLimitTier },
+        })
+      );
+      vi.mocked(fetch).mockResolvedValue(Response.json({ five_hour: { utilization: 20 } }));
+
+      const status = await fetchStatus({ provider: { id: 'claude-agent', models: {} } });
+
+      expect(status).toMatchObject({ status: 'available' });
+      expect(status.status === 'available' ? status.planName : null).toBe(planName);
+    }
+  );
+
   it('falls back to the legacy Fable weekly key without a limits list', async () => {
     vi.mocked(readFile).mockResolvedValue(
       JSON.stringify({ claudeAiOauth: { accessToken: 'claude-code-token' } })
