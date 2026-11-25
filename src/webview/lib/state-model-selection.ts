@@ -370,6 +370,11 @@ export function getReviewerModelNames(route: { providerID: string; modelID: stri
   if (route.providerID === JEV_DECISION_PROVIDER_ID) {
     return { providerName: 'TypeSafe', modelName: route.modelID.replace(/^jev-/, 'Jev ') };
   }
+  return getModelRouteNames(route);
+}
+
+/** Provider and model display names for a route, falling back to its raw IDs. */
+export function getModelRouteNames(route: { providerID: string; modelID: string }) {
   const provider = state.providers.find((item) => item.id === route.providerID);
   const model = provider
     ? Object.values(provider.models).find((item) => item.id === route.modelID)

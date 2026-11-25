@@ -4,6 +4,7 @@ import {
   type TokenUsage,
 } from '../../lib/message-metrics';
 import type { AssistantMessage, Message, Part, Session, TextPart } from '../../types';
+import type { SessionModelRoute } from '../../../shared/protocol';
 import { stripContextForHistory } from '../../lib/context-history';
 
 export type MessageInfoEntry = { info: Message };
@@ -80,6 +81,31 @@ export function sumAssistantTokensFromMessageEntries(
   }
 
   return result;
+}
+
+/**
+ * Distinct models with recorded usage across a session tree, in first-use order. Server-reported
+ * routes cover nested sessions whose messages the webview has not loaded.
+ */
+export function collectSessionModels(
+  messageLists: Iterable<readonly MessageInfoEntry[]>,
+  known: readonly SessionModelRoute[] = []
+): SessionModelRoute[] {
+  const models = new Map<string, SessionModelRoute>();
+  for (const messages of messageLists) {
+    for (const entry of messages) {
+      const info = entry.info;
+      if (!isAssistantMessage(info) || !info.providerID || !info.modelID) continue;
+      if (getAssistantTotalTokens(info) <= 0) continue;
+      const key = `${info.providerID}/${info.modelID}`;
+      if (!models.has(key)) models.set(key, { providerID: info.providerID, modelID: info.modelID });
+    }
+  }
+  for (const route of known) {
+    const key = `${route.providerID}/${route.modelID}`;
+    if (!models.has(key)) models.set(key, route);
+  }
+  return [...models.values()];
 }
 
 export function getSessionCost(

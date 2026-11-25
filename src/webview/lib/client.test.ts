@@ -794,6 +794,39 @@ describe('client', () => {
     });
   });
 
+  it('shows the Claude Agent provider as Claude without overriding custom names', async () => {
+    const { client } = await loadClient();
+    const providers = [
+      { id: 'claude-agent', name: 'Claude Agent', models: {} },
+      { id: 'anthropic', name: 'Claude Agent', models: {} },
+    ];
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {
+      if (path === '/config/providers') return Promise.resolve({ providers, default: {} });
+      if (path === '/provider')
+        return Promise.resolve({ all: providers, default: {}, connected: ['claude-agent'] });
+      return Promise.reject(new Error('404 Not Found'));
+    });
+
+    const expected = [
+      { id: 'claude-agent', name: 'Claude', models: {} },
+      { id: 'anthropic', name: 'Claude Agent', models: {} },
+    ];
+    await expect(client.config.providers()).resolves.toMatchObject({ providers: expected });
+    await expect(client.config.providerCatalog()).resolves.toMatchObject({ all: expected });
+
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) =>
+      path === '/config/providers'
+        ? Promise.resolve({
+            providers: [{ id: 'claude-agent', name: 'Work Claude', models: {} }],
+            default: {},
+          })
+        : Promise.reject(new Error('404 Not Found'))
+    );
+    await expect(client.config.providers()).resolves.toMatchObject({
+      providers: [{ id: 'claude-agent', name: 'Work Claude' }],
+    });
+  });
+
   it.each([
     {
       path: '/provider/auth',

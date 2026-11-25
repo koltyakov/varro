@@ -65,6 +65,7 @@ import plusIcon from 'iconoir/icons/plus.svg';
 import playIcon from 'iconoir/icons/play.svg';
 import playSolidIcon from 'iconoir/icons/play-solid.svg';
 import priorityHighIcon from 'iconoir/icons/priority-high.svg';
+import reportsIcon from 'iconoir/icons/reports.svg';
 import runningIcon from 'iconoir/icons/running.svg';
 import searchIcon from 'iconoir/icons/search.svg';
 import settingsIcon from 'iconoir/icons/settings.svg';
@@ -158,6 +159,7 @@ export {
   playIcon,
   playSolidIcon,
   priorityHighIcon,
+  reportsIcon,
   runningIcon,
   searchIcon,
   settingsIcon,

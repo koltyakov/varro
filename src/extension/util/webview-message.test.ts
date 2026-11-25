@@ -1247,6 +1247,25 @@ describe('webview message validation', () => {
     expect(parseWebviewMessage({ type: 'usage/report' })).toBeNull();
   });
 
+  it('accepts session usage report requests', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'usage/session-report',
+        payload: { sessionId: 'session-1', directory: '/repo' },
+      })
+    ).toEqual({
+      type: 'usage/session-report',
+      payload: { sessionId: 'session-1', directory: '/repo' },
+    });
+    expect(parseWebviewMessage({ type: 'usage/session-report', payload: {} })).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'usage/session-report',
+        payload: { sessionId: 'session-1', directory: 7 },
+      })
+    ).toBeNull();
+  });
+
   it('parses every Ralph command and reconstructs nested legacy runs', () => {
     const config = createRalphConfig();
     const run = createRalphRun();

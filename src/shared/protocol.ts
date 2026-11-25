@@ -289,6 +289,11 @@ export type SessionTokenBreakdown = {
   subagentCount: number;
 };
 
+export type SessionModelRoute = {
+  providerID: string;
+  modelID: string;
+};
+
 export type SessionLocation = {
   directory: string;
   isGitWorktree: boolean;
@@ -310,6 +315,8 @@ export type SessionDiffSummary = {
   deletions: number;
   tokens: number;
   model?: { providerID: string; modelID: string; variant?: string };
+  /** Distinct models with recorded usage in the session and its nested sessions. */
+  models?: SessionModelRoute[];
   tokenBreakdown?: SessionTokenBreakdown;
   nestedContextBreakdown?: ContextBreakdownSegment[];
   durationMs: number;
@@ -1245,6 +1252,7 @@ export type WebviewMessage =
   | { type: 'model-preferences/migrate'; payload: ModelPreferences }
   | { type: 'session/export'; payload: { sessionId: string; directory?: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
+  | { type: 'usage/session-report'; payload: { sessionId: string; directory?: string } }
   | { type: 'webview/reload' }
   | { type: 'vscode/open-folder'; payload?: { sessionId: string; directory: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }

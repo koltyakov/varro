@@ -13,6 +13,7 @@ import { pauseCompletedAt, readSessionPauses } from '../shared/session-pauses';
 import type { SessionPauseBoundary } from '../shared/session-pauses';
 import type {
   SessionDiffSummary,
+  SessionModelRoute,
   SessionTokenBreakdown,
   SessionTokenUsage,
 } from '../shared/protocol';
@@ -54,6 +55,7 @@ async function summarizeRemoteSession(
     ...messageLists.map(normalizeContextMessages),
   ]);
   const model = summarizeSessionModel(messages);
+  const models = summarizeSessionModels([messages, ...messageLists]);
   const result: SessionDiffSummary = {
     ...editStats,
     tokens:
@@ -63,6 +65,7 @@ async function summarizeRemoteSession(
   };
   if (historyStatsUnavailable) result.historyStatsUnavailable = true;
   if (model) result.model = model;
+  if (models.length > 0) result.models = models;
   if (!historyStatsUnavailable) result.tokenBreakdown = tokenBreakdown;
   if (!historyStatsUnavailable && nestedContextBreakdown.length > 0) {
     result.nestedContextBreakdown = nestedContextBreakdown;
@@ -313,6 +316,7 @@ function summarizeLocalSession(
   const editStats = summarizeSessionMessageEdits(messages);
   const session = summarizeSessionTokenUsage(messages);
   const subagents = emptySessionTokenUsage();
+  const modelLists: unknown[] = [messages];
   const contextSessions = [
     {
       messages,
@@ -327,6 +331,7 @@ function summarizeLocalSession(
     const messageUsage = summarizeSessionTokenUsage(descendantMessages);
     if (messageUsage.cost) snapshot.cost = messageUsage.cost;
     addSessionTokenUsage(subagents, snapshot.total > 0 ? snapshot : messageUsage);
+    modelLists.push(descendantMessages);
     contextSessions.push({
       messages: descendantMessages,
       characters: descendant.contextCharacters,
@@ -347,8 +352,10 @@ function summarizeLocalSession(
     ...summarizeSessionDuration(messages, readSessionPauses(metadata)),
   };
   const model = summarizeSessionModel(messages);
+  const models = summarizeSessionModels(modelLists);
   const nestedContextBreakdown = estimateLocalContextBreakdown(contextSessions);
   if (model) result.model = model;
+  if (models.length > 0) result.models = models;
   if (nestedContextBreakdown.length > 0) result.nestedContextBreakdown = nestedContextBreakdown;
   return result;
 }
@@ -466,6 +473,24 @@ function summarizeSessionModel(value: unknown): SessionDiffSummary['model'] {
     if (typeof info.variant === 'string' && info.variant) model.variant = info.variant;
   }
   return model;
+}
+
+function summarizeSessionModels(lists: readonly unknown[]): SessionModelRoute[] {
+  const models = new Map<string, SessionModelRoute>();
+  for (const value of lists) {
+    if (!Array.isArray(value)) continue;
+    for (const entry of value) {
+      const info = asRecord(asRecord(entry)?.info);
+      if (info?.role !== 'assistant') continue;
+      const providerID = info.providerID ?? asRecord(info.model)?.providerID;
+      const modelID = info.modelID ?? asRecord(info.model)?.modelID;
+      if (typeof providerID !== 'string' || !providerID) continue;
+      if (typeof modelID !== 'string' || !modelID) continue;
+      if (summarizeTokenUsageRecord(asRecord(info.tokens)).total <= 0) continue;
+      models.set(`${providerID}/${modelID}`, { providerID, modelID });
+    }
+  }
+  return [...models.values()];
 }
 
 function summarizeSessionDuration(

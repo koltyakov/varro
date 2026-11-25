@@ -1214,6 +1214,150 @@ describe('UsageReportService', () => {
   });
 });
 
+describe('UsageReportService session report', () => {
+  const now = NOW.getTime();
+  const records: Record<string, Record<string, unknown>> = {
+    root: {
+      id: 'root',
+      directory: '/repo',
+      title: 'Main task',
+      time: { created: 1, updated: now },
+    },
+    explore: {
+      id: 'explore',
+      parentID: 'root',
+      directory: '/repo',
+      title: 'Explore | files',
+      time: { created: 2, updated: now },
+    },
+    review: {
+      id: 'review',
+      parentID: 'root',
+      directory: '/repo',
+      title: 'Review',
+      time: { created: 3, updated: now },
+    },
+    nested: {
+      id: 'nested',
+      parentID: 'explore',
+      directory: '/repo',
+      title: 'Deep search',
+      time: { created: 4, updated: now },
+    },
+  };
+  const messages: Record<string, unknown[]> = {
+    root: [assistant('root-1', now), assistant('root-2', now)],
+    explore: [
+      assistant('explore-1', now, { providerID: 'provider-b', modelID: 'model-b' }),
+      assistant('explore-empty', now, {
+        providerID: 'provider-c',
+        modelID: 'model-c',
+        tokens: tokenDetails(0),
+      }),
+    ],
+    review: [assistant('review-1', now, { providerID: 'claude-agent', modelID: 'opus' })],
+    nested: [assistant('nested-1', now, { providerID: 'provider-c', modelID: 'model-c' })],
+  };
+
+  function sessionRequest(): ReturnType<typeof vi.fn<Request>> {
+    return vi.fn<Request>(async (_method, path) => {
+      const url = new URL(path, 'http://fixture');
+      const match = /^\/session\/([^/]+)(\/children|\/message)?$/.exec(url.pathname);
+      const id = match?.[1] ? decodeURIComponent(match[1]) : undefined;
+      if (!id || !records[id]) throw new Error(`Unexpected path ${path}`);
+      if (match?.[2] === '/children')
+        return Object.values(records)
+          .filter((record) => record.parentID === id)
+          .toReversed();
+      if (match?.[2] === '/message') return messages[id] ?? [];
+      return records[id];
+    });
+  }
+
+  it('reports the root session and every nested session by model and by session', async () => {
+    const request = sessionRequest();
+    const ensureServerStarted = vi.fn(async () => undefined);
+    const service = new UsageReportService({ request }, ensureServerStarted, null);
+
+    await service.openSessionReport('nested', '/repo');
+
+    expect(ensureServerStarted).toHaveBeenCalledOnce();
+    expect(request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    const content = reportContent();
+    expect(content).toContain('# OpenCode Session Usage Report');
+    expect(content).toContain('Session: **Main task** (`root`)');
+    expect(content).toContain('from 4 sessions (main session and 3 nested sessions)');
+    const byModel = reportSection(content, 'By model');
+    expect(byModel).toContain('| provider-a | model-a | 2 | 380 |');
+    expect(byModel).toContain('| provider-b | model-b | 1 | 190 |');
+    expect(byModel).toContain('| provider-c | model-c | 1 | 190 |');
+    expect(byModel).toContain('| claude | opus | 1 | 190 |');
+    expect(content).not.toContain('claude-agent');
+    expect(byModel).toContain('| **Total** |  | 5 | 950 |');
+    const bySession = reportSection(content, 'By session').split('\n');
+    const rows = bySession.filter((line) => line.startsWith('| ') && !line.startsWith('| ---'));
+    expect(rows.slice(1)).toEqual([
+      expect.stringMatching(/^\| Main task \| provider-a\/model-a \| 2 \| 380 \|/),
+      expect.stringMatching(/^\| ↳ Explore \\\| files \| provider-b\/model-b \| 1 \| 190 \|/),
+      expect.stringMatching(/^\| &nbsp;&nbsp;↳ Deep search \| provider-c\/model-c \| 1 \| 190 \|/),
+      expect.stringMatching(/^\| ↳ Review \| claude\/opus \| 1 \| 190 \|/),
+      expect.stringMatching(/^\| \*\*Total\*\* \|  \| 5 \| 950 \|/),
+    ]);
+    expect(mocks.executeCommand).toHaveBeenCalledWith('markdown.showPreview', mocks.documentUri);
+  });
+
+  it('includes auxiliary session LLM calls such as titles and compaction', async () => {
+    const base = sessionRequest();
+    const request = vi.fn<Request>(async (method, path, ...rest) => {
+      if (!path.includes('/log?')) return base(method, path, ...rest);
+      const id = /\/session\/([^/]+)\/log/.exec(path)?.[1] ?? '';
+      const events =
+        id === 'root'
+          ? [
+              {
+                id: 'evt_title',
+                type: 'session.usage.recorded',
+                created: now,
+                durable: { aggregateID: 'root', seq: 1 },
+                data: {
+                  sessionID: 'root',
+                  source: 'title',
+                  cost: 0,
+                  tokens: { input: 7, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+                },
+              },
+            ]
+          : [];
+      return [...events, { type: 'log.synced', aggregateID: id }]
+        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+        .join('');
+    });
+    const service = new UsageReportService(
+      { request, apiVersion: 2, isAttachOnly: true },
+      vi.fn(),
+      null
+    );
+
+    await service.openSessionReport('root');
+
+    const byModel = reportSection(reportContent(), 'By model');
+    expect(byModel).toContain('| Unattributed | Session titles | 0 | 10 |');
+    expect(byModel).toContain('| **Total** |  | 5 | 960 |');
+  });
+
+  it('shows an error when the session cannot be read', async () => {
+    const request = vi.fn<Request>(async () => {
+      throw new Error('404 session not found');
+    });
+    const service = new UsageReportService({ request }, vi.fn(), null);
+
+    await expect(service.openSessionReport('missing')).rejects.toThrow('404 session not found');
+    expect(mocks.showErrorMessage).toHaveBeenCalledWith(
+      'Could not build OpenCode session usage report: 404 session not found'
+    );
+  });
+});
+
 function tokenDetails(total: number): Record<string, unknown> {
   return {
     input: total,

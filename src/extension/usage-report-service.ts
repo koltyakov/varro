@@ -288,6 +288,12 @@ type CachedSessionUsage = {
   timingRevision: string;
 };
 
+type SessionTreeNode = {
+  session: Session;
+  title: string;
+  depth: number;
+};
+
 type LocalUsageSnapshot =
   | { sessionCount: number; usage: Usage[] }
   | { aggregates: WindowAggregates[]; sessionCount: number };
@@ -312,6 +318,7 @@ const SESSION_USAGE_CACHE_LIMIT = 500;
 const SESSION_USAGE_CACHE_ENTRY_LIMIT = 10_000;
 const SESSION_USAGE_CACHE_TOTAL_LIMIT = 50_000;
 const SESSION_FALLBACK_MAX_SESSIONS = 250;
+const SESSION_TREE_MAX_DEPTH = 64;
 const LOCAL_USAGE_WORKER_TIMEOUT_MS = 30_000;
 const LOCAL_USAGE_REPORT_STALL_TIMEOUT_MS = 60_000;
 const LOCAL_USAGE_REPORT_MAX_DURATION_MS = 10 * 60_000;
@@ -335,6 +342,7 @@ export class UsageReportService {
   private readonly sessionUsageCache = new Map<string, CachedSessionUsage>();
   private sessionUsageCacheEntries = 0;
   private reportOperation: { includeAllTime: boolean; promise: Promise<void> } | null = null;
+  private readonly sessionReportOperations = new Map<string, Promise<void>>();
   private csvExportOperation: Promise<void> | null = null;
 
   constructor(
@@ -466,23 +474,7 @@ export class UsageReportService {
           : `The local OpenCode usage database is unavailable. Refusing to fetch full history for ${sessions.length.toLocaleString()} sessions.`
       );
     }
-    // Never read this machine's sidecar for an external/unknown server connection.
-    if (sessions.length && this.server.isAttachOnly === false && this.server.apiVersion === 2) {
-      const timings = await readOriginalUsageTimings(sessions.map((session) => session.id));
-      const bySession = new Map<string, OriginalUsageTiming[]>();
-      for (const timing of timings) {
-        const rows = bySession.get(timing.session_id) ?? [];
-        rows.push(timing);
-        bySession.set(timing.session_id, rows);
-      }
-      for (const session of sessions) {
-        const rows = bySession.get(session.id) ?? [];
-        session.originalTimings = new Map(rows.map((row) => [row.message_id, row]));
-        session.timingRevision = createHash('sha256')
-          .update(JSON.stringify([session.identity, rows]))
-          .digest('hex');
-      }
-    }
+    await this.attachOriginalTimings(sessions);
     const sessionIDs = new Set(sessions.map((session) => session.id));
     for (const id of this.sessionUsageCache.keys()) {
       if (sessionIDs.has(id)) continue;
@@ -526,26 +518,13 @@ export class UsageReportService {
       if (!page) throw new Error('OpenCode returned a malformed global session list.');
 
       for (const value of page.data) {
-        const record = asRecord(value);
-        const id = stringValue(record?.id);
-        const directory = stringValue(record?.directory);
-        if (!id || !directory) {
+        const session = this.decodeSession(value);
+        if (!session) {
           warnings.push('Ignored a malformed session without an id or directory.');
           continue;
         }
-        if (!sessions.has(id)) {
-          sessions.set(id, {
-            id,
-            directory,
-            updated: numberValue(asRecord(record?.time)?.updated),
-            nativeTokens:
-              this.server.apiVersion === 2 ? nativeUsageTokens(record?.tokens) : undefined,
-            pauses: readSessionPauses(record?.metadata),
-            identity:
-              stringValue(
-                asRecord(asRecord(record?.metadata)?.varroLegacyImport)?.sourceSessionID
-              ) ?? id,
-          });
+        if (!sessions.has(session.id)) {
+          sessions.set(session.id, session);
           if (sessions.size > SESSION_FALLBACK_MAX_SESSIONS) return [...sessions.values()];
         }
       }
@@ -559,6 +538,191 @@ export class UsageReportService {
     } while (cursor);
 
     return [...sessions.values()];
+  }
+
+  private decodeSession(value: unknown): Session | null {
+    const record = asRecord(value);
+    const id = stringValue(record?.id);
+    const directory = stringValue(record?.directory);
+    if (!id || !directory) return null;
+    return {
+      id,
+      directory,
+      updated: numberValue(asRecord(record?.time)?.updated),
+      nativeTokens: this.server.apiVersion === 2 ? nativeUsageTokens(record?.tokens) : undefined,
+      pauses: readSessionPauses(record?.metadata),
+      identity:
+        stringValue(asRecord(asRecord(record?.metadata)?.varroLegacyImport)?.sourceSessionID) ?? id,
+    };
+  }
+
+  /** Never read this machine's sidecar for an external/unknown server connection. */
+  private async attachOriginalTimings(sessions: Session[]): Promise<void> {
+    if (!sessions.length || this.server.isAttachOnly !== false || this.server.apiVersion !== 2)
+      return;
+    const timings = await readOriginalUsageTimings(sessions.map((session) => session.id));
+    const bySession = new Map<string, OriginalUsageTiming[]>();
+    for (const timing of timings) {
+      const rows = bySession.get(timing.session_id) ?? [];
+      rows.push(timing);
+      bySession.set(timing.session_id, rows);
+    }
+    for (const session of sessions) {
+      const rows = bySession.get(session.id) ?? [];
+      session.originalTimings = new Map(rows.map((row) => [row.message_id, row]));
+      session.timingRevision = createHash('sha256')
+        .update(JSON.stringify([session.identity, rows]))
+        .digest('hex');
+    }
+  }
+
+  openSessionReport(sessionId: string, directory?: string): Promise<void> {
+    const current = this.sessionReportOperations.get(sessionId);
+    if (current) return current;
+    const promise = this.openSessionReportNow(sessionId, directory);
+    this.sessionReportOperations.set(sessionId, promise);
+    const finish = () => {
+      if (this.sessionReportOperations.get(sessionId) === promise)
+        this.sessionReportOperations.delete(sessionId);
+    };
+    void promise.then(finish, finish);
+    return promise;
+  }
+
+  private async openSessionReportNow(sessionId: string, directory?: string): Promise<void> {
+    try {
+      const report = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Building OpenCode session usage report',
+          cancellable: false,
+        },
+        () => this.buildSessionReport(sessionId, directory)
+      );
+      const uri = await this.openDocument(
+        report.content,
+        `OpenCode Session Usage - ${report.title}`
+      );
+      await vscode.commands.executeCommand('markdown.showPreview', uri);
+    } catch (error) {
+      await vscode.window.showErrorMessage(
+        `Could not build OpenCode session usage report: ${errorMessage(error)}`
+      );
+      throw error;
+    }
+  }
+
+  private async buildSessionReport(
+    sessionId: string,
+    directory?: string
+  ): Promise<{ title: string; content: string }> {
+    await this.ensureServerStarted();
+    const warnings: string[] = [];
+    const now = Date.now();
+    const root = await this.readSessionTreeRoot(sessionId, directory);
+    const tree = await this.listSessionTree(root, warnings);
+    const sessions = tree.map((node) => node.session);
+    try {
+      await this.attachOriginalTimings(sessions);
+    } catch (error) {
+      warnings.push(`Could not read preserved usage timing: ${errorMessage(error)}.`);
+    }
+    const usage = await mapConcurrent(sessions, SESSION_CONCURRENCY, (session) =>
+      this.readSessionUsage(session, warnings)
+    );
+    return {
+      title: root.title,
+      content: renderSessionReport(tree, usage, warnings, now),
+    };
+  }
+
+  private async readSessionRecord(sessionId: string, directory?: string) {
+    const path = `/session/${encodeURIComponent(sessionId)}`;
+    const record = asRecord(
+      await this.server.request('GET', directory ? scopedPath(path, directory) : path)
+    );
+    const session = this.decodeSession(record);
+    if (!session || session.id !== sessionId)
+      throw new Error(`OpenCode returned a malformed session ${sessionId}.`);
+    return {
+      session,
+      title: stringValue(record?.title) ?? sessionId,
+      parentID: stringValue(record?.parentID) ?? undefined,
+    };
+  }
+
+  private async readSessionTreeRoot(
+    sessionId: string,
+    directory?: string
+  ): Promise<SessionTreeNode> {
+    let current = await this.readSessionRecord(sessionId, directory);
+    const visited = new Set([current.session.id]);
+    while (current.parentID) {
+      if (visited.has(current.parentID) || visited.size > SESSION_TREE_MAX_DEPTH)
+        throw new Error(`Could not resolve the root session of ${sessionId}.`);
+      visited.add(current.parentID);
+      current = await this.readSessionRecord(current.parentID, current.session.directory);
+    }
+    return { session: current.session, title: current.title, depth: 0 };
+  }
+
+  /** Depth-first so nested sessions render under the session that started them. */
+  private async listSessionTree(
+    root: SessionTreeNode,
+    warnings: string[]
+  ): Promise<SessionTreeNode[]> {
+    const nodes: SessionTreeNode[] = [];
+    const visited = new Set<string>();
+    const pending = [root];
+    while (pending.length > 0) {
+      const node = pending.pop()!;
+      if (visited.has(node.session.id)) continue;
+      visited.add(node.session.id);
+      nodes.push(node);
+      if (nodes.length > SESSION_FALLBACK_MAX_SESSIONS)
+        throw new Error(
+          `Session usage reports support up to ${SESSION_FALLBACK_MAX_SESSIONS} nested sessions.`
+        );
+      let response: unknown;
+      try {
+        response = await this.server.request(
+          'GET',
+          scopedPath(
+            `/session/${encodeURIComponent(node.session.id)}/children`,
+            node.session.directory
+          )
+        );
+      } catch (error) {
+        warnings.push(
+          `Could not list nested sessions of ${node.session.id}: ${errorMessage(error)}.`
+        );
+        continue;
+      }
+      const children = Array.isArray(response) ? response : asRecord(response)?.data;
+      if (!Array.isArray(children)) {
+        warnings.push(`Ignored a malformed nested session list for ${node.session.id}.`);
+        continue;
+      }
+      const childNodes: Array<SessionTreeNode & { created: number }> = [];
+      for (const value of children) {
+        const session = this.decodeSession(value);
+        if (!session) {
+          warnings.push('Ignored a malformed nested session without an id or directory.');
+          continue;
+        }
+        const record = asRecord(value);
+        childNodes.push({
+          session,
+          title: stringValue(record?.title) ?? session.id,
+          depth: node.depth + 1,
+          created: numberValue(asRecord(record?.time)?.created) ?? 0,
+        });
+      }
+      // The stack pops the last entry first, so push newest first to visit oldest first.
+      childNodes.sort((left, right) => right.created - left.created);
+      pending.push(...childNodes);
+    }
+    return nodes;
   }
 
   private async readSessionUsage(session: Session, warnings: string[]): Promise<Usage[]> {
@@ -1872,6 +2036,76 @@ function renderAggregatedReport(
   return lines.join('\n');
 }
 
+function renderSessionReport(
+  tree: SessionTreeNode[],
+  usageBySession: Usage[][],
+  warnings: string[],
+  now: number
+): string {
+  const root = tree[0];
+  const nested = tree.length - 1;
+  const models = new Map<string, Aggregate>();
+  const sessionRows: Array<{ node: SessionTreeNode; models: string[]; aggregate: Aggregate }> = [];
+  for (let index = 0; index < tree.length; index += 1) {
+    const usage = usageBySession[index] ?? [];
+    const groups = new Map<string, Aggregate>();
+    const sessionModels = new Set<string>();
+    for (const entry of usage) {
+      if (entry.tokens.total <= 0) continue;
+      addUsageToAggregateGroup(models, entry);
+      addUsageToAggregateGroup(groups, entry);
+      if (!entry.source)
+        sessionModels.add(`${formatProviderID(entry.providerID)}/${entry.modelID}`);
+    }
+    sessionRows.push({
+      node: tree[index]!,
+      models: [...sessionModels],
+      aggregate: sumAggregates(groups.values()),
+    });
+  }
+
+  const lines = [
+    '# OpenCode Session Usage Report',
+    '',
+    `Session: **${escapeMarkdown(root?.title ?? 'Unknown session')}**${root ? ` (\`${escapeMarkdown(root.session.id)}\`)` : ''}`,
+    '',
+    `Generated ${new Date(now).toLocaleString()} from ${tree.length.toLocaleString()} ${tree.length === 1 ? 'session' : 'sessions'} (main session and ${nested.toLocaleString()} nested ${nested === 1 ? 'session' : 'sessions'}).`,
+    '',
+    '## By model',
+    '',
+  ];
+  if (models.size === 0) lines.push('_No token usage._');
+  else renderAggregateTable(lines, models);
+
+  lines.push(
+    '',
+    '## By session',
+    '',
+    '| Session | Models | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write | Cache rate |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+  );
+  for (const row of sessionRows) {
+    const indent = row.node.depth > 0 ? `${'&nbsp;&nbsp;'.repeat(row.node.depth - 1)}↳ ` : '';
+    lines.push(
+      renderAggregateRow(
+        `${indent}${row.node.title}`,
+        row.models.length ? row.models.join(', ') : '-',
+        row.aggregate
+      )
+    );
+  }
+  lines.push(
+    renderAggregateRow('**Total**', '', sumAggregates(sessionRows.map((row) => row.aggregate)))
+  );
+
+  if (warnings.length > 0) {
+    lines.push('', '## Warnings', '');
+    for (const warning of new Set(warnings)) lines.push(`- ${escapeMarkdown(warning)}`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
 function renderAggregateTable(
   lines: string[],
   groups: Map<string, Aggregate>,
@@ -1890,7 +2124,7 @@ function renderAggregateTable(
     const [providerID = '', modelID = '', source] = route.split('\u0000');
     lines.push(
       renderAggregateRow(
-        source ? 'Unattributed' : providerID,
+        source ? 'Unattributed' : formatProviderID(providerID),
         source === 'generate'
           ? 'Session generation'
           : source === 'title'
@@ -1942,8 +2176,13 @@ function addTokens(target: Tokens, tokens: Tokens): void {
   target.cacheWrite += tokens.cacheWrite;
 }
 
-function renderAggregateRow(providerID: string, modelID: string, aggregate: Aggregate): string {
-  return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregatePromptCount(aggregate))} | ${formatTokenCount(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${formatTokenCount(aggregate.input)} | ${formatTokenCount(aggregate.output)} | ${formatTokenCount(aggregate.reasoning)} | ${formatTokenCount(aggregate.cacheRead)} | ${formatTokenCount(aggregate.cacheWrite)} | ${formatCacheRate(aggregate)} |`;
+function renderAggregateRow(first: string, second: string, aggregate: Aggregate): string {
+  return `| ${escapeMarkdown(first)} | ${escapeMarkdown(second)} | ${integer(aggregatePromptCount(aggregate))} | ${formatTokenCount(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${formatTokenCount(aggregate.input)} | ${formatTokenCount(aggregate.output)} | ${formatTokenCount(aggregate.reasoning)} | ${formatTokenCount(aggregate.cacheRead)} | ${formatTokenCount(aggregate.cacheWrite)} | ${formatCacheRate(aggregate)} |`;
+}
+
+/** Report label for a provider; OpenCode's Claude subscription provider shows as plain Claude. */
+function formatProviderID(providerID: string): string {
+  return providerID === 'claude-agent' ? 'claude' : providerID;
 }
 
 function formatTokenCount(value: number): string {

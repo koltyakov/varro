@@ -52,6 +52,7 @@ import type {
   DatabaseTableReference,
   ExtensionMessage,
   InitialWebviewState,
+  SessionModelRoute,
   SessionTokenBreakdown,
   SessionWorkspaceTarget,
 } from '../../shared/protocol';
@@ -150,6 +151,7 @@ import {
   loadingLastActivityAt,
   loadingStartedAt,
   showTurnTimer,
+  getModelRouteNames,
   getReviewerModelNames,
   getMessageLookup,
 } from '../lib/state';
@@ -318,6 +320,7 @@ import {
   getLatestAssistantMessageInfoWithTokens,
   getSessionCost,
   accumulateSessionMessageTotals,
+  collectSessionModels,
   getSessionTreeTokenBreakdown,
   getSessionTreeTokenBreakdownFromTotals,
   getUserMessageHistoryText,
@@ -926,6 +929,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     rootId: string;
     breakdown: SessionTokenBreakdown;
     nestedBreakdown: ReturnType<typeof estimateNestedContextBreakdown>;
+    models: SessionModelRoute[];
   } | null>(null);
   const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
@@ -6382,6 +6386,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         rootId,
         breakdown: summary.tokenBreakdown,
         nestedBreakdown: summary.nestedContextBreakdown ?? [],
+        models: summary.models ?? [],
       });
     } catch {}
   }
@@ -6389,6 +6394,28 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   function toggleContextPopup() {
     if (togglePopup('context', showContextPopup, setShowContextPopup))
       void loadCompleteTokenBreakdown();
+  }
+
+  // Only scanned while the popup is open; the server summary adds unloaded nested sessions.
+  const sessionModels = createMemo(() => {
+    const rootId = tokenTreeRootId();
+    if (!showContextPopup() || !rootId) return [];
+    const complete = completeTokenBreakdown();
+    const lookup = messagesBySession();
+    return collectSessionModels(
+      tokenTreeSessionIds().map((id) => lookup.get(id) ?? []),
+      complete?.rootId === rootId ? complete.models : []
+    ).map((route) => getModelRouteNames(route));
+  });
+
+  function openSessionUsageReport() {
+    const rootId = tokenTreeRootId();
+    if (!rootId) return;
+    const directory = sessionsById().get(rootId)?.directory;
+    postMessage({
+      type: 'usage/session-report',
+      payload: directory ? { sessionId: rootId, directory } : { sessionId: rootId },
+    });
   }
 
   const activeUsageLimit = createMemo(() => {
@@ -6996,6 +7023,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     onCompactSession: () => {
       void compactSession();
     },
+    onOpenSessionUsageReport: openSessionUsageReport,
     onAttach: () => postMessage({ type: 'files/pick' }),
     onStop: requestAbortSession,
     busyToggleRef: (el) => {
@@ -7621,6 +7649,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             sessionCost={sessionCost()}
             subagentTokens={sessionTokenBreakdown().subagents}
             subagentCount={sessionTokenBreakdown().subagentCount}
+            sessionModels={sessionModels()}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
             showAttachmentsControl={isToolbarControlVisible('attachments')}
             showStopButton={showStopButton()}
@@ -7719,6 +7748,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           sessionCost={sessionCost()}
           subagentTokens={sessionTokenBreakdown().subagents}
           subagentCount={sessionTokenBreakdown().subagentCount}
+          sessionModels={sessionModels()}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           showStopButton={showStopButton()}

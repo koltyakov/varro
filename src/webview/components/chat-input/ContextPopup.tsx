@@ -7,6 +7,7 @@ import {
   infoCircleIcon,
   navArrowRightIcon,
   squareIcon,
+  reportsIcon,
 } from '../../lib/ui-icons';
 import { formatCost, formatNumber } from '../../lib/message-metrics';
 import {
@@ -51,6 +52,8 @@ type ContextTokens = {
   cacheWrite: number;
 };
 
+export type ContextPopupModel = { providerName: string; modelName: string };
+
 type ContextTokenRow = {
   key: 'input' | 'output' | 'reasoning' | 'cacheRead' | 'cacheWrite';
   label: string;
@@ -86,6 +89,10 @@ function getTokenRows(tokens: ContextTokens): ContextTokenRow[] {
   return items;
 }
 
+function formatModelName(model: ContextPopupModel) {
+  return `${model.providerName} / ${model.modelName}`;
+}
+
 function CacheReadInfo() {
   return (
     <Tooltip content={CACHE_READ_TOOLTIP}>
@@ -118,10 +125,13 @@ export function ContextPopup(props: {
   subagentTokens: ContextTokens;
   subagentCount: number;
   model: { providerName: string; modelName: string };
+  /** Models with recorded usage across the session tree; more than one marks mixed usage. */
+  models?: ContextPopupModel[];
   compactDisabled: boolean;
   showCompactAction?: boolean;
   onClose: () => void;
   onCompact: () => void;
+  onOpenUsageReport?: () => void;
 }) {
   const [subagentsExpanded, setSubagentsExpanded] = createSignal(false);
   const [nestedBreakdown, setNestedBreakdown] = createSignal(true);
@@ -132,6 +142,11 @@ export function ContextPopup(props: {
   const subagentTotal = () => getSessionTotalTokens(props.subagentTokens);
   const sessionTokensAvailable = () => sessionTotal() > 0;
   const overallTotal = () => sessionTotal() + subagentTotal();
+  const showUsageReport = () => !!props.onOpenUsageReport && overallTotal() > 0;
+  const mixedModels = () => {
+    const models = props.models ?? [];
+    return models.length > 1 ? models : undefined;
+  };
   let popupEl: HTMLDivElement | undefined;
 
   const setRef = (el: HTMLDivElement) => {
@@ -369,9 +384,53 @@ export function ContextPopup(props: {
         </div>
       </Show>
 
-      <Show when={props.model.modelName}>
-        <div class="context-popup-model">
-          {props.model.providerName} / {props.model.modelName}
+      <Show when={props.model.modelName || mixedModels() || showUsageReport()}>
+        <div class="context-popup-footer">
+          <Show
+            when={mixedModels()}
+            fallback={
+              <Show when={props.model.modelName}>
+                <div class="context-popup-model">{formatModelName(props.model)}</div>
+              </Show>
+            }
+          >
+            {(models) => (
+              <Tooltip
+                content={
+                  <div class="context-popup-models-tooltip">
+                    <div>Models used in this session:</div>
+                    <For each={models()}>{(model) => <div>{formatModelName(model)}</div>}</For>
+                  </div>
+                }
+              >
+                <div
+                  class="context-popup-model context-popup-models-mixed"
+                  tabindex="0"
+                  aria-label={`Models used in this session: ${models()
+                    .map((model) => formatModelName(model))
+                    .join(', ')}`}
+                >
+                  Mixed models ({models().length})
+                </div>
+              </Tooltip>
+            )}
+          </Show>
+          <Show when={showUsageReport()}>
+            <Tooltip content="Usage by model and session, including nested sessions">
+              <button
+                type="button"
+                class="context-popup-report-button"
+                aria-label="Open session usage report"
+                onClick={() => {
+                  props.onClose();
+                  props.onOpenUsageReport?.();
+                }}
+              >
+                <UiIcon source={reportsIcon} width="11" height="11" />
+                <span>Report</span>
+              </button>
+            </Tooltip>
+          </Show>
         </div>
       </Show>
     </div>

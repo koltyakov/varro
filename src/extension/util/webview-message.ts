@@ -149,6 +149,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'editor/route-changed': true,
   'session/export': true,
   'usage/report': true,
+  'usage/session-report': true,
   'webview/reload': true,
   'vscode/open-folder': true,
   'vscode/open-settings': true,
@@ -587,15 +588,17 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return { type, payload: { route: parsedRoute } };
     }
 
-    case 'session/export': {
+    case 'session/export':
+    case 'usage/session-report': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
       const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
       if (payload?.directory !== undefined && !directory) return null;
       if (!sessionId) return null;
-      const parsedPayload: Extract<WebviewMessage, { type: 'session/export' }>['payload'] = {
-        sessionId,
-      };
+      const parsedPayload: Extract<
+        WebviewMessage,
+        { type: 'session/export' | 'usage/session-report' }
+      >['payload'] = { sessionId };
       if (directory) parsedPayload.directory = directory;
       return { type, payload: parsedPayload };
     }

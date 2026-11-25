@@ -83,3 +83,40 @@ describe('session summary costs', () => {
     }
   });
 });
+
+describe('session summary models', () => {
+  it('lists distinct models with usage across the session and its descendants', async () => {
+    const assistant = (providerID: string, modelID: string, input: number) => ({
+      info: { role: 'assistant', providerID, modelID, tokens: { input } },
+    });
+    const messages = [assistant('openai', 'gpt', 10), assistant('openai', 'gpt', 20)];
+    const descendants = [
+      {
+        id: 'child',
+        tokens: undefined,
+        messages: [
+          assistant('anthropic', 'opus', 5),
+          assistant('google', 'failed-before-usage', 0),
+          {
+            info: {
+              role: 'assistant',
+              model: { providerID: 'local', modelID: 'v2' },
+              tokens: { output: 3 },
+            },
+          },
+        ],
+      },
+    ];
+    const local = sessionSummary.fromLocal({ messages, descendants });
+    const remote = await sessionSummary.fromRemote([], messages, descendants, async () =>
+      descendants.map((child) => child.messages)
+    );
+    for (const summary of [local, remote]) {
+      expect(summary.models).toEqual([
+        { providerID: 'openai', modelID: 'gpt' },
+        { providerID: 'anthropic', modelID: 'opus' },
+        { providerID: 'local', modelID: 'v2' },
+      ]);
+    }
+  });
+});

@@ -262,6 +262,15 @@ export function createSidebarProviderActions(
         : deps.sessionExportService.exportSession(sessionId));
     },
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),
+    generateSessionUsageReport: async (sessionId, requestedDirectory) => {
+      const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
+      const validatedDirectory = await assertSessionInCurrentWorkspace(
+        deps.sessionServer ?? deps.server,
+        sessionId,
+        directory ?? undefined
+      );
+      await deps.usageReportService.openSessionReport(sessionId, validatedDirectory);
+    },
     reloadWebview: () => deps.webviewSession.reload(),
     openFolder: async (payload) => {
       if (payload) {

@@ -4095,6 +4095,75 @@ describe('ChatInput', () => {
     expect(costRow?.querySelector('.context-popup-cost-info')).toBeNull();
   });
 
+  it('marks mixed models across nested sessions and opens the session usage report', async () => {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const bridgeWindow = window as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const sent: WebviewMessage[] = [];
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    try {
+      setupModelState();
+      setStateAndFlush('activeSessionId', 'session-1');
+      setStateAndFlush('sessions', [
+        session('session-1', 2_000),
+        session('child-1', 2_000, { parentID: 'session-1' }),
+      ]);
+      setStateAndFlush('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+      vi.mocked(client.varro.session.diffSummary).mockResolvedValue({
+        files: 0,
+        additions: 0,
+        deletions: 0,
+        tokens: 500,
+        models: [
+          { providerID: 'openai', modelID: 'gpt-4o' },
+          { providerID: 'anthropic', modelID: 'opus' },
+        ],
+        tokenBreakdown: {
+          session: {
+            total: 500,
+            input: 400,
+            output: 100,
+            reasoning: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+          },
+          subagents: { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+          subagentCount: 1,
+        },
+        durationMs: 0,
+        activeStartedAt: null,
+      });
+
+      renderChatInput();
+      clickSelectorAndFlush('.chat-context-usage');
+
+      expect(container?.querySelector('.context-popup-models-mixed')).toBeNull();
+      await vi.waitFor(() => {
+        expect(container?.querySelector('.context-popup-models-mixed')?.textContent).toBe(
+          'Mixed models (2)'
+        );
+      });
+      expect(container?.querySelectorAll('.context-popup-model')).toHaveLength(1);
+      expect(
+        container?.querySelector('.context-popup-models-mixed')?.getAttribute('aria-label')
+      ).toContain('anthropic / opus');
+
+      expect(container?.querySelector('.context-popup-report-button')?.textContent).toBe('Report');
+      clickSelectorAndFlush('.context-popup-report-button');
+
+      expect(sent).toContainEqual({
+        type: 'usage/session-report',
+        payload: { sessionId: 'session-1', directory: '/repo' },
+      });
+      expect(container?.querySelector('.context-popup')).toBeNull();
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('loads tokens and costs for subagent sessions whose messages and snapshots are not loaded', async () => {
     setupModelState();
     setStateAndFlush('activeSessionId', 'session-1');

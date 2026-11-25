@@ -646,7 +646,7 @@ export const client = {
       ]);
       const response = requireRecord(providerResponse, path);
       return {
-        providers: requireArray<Provider>(response.providers, path),
+        providers: requireArray<Provider>(response.providers, path).map(withProviderDisplayName),
         // SAFETY: The surrounding shape or discriminator check establishes the Record<string, string> contract used below.
         default: requireRecord(response.default, path) as Record<string, string>,
         defaultModel,
@@ -670,7 +670,7 @@ export const client = {
       const path = '/provider';
       const response = requireRecord(await apiCall('GET', path), path);
       return {
-        all: requireArray<Provider>(response.all, path),
+        all: requireArray<Provider>(response.all, path).map(withProviderDisplayName),
         // SAFETY: The surrounding shape or discriminator check establishes the Record<string, string> contract used below.
         default: requireRecord(response.default, path) as Record<string, string>,
         connected: requireArray<string>(response.connected, path),
@@ -1284,6 +1284,13 @@ function withDirectory(path: string, directory: string | undefined): string {
   const url = new URL(path, 'http://varro.local');
   url.searchParams.set('directory', directory);
   return `${url.pathname}${url.search}`;
+}
+
+/** OpenCode's built-in Claude subscription provider reads better as plain "Claude". */
+function withProviderDisplayName(provider: Provider): Provider {
+  return provider.id === 'claude-agent' && provider.name === 'Claude Agent'
+    ? { ...provider, name: 'Claude' }
+    : provider;
 }
 
 function requireArray<T, V = unknown>(value: V, path: string): T[] {
