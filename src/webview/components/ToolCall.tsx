@@ -92,12 +92,14 @@ import {
 } from '../lib/ui-icons';
 import { createAltKeyTracker } from './alt-key-tracker';
 import { UiIcon } from './UiIcon';
+import { getAgentIcon } from '../lib/agent-icons';
 import { ChildTaskControls } from './chat/ChildTaskControls';
 
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
+const DEFAULT_TASK_AGENT = 'general';
 const { pressed: taskActivityAltPressed, retain: retainTaskActivityAltListener } =
   createAltKeyTracker();
 
@@ -1548,6 +1550,15 @@ function GenericToolCall(props: {
     const label = type.trim();
     return `${label.charAt(0).toUpperCase()}${label.slice(1)} subagent`;
   };
+  // The default `general` subagent stays unlabeled; any other type is named in the header.
+  const taskAgentBadge = createMemo(() => {
+    if (!isTask()) return null;
+    const type = taskAgent();
+    const name = isString(type) ? type.trim() : '';
+    if (!name || name.toLowerCase() === DEFAULT_TASK_AGENT) return null;
+    const agent = appState.allAgents.find((candidate) => candidate.name === name);
+    return { name, icon: getAgentIcon(agent ?? { name, options: {} }) };
+  });
   const taskSessionId = createMemo(() => {
     if (!isTask()) return null;
     if (
@@ -2157,6 +2168,20 @@ function GenericToolCall(props: {
             class={`tool-invocation-title${statusClass() === 'tool-status-running' && !isTask() ? ' shimmer-progress' : ''}`}
           >
             {props.title}
+            {/* Inline in the title so both truncate as one run with a single ellipsis. */}
+            <Show when={taskAgentBadge()}>
+              {(badge) => (
+                <span class="tool-invocation-agent" title={taskAgentLabel()}>
+                  <UiIcon
+                    source={badge().icon}
+                    class="tool-invocation-agent-icon"
+                    width={12}
+                    height={12}
+                  />
+                  {badge().name}
+                </span>
+              )}
+            </Show>
           </span>
           <Show when={isBackgroundLaunch() && waitingForPermission() && !taskRetryStatus()}>
             <span class="tool-invocation-task-status" role="status">

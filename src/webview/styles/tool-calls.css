@@ -1413,6 +1413,19 @@ kbd {
   color: var(--color-vscode-fg);
 }
 
+/* Inline inside the title, so the title's ellipsis truncates title and agent together. */
+.chat-tool-invocation-part .tool-invocation-agent {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--color-vscode-muted);
+  opacity: 0.8;
+}
+
+.chat-tool-invocation-part .tool-invocation-agent-icon {
+  margin-right: 3px;
+  vertical-align: -2px;
+}
+
 .chat-tool-invocation-part .shimmer-progress {
   background-image: linear-gradient(
     90deg,

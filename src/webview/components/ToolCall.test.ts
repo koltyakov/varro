@@ -1,3 +1,4 @@
+import cubeIcon from 'iconoir/icons/cube.svg';
 import { flush as flushSolid, createComponent, createSignal, reconcile } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1348,6 +1349,32 @@ describe('ToolCall', () => {
     expect(rows.some((row) => row.classList.contains('structured-tool-row-block'))).toBe(false);
   });
 
+  it('labels non-default subagents in the task header', () => {
+    applyState(
+      storePath('allAgents', [
+        { name: 'code-reviewer', mode: 'subagent', permission: [], options: {} },
+      ])
+    );
+    const part = toolPart(
+      'task',
+      completedState({ subagent_type: 'code-reviewer', prompt: 'Review' }, 'Review changes')
+    );
+
+    renderToolCall(part);
+
+    // The badge sits inside the title so one ellipsis truncates both.
+    const badge = container?.querySelector<HTMLElement>(
+      '.tool-invocation-header .tool-invocation-title > .tool-invocation-agent'
+    );
+    expect(badge?.textContent).toBe('code-reviewer');
+    expect(badge?.title).toBe('Code-reviewer subagent');
+    expect(
+      badge
+        ?.querySelector<HTMLElement>('.tool-invocation-agent-icon')
+        ?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(cubeIcon));
+  });
+
   it('opens long task prompts and results in Markdown preview', () => {
     const send = setExtensionSender();
     flushSolid();
@@ -1383,6 +1410,8 @@ describe('ToolCall', () => {
     };
 
     renderToolCall(part);
+    // The default subagent is not labeled in the header.
+    expect(container?.querySelector('.tool-invocation-agent')).toBeNull();
     toggleHeader();
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
