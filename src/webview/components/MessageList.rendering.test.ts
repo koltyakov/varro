@@ -5974,6 +5974,52 @@ describe('MessageList loading row', () => {
     ).not.toBeNull();
   });
 
+  it('counts running child sessions when the background wait is a subagent', async () => {
+    setState(storePath('activeSessionId', 'session-1'));
+    setSessions([
+      session('session-1'),
+      session('child-1', { parentID: 'session-1', title: 'Directory transfers' }),
+      session('child-2', { parentID: 'session-1', title: 'Secret destination binding' }),
+    ]);
+    flushSolid();
+    const interim = assistantMessage('assistant-1', { time: { created: 2_000, completed: 3_000 } });
+    interim.finish = 'stop';
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Run the wave')],
+      },
+      { info: interim, parts: [textPart('text-assistant-1', 'Subagents are running.')] },
+    ]);
+    const waiting = {
+      type: 'busy',
+      background: true,
+      backgroundCommand: 'Secret destination binding',
+      backgroundKind: 'subagent',
+      backgroundSessionID: 'child-2',
+    } as const;
+    setStateRecord('sessionStatus', {
+      'session-1': waiting,
+      'child-1': { type: 'busy' },
+      'child-2': { type: 'busy' },
+    });
+    flushSolid();
+    startLoading(1_000);
+    flushSolid();
+    mountList();
+    await Promise.resolve();
+    flushSolid();
+    const title = () => container?.querySelector('.background-process .tool-invocation-title');
+    expect(title()?.textContent).toBe('Waiting for subagents');
+    setStateRecord('sessionStatus', {
+      'session-1': waiting,
+      'child-1': { type: 'idle' },
+      'child-2': { type: 'busy' },
+    });
+    flushSolid();
+    expect(title()?.textContent).toBe('Waiting for subagent');
+  });
+
   it('does not show a trailing worked summary before the final text response', async () => {
     const prompt = {
       info: { ...userMessage('user-1'), time: { created: 1_000 } },

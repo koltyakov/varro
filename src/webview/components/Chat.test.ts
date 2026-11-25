@@ -2434,7 +2434,7 @@ describe('header status badges', () => {
     expect(titles).toEqual(['child-1', 'child-2']);
   });
 
-  it('opens the sub-agents list when background sub-agent work asks for it', async () => {
+  it('opens the subagents list when background subagent work asks for it', async () => {
     applyState(
       storePath('sessions', [
         session('parent', 500),

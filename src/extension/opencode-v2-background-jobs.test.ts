@@ -225,7 +225,7 @@ describe('native v2 background jobs', () => {
     });
   });
 
-  it('describes the work named by the status when shells and sub-agents mix', async () => {
+  it('describes the work named by the status when shells and subagents mix', async () => {
     const { status } = fixture([subagentJob, shellJob]);
     expect(await status()).toMatchObject({
       ses_root: {

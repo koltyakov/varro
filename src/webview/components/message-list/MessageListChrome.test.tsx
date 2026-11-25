@@ -150,7 +150,7 @@ describe('MessageListChrome', () => {
     expect(container!.querySelector('.background-process')).not.toBeNull();
     expect(container!.querySelector('.loading-indicator')).toBeNull();
   });
-  it('names sub-agent work and opens the session tree sub-agents instead of the process dialog', () => {
+  it('names subagent work and opens the session tree subagents instead of the process dialog', () => {
     const session = (id: string, parentID?: string) => ({
       id,
       parentID,
@@ -181,15 +181,15 @@ describe('MessageListChrome', () => {
     );
     flushSolid();
     const title = () => container!.querySelector('.background-process .tool-invocation-title');
-    expect(title()?.textContent).toBe('Waiting for sub-agents');
+    expect(title()?.textContent).toBe('Waiting for subagent');
     const button = container!.querySelector<HTMLButtonElement>(
-      '[aria-label="View sub-agent sessions"]'
+      '[aria-label="View subagent sessions"]'
     )!;
     expect(button.hasAttribute('aria-haspopup')).toBe(false);
     // The kind stays with the retained command through the resume handoff.
     setCommand(undefined);
     flushSolid();
-    expect(title()?.textContent).toBe('Waiting for sub-agents');
+    expect(title()?.textContent).toBe('Waiting for subagent');
     button.click();
     flushSolid();
     expect(subagentSessionsRequest()).toEqual({
@@ -230,7 +230,7 @@ describe('MessageListChrome', () => {
       flushSolid();
       return document.querySelector('.themed-tooltip[role="tooltip"]');
     };
-    const renderWaiting = (kind?: 'subagent') => {
+    const renderWaiting = (kind?: 'subagent', subagents?: () => readonly string[]) => {
       vi.useFakeTimers();
       setState(storePath('activeSessionId', 'ses_background'));
       flushSolid();
@@ -244,6 +244,7 @@ describe('MessageListChrome', () => {
             waiting
             waitingCommand={kind ? 'Secret destination binding' : 'npm test'}
             waitingKind={kind}
+            waitingSubagents={subagents?.()}
           />
         ),
         container!
@@ -251,7 +252,24 @@ describe('MessageListChrome', () => {
       flushSolid();
     };
 
-    it('shows the hidden sub-agent description in a row-wide goal-style panel', async () => {
+    it('pluralizes the subagent wait and lists every running subagent', async () => {
+      const [subagents, setSubagents] = createSignal<readonly string[]>([
+        'Secret destination binding',
+      ]);
+      renderWaiting('subagent', subagents);
+      const title = () => container!.querySelector('.background-process .tool-invocation-title');
+      expect(title()?.textContent).toBe('Waiting for subagent');
+      setSubagents(['Directory transfers', 'Secret destination binding']);
+      flushSolid();
+      expect(title()?.textContent).toBe('Waiting for subagents');
+      const lines = [...((await hoverTooltip())?.querySelectorAll('div') ?? [])];
+      expect(lines.map((line) => line.textContent)).toEqual([
+        'Directory transfers',
+        'Secret destination binding',
+      ]);
+    });
+
+    it('shows the hidden subagent description in a row-wide goal-style panel', async () => {
       renderWaiting('subagent');
       expect(container!.querySelector('.background-process [title]')).toBeNull();
       const tooltip = await hoverTooltip();

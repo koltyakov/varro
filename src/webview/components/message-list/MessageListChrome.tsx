@@ -529,8 +529,10 @@ export function LoadingRow(props: {
   waitingCommand?: string;
   /** Kind of the work named by `waitingCommand`; unset for shell processes. */
   waitingKind?: BackgroundWorkKind;
-  /** Sub-agent session running the work named by `waitingCommand`. */
+  /** Subagent session running the work named by `waitingCommand`. */
   waitingSessionID?: string;
+  /** Titles of the subagent sessions still running in the waiting tree. */
+  waitingSubagents?: readonly string[];
   turnStartedAt?: number;
   elapsedStartedAt?: number;
   /** Active content owns the transcript's last line, so the hidden slot takes no space. */
@@ -618,13 +620,18 @@ export function LoadingRow(props: {
   const waitingLabel = () => {
     const kind = waitingClock()?.kind;
     return kind === 'subagent'
-      ? 'Waiting for sub-agents'
+      ? `Waiting for ${(props.waitingSubagents?.length ?? 0) > 1 ? 'subagents' : 'subagent'}`
       : kind === 'task'
         ? 'Background task'
         : 'Background process';
   };
-  // Sub-agent rows name only the wait, so the description lives in the tooltip.
+  // Subagent rows name only the wait, so the description lives in the tooltip.
   const waitingCommandHidden = () => waitingClock()?.kind === 'subagent';
+  const waitingTooltipLines = (): readonly string[] => {
+    const command = waitingClock()?.command;
+    if (waitingCommandHidden() && props.waitingSubagents?.length) return props.waitingSubagents;
+    return command ? [command] : [];
+  };
   const [waitingTitleClipped, setWaitingTitleClipped] = createSignal(false);
   // oxlint-disable-next-line no-unassigned-vars
   let waitingCard: HTMLDivElement | undefined;
@@ -750,16 +757,21 @@ export function LoadingRow(props: {
             variant="panel"
             anchor={() => waitingCard}
             disabled={
-              !waitingClock()?.command || (!waitingCommandHidden() && !waitingTitleClipped())
+              waitingTooltipLines().length === 0 ||
+              (!waitingCommandHidden() && !waitingTitleClipped())
             }
-            content={<div class="chat-goal-tooltip-objective">{waitingClock()?.command}</div>}
+            content={
+              <For each={waitingTooltipLines()}>
+                {(line) => <div class="chat-goal-tooltip-objective">{line}</div>}
+              </For>
+            }
           >
             <button
               type="button"
               class="tool-invocation-header"
               aria-label={
                 waitingClock()?.kind === 'subagent'
-                  ? 'View sub-agent sessions'
+                  ? 'View subagent sessions'
                   : 'View background process details'
               }
               aria-haspopup={waitingClock()?.kind === 'subagent' ? undefined : 'dialog'}

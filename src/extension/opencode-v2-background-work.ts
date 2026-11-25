@@ -3,7 +3,7 @@ import { BACKGROUND_COMMAND_SUMMARY_CHARS } from '../shared/background-process';
 import type { BackgroundWorkKind } from '../shared/background-process';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 
-/** The work a waiting session names: its command or title, kind, and sub-agent session. */
+/** The work a waiting session names: its command or title, kind, and subagent session. */
 export type BackgroundWorkSummary = {
   command?: string;
   kind?: BackgroundWorkKind;

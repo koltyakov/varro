@@ -498,7 +498,7 @@ export type SessionStatus =
       backgroundCommand?: string;
       /** Kind of the work named by `backgroundCommand`; unset for shell processes. */
       backgroundKind?: BackgroundWorkKind;
-      /** Child session running the work named by `backgroundCommand`, for sub-agents. */
+      /** Child session running the work named by `backgroundCommand`, for subagents. */
       backgroundSessionID?: string;
       backgroundServices?: number;
     };

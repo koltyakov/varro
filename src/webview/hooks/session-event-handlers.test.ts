@@ -4120,7 +4120,7 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
-  it('retains validated background work kinds and sub-agent sessions', () => {
+  it('retains validated background work kinds and subagent sessions', () => {
     const handlers = installHandlers();
     flushSolid();
     const setSessionStatusEntry = vi.fn();
