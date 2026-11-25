@@ -273,6 +273,11 @@ type Aggregate = Tokens & {
   durationCount: number;
 };
 
+type ReportColumns = {
+  /** Render cache write tokens in their own column instead of adding them to Input. */
+  showCacheWrite: boolean;
+};
+
 type ReportWindow = {
   title: string;
   start: number | null;
@@ -453,6 +458,7 @@ export class UsageReportService {
   private async buildReport(includeAllTime: boolean): Promise<string> {
     const warnings: string[] = [];
     const now = Date.now();
+    const columns = readReportColumns();
     const start = includeAllTime ? undefined : now - 30 * DAY_MS;
     const local = this.server.isAttachOnly
       ? null
@@ -461,8 +467,8 @@ export class UsageReportService {
       this.sessionUsageCache.clear();
       this.sessionUsageCacheEntries = 0;
       return 'aggregates' in local
-        ? renderAggregatedReport(local.aggregates, local.sessionCount, warnings, now)
-        : renderReport(local.usage, local.sessionCount, warnings, now, includeAllTime);
+        ? renderAggregatedReport(local.aggregates, local.sessionCount, warnings, now, columns)
+        : renderReport(local.usage, local.sessionCount, warnings, now, includeAllTime, columns);
     }
 
     await this.ensureServerStarted();
@@ -486,7 +492,7 @@ export class UsageReportService {
     await mapConcurrent(sessions, SESSION_CONCURRENCY, async (session) => {
       addUsageToWindowAggregates(aggregates, await this.readSessionUsage(session, warnings));
     });
-    return renderAggregatedReport(aggregates, sessions.length, warnings, now);
+    return renderAggregatedReport(aggregates, sessions.length, warnings, now, columns);
   }
 
   private async listSessions(warnings: string[], start?: number): Promise<Session[]> {
@@ -619,6 +625,7 @@ export class UsageReportService {
     await this.ensureServerStarted();
     const warnings: string[] = [];
     const now = Date.now();
+    const columns = readReportColumns();
     const root = await this.readSessionTreeRoot(sessionId, directory);
     const tree = await this.listSessionTree(root, warnings);
     const sessions = tree.map((node) => node.session);
@@ -632,7 +639,7 @@ export class UsageReportService {
     );
     return {
       title: root.title,
-      content: renderSessionReport(tree, usage, warnings, now),
+      content: renderSessionReport(tree, usage, warnings, now, columns),
     };
   }
 
@@ -1947,11 +1954,12 @@ function renderReport(
   sessionCount: number,
   warnings: string[],
   now: number,
-  includeAllTime: boolean
+  includeAllTime: boolean,
+  columns: ReportColumns
 ): string {
   const aggregates = createWindowAggregates(now, includeAllTime);
   addUsageToWindowAggregates(aggregates, usage);
-  return renderAggregatedReport(aggregates, sessionCount, warnings, now);
+  return renderAggregatedReport(aggregates, sessionCount, warnings, now, columns);
 }
 
 function createWindowAggregates(now: number, includeAllTime: boolean): WindowAggregates[] {
@@ -2010,7 +2018,8 @@ function renderAggregatedReport(
   aggregates: WindowAggregates[],
   sessionCount: number,
   warnings: string[],
-  now: number
+  now: number,
+  columns: ReportColumns
 ): string {
   const lines = [
     '# OpenCode Usage Report',
@@ -2025,7 +2034,7 @@ function renderAggregatedReport(
       lines.push('_No token usage._');
       continue;
     }
-    renderAggregateTable(lines, aggregate.groups, aggregate.totalPromptCount);
+    renderAggregateTable(lines, aggregate.groups, columns, aggregate.totalPromptCount);
   }
 
   if (warnings.length > 0) {
@@ -2040,7 +2049,8 @@ function renderSessionReport(
   tree: SessionTreeNode[],
   usageBySession: Usage[][],
   warnings: string[],
-  now: number
+  now: number,
+  columns: ReportColumns
 ): string {
   const root = tree[0];
   const nested = tree.length - 1;
@@ -2075,27 +2085,27 @@ function renderSessionReport(
     '',
   ];
   if (models.size === 0) lines.push('_No token usage._');
-  else renderAggregateTable(lines, models);
+  else renderAggregateTable(lines, models, columns);
 
-  lines.push(
-    '',
-    '## By session',
-    '',
-    '| Session | Models | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write | Cache rate |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
-  );
+  lines.push('', '## By session', '', ...renderAggregateHeader('Session', 'Models', columns));
   for (const row of sessionRows) {
     const indent = row.node.depth > 0 ? `${'&nbsp;&nbsp;'.repeat(row.node.depth - 1)}↳ ` : '';
     lines.push(
       renderAggregateRow(
         `${indent}${row.node.title}`,
         row.models.length ? row.models.join(', ') : '-',
-        row.aggregate
+        row.aggregate,
+        columns
       )
     );
   }
   lines.push(
-    renderAggregateRow('**Total**', '', sumAggregates(sessionRows.map((row) => row.aggregate)))
+    renderAggregateRow(
+      '**Total**',
+      '',
+      sumAggregates(sessionRows.map((row) => row.aggregate)),
+      columns
+    )
   );
 
   if (warnings.length > 0) {
@@ -2109,12 +2119,10 @@ function renderSessionReport(
 function renderAggregateTable(
   lines: string[],
   groups: Map<string, Aggregate>,
+  columns: ReportColumns,
   totalPromptCount?: number
 ): void {
-  lines.push(
-    '| Provider | Model | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write | Cache rate |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
-  );
+  lines.push(...renderAggregateHeader('Provider', 'Model', columns));
   for (const [route, aggregate] of [...groups].toSorted(
     ([leftRoute, left], [rightRoute, right]) =>
       aggregatePromptCount(right) - aggregatePromptCount(left) ||
@@ -2134,11 +2142,14 @@ function renderAggregateTable(
               : source === 'unrecorded'
                 ? 'Other session usage'
                 : modelID,
-        aggregate
+        aggregate,
+        columns
       )
     );
   }
-  lines.push(renderAggregateRow('**Total**', '', sumAggregates(groups.values(), totalPromptCount)));
+  lines.push(
+    renderAggregateRow('**Total**', '', sumAggregates(groups.values(), totalPromptCount), columns)
+  );
 }
 
 function sumAggregates(values: Iterable<Aggregate>, promptCount?: number): Aggregate {
@@ -2176,8 +2187,58 @@ function addTokens(target: Tokens, tokens: Tokens): void {
   target.cacheWrite += tokens.cacheWrite;
 }
 
-function renderAggregateRow(first: string, second: string, aggregate: Aggregate): string {
-  return `| ${escapeMarkdown(first)} | ${escapeMarkdown(second)} | ${integer(aggregatePromptCount(aggregate))} | ${formatTokenCount(aggregate.total)} | ${formatAggregateDuration(aggregate)} | ${formatTokenCount(aggregate.input)} | ${formatTokenCount(aggregate.output)} | ${formatTokenCount(aggregate.reasoning)} | ${formatTokenCount(aggregate.cacheRead)} | ${formatTokenCount(aggregate.cacheWrite)} | ${formatCacheRate(aggregate)} |`;
+function renderAggregateHeader(first: string, second: string, columns: ReportColumns): string[] {
+  const labels = [
+    first,
+    second,
+    'Prompts',
+    'Total',
+    'Duration',
+    'Input',
+    'Output',
+    'Reasoning',
+    'Cache read',
+    ...(columns.showCacheWrite ? ['Cache write'] : []),
+    'Cache rate',
+  ];
+  return [
+    `| ${labels.join(' | ')} |`,
+    `| ${labels.map((_, index) => (index < 2 ? '---' : '---:')).join(' | ')} |`,
+  ];
+}
+
+function renderAggregateRow(
+  first: string,
+  second: string,
+  aggregate: Aggregate,
+  columns: ReportColumns
+): string {
+  const cells = [
+    escapeMarkdown(first),
+    escapeMarkdown(second),
+    integer(aggregatePromptCount(aggregate)),
+    formatTokenCount(aggregate.total),
+    formatAggregateDuration(aggregate),
+    formatTokenCount(
+      columns.showCacheWrite ? aggregate.input : aggregate.input + aggregate.cacheWrite
+    ),
+    formatTokenCount(aggregate.output),
+    formatTokenCount(aggregate.reasoning),
+    formatTokenCount(aggregate.cacheRead),
+    ...(columns.showCacheWrite ? [formatTokenCount(aggregate.cacheWrite)] : []),
+    formatCacheRate(aggregate),
+  ];
+  return `| ${cells.join(' | ')} |`;
+}
+
+/** Cache write is folded into Input unless the user opts into a separate column. */
+function readReportColumns(): ReportColumns {
+  return {
+    showCacheWrite:
+      vscode.workspace
+        .getConfiguration('varro')
+        .get<boolean>('usageReports.showCacheWrite', false) === true,
+  };
 }
 
 /** Report label for a provider; OpenCode's Claude subscription provider shows as plain Claude. */

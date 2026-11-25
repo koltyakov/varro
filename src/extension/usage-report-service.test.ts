@@ -10,9 +10,18 @@ const mocks = vi.hoisted(() => {
   const showErrorMessage = vi.fn(async () => undefined);
   const withProgress = vi.fn(async (_options: unknown, task: () => Promise<unknown>) => task());
   const executeCommand = vi.fn(async () => undefined);
+  const settings = { showCacheWrite: false };
+  const getConfiguration = vi.fn((section: string) => ({
+    get: (key: string, fallback?: unknown) =>
+      section === 'varro' && key === 'usageReports.showCacheWrite'
+        ? settings.showCacheWrite
+        : fallback,
+  }));
   return {
     documentUri,
     executeCommand,
+    getConfiguration,
+    settings,
     openTextDocument,
     showTextDocument,
     showErrorMessage,
@@ -52,7 +61,10 @@ vi.mock('node:worker_threads', () => ({
 vi.mock('vscode', () => ({
   ProgressLocation: { Notification: 15 },
   commands: { executeCommand: mocks.executeCommand },
-  workspace: { openTextDocument: mocks.openTextDocument },
+  workspace: {
+    getConfiguration: mocks.getConfiguration,
+    openTextDocument: mocks.openTextDocument,
+  },
   window: {
     showTextDocument: mocks.showTextDocument,
     showErrorMessage: mocks.showErrorMessage,
@@ -122,6 +134,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   vi.clearAllMocks();
+  mocks.settings.showCacheWrite = false;
 });
 
 afterEach(() => {
@@ -430,7 +443,7 @@ describe('UsageReportService', () => {
     expect(request).not.toHaveBeenCalled();
     expect(reportContent()).toContain('from 2 sessions scanned');
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| provider-local | model-local | 1 | 100 | 25h | 70 | 20 | 10 | 0 | 0 |'
+      '| provider-local | model-local | 1 | 100 | 25h | 70 | 20 | 10 | 0 | 0.0% |'
     );
   });
 
@@ -717,7 +730,7 @@ describe('UsageReportService', () => {
     expect(request).not.toHaveBeenCalled();
     expect(reportContent()).toContain('from 2,209 sessions scanned');
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| openai | gpt-5.6-sol | 9 | 35.1M | 9s | 1.7M | 61K | 136.6K | 33.2M | 0 | 95.0% |'
+      '| openai | gpt-5.6-sol | 9 | 35.1M | 9s | 1.7M | 61K | 136.6K | 33.2M | 95.0% |'
     );
   });
 
@@ -749,6 +762,7 @@ describe('UsageReportService', () => {
           ]
     );
     const { service } = createService(request);
+    mocks.settings.showCacheWrite = true;
 
     await service.openReport();
 
@@ -785,20 +799,44 @@ describe('UsageReportService', () => {
       for (const title of titles) {
         const section = reportSection(reportContent(), title);
         expect(section).toContain(
-          '| provider-a | model-a | 2 | 1K | 5s | 900 | 2 | 0 | 100 | 0 | 10.0% |'
+          '| provider-a | model-a | 2 | 1K | 5s | 900 | 2 | 0 | 100 | 10.0% |'
         );
         expect(section).toContain(
-          '| provider-a | model-b | 1 | 1K | 3s | 0 | 1 | 0 | 800 | 200 | 80.0% |'
+          '| provider-a | model-b | 1 | 1K | 3s | 200 | 1 | 0 | 800 | 80.0% |'
         );
-        expect(section).toContain(
-          '| **Total** |  | 3 | 2K | 8s | 900 | 3 | 0 | 900 | 200 | 45.0% |'
-        );
+        expect(section).toContain('| **Total** |  | 3 | 2K | 8s | 1.1K | 3 | 0 | 900 | 45.0% |');
       }
+      expect(reportContent()).not.toContain('Cache write');
       expect(reportContent()).not.toMatch(/tok\/s|TTFT/i);
       expect(request).toHaveBeenCalledTimes(2);
       expect(request.mock.calls[1]?.[3]).toMatchObject({ stripMessageParts: true });
     }
   );
+
+  it('shows cache write in a separate column when the setting is enabled', async () => {
+    const request = vi.fn<Request>(async (_method, path) =>
+      path.startsWith('/experimental/session')
+        ? [session('session-1', '/repo', 10)]
+        : [
+            assistant('other-model', NOW.getTime(), {
+              tokens: { input: 0, output: 1, cache: { read: 800, write: 200 } },
+            }),
+          ]
+    );
+    const { service } = createService(request);
+    mocks.settings.showCacheWrite = true;
+
+    await service.openReport();
+
+    const section = reportSection(reportContent(), 'Today');
+    expect(section).toContain(
+      '| Provider | Model | Prompts | Total | Duration | Input | Output | Reasoning | Cache read | Cache write | Cache rate |\n| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+    );
+    expect(section).toContain(
+      '| provider-a | model-a | 1 | 1K | 3s | 0 | 1 | 0 | 800 | 200 | 80.0% |'
+    );
+    expect(mocks.getConfiguration).toHaveBeenCalledWith('varro');
+  });
 
   it.each([
     { input: 0, read: 0, write: 0, expected: '-' },
@@ -942,7 +980,7 @@ describe('UsageReportService', () => {
       }
     );
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| provider-a | model-a | 1 | 190 | 3s | 100 | 50 | 25 | 10 | 5 |'
+      '| provider-a | model-a | 1 | 190 | 3s | 105 | 50 | 25 | 10 | 8.7% |'
     );
     expect(reportSection(reportContent(), 'Last 7 rolling days')).toContain(
       '| provider-a | model-a | 1 | 190 |'
@@ -1153,10 +1191,10 @@ describe('UsageReportService', () => {
     await service.openReport();
 
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| provider-a | valid | 1 | 190 | <1s | 100 | 50 | 25 | 10 | 5 |'
+      '| provider-a | valid | 1 | 190 | <1s | 105 | 50 | 25 | 10 |'
     );
     expect(reportSection(reportContent(), 'Today')).toContain(
-      '| provider-a | invalid | 2 | 380 | - | 200 | 100 | 50 | 20 | 10 |'
+      '| provider-a | invalid | 2 | 380 | - | 210 | 100 | 50 | 20 |'
     );
   });
 
@@ -1305,6 +1343,27 @@ describe('UsageReportService session report', () => {
     ]);
     expect(mocks.executeCommand).toHaveBeenCalledWith('markdown.showPreview', mocks.documentUri);
   });
+
+  it.each([
+    [false, '| 210 | 100 | 50 | 20 | 8.7% |'],
+    [true, '| 200 | 100 | 50 | 20 | 10 | 8.7% |'],
+  ])(
+    'renders session report cache write columns when showCacheWrite=%s',
+    async (showCacheWrite, rootTokens) => {
+      mocks.settings.showCacheWrite = showCacheWrite;
+      const service = new UsageReportService({ request: sessionRequest() }, vi.fn(), null);
+
+      await service.openSessionReport('root');
+
+      const content = reportContent();
+      for (const title of ['By model', 'By session'])
+        expect(reportSection(content, title).includes('| Cache write |')).toBe(showCacheWrite);
+      const rootRow = reportSection(content, 'By session')
+        .split('\n')
+        .find((line) => line.startsWith('| Main task |'));
+      expect(rootRow?.endsWith(rootTokens)).toBe(true);
+    }
+  );
 
   it('includes auxiliary session LLM calls such as titles and compaction', async () => {
     const base = sessionRequest();

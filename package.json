@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.36.8",
+  "version": "0.36.9",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -108,9 +108,9 @@
     "@solidjs/vite-plugin": "3.0.1",
     "@tailwindcss/vite": "4.3.5",
     "@types/css.escape": "1.5.2",
-    "@types/node": "26.6.7",
+    "@types/node": "26.6.10",
     "@types/vscode": "1.107.0",
-    "@vitest/coverage-v8": "5.1.1",
+    "@vitest/coverage-v8": "5.1.2",
     "@vscode/vsce": "4.1.1",
     "css.escape": "1.5.1",
     "esbuild": "0.28.2",
@@ -124,7 +124,7 @@
     "tailwindcss": "4.3.5",
     "typescript": "7.0.2",
     "vite": "8.3.8",
-    "vitest": "5.1.1",
+    "vitest": "5.1.2",
     "ws": "8.23.0"
   },
   "overrides": {
@@ -567,6 +567,11 @@
           ],
           "default": "rotating",
           "description": "Choose how pinned provider limits appear in the status bar. Providers selected in visible chats in this window are excluded. The tooltip shows available limits for the remaining pinned providers."
+        },
+        "varro.usageReports.showCacheWrite": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show cache write tokens in a separate column in usage reports. When disabled, cache write tokens are included in the Input column."
         },
         "varro.chat.showFileDiffs": {
           "type": "boolean",

@@ -32,6 +32,11 @@ vi.mock('vscode', () => ({
   ProgressLocation: { Notification: 15 },
   commands: { executeCommand: vi.fn() },
   workspace: {
+    // Keep the separate cache-write column so expected rows check every token bucket.
+    getConfiguration: () => ({
+      get: (key: string, defaultValue: boolean): boolean =>
+        key === 'usageReports.showCacheWrite' || defaultValue,
+    }),
     openTextDocument: async (options: { content: string }) => {
       ui.content = options.content;
       return { uri: 'untitled:stats' };
