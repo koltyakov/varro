@@ -8,6 +8,7 @@ import type {
   SessionStateManager,
 } from './session-state-manager';
 import type { ContextProvider } from './context-provider';
+import type { CommandHistoryState } from './message-router';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import type { SidebarProviderBridge } from './sidebar-provider-bridge';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
@@ -31,6 +32,10 @@ import { isSameWorkspacePath } from '../shared/workspace-path';
 export type WebviewHost = vscode.WebviewView | vscode.WebviewPanel;
 const RELIABLE_DELIVERY_TIMEOUT_MS = 5_000;
 const ENCODED_API_RESPONSE_MIN_LENGTH = 64 * 1024;
+const NO_COMMAND_HISTORY: CommandHistoryState = {
+  canNavigateBack: false,
+  canNavigateForward: false,
+};
 
 type ApiResponsePayload = Extract<ExtensionMessage, { type: 'api/response' }>['payload'];
 
@@ -62,6 +67,7 @@ type QueuedCommand = Extract<
       | 'command/attach-problems'
       | 'command/abort'
       | 'command/switch-session'
+      | 'command/navigate-history'
       | 'command/open-session'
       | 'command/highlight-session';
   }
@@ -78,7 +84,9 @@ export class WebviewSession {
   private pendingOpenCompletedSessions = false;
   private pendingCommands: QueuedCommand[] = [];
   private commandStateReady = false;
-  private commandState: { canAbort: boolean; canSwitchSessions: boolean } | undefined;
+  private commandState:
+    | { canAbort: boolean; canSwitchSessions: boolean; history: CommandHistoryState }
+    | undefined;
   private webviewLoadGeneration = 0;
   private webviewRenderGeneration = 0;
   private readyGeneration: number | null = null;
@@ -239,19 +247,39 @@ export class WebviewSession {
     return this.commandState?.canAbort === true;
   }
 
-  updateCommandState(canAbort: boolean, canSwitchSessions: boolean) {
+  updateCommandState(
+    canAbort: boolean,
+    canSwitchSessions: boolean,
+    history: CommandHistoryState = NO_COMMAND_HISTORY
+  ) {
     this.commandStateReady = true;
-    const changed =
-      this.commandState?.canAbort !== canAbort ||
-      this.commandState.canSwitchSessions !== canSwitchSessions;
-    this.commandState = { canAbort, canSwitchSessions };
-    if (this.manageCommandContext && changed) {
-      void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', canAbort);
-      void vscode.commands.executeCommand(
-        'setContext',
-        'varro:canSwitchSessions',
-        canSwitchSessions
-      );
+    const previous = this.commandState;
+    this.commandState = { canAbort, canSwitchSessions, history };
+    if (this.manageCommandContext) {
+      if (previous?.canAbort !== canAbort) {
+        void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', canAbort);
+      }
+      if (previous?.canSwitchSessions !== canSwitchSessions) {
+        void vscode.commands.executeCommand(
+          'setContext',
+          'varro:canSwitchSessions',
+          canSwitchSessions
+        );
+      }
+      if (previous?.history.canNavigateBack !== history.canNavigateBack) {
+        void vscode.commands.executeCommand(
+          'setContext',
+          'varro:canNavigateBack',
+          history.canNavigateBack
+        );
+      }
+      if (previous?.history.canNavigateForward !== history.canNavigateForward) {
+        void vscode.commands.executeCommand(
+          'setContext',
+          'varro:canNavigateForward',
+          history.canNavigateForward
+        );
+      }
     }
     this.flushPendingCommands();
   }
@@ -720,6 +748,8 @@ export class WebviewSession {
     if (!this.manageCommandContext) return;
     void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', false);
     void vscode.commands.executeCommand('setContext', 'varro:canSwitchSessions', false);
+    void vscode.commands.executeCommand('setContext', 'varro:canNavigateBack', false);
+    void vscode.commands.executeCommand('setContext', 'varro:canNavigateForward', false);
   }
 
   private registerMessageListener(webviewView: WebviewHost, generation: number) {

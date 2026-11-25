@@ -244,6 +244,16 @@ export function registerCommands(
       await revealSidebar();
     }),
 
+    vscode.commands.registerCommand('varro.chat.navigateBack', async () => {
+      sidebar.navigateHistory('back');
+      await revealSidebar();
+    }),
+
+    vscode.commands.registerCommand('varro.chat.navigateForward', async () => {
+      sidebar.navigateHistory('forward');
+      await revealSidebar();
+    }),
+
     vscode.commands.registerCommand('varro.about', async () => {
       let openedPanel: vscode.WebviewPanel | undefined;
       let ownsRefresh = false;

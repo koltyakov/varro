@@ -1633,6 +1633,33 @@ describe('webview message validation', () => {
     });
     expect(
       parseWebviewMessage({
+        type: 'commands/state',
+        payload: {
+          canAbort: false,
+          canSwitchSessions: true,
+          canNavigateBack: true,
+          canNavigateForward: false,
+          model: null,
+        },
+      })
+    ).toEqual({
+      type: 'commands/state',
+      payload: {
+        canAbort: false,
+        canSwitchSessions: true,
+        canNavigateBack: true,
+        canNavigateForward: false,
+        model: null,
+      },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'commands/state',
+        payload: { canAbort: false, canSwitchSessions: true, canNavigateBack: 1, model: null },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
         type: 'vscode/open',
         payload: { path: 'src/app.ts', view: 'diff', sessionID: 'session-1' },
       })

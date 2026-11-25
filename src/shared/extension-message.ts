@@ -77,6 +77,7 @@ const KNOWN_TYPES = new Set<string>([
   'command/open-attention-sessions',
   'command/open-completed-sessions',
   'command/switch-session',
+  'command/navigate-history',
   'command/abort',
   'ralph/state',
 ]);
@@ -214,6 +215,12 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'command/switch-session': {
       const payload = asRecord(record.payload);
       if (payload?.direction !== 'previous' && payload?.direction !== 'next') return null;
+      return { type, payload: { direction: payload.direction } };
+    }
+
+    case 'command/navigate-history': {
+      const payload = asRecord(record.payload);
+      if (payload?.direction !== 'back' && payload?.direction !== 'forward') return null;
       return { type, payload: { direction: payload.direction } };
     }
 

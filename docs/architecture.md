@@ -40,6 +40,7 @@ Registers the VS Code command surface that surrounds the chat UI.
 - `varro.chat.abort`
 - `varro.chat.previousSession`
 - `varro.chat.nextSession`
+- `varro.chat.navigateBack` and `varro.chat.navigateForward` step through the sidebar's browser-style history of opened sessions
 - `varro.server.restart`
 - `varro.about`
 - `varro.showOutput`

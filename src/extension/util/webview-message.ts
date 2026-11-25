@@ -615,6 +615,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (
         typeof payload?.canAbort !== 'boolean' ||
         typeof payload.canSwitchSessions !== 'boolean' ||
+        (payload.canNavigateBack !== undefined && typeof payload.canNavigateBack !== 'boolean') ||
+        (payload.canNavigateForward !== undefined &&
+          typeof payload.canNavigateForward !== 'boolean') ||
         (payload.modelVisible !== undefined && typeof payload.modelVisible !== 'boolean')
       ) {
         return null;
@@ -629,6 +632,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         };
         if (sessionId.value !== undefined) commandState.sessionId = sessionId.value;
         if (payload.modelVisible !== undefined) commandState.modelVisible = payload.modelVisible;
+        if (payload.canNavigateBack !== undefined) {
+          commandState.canNavigateBack = payload.canNavigateBack;
+        }
+        if (payload.canNavigateForward !== undefined) {
+          commandState.canNavigateForward = payload.canNavigateForward;
+        }
         return { type, payload: commandState };
       }
       const selectedModel = parseChatModelSelection(payload.model);
@@ -642,6 +651,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
       if (sessionId.value !== undefined) commandState.sessionId = sessionId.value;
       if (payload.modelVisible !== undefined) commandState.modelVisible = payload.modelVisible;
+      if (payload.canNavigateBack !== undefined) {
+        commandState.canNavigateBack = payload.canNavigateBack;
+      }
+      if (payload.canNavigateForward !== undefined) {
+        commandState.canNavigateForward = payload.canNavigateForward;
+      }
       return { type, payload: commandState };
     }
 

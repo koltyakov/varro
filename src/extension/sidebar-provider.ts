@@ -3438,6 +3438,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  navigateHistory(direction: 'back' | 'forward') {
+    this.webviewSession.queueCommand({
+      type: 'command/navigate-history',
+      payload: { direction },
+    });
+  }
+
   requestInputFocus() {
     this.webviewSession.requestInputFocus();
   }

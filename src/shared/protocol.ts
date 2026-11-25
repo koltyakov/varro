@@ -1170,6 +1170,7 @@ export type ExtensionMessage =
   | { type: 'command/open-attention-sessions' }
   | { type: 'command/open-completed-sessions' }
   | { type: 'command/switch-session'; payload: { direction: 'previous' | 'next' } }
+  | { type: 'command/navigate-history'; payload: { direction: 'back' | 'forward' } }
   | { type: 'command/abort' }
   | { type: 'ralph/state'; payload: RalphStatePayload };
 
@@ -1185,6 +1186,8 @@ export type WebviewMessage =
       payload: {
         canAbort: boolean;
         canSwitchSessions: boolean;
+        canNavigateBack?: boolean;
+        canNavigateForward?: boolean;
         model: ChatModelSelection | null;
         modelVisible?: boolean;
         sessionId?: string | null;

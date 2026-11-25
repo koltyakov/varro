@@ -6,6 +6,7 @@ type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['paylo
 type ApiCancelPayload = Extract<WebviewMessage, { type: 'api/cancel' }>['payload'];
 type ConfigUpdatePayload = Extract<WebviewMessage, { type: 'config/update' }>['payload'];
 type CommandStatePayload = Extract<WebviewMessage, { type: 'commands/state' }>['payload'];
+export type CommandHistoryState = { canNavigateBack: boolean; canNavigateForward: boolean };
 type DroppedContentFile = Extract<
   WebviewMessage,
   { type: 'files/drop-content' }
@@ -63,7 +64,8 @@ export interface MessageRouterCallbacks {
     canSwitchSessions: boolean,
     model: CommandStatePayload['model'],
     sessionId?: string | null,
-    modelVisible?: boolean
+    modelVisible?: boolean,
+    history?: CommandHistoryState
   ): void;
   acknowledgeSessionSeen(sessionId: string): void;
   updateSessionReadState(sessionId: string, seenAt: number): Promise<void>;
@@ -211,7 +213,11 @@ export class MessageRouter {
             msg.payload.canSwitchSessions,
             msg.payload.model,
             msg.payload.sessionId,
-            msg.payload.modelVisible
+            msg.payload.modelVisible,
+            {
+              canNavigateBack: msg.payload.canNavigateBack === true,
+              canNavigateForward: msg.payload.canNavigateForward === true,
+            }
           );
           break;
         case 'session/seen':

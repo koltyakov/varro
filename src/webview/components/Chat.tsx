@@ -69,7 +69,7 @@ import {
   providerConnectionRequest,
   requestProviderConnection,
 } from '../lib/provider-connection-state';
-import { client } from '../lib/client';
+import { client, serverEvents } from '../lib/client';
 import { createPendingBackgroundSessionIds } from '../lib/background-session-status';
 import type { Provider, Session } from '../types';
 import {
@@ -77,7 +77,17 @@ import {
   clearDirectSessionReturnUnless,
   getDirectSessionReturnId,
 } from '../lib/session-navigation';
+import {
+  EMPTY_SESSION_HISTORY,
+  canNavigateSessionHistory,
+  navigateSessionHistory,
+  recordSessionHistory,
+  removeFromSessionHistory,
+  type SessionHistoryDirection,
+  type SessionHistoryState,
+} from '../lib/session-history';
 import { isFunction } from '../lib/runtime-values';
+import { asRecord, isString } from '../../shared/type-utils';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 import { BackgroundProcessDialog } from './BackgroundProcessDialog';
 import { SideQuestionDialog } from './SideQuestionDialog';
@@ -377,6 +387,29 @@ export function Chat() {
     const sessionId = state.activeSessionId;
     return sessionId ? sessionsById().get(sessionId) || null : null;
   });
+  const [sessionHistory, setSessionHistory] =
+    createSignal<SessionHistoryState>(EMPTY_SESSION_HISTORY);
+  createEffect(
+    () => [state.activeSessionId, activeSession()?.directory] as const,
+    ([sessionId, directory]) => {
+      if (!sessionId) return;
+      setSessionHistory((history) => recordSessionHistory(history, sessionId, directory));
+    }
+  );
+  const forgetSessionHistoryEntries = (sessionIds: Iterable<string>) => {
+    setSessionHistory((history) => {
+      let next = history;
+      for (const sessionId of sessionIds) next = removeFromSessionHistory(next, sessionId);
+      return next;
+    });
+  };
+  createEffect(recycleBinSessionIds, (sessionIds) => forgetSessionHistoryEntries(sessionIds));
+  onCleanup(
+    serverEvents.on('session.deleted', (event) => {
+      const sessionId = asRecord(asRecord(event.properties)?.info)?.id;
+      if (isString(sessionId)) forgetSessionHistoryEntries([sessionId]);
+    })
+  );
   const isEventStreamDegraded = createMemo(
     () => state.serverStatus.state === 'running' && state.serverStatus.eventStream === 'degraded'
   );
@@ -408,6 +441,8 @@ export function Chat() {
       return {
         canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
         canSwitchSessions,
+        canNavigateBack: canNavigateSessionHistory(sessionHistory(), 'back', activeSessionId),
+        canNavigateForward: canNavigateSessionHistory(sessionHistory(), 'forward', activeSessionId),
         model: modelPayload,
         modelVisible: shouldRenderWorkspace() && !showModels(),
         sessionId: activeSessionId,
@@ -812,13 +847,45 @@ export function Chat() {
     void selectSession(orderedSessions[nextIndex]!.id);
   };
 
+  const navigateHistory = (direction: SessionHistoryDirection) => {
+    const target = navigateSessionHistory(sessionHistory(), direction, state.activeSessionId);
+    if (!target) return;
+    // The selection effect sees the entry at the new index and keeps forward entries.
+    setSessionHistory(target.history);
+    setSessionFilter(null);
+    setSubagentParentId(null);
+    setShowModels(false);
+    setShowPermissionSettings(false);
+    setShowMcpSettings(false);
+    setShowSessionPicker(false);
+    const { sessionId, directory } = target.entry;
+    void (directory ? selectSession(sessionId, { directory }) : selectSession(sessionId));
+  };
+
   onSettled(() => {
     const cleanups: Array<() => void> = [];
 
     const disposeBridge = onMessage((message) => {
+      if (message.type === 'command/navigate-history') {
+        navigateHistory(message.payload.direction);
+        return;
+      }
       if (message.type !== 'command/switch-session') return;
       switchActiveSession(message.payload.direction === 'previous' ? -1 : 1);
     });
+    // Mouse side buttons report 3 (back) and 4 (forward). Suppress the frame's own
+    // navigation on press so release only drives Varro history.
+    const getMouseHistoryDirection = (event: MouseEvent): SessionHistoryDirection | null =>
+      event.button === 3 ? 'back' : event.button === 4 ? 'forward' : null;
+    const handleMouseDown = (event: MouseEvent) => {
+      if (getMouseHistoryDirection(event)) event.preventDefault();
+    };
+    const handleMouseUp = (event: MouseEvent) => {
+      const direction = getMouseHistoryDirection(event);
+      if (!direction) return;
+      event.preventDefault();
+      navigateHistory(direction);
+    };
     const handleKeydown = (event: KeyboardEvent) => {
       if (
         event.key !== 'Escape' ||
@@ -863,9 +930,13 @@ export function Chat() {
     };
 
     window.addEventListener('keydown', handleKeydown);
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mouseup', handleMouseUp);
     cleanups.push(() => {
       disposeBridge();
       window.removeEventListener('keydown', handleKeydown);
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mouseup', handleMouseUp);
     });
 
     return () => {

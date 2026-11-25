@@ -251,6 +251,16 @@
         "enablement": "varro:canSwitchSessions"
       },
       {
+        "command": "varro.chat.navigateBack",
+        "title": "Varro: Go Back in Session History",
+        "enablement": "varro:canNavigateBack"
+      },
+      {
+        "command": "varro.chat.navigateForward",
+        "title": "Varro: Go Forward in Session History",
+        "enablement": "varro:canNavigateForward"
+      },
+      {
         "command": "varro.server.restart",
         "title": "Varro: Restart Server"
       },
@@ -483,6 +493,18 @@
         "key": "ctrl+shift+k",
         "mac": "cmd+shift+k",
         "when": "terminalFocus && terminalTextSelected"
+      },
+      {
+        "command": "varro.chat.navigateBack",
+        "key": "alt+left",
+        "mac": "ctrl+-",
+        "when": "varro:focusedChatSurface == sidebar && varro:canNavigateBack"
+      },
+      {
+        "command": "varro.chat.navigateForward",
+        "key": "alt+right",
+        "mac": "ctrl+shift+-",
+        "when": "varro:focusedChatSurface == sidebar && varro:canNavigateForward"
       }
     ],
     "configuration": {

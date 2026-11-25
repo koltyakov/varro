@@ -397,6 +397,30 @@ describe('WebviewSession', () => {
     );
   });
 
+  it('mirrors session history availability into command contexts', () => {
+    const { session } = createSession();
+
+    session.updateCommandState(false, false, { canNavigateBack: true, canNavigateForward: false });
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:canNavigateBack',
+      true
+    );
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:canNavigateForward',
+      false
+    );
+
+    vscodeMock.commands.executeCommand.mockClear();
+    session.updateCommandState(false, false, { canNavigateBack: true, canNavigateForward: true });
+
+    expect(vscodeMock.commands.executeCommand.mock.calls).toEqual([
+      ['setContext', 'varro:canNavigateForward', true],
+    ]);
+  });
+
   it('does not let an editor endpoint overwrite global command contexts', () => {
     const { session } = createSession({ manageCommandContext: false });
 

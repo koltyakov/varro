@@ -179,6 +179,7 @@ function register(
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
     switchSession: vi.fn(),
+    navigateHistory: vi.fn(),
     getStatusBarClickAction: vi.fn<() => 'focus' | 'attention' | 'sibling'>(() => 'focus'),
     openAttentionSessions: vi.fn(),
     openCompletedSessions: vi.fn(),
@@ -1566,6 +1567,16 @@ describe('sidebar navigation commands', () => {
 
     expect(sidebar.switchSession).toHaveBeenNthCalledWith(1, 'previous');
     expect(sidebar.switchSession).toHaveBeenNthCalledWith(2, 'next');
+  });
+
+  it('navigates session history in both directions', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.navigateBack');
+    await runCommand('varro.chat.navigateForward');
+
+    expect(sidebar.navigateHistory).toHaveBeenNthCalledWith(1, 'back');
+    expect(sidebar.navigateHistory).toHaveBeenNthCalledWith(2, 'forward');
   });
 
   it('opens the source control view', async () => {

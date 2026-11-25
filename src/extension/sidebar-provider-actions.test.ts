@@ -573,10 +573,12 @@ describe('createSidebarProviderActions', () => {
 
     actions.updateCommandState(true, false, model);
 
-    expect(webviewSession.updateCommandState).toHaveBeenCalledWith(true, false);
+    expect(webviewSession.updateCommandState).toHaveBeenCalledWith(true, false, undefined);
     expect(deps.setActiveChatModel).toHaveBeenCalledWith(model, true);
-    actions.updateCommandState(true, false, model, undefined, false);
+    const history = { canNavigateBack: true, canNavigateForward: false };
+    actions.updateCommandState(true, false, model, undefined, false, history);
     expect(deps.setActiveChatModel).toHaveBeenLastCalledWith(model, false);
+    expect(webviewSession.updateCommandState).toHaveBeenLastCalledWith(true, false, history);
   });
 
   it('forwards session read acknowledgements', () => {

@@ -325,6 +325,12 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({ type: 'command/switch-session', payload: { direction: 'sideways' } })
     ).toBeNull();
+    expect(
+      parseExtensionMessage({ type: 'command/navigate-history', payload: { direction: 'back' } })
+    ).toEqual({ type: 'command/navigate-history', payload: { direction: 'back' } });
+    expect(
+      parseExtensionMessage({ type: 'command/navigate-history', payload: { direction: 'up' } })
+    ).toBeNull();
     expect(parseExtensionMessage({ type: 'command/abort' })).toEqual({ type: 'command/abort' });
   });
 

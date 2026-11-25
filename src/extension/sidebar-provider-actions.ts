@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
 import type { DictationIntegration } from './dictation-integration';
-import type { MessageRouterCallbacks } from './message-router';
+import type { CommandHistoryState, MessageRouterCallbacks } from './message-router';
 import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
@@ -34,7 +34,11 @@ export interface SidebarProviderActionDeps {
   contextProvider: ContextProvider;
   extensionId: string;
   webviewSession: {
-    updateCommandState(canAbort: boolean, canSwitchSessions: boolean): void;
+    updateCommandState(
+      canAbort: boolean,
+      canSwitchSessions: boolean,
+      history?: CommandHistoryState
+    ): void;
     reload(): Promise<void>;
   };
   setProviderWatchActive(active: boolean): void;
@@ -148,8 +152,8 @@ export function createSidebarProviderActions(
       deps.post({ type: 'dictation/result', payload: { requestId, ...payload } });
     },
     ready: (documentId) => deps.handleReadyMessage(documentId),
-    updateCommandState: (canAbort, canSwitchSessions, model, sessionId, modelVisible) => {
-      deps.webviewSession.updateCommandState(canAbort, canSwitchSessions);
+    updateCommandState: (canAbort, canSwitchSessions, model, sessionId, modelVisible, history) => {
+      deps.webviewSession.updateCommandState(canAbort, canSwitchSessions, history);
       deps.setActiveChatModel(model, modelVisible !== false);
       deps.setActiveRoute(sessionId);
     },

@@ -1857,6 +1857,57 @@ describe('header status badges', () => {
     expect(selectSessionSpy).toHaveBeenCalledWith('middle');
   });
 
+  it('navigates opened sessions like browser history', () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockImplementation(async (sessionId) => {
+        applyState(storePath('activeSessionId', sessionId));
+      });
+    applyState(storePath('sessions', [session('a', 300), session('b', 200), session('c', 100)]));
+    applyState(storePath('activeSessionId', 'a'));
+
+    captureBridgeMessages((sent) => {
+      renderChat();
+      const historyState = () => {
+        const payload = sent.findLast((message) => message.type === 'commands/state')?.payload;
+        return payload && 'canNavigateBack' in payload
+          ? { back: payload.canNavigateBack, forward: payload.canNavigateForward }
+          : null;
+      };
+      expect(historyState()).toEqual({ back: false, forward: false });
+
+      for (const sessionId of ['b', 'c']) {
+        applyState(storePath('activeSessionId', sessionId));
+        flushSolid();
+      }
+      expect(historyState()).toEqual({ back: true, forward: false });
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'command/navigate-history', payload: { direction: 'back' } },
+        })
+      );
+      flushSolid();
+      expect(selectSessionSpy).toHaveBeenLastCalledWith('b', { directory: '/repo' });
+      expect(historyState()).toEqual({ back: true, forward: true });
+
+      const mouseBack = new MouseEvent('mouseup', { button: 3, cancelable: true });
+      window.dispatchEvent(mouseBack);
+      flushSolid();
+      expect(mouseBack.defaultPrevented).toBe(true);
+      expect(selectSessionSpy).toHaveBeenLastCalledWith('a', { directory: '/repo' });
+      expect(historyState()).toEqual({ back: false, forward: true });
+
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 4 }));
+      flushSolid();
+      expect(selectSessionSpy).toHaveBeenLastCalledWith('b', { directory: '/repo' });
+
+      applyState(storePath('activeSessionId', 'c'));
+      flushSolid();
+      expect(historyState()).toEqual({ back: true, forward: false });
+    });
+  });
+
   it('returns to the sessions list with Escape', async () => {
     applyState(storePath('sessions', [session('active', 500), session('other', 400)]));
     applyState(storePath('activeSessionId', 'active'));

@@ -172,7 +172,31 @@ describe('MessageRouter', () => {
       payload: { canAbort: true, canSwitchSessions: false, model },
     });
 
-    expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model, undefined, undefined);
+    expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model, undefined, undefined, {
+      canNavigateBack: false,
+      canNavigateForward: false,
+    });
+  });
+
+  it('dispatches session history availability with command state', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({
+      type: 'commands/state',
+      payload: {
+        canAbort: false,
+        canSwitchSessions: true,
+        canNavigateBack: true,
+        canNavigateForward: false,
+        model: null,
+      },
+    });
+
+    expect(cb.updateCommandState).toHaveBeenCalledWith(false, true, null, undefined, undefined, {
+      canNavigateBack: true,
+      canNavigateForward: false,
+    });
   });
 
   it('dispatches session read acknowledgements', async () => {
@@ -529,6 +553,7 @@ const DISPATCH_EXPECTATIONS = {
         { providerID: 'anthropic', modelID: 'claude-opus-5' },
         'session-1',
         undefined,
+        { canNavigateBack: false, canNavigateForward: false },
       ],
     },
   ],
