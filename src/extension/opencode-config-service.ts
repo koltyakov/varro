@@ -246,47 +246,16 @@ export class OpenCodeConfigService {
       throw new Error(
         'Open the OpenCode configuration on the server host. This connection is managed elsewhere.'
       );
-    const workspacePath = scope === 'project' ? this.getOpenCodeWorkspacePath() : undefined;
-    const candidates = workspacePath
-      ? resolveOpenCodeProjectConfigPaths(
-          workspacePath,
-          (candidate) =>
-            getOpenCodePathApi(candidate).basename(candidate) === '.git'
-              ? existsSync(candidate)
-              : true,
-          this.callbacks.server.apiVersion
-        )
-      : getOpenCodeConfigPaths();
-    let path: string | undefined;
-    for (const candidate of candidates.toReversed()) {
-      if (await this.readConfigStat(vscode.Uri.file(candidate))) {
-        path = candidate;
-        break;
-      }
-    }
-    path ??= workspacePath
-      ? getOpenCodePathApi(workspacePath).join(workspacePath, 'opencode.json')
-      : getOpenCodeConfigPaths()[1]!;
-    const uri = vscode.Uri.file(path);
-    await withOpenCodeConfigUpdateLock(getCanonicalOpenCodeConfigPath(path), async () => {
-      if (await this.readConfigStat(uri)) return;
-      if (
-        vscode.workspace.textDocuments.some((document) =>
-          isSameWorkspacePath(document.uri.fsPath, path)
-        )
-      )
-        return;
-      await vscode.workspace.fs.createDirectory(
-        vscode.Uri.file(getOpenCodePathApi(path).dirname(path))
-      );
-      await vscode.workspace.fs.writeFile(
-        uri,
-        new TextEncoder().encode('{\n  "$schema": "https://opencode.ai/config.json"\n}\n')
-      );
-    });
-    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), {
-      preview: false,
-    });
+    if (scope === 'global') return openGlobalOpenCodeConfig();
+
+    const workspacePath = this.getOpenCodeWorkspacePath();
+    const pathApi = getOpenCodePathApi(workspacePath);
+    const candidates = resolveOpenCodeProjectConfigPaths(
+      workspacePath,
+      (candidate) => (pathApi.basename(candidate) === '.git' ? existsSync(candidate) : true),
+      this.callbacks.server.apiVersion
+    );
+    await openOpenCodeConfigFile(candidates, pathApi.join(workspacePath, 'opencode.json'));
   }
 
   private mcpConfigTarget(
@@ -329,7 +298,7 @@ export class OpenCodeConfigService {
           throw new Error(
             `MCP server ${duplicate} is already configured in this scope. Open the config file to edit it.`
           );
-        const initialStat = await this.readConfigStat(target.uri);
+        const initialStat = await readConfigStat(target.uri);
         const mcp = asRecord(target.config.mcp);
         if (
           (target.config.mcp !== undefined && !mcp) ||
@@ -355,7 +324,7 @@ export class OpenCodeConfigService {
           }
           raw = applyJsoncChange(raw, native ? ['mcp', 'servers', key] : ['mcp', key], server);
         }
-        if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri)))
+        if (!this.areConfigStatsEqual(initialStat, await readConfigStat(target.uri)))
           throw new Error(`${target.path} changed while adding MCP servers; please retry.`);
         if (initialStat) {
           const latest = new TextDecoder().decode(await vscode.workspace.fs.readFile(target.uri));
@@ -465,7 +434,7 @@ export class OpenCodeConfigService {
           server.enabled = enabled !== false;
           delete server.disabled;
         }
-        const initialStat = await this.readConfigStat(target.uri);
+        const initialStat = await readConfigStat(target.uri);
         let raw = target.raw.trim() ? target.raw : '{}\n';
         if (!target.config.$schema && !removeOverride)
           raw = applyJsoncChange(raw, ['$schema'], 'https://opencode.ai/config.json');
@@ -482,7 +451,7 @@ export class OpenCodeConfigService {
         // sessions run, retry, or wait for a permission or question, in this or any other
         // project. Do not add a running-session gate here or in McpSettingsPanel; one was
         // reverted after briefly returning. Session MCP toggles cover the current turn.
-        if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri))) {
+        if (!this.areConfigStatsEqual(initialStat, await readConfigStat(target.uri))) {
           throw new Error(`${target.path} changed while updating MCP defaults; please retry`);
         }
         if (!initialStat)
@@ -614,7 +583,7 @@ export class OpenCodeConfigService {
             `${target.path} has unsaved changes; save or revert before disabling a provider`
           );
         }
-        const initialStat = await this.readConfigStat(target.uri);
+        const initialStat = await readConfigStat(target.uri);
         const experimental = asRecord(current.config.experimental);
         // Preserve native policies when present; the legacy key still supports the v2 floor.
         const nativePolicies = current.config.policies !== undefined;
@@ -634,7 +603,7 @@ export class OpenCodeConfigService {
           nativePolicies ? ['policies'] : ['experimental', 'policies'],
           nextPolicies
         );
-        if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri))) {
+        if (!this.areConfigStatsEqual(initialStat, await readConfigStat(target.uri))) {
           throw new Error(`${target.path} changed while disabling the provider; please retry`);
         }
         if (!initialStat)
@@ -692,7 +661,7 @@ export class OpenCodeConfigService {
             `${targetLabel} has unsaved changes; save or revert the document before updating model routing`
           );
         }
-        const initialStat = await this.readConfigStat(uri);
+        const initialStat = await readConfigStat(uri);
         let nextRaw = target.raw.trim() ? target.raw : '{}\n';
         if (
           !request.unset &&
@@ -789,7 +758,7 @@ export class OpenCodeConfigService {
 
         const nextTargetConfig = parseOpenCodeConfig(nextRaw, target.path);
         const encoded = new TextEncoder().encode(nextRaw.endsWith('\n') ? nextRaw : `${nextRaw}\n`);
-        const latestStat = await this.readConfigStat(uri);
+        const latestStat = await readConfigStat(uri);
         if (!this.areConfigStatsEqual(initialStat, latestStat)) {
           throw new Error(`${targetLabel} changed while updating model routing; please retry`);
         }
@@ -896,7 +865,7 @@ export class OpenCodeConfigService {
           return { kind: 'complete' as const };
         }
 
-        const initialStat = await this.readConfigStat(target.uri);
+        const initialStat = await readConfigStat(target.uri);
         let nextRaw = target.raw.trim() ? target.raw : '{}\n';
         if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
           nextRaw = applyJsoncChange(
@@ -945,7 +914,7 @@ export class OpenCodeConfigService {
           nextRaw = applyJsoncChange(nextRaw, ['permission', permission], rules);
         }
 
-        const latestStat = await this.readConfigStat(target.uri);
+        const latestStat = await readConfigStat(target.uri);
         if (!this.areConfigStatsEqual(initialStat, latestStat)) {
           throw new Error(
             `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating permissions; please retry`
@@ -1442,7 +1411,7 @@ export class OpenCodeConfigService {
           );
         }
 
-        const initialStat = await this.readConfigStat(target.uri);
+        const initialStat = await readConfigStat(target.uri);
         let nextRaw = target.raw.trim() ? target.raw : '{}\n';
         if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
           nextRaw = applyJsoncChange(
@@ -1488,7 +1457,7 @@ export class OpenCodeConfigService {
               rules.length > 0 ? permissionConfig : undefined
             );
 
-        const latestStat = await this.readConfigStat(target.uri);
+        const latestStat = await readConfigStat(target.uri);
         if (!this.areConfigStatsEqual(initialStat, latestStat)) {
           throw new Error(
             `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating permissions; please retry`
@@ -1540,27 +1509,62 @@ export class OpenCodeConfigService {
     );
   }
 
-  private async readConfigStat(uri: vscode.Uri) {
-    try {
-      return await vscode.workspace.fs.stat(uri);
-    } catch (err) {
-      if (
-        err &&
-        typeof err === 'object' &&
-        'code' in err &&
-        (err.code === 'FileNotFound' || err.code === 'ENOENT')
-      ) {
-        return null;
-      }
-      throw err;
-    }
-  }
-
   private areConfigStatsEqual(left: vscode.FileStat | null, right: vscode.FileStat | null) {
     if (left === null || right === null) {
       return left === right;
     }
     return left.mtime === right.mtime && left.size === right.size;
+  }
+}
+
+export async function openGlobalOpenCodeConfig(): Promise<void> {
+  const candidates = getOpenCodeConfigPaths();
+  await openOpenCodeConfigFile(candidates, candidates[1]!);
+}
+
+async function openOpenCodeConfigFile(candidates: string[], defaultPath: string): Promise<void> {
+  let path = defaultPath;
+  for (const candidate of candidates.toReversed()) {
+    if (await readConfigStat(vscode.Uri.file(candidate))) {
+      path = candidate;
+      break;
+    }
+  }
+  const uri = vscode.Uri.file(path);
+  await withOpenCodeConfigUpdateLock(getCanonicalOpenCodeConfigPath(path), async () => {
+    if (await readConfigStat(uri)) return;
+    if (
+      vscode.workspace.textDocuments.some((document) =>
+        isSameWorkspacePath(document.uri.fsPath, path)
+      )
+    )
+      return;
+    await vscode.workspace.fs.createDirectory(
+      vscode.Uri.file(getOpenCodePathApi(path).dirname(path))
+    );
+    await vscode.workspace.fs.writeFile(
+      uri,
+      new TextEncoder().encode('{\n  "$schema": "https://opencode.ai/config.json"\n}\n')
+    );
+  });
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), {
+    preview: false,
+  });
+}
+
+async function readConfigStat(uri: vscode.Uri) {
+  try {
+    return await vscode.workspace.fs.stat(uri);
+  } catch (err) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      (err.code === 'FileNotFound' || err.code === 'ENOENT')
+    ) {
+      return null;
+    }
+    throw err;
   }
 }
 

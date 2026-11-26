@@ -54,6 +54,7 @@ const { configInspectMock, configUpdateMock, registeredCommands, vscodeMock } = 
       asRelativePath: vi.fn((uri: { fsPath: string } | string) =>
         (typeof uri === 'string' ? uri : uri.fsPath).replace(/^\/repo\//, '')
       ),
+      textDocuments: [],
       workspaceFolders: undefined as { name: string }[] | undefined,
     },
     window: {
@@ -149,6 +150,8 @@ vi.mock('./database-compaction', () => ({
 }));
 vi.mock('./open-code-process', () => ({
   getOpenCodeConfigDirectory: () => '/config/opencode',
+  getOpenCodeConfigPaths: () =>
+    ['config.json', 'opencode.json', 'opencode.jsonc'].map((name) => `/config/opencode/${name}`),
 }));
 const { errorHubMock, loggerMock } = vi.hoisted(() => ({
   errorHubMock: { report: vi.fn<(error: ReportedError) => void>() },
@@ -947,6 +950,53 @@ async function runCommand(id: string, ...args: unknown[]) {
   expect(handler).toBeTypeOf('function');
   await handler?.(...args);
 }
+
+describe('OpenCode.json command', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('opens the existing global JSONC config without a project', async () => {
+    const uri = fileUri('/config/opencode/opencode.jsonc');
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1 });
+    register(null);
+
+    await runCommand('varro.chat.openOpenCodeConfig');
+
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(uri);
+    expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith({ uri }, { preview: false });
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('creates and opens a global opencode.json when no config exists', async () => {
+    const uri = fileUri('/config/opencode/opencode.json');
+    vscodeMock.workspace.fs.stat.mockRejectedValue({ code: 'FileNotFound' });
+    register();
+
+    await runCommand('varro.chat.openOpenCodeConfig');
+
+    expect(vscodeMock.workspace.fs.createDirectory).toHaveBeenCalledWith(
+      fileUri('/config/opencode')
+    );
+    expect(vscodeMock.workspace.fs.writeFile).toHaveBeenCalledWith(
+      uri,
+      new TextEncoder().encode('{\n  "$schema": "https://opencode.ai/config.json"\n}\n')
+    );
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(uri);
+  });
+
+  it('directs attach-only users to the server host', async () => {
+    register('/repo', { isAttachOnly: true });
+
+    await runCommand('varro.chat.openOpenCodeConfig');
+
+    expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining('server host')
+    );
+    expect(vscodeMock.workspace.fs.stat).not.toHaveBeenCalled();
+    expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+});
 
 describe('AGENTS.md commands', () => {
   it('explains external global configuration without touching local files', async () => {

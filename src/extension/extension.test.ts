@@ -1378,6 +1378,11 @@ describe('extension manifest', () => {
       shortTitle: 'Hide File Diffs',
       icon: '$(list-flat)',
     });
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.chat.openOpenCodeConfig',
+      title: 'Varro: Open Global OpenCode Config',
+      shortTitle: 'OpenCode.json',
+    });
     expect(packageJson.contributes.submenus).toContainEqual({
       id: 'varro.viewActions',
       label: 'More Actions',
@@ -1408,7 +1413,8 @@ describe('extension manifest', () => {
     expect(packageJson.contributes.menus['varro.viewActions']).toEqual([
       { command: 'varro.about', group: '1_main@1' },
       { command: 'varro.chat.openStats', group: '1_main@2' },
-      { command: 'varro.openGitHub', group: '1_main@3' },
+      { command: 'varro.chat.openOpenCodeConfig', group: '1_main@3' },
+      { command: 'varro.openGitHub', group: '1_main@4' },
     ]);
     expect(packageJson.contributes.menus.commandPalette).toEqual(
       expect.arrayContaining([

@@ -224,6 +224,11 @@
         "shortTitle": "Usage Stats"
       },
       {
+        "command": "varro.chat.openOpenCodeConfig",
+        "title": "Varro: Open Global OpenCode Config",
+        "shortTitle": "OpenCode.json"
+      },
+      {
         "command": "varro.chat.exportUsageCsv",
         "title": "Varro: Export All-Time Usage to CSV"
       },
@@ -432,8 +437,12 @@
           "group": "1_main@2"
         },
         {
-          "command": "varro.openGitHub",
+          "command": "varro.chat.openOpenCodeConfig",
           "group": "1_main@3"
+        },
+        {
+          "command": "varro.openGitHub",
+          "group": "1_main@4"
         }
       ],
       "commandPalette": [

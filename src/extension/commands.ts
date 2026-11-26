@@ -9,6 +9,7 @@ import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
 import { RestartBlockedError, type OpenCodeServer, type OpenCodeServerInfo } from './server';
 import { getOpenCodeConfigDirectory } from './open-code-process';
+import { openGlobalOpenCodeConfig } from './opencode-config-service';
 import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
 import { logger } from './logger';
@@ -199,6 +200,22 @@ export function registerCommands(
       } catch (err) {
         // The report service has already displayed the actionable failure.
         logger.warn(`Usage report failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('varro.chat.openOpenCodeConfig', async () => {
+      if (server.isAttachOnly) {
+        await vscode.window.showInformationMessage(
+          'Open the OpenCode configuration on the server host. This connection is managed elsewhere.'
+        );
+        return;
+      }
+      try {
+        await openGlobalOpenCodeConfig();
+      } catch (err) {
+        const message = `Failed to open OpenCode config: ${err instanceof Error ? err.message : String(err)}`;
+        logger.error(message);
+        void vscode.window.showErrorMessage(message);
       }
     }),
 
