@@ -743,10 +743,28 @@ The estimate and the keep-alive schedule follow each provider's documented behav
 
 - Claude on any host (Anthropic, Bedrock, Vertex, OpenRouter, OpenCode Zen): 5 minutes, or 1 hour with `cache.ttl: "1h"`. Older Bedrock releases that only cache for 5 minutes stay at 5.
 - Claude Agent (Claude Code): 1 hour on a Claude subscription and 5 minutes on API billing, told apart by whether Claude Agent prices the model. Claude Code ignores `cache.ttl` and drops to 5 minutes while a subscription runs on extra usage. The lifetime counts from the end of each response, because one OpenCode step runs Claude Code's own request loop.
-- OpenAI GPT-5.6 and later (OpenAI, Azure, OpenRouter, OpenCode Zen): at least 30 minutes, or 12 hours with `cache.ttl: "12h"`. Entries often last longer, so after 30 minutes the popup shows **May be warm**, and it only reports **Likely expired** and shows the warning after about 3 hours. Keep-alives still follow the 30-minute minimum.
+- OpenAI GPT-5.6 and later (OpenAI, Azure, Bedrock, OpenRouter, OpenCode Zen): at least 30 minutes, or 12 hours with `cache.ttl: "12h"` (Bedrock accepts only 30 minutes). Entries often last longer, so after 30 minutes the popup shows **May be warm**, and it only reports **Likely expired** and shows the warning after about 3 hours. Keep-alives still follow the 30-minute minimum.
 - OpenAI GPT-5.5 and earlier models with 24-hour retention, such as GPT-5.1 and GPT-4.1: about 30 minutes. Organizations with Zero Data Retention keep the in-memory default of about 5 to 10 minutes on the earlier models.
-- Other OpenAI models: about 5 minutes (in-memory retention).
-- Other providers: the configured `cache.ttl`, or 5 minutes. GPT-named models on hosts that manage their own caching, such as GitHub Copilot, use this estimate too.
+- Other OpenAI models: 5 minutes, maybe warm up to 10 (in-memory retention).
+
+For providers that cache automatically without promising a lifetime, keep-alives follow the shortest lifetime they can count on, and the popup shows **May be warm** until the lifetime the provider describes or independent measurements found:
+
+| Provider | Keep-alives follow | Likely expired after |
+| --- | --- | --- |
+| Gemini (Google, Vertex, OpenRouter `google/`) | 5 min | 15 min (no fixed lifetime; at most 24 h) |
+| DeepSeek | 1 h | 6 h (a disk cache, cleared hours to days after its last use) |
+| xAI Grok (also OpenRouter `x-ai/`) | 5 min | 30 min (no published lifetime) |
+| Z.ai GLM, including coding plans | 5 min | 1 h (no published lifetime; measured to outlive 1 h) |
+| Kimi (Moonshot, Kimi coding plans) | 5 min, or 1 h with `cache.ttl: "1h"` | the same |
+| Qwen on Alibaba Model Studio | 5 min, or 1 h with `cache.ttl: "1h"` on Qwen4 | the same |
+| Groq | 5 min | 2 h (expires 2 h after its last use) |
+| Fireworks | 5 min | 1 h (several minutes to several hours) |
+| Meta Muse | 5 min | 15 min, or 1 h with `cache.ttl: "24h"` (only a hint) |
+| Amazon Nova on Bedrock | 5 min | 5 min |
+| Mistral | 3 min | 5 min (no published lifetime; reportedly a few minutes) |
+| Anything else, such as GitHub Copilot or MiniMax | the configured `cache.ttl`, or 5 min | 15 min |
+
+Open-weight models on OpenRouter use the last row, since any host there can serve them with its own cache.
 
 Accounts differ by plan, data retention, and extra usage, so Varro also learns how long your caches actually last. Every request after 5 or more idle minutes on the same model shows whether the cache survived that gap. Varro collects these from live turns and from the history of sessions you open, per model and per provider, and keeps them in VS Code's global state. Once a model has enough evidence:
 

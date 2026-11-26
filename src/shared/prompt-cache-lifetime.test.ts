@@ -84,11 +84,42 @@ describe('prompt cache lifetime', () => {
 
   it('does not treat Anthropic-compatible APIs of other models as Claude', () => {
     const lifetime = resolvePromptCacheLifetime({
-      providerID: 'kimi-for-coding',
-      modelID: 'kimi-k3',
+      providerID: 'my-gateway',
+      modelID: 'glm-5.3',
       npm: '@ai-sdk/anthropic',
     });
     expect(lifetime).toMatchObject({ ttlMs: 5 * MINUTE, source: 'fallback' });
+  });
+
+  it('follows other popular providers', () => {
+    const lifetime = (providerID: string, modelID: string, ttl?: string) => {
+      const { ttlMs, likelyMs } = resolvePromptCacheLifetime({ providerID, modelID, ttl });
+      return [ttlMs / MINUTE, (likelyMs ?? ttlMs) / MINUTE];
+    };
+    expect(lifetime('google', 'gemini-4-argon')).toEqual([5, 15]);
+    expect(lifetime('google-vertex', 'gemini-3.8-flash')).toEqual([5, 15]);
+    expect(lifetime('openrouter', 'google/gemini-4-argon')).toEqual([5, 15]);
+    expect(lifetime('deepseek', 'deepseek-v4-flash')).toEqual([60, 360]);
+    expect(lifetime('xai', 'grok-4.6')).toEqual([5, 30]);
+    expect(lifetime('openrouter', 'x-ai/grok-4.6')).toEqual([5, 30]);
+    expect(lifetime('zai-coding-plan', 'glm-5.3')).toEqual([5, 60]);
+    expect(lifetime('kimi-for-coding', 'k3')).toEqual([5, 5]);
+    expect(lifetime('moonshotai', 'kimi-k3.1-pro', '1h')).toEqual([60, 60]);
+    expect(lifetime('alibaba', 'qwen3.8-max', '1h')).toEqual([5, 5]);
+    expect(lifetime('alibaba', 'qwen4-max', '1h')).toEqual([60, 60]);
+    expect(lifetime('groq', 'openai/gpt-oss-120b')).toEqual([5, 120]);
+    expect(lifetime('fireworks-ai', 'accounts/fireworks/models/glm-5')).toEqual([5, 60]);
+    expect(lifetime('meta', 'muse-spark-1.3')).toEqual([5, 15]);
+    expect(lifetime('meta', 'muse-spark-1.3', '24h')).toEqual([5, 60]);
+    expect(lifetime('amazon-bedrock', 'amazon.nova-pro-v1:0')).toEqual([5, 5]);
+    expect(lifetime('amazon-bedrock', 'openai.gpt-6.1-sol', '12h')).toEqual([30, 180]);
+    expect(lifetime('amazon-bedrock', 'openai.gpt-5.4')).toEqual([5, 10]);
+    expect(lifetime('kimi-code-plan-global', 'kimi-k3')).toEqual([5, 5]);
+    expect(lifetime('alibaba-token-plan-cn', 'qwen4-max', '1h')).toEqual([60, 60]);
+    expect(lifetime('mistral', 'mistral-large-latest')).toEqual([3, 5]);
+    // Open-weight models on OpenRouter can be served by any host, with its own cache.
+    expect(lifetime('openrouter', 'deepseek/deepseek-v4')).toEqual([5, 15]);
+    expect(lifetime('github-copilot', 'mai-code-1.1-flash')).toEqual([5, 15]);
   });
 
   it('follows OpenAI retention by model generation', () => {
@@ -112,7 +143,7 @@ describe('prompt cache lifetime', () => {
   it('leaves GPT-named models on other hosts to the generic estimate', () => {
     expect(
       resolvePromptCacheLifetime({ providerID: 'groq', modelID: 'openai/gpt-oss-120b' })
-    ).toMatchObject({ ttlMs: 5 * MINUTE, source: 'fallback' });
+    ).toMatchObject({ ttlMs: 5 * MINUTE, likelyMs: 2 * HOUR });
     expect(
       resolvePromptCacheLifetime({ providerID: 'github-copilot', modelID: 'gpt-6.2-sol' }).source
     ).toBe('fallback');
@@ -122,7 +153,7 @@ describe('prompt cache lifetime', () => {
 
   it('uses a configured ttl for other providers', () => {
     expect(
-      resolvePromptCacheLifetime({ providerID: 'deepseek', modelID: 'deepseek-v4', ttl: '1h' })
+      resolvePromptCacheLifetime({ providerID: 'my-gateway', modelID: 'deepseek-v4', ttl: '1h' })
     ).toMatchObject({ ttlMs: HOUR, source: 'configured' });
   });
 
