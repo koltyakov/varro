@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, open, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LocalImages } from './local-images';
@@ -70,6 +70,40 @@ describe('LocalImages', () => {
     await expect(
       images.load('/outside/image.png', '/workspace', new AbortController().signal)
     ).rejects.toThrow('not in an open workspace');
+  });
+
+  it('loads images from a temp folder outside the workspace', async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'varro-local-temp-')));
+    roots.push(root);
+    const path = join(root, 'shot.png');
+    await writeFile(path, png);
+    const resolvePath = vi.fn(async () => null);
+    const images = new LocalImages({ resolvePath }, undefined, [root]);
+    services.push(images);
+    expect(await images.load(path, '/workspace', new AbortController().signal, true)).toEqual({
+      url: `data:image/png;base64,${png.toString('base64')}`,
+      path,
+      mime: 'image/png',
+    });
+  });
+
+  it('rejects temp symlinks that escape the temp folder and relative temp paths', async () => {
+    const temp = await realpath(await mkdtemp(join(tmpdir(), 'varro-local-temp-')));
+    const outside = await realpath(await mkdtemp(join(tmpdir(), 'varro-local-outside-')));
+    roots.push(temp, outside);
+    await writeFile(join(outside, 'secret.png'), png);
+    await symlink(join(outside, 'secret.png'), join(temp, 'link.png'));
+    await writeFile(join(temp, 'shot.png'), png);
+    const resolvePath = vi.fn(async () => null);
+    const images = new LocalImages({ resolvePath }, undefined, [temp]);
+    services.push(images);
+    const signal = new AbortController().signal;
+    await expect(images.load(join(temp, 'link.png'), '/workspace', signal, true)).rejects.toThrow(
+      'not in an open workspace'
+    );
+    await expect(images.load('shot.png', '/workspace', signal, true)).rejects.toThrow(
+      'not in an open workspace'
+    );
   });
 
   it('rejects network share paths before resolving them', async () => {
