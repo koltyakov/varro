@@ -589,13 +589,24 @@ export class RestProxy {
     this.activeRequests.clear();
   }
 
-  invalidateSessionCatalog() {
+  /**
+   * Clears catalog authorization. A move passes `movedSessionID` so other verified
+   * transfers survive while the moved conversation must be authorized again.
+   */
+  invalidateSessionCatalog(options: { movedSessionID?: string } = {}) {
     this.sessionCatalogGeneration++;
     this.workspaceSessionStatusCoordinator.clearCatalogs();
     this.currentProjects.clear();
     this.sessionEventCatalogRefreshes.clear();
     this.authorizedSessionDirectories.clear();
-    this.authorizedTransferredSessions.clear();
+    if (options.movedSessionID !== undefined) {
+      this.authorizedTransferredSessions.delete(options.movedSessionID);
+      for (const [sessionID, authorized] of this.authorizedTransferredSessions) {
+        this.authorizedSessionDirectories.set(sessionID, authorized);
+      }
+    } else {
+      this.authorizedTransferredSessions.clear();
+    }
     this.projectGitWorktrees.clear();
     this.authorizedSessionCatalogs.clear();
     this.hasSessionDirectorySnapshot = false;
@@ -739,6 +750,45 @@ export class RestProxy {
   }
 
   async refreshSessionCatalogEventAuthorization(
+    sessionIDs: readonly string[],
+    directory?: string
+  ): Promise<boolean> {
+    return (
+      (await this.refreshCatalogEventAuthorization(sessionIDs, directory)) ||
+      this.restoreTransferredEventAuthorization(sessionIDs, directory)
+    );
+  }
+
+  // Catalog invalidation and reloads drop transfer verification. A retained transfer
+  // to the event's exact directory can be verified again before its event is routed.
+  private async restoreTransferredEventAuthorization(
+    sessionIDs: readonly string[],
+    directory?: string
+  ): Promise<boolean> {
+    if (!directory || sessionIDs.length === 0) return false;
+    const pending = sessionIDs.filter(
+      (sessionID) => !this.isSessionCatalogInventoryAuthorized(sessionID, directory)
+    );
+    if (pending.length === 0) return true;
+    const transfers = this.callbacks.getTransferredSessions?.(this.getOpenWorkspaceRoots()) ?? [];
+    if (
+      !pending.every((sessionID) =>
+        transfers.some(
+          (transfer) =>
+            transfer.id === sessionID && isSameWorkspacePath(transfer.directory, directory)
+        )
+      )
+    ) {
+      return false;
+    }
+    const generation = this.sessionCatalogGeneration;
+    for (const sessionID of pending) {
+      if (!(await this.authorizeTransferredSession(sessionID, directory, generation))) return false;
+    }
+    return true;
+  }
+
+  private async refreshCatalogEventAuthorization(
     sessionIDs: readonly string[],
     directory?: string
   ): Promise<boolean> {
@@ -2520,14 +2570,11 @@ export class RestProxy {
       )?.catalogRoot;
     }
     if (!this.callbacks.isPermissionAutomationLeaseCurrent(lease, request)) {
-      // Keep the guard (another window/view may be the current owner), but
-      // make the failure visible: for automatic replies these errors were
-      // fully suppressed, so an approved permission could fail delivery
-      // with zero trace and the gated tool call would hang forever.
-      logger.warn(
-        `Permission automation ownership changed for ${pathname} ` +
-          `(session ${request.sessionID ?? 'unknown'}, permission ${request.permissionID ?? 'unknown'}); ` +
-          `rejecting the request — if no other view holds the current lease, the pending ask is now undeliverable.`
+      // An ownership handoff is expected; the webview hides this error from chat.
+      logger.info(
+        `Rejected automatic permission request ${pathname} for session ` +
+          `${request.sessionID ?? 'unknown'} (catalog root ${request.workspaceDirectory ?? 'none'}): ` +
+          'this view no longer holds the automation lease'
       );
       throw new Error('Permission automation ownership changed');
     }
@@ -3107,6 +3154,13 @@ export class RestProxy {
         throw new Error('Cannot reconcile pending requests from an incomplete session catalog');
       }
       for (const session of catalog.sessions) rememberDirectory(session.directory);
+    }
+    // A conversation moved out of an open folder stays authorized here, and its
+    // pending requests live in the destination instance.
+    for (const transferred of this.authorizedTransferredSessions.values()) {
+      if (roots.some((root) => isSameWorkspacePath(root, transferred.catalogRoot))) {
+        rememberDirectory(transferred.directory);
+      }
     }
 
     const responses = await Promise.all(
@@ -4244,12 +4298,34 @@ export class RestProxy {
   ) {
     const normalizedWorkspacePath = normalizeWorkspaceIdentity(workspacePath);
     if (!normalizedWorkspacePath) return requests;
+    // Catalog-authorized sessions (nested folders, project worktrees, and moved
+    // conversations) receive live attention events, so the snapshot must keep them too.
+    const catalogSessionIDs = new Set(
+      requests
+        .map((request) => request.sessionID)
+        .filter((sessionID) => this.isCatalogSessionInWorkspace(sessionID, normalizedWorkspacePath))
+    );
     const visibleSessionIDs = await this.getVisibleWorkspaceSessionIDs(
-      requests.map((request) => request.sessionID),
+      requests
+        .map((request) => request.sessionID)
+        .filter((sessionID) => !catalogSessionIDs.has(sessionID)),
       normalizedWorkspacePath,
       true
     );
-    return requests.filter((request) => visibleSessionIDs.has(request.sessionID));
+    return requests.filter(
+      (request) =>
+        catalogSessionIDs.has(request.sessionID) || visibleSessionIDs.has(request.sessionID)
+    );
+  }
+
+  private isCatalogSessionInWorkspace(sessionID: string, workspacePath: string) {
+    const catalogRoot = this.getAuthorizedSessionCatalogRoot(sessionID);
+    return Boolean(catalogRoot && isSameWorkspacePath(catalogRoot, workspacePath));
+  }
+
+  /** Returns the open workspace root whose session catalog authorizes this session. */
+  getAuthorizedSessionCatalogRoot(sessionID: string): string | undefined {
+    return this.authorizedSessionDirectories.get(sessionID)?.catalogRoot;
   }
 
   private async getVisibleWorkspaceSessionIDs(

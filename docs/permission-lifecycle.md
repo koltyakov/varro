@@ -134,6 +134,15 @@ webview per workspace may run automatic permission work. The extension host elec
 and publishes owner flags with a shared generation lease. A ready sidebar is preferred in its
 workspace; otherwise, the current ready owner or the next ready editor owns automation there.
 
+A session belongs to the workspace whose directory matches it exactly, or else to the open root
+whose session catalog authorizes it: nested folders under `descendants`, project worktrees under
+`project`, and conversations moved out of an open folder. Owner lookup, lease validation, pending
+snapshots, and host attention (notifications, badge, status bar) must all use that same catalog
+root. A path-containment check alone is not enough, because it misses worktrees outside the folder
+and ignores the configured history scope. Moving one conversation must not revoke another moved
+conversation's verified transfer; after a full catalog invalidation, an attention event for a
+retained transfer re-verifies it before routing.
+
 - Only the elected owner for a workspace may run the model judge, answer full-mode requests, or
   automatically process that workspace's pending-permission snapshot. This also applies to direct
   `todowrite` and `question` replies in every mode.
@@ -567,7 +576,10 @@ mutation guards. Preserve these rules:
 
 The extension filters pending snapshots to the current workspace and removes hidden or recycled
 sessions before reconciling host attention. It must first collect each snapshot from every OpenCode
-directory instance that can own a visible session. If any required directory or session catalog fails,
+directory instance that can own a visible session, including verified transfer destinations, and
+keep requests from every catalog-authorized session. The webview treats an omission as
+resolution, so a snapshot that drops a session whose live events are routed makes its prompt
+flash and disappear while the tool call hangs. If any required directory or session catalog fails,
 reject the snapshot rather than using partial omissions as proof that a request resolved. Keep
 permission and question reconciliation independent.
 

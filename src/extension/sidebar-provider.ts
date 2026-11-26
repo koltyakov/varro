@@ -32,11 +32,7 @@ import type {
 } from '../shared/protocol';
 import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
-import {
-  getRelativePathWithinWorkspace,
-  isSameWorkspacePath,
-  normalizeWorkspaceIdentity,
-} from '../shared/workspace-path';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 
 const CHAT_FOCUSED_CONTEXT = 'varro:chatFocused';
 const FOCUSED_CHAT_SURFACE_CONTEXT = 'varro:focusedChatSurface';
@@ -322,6 +318,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly permissionAutomationOwnerWorkspaces = new Map<string, string>();
   private readonly permissionAutomationLeases = new Map<string, number>();
   private nextPermissionAutomationLease = 0;
+  private readonly unownedPermissionActionables = new Set<string>();
   private interruptedRecoveryClaim: {
     claimId: number;
     sessionIds: string[];
@@ -471,10 +468,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       },
       {
         shouldShow: (sessionID) =>
-          this.sessionState.getSessionWorkspaceMatch(
+          (this.sessionState.getSessionWorkspaceMatch(
             sessionID,
             this.contextProvider.context.workspacePath
-          ) !== false && !this.isAnyChatVisible(),
+          ) !== false ||
+            this.isCatalogSessionInWorkspace(
+              sessionID,
+              this.contextProvider.context.workspacePath
+            )) &&
+          !this.isAnyChatVisible(),
       }
     );
     this.attentionNotifications = new AttentionNotifications(
@@ -517,10 +519,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             !this.sessionTrash.isHidden(rootID) &&
             !this.hiddenSessions.isHidden(sessionID) &&
             !this.hiddenSessions.isHidden(rootID) &&
-            this.sessionState.getSessionWorkspaceMatch(
+            (this.sessionState.getSessionWorkspaceMatch(
               sessionID,
               this.contextProvider.context.workspacePath
-            ) !== false
+            ) !== false ||
+              this.isCatalogSessionInWorkspace(
+                sessionID,
+                this.contextProvider.context.workspacePath
+              ))
           );
         },
         titleFor: (sessionID) => this.sessionState.titleFor(sessionID),
@@ -2206,7 +2212,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     for (const endpoint of affected) {
       if (!this.endpoints.has(endpoint)) continue;
-      endpoint.restProxy.invalidateSessionCatalog();
+      endpoint.restProxy.invalidateSessionCatalog({ movedSessionID: sessionId });
       const available = await endpoint.restProxy.authorizeSessionDirectory(sessionId, directory);
       if (
         this.disposing ||
@@ -2664,21 +2670,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postPendingPermissionActionables() {
+    for (const permissionId of this.unownedPermissionActionables) {
+      if (!this.sessionState.pending.has(permissionId)) {
+        this.unownedPermissionActionables.delete(permissionId);
+      }
+    }
     for (const [permissionId, request] of this.sessionState.pending) {
       if (request.kind !== 'permission') continue;
       const owner = this.permissionAutomationOwnerForSession(request.sessionID);
       if (!owner) {
-        // Without an owner the actionable is never delivered: no prompt is
-        // rendered, the pending permission never resolves, and the gated
-        // tool call hangs the session until the user interrupts. Warn so
-        // the drop is at least diagnosable instead of fully silent.
-        logger.warn(
-          `Permission actionable ${permissionId} for session ${request.sessionID} has no owner view ` +
-            `(directory ${this.sessionState.directoryFor(request.sessionID) ?? 'unknown'}); ` +
-            `dropping it — the permission prompt will not be shown.`
-        );
+        const directory = this.sessionState.directoryFor(request.sessionID);
+        // Requests from other windows' folders have no owner here by design. Log
+        // each one once so a missing prompt stays diagnosable without log noise.
+        if (directory && !this.unownedPermissionActionables.has(permissionId)) {
+          this.unownedPermissionActionables.add(permissionId);
+          logger.info(
+            `Permission ${permissionId} for session ${request.sessionID} in ${directory} ` +
+              'has no permission owner view in this window'
+          );
+        }
         continue;
       }
+      this.unownedPermissionActionables.delete(permissionId);
       owner.bridge.post({
         type: 'permission/actionable',
         payload: { permissionId },
@@ -2692,16 +2705,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const owners = [...this.endpoints].filter(
       (endpoint) => endpoint.ready && this.permissionAutomationOwnerViewIds.has(endpoint.viewId)
     );
-    const exact = owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, directory));
-    if (exact) return exact;
-    // Sessions in git worktrees/subfolders of an open workspace folder have
-    // no exact-match owner; without a fallback their permission prompts are
-    // silently dropped and gated tool calls hang forever. Fall back to a
-    // ready owner endpoint whose workspace folder CONTAINS the session
-    // directory — same containment semantics the session-authorization
-    // code already uses for descendant scopes.
-    return owners.find(
-      (endpoint) => getRelativePathWithinWorkspace(directory, endpoint.workspacePath) !== null
+    return (
+      owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, directory)) ??
+      // Nested folders, project worktrees, and moved conversations belong to the open
+      // root whose session catalog authorizes them. The lease check uses the same root.
+      owners.find((endpoint) => {
+        const catalogRoot = endpoint.restProxy.getAuthorizedSessionCatalogRoot(sessionID);
+        return Boolean(catalogRoot && isSameWorkspacePath(catalogRoot, endpoint.workspacePath));
+      })
     );
   }
 
@@ -4310,7 +4321,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         !this.isSessionAttentionVisible(request.sessionID) &&
         !this.sessionTrash.isHidden(request.sessionID) &&
         !this.hiddenSessions.isHidden(request.sessionID) &&
-        this.sessionState.isSessionVisibleInWorkspace(
+        (this.sessionState.isSessionVisibleInWorkspace(
           request.sessionID,
           this.contextProvider.context.workspacePath,
           this.contextProvider.context.workspaceDirectory,
@@ -4320,8 +4331,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               this.contextProvider.context.workspaceDirectory
             )
           )
-        )
+        ) ||
+          this.isCatalogSessionInWorkspace(
+            request.sessionID,
+            this.contextProvider.context.workspacePath
+          ))
     );
+  }
+
+  /** Nested folders, project worktrees, and moved conversations belong to their catalog root. */
+  private isCatalogSessionInWorkspace(sessionID: string, workspacePath: string | null | undefined) {
+    if (!normalizeWorkspaceIdentity(workspacePath)) return false;
+    return [...this.endpoints].some((endpoint) => {
+      const catalogRoot = endpoint.restProxy.getAuthorizedSessionCatalogRoot(sessionID);
+      return Boolean(catalogRoot && isSameWorkspacePath(catalogRoot, workspacePath));
+    });
   }
 
   /**

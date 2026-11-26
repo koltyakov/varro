@@ -96,9 +96,15 @@ async function createProjectAttentionHarness() {
     path === PROJECT_ROOT ? PROJECT_ROOT : null
   );
   const server = createServer({
-    request: vi.fn(async (method: string, path: string) => {
+    request: vi.fn(async (method: string, path: string, _body?: unknown, options?: unknown) => {
       if (path === '/project/current') {
         return { id: 'project-1', worktree: PROJECT_ROOT, vcs: 'git' };
+      }
+      if (method === 'GET' && (path === '/permission' || path === '/question')) {
+        const directory = (options as { directory?: string } | undefined)?.directory;
+        const kind = path === '/permission' ? 'permission' : 'question';
+        const pending = projectAttentionCases.find((entry) => entry.kind === kind)!;
+        return directory === PROJECT_SESSION_DIRECTORY ? [pending.event.properties] : [];
       }
       const url = new URL(path, 'http://localhost');
       if (
@@ -179,6 +185,185 @@ describe('SidebarProvider permission replay', () => {
           directory: PROJECT_SESSION_DIRECTORY,
           signal: expect.any(AbortSignal),
         })
+      );
+    }
+  );
+
+  it.each(projectAttentionCases)(
+    'keeps nested project-catalog $kind requests in the pending snapshot',
+    async ({ event, kind }) => {
+      const { eventHandler, posted, provider } = await createProjectAttentionHarness();
+      eventHandler({ directory: PROJECT_SESSION_DIRECTORY, payload: event });
+      posted.length = 0;
+
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 302,
+          method: 'GET',
+          path: kind === 'permission' ? '/permission' : '/question',
+        },
+      });
+
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: { id: 302, data: [expect.objectContaining({ id: event.properties.id })] },
+      });
+    }
+  );
+
+  it('routes a project worktree permission outside the folder to the catalog root owner', async () => {
+    const { eventHandler, posted, provider } = await createProjectAttentionHarness();
+    eventHandler({ directory: PROJECT_SESSION_DIRECTORY, payload: projectAttentionCases[0].event });
+    posted.length = 0;
+
+    await provider.handleMessage({
+      type: 'permission/reveal',
+      payload: { permissionId: 'project-permission' },
+    });
+
+    expect(posted).toContainEqual({
+      type: 'permission/actionable',
+      payload: { permissionId: 'project-permission' },
+    });
+  });
+
+  it.each([
+    ['alone', [], false],
+    ['after another conversation moves', ['second-session'], false],
+    ['after the session catalog is invalidated', [], true],
+  ] as const)(
+    'keeps a moved conversation permission actionable %s',
+    async (_label, laterMoves, invalidate) => {
+      const worktreeFor = (sessionID: string) => `/repo/.worktrees/${sessionID}`;
+      const worktree = worktreeFor('moved-session');
+      const permission = {
+        id: 'moved-permission',
+        sessionID: 'moved-session',
+        permission: 'external_directory',
+        title: 'Access external directory',
+        always: [],
+      };
+      const contextProvider = createContextProvider();
+      contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+        path === '/repo' ? path : null
+      );
+      const server = createServer({
+        request: vi.fn(async (method: string, path: string, _body?: unknown, options?: unknown) => {
+          const directory = (options as { directory?: string } | undefined)?.directory;
+          const sessionMatch = path.match(/^\/session\/([^/?]+)$/);
+          if (method === 'GET' && sessionMatch) {
+            const sessionID = decodeURIComponent(sessionMatch[1]!);
+            return {
+              id: sessionID,
+              directory: worktreeFor(sessionID),
+              projectID: 'project-1',
+              title: 'Moved chat',
+              version: '2',
+              time: { created: 1, updated: 2 },
+            };
+          }
+          if (method === 'GET' && path === '/permission') {
+            return directory === worktree ? [permission] : [];
+          }
+          if (method === 'GET' && path === '/question') return [];
+          return [];
+        }),
+      });
+      const { provider } = await createSidebarProviderInstance({ contextProvider, server });
+      const { posted } = attachTestView(provider);
+      await provider.handleMessage({ type: 'ready' });
+      const lease = lastPermissionAutomationLease(posted);
+      expect(lease).toBeTypeOf('number');
+      const providerState = provider as unknown as {
+        sessionState: { handleServerEvent(event: unknown): void };
+      };
+      for (const sessionID of ['moved-session', ...laterMoves]) {
+        providerState.sessionState.handleServerEvent({
+          type: 'session.updated',
+          properties: { info: { id: sessionID, directory: '/repo', projectID: 'project-1' } },
+        });
+        provider.post({
+          type: 'server/event',
+          payload: {
+            type: 'session.next.moved',
+            workspaceDirectory: '/repo',
+            properties: { sessionID, location: { directory: worktreeFor(sessionID) } },
+          },
+        });
+        await vi.waitFor(() =>
+          expect(posted).toContainEqual({
+            type: 'session/transferred',
+            payload: { sessionId: sessionID, directory: worktreeFor(sessionID), available: true },
+          })
+        );
+      }
+      const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1] as
+        | ((event: unknown) => void)
+        | undefined;
+      if (!eventHandler) throw new Error('Expected the server event bridge to be attached');
+      if (invalidate) {
+        const { endpoints } = provider as unknown as {
+          endpoints: Set<{ restProxy: { invalidateSessionCatalog(): void } }>;
+        };
+        for (const endpoint of endpoints) endpoint.restProxy.invalidateSessionCatalog();
+      }
+      posted.length = 0;
+
+      eventHandler({
+        directory: worktree,
+        payload: { type: 'permission.asked', properties: permission },
+      });
+      await vi.waitFor(() =>
+        expect(posted).toContainEqual({
+          type: 'server/event',
+          payload: {
+            type: 'permission.asked',
+            properties: permission,
+            workspaceDirectory: worktree,
+          },
+        })
+      );
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 303, method: 'GET', path: '/permission' },
+      });
+
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: { id: 303, data: [expect.objectContaining({ id: 'moved-permission' })] },
+      });
+
+      posted.length = 0;
+      await provider.handleMessage({
+        type: 'permission/reveal',
+        payload: { permissionId: 'moved-permission' },
+      });
+      expect(posted).toContainEqual({
+        type: 'permission/actionable',
+        payload: { permissionId: 'moved-permission' },
+      });
+      // The visible sidebar suppresses the status item itself, so check the computed attention.
+      const attention = provider as unknown as { getCurrentStatusBarState(): { text?: string } };
+      expect(attention.getCurrentStatusBarState().text).toBe('$(bell-dot) Varro: 1 waiting');
+
+      server.request.mockClear();
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 304,
+          method: 'POST',
+          path: '/permission/moved-permission/reply',
+          body: { reply: 'once' },
+          permissionAutomationLease: lease!,
+          permissionAutomationSessionID: 'moved-session',
+        },
+      });
+      expect(server.request).toHaveBeenCalledWith(
+        'POST',
+        '/permission/moved-permission/reply',
+        { reply: 'once' },
+        expect.objectContaining({ directory: worktree })
       );
     }
   );
