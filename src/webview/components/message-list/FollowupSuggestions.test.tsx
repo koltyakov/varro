@@ -1300,6 +1300,117 @@ describe('FollowupSuggestions', () => {
     expect(client.varro.dismissFollowups).toHaveBeenCalledTimes(1);
   });
 
+  describe('combined All action', () => {
+    const combinable = { ...suggestions, combinable: true };
+    const combinedPrompt = [
+      'Do all of the following:',
+      ...actions.map((action, index) => `${index + 1}. ${action.prompt}`),
+    ].join('\n\n');
+
+    async function mountCombinable(set: FollowupSuggestionSet = combinable) {
+      vi.mocked(client.varro.followups).mockImplementation(async (_id, _source, options) =>
+        options.allowGenerate ? set : { summary: '', actions: [] }
+      );
+      const { setWorking } = mount();
+      flushSolid();
+      setWorking(false);
+      flushSolid();
+      await flush();
+      flushSolid();
+      vi.mocked(client.varro.followups).mockResolvedValue(set);
+    }
+
+    it('hides All when the generator does not mark actions as compatible', async () => {
+      await mountCombinable(suggestions);
+      expect(container.querySelector('.followup-all')).toBeNull();
+      await openActionMenu();
+      flushSolid();
+      expect(() => menuItem('Send all follow-ups')).toThrow();
+    });
+
+    it('hides All when fewer than two actions remain unsent', async () => {
+      await mountCombinable({ ...combinable, actions: actions.slice(0, 2) });
+      expect(container.querySelector('.followup-all')).not.toBeNull();
+      await openActionMenu(1);
+      flushSolid();
+      menuItem('Run in new session').click();
+      flushSolid();
+      await flush();
+      flushSolid();
+      expect(container.querySelector('.followup-session-link')).not.toBeNull();
+      expect(container.querySelector('.followup-all')).toBeNull();
+    });
+
+    it('sends every compatible action as one prompt from the All button', async () => {
+      await mountCombinable();
+      const all = container.querySelector<HTMLButtonElement>('.followup-all')!;
+      expect(all.textContent?.trim()).toBe('All');
+      all.click();
+      flushSolid();
+      all.click();
+      flushSolid();
+      await flush();
+      flushSolid();
+      expect(mocks.send).toHaveBeenCalledExactlyOnceWith(combinedPrompt, {
+        targetSessionId: 'session-1',
+        preserveComposer: true,
+        omitContext: true,
+        followupTitle: 'All follow-ups',
+        validateBeforeSend: expect.any(Function),
+        onOptimisticPublish: expect.any(Function),
+      });
+      await flush();
+      flushSolid();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+    });
+
+    it('offers Send all from an action context menu', async () => {
+      await mountCombinable();
+      await openActionMenu(2);
+      flushSolid();
+      menuItem('Send all follow-ups').click();
+      flushSolid();
+      await flush();
+      flushSolid();
+      expect(mocks.send).toHaveBeenCalledExactlyOnceWith(combinedPrompt, expect.any(Object));
+    });
+
+    it('queues the combined prompt from the All context menu without a new-session option', async () => {
+      await mountCombinable();
+      container.querySelector<HTMLButtonElement>('.followup-all')!.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 20,
+          clientY: 30,
+        })
+      );
+      await flush();
+      flushSolid();
+      expect(() => menuItem('Run in new session')).toThrow();
+      expect(() => menuItem('Send all follow-ups')).toThrow();
+      menuItem('Add to queue (paused)').click();
+      flushSolid();
+      await flush();
+      flushSolid();
+      expect(state.queuedMessages).toMatchObject([
+        { text: combinedPrompt, followupTitle: 'All follow-ups', paused: true },
+      ]);
+      expect(mocks.send).not.toHaveBeenCalled();
+    });
+
+    it('does not send All when the latest suggestions are no longer compatible', async () => {
+      await mountCombinable();
+      vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+      container.querySelector<HTMLButtonElement>('.followup-all')!.click();
+      flushSolid();
+      await flush();
+      flushSolid();
+      expect(mocks.send).not.toHaveBeenCalled();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+    });
+  });
+
   it('hides the card with optimistic publication, before admission, without persisting premature dismissal', async () => {
     let finish!: (accepted: boolean) => void;
     mocks.send.mockImplementationOnce((_prompt, options) => {

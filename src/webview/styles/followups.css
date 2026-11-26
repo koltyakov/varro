@@ -65,6 +65,20 @@
   background: transparent;
 }
 
+/* A translucent fill sits closer to the card surface than the other options: darker on dark
+   themes and lighter on light themes. The full border keeps it from blending into the card. */
+.followup-suggestions .followup-all {
+  background: color-mix(in srgb, var(--color-vscode-button-secondary-bg) 40%, transparent);
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
+  font-weight: 600;
+}
+.followup-suggestions .followup-all:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-button-secondary-hover) 75%, transparent);
+}
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .followup-suggestions .followup-all {
+  border-color: var(--color-vscode-contrast-border);
+}
+
 .followup-suggestions-error {
   margin: 8px 0 0;
   font-size: 12px;

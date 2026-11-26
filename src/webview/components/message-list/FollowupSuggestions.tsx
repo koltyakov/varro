@@ -6,6 +6,7 @@ import type {
   FollowupSuggestionSet,
 } from '../../../shared/followups';
 import {
+  combineFollowupActions,
   parseFollowupSuggestions,
   parseFollowupSource,
   readFollowupText,
@@ -51,7 +52,8 @@ export function FollowupSuggestions(props: {
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal('');
   const [menu, setMenu] = createSignal<{
-    action: FollowupAction;
+    /** `null` targets the combined All action. */
+    action: FollowupAction | null;
     x: number;
     y: number;
   } | null>(null);
@@ -153,11 +155,19 @@ export function FollowupSuggestions(props: {
   }
 
   async function send(
-    action: FollowupAction,
+    group: readonly FollowupAction[],
     destination: 'current' | 'queue' | 'new-session' = 'current'
   ) {
     const value = current();
-    if (sendPending || !value || !value.actions.includes(action) || action.sessionId) return;
+    if (
+      sendPending ||
+      !value ||
+      !group.length ||
+      group.some((item) => !value.actions.includes(item) || item.sessionId) ||
+      (group.length > 1 && (!value.combinable || destination === 'new-session'))
+    )
+      return;
+    const action = group.length > 1 ? combineFollowupActions(group) : group[0]!;
     sendPending = true;
     setMenu(null);
     setSending(true);
@@ -182,14 +192,20 @@ export function FollowupSuggestions(props: {
         allowGenerate: false,
         model,
       });
-      const latestAction = latest.actions.find(
-        (item) => item.title === action.title && item.prompt === action.prompt
+      const latestActions = group.map((selectedAction) =>
+        latest.actions.find(
+          (item) => item.title === selectedAction.title && item.prompt === selectedAction.prompt
+        )
       );
-      if (current() !== value || !latestAction) {
+      if (
+        current() !== value ||
+        latestActions.some((item) => !item) ||
+        (group.length > 1 && !latest.combinable)
+      ) {
         if (ready() === value) clear();
         return false;
       }
-      if (latestAction.sessionId) {
+      if (latestActions.some((item) => item?.sessionId)) {
         setReady({ ...value, ...latest });
         return false;
       }
@@ -462,6 +478,22 @@ export function FollowupSuggestions(props: {
       ? value
       : null;
   };
+  /** Unsent compatible actions. All is offered only for two or more. */
+  const combinableActions = () => {
+    const value = ready();
+    const pending = value?.combinable ? value.actions.filter((action) => !action.sessionId) : [];
+    return pending.length > 1 ? pending : [];
+  };
+  const openMenu = (
+    event: MouseEvent & { currentTarget: HTMLElement },
+    action: FollowupAction | null
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (sending() || !current()) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu({ action, x: event.clientX || rect.left, y: event.clientY || rect.bottom });
+  };
 
   return (
     <>
@@ -501,18 +533,8 @@ export function FollowupSuggestions(props: {
                         <button
                           type="button"
                           disabled={sending() || !current()}
-                          onClick={() => void send(action)}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            if (sending() || !current()) return;
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            setMenu({
-                              action,
-                              x: event.clientX || rect.left,
-                              y: event.clientY || rect.bottom,
-                            });
-                          }}
+                          onClick={() => void send([action])}
+                          onContextMenu={(event) => openMenu(event, action)}
                         >
                           <InlineCodeText text={action.title} />
                         </button>
@@ -529,6 +551,20 @@ export function FollowupSuggestions(props: {
                   </Show>
                 )}
               </For>
+              <Show when={combinableActions().length > 1}>
+                <Tooltip content={combineFollowupActions(combinableActions()).prompt}>
+                  <button
+                    type="button"
+                    class="followup-all"
+                    aria-label={`Send all ${combinableActions().length} follow-ups`}
+                    disabled={sending() || !current()}
+                    onClick={() => void send(combinableActions())}
+                    onContextMenu={(event) => openMenu(event, null)}
+                  >
+                    All
+                  </button>
+                </Tooltip>
+              </Show>
             </div>
             <Show when={error()}>
               <p class="followup-suggestions-error" role="alert">
@@ -539,27 +575,44 @@ export function FollowupSuggestions(props: {
         )}
       </Show>
       <Show when={menu()} keyed>
-        {(value) => (
-          <Portal>
-            <FollowupActionsMenu
-              x={value.x}
-              y={value.y}
-              onClose={() => setMenu(null)}
-              onCopy={() => {
-                void writeClipboard(value.action.prompt);
-                setMenu(null);
-              }}
-              onQueue={() => {
-                setMenu(null);
-                void send(value.action, 'queue');
-              }}
-              onRunInNewSession={() => {
-                setMenu(null);
-                void send(value.action, 'new-session');
-              }}
-            />
-          </Portal>
-        )}
+        {(value) => {
+          const target = value.action;
+          return (
+            <Portal>
+              <FollowupActionsMenu
+                x={value.x}
+                y={value.y}
+                onClose={() => setMenu(null)}
+                onCopy={() => {
+                  void writeClipboard(
+                    target ? target.prompt : combineFollowupActions(combinableActions()).prompt
+                  );
+                  setMenu(null);
+                }}
+                onQueue={() => {
+                  setMenu(null);
+                  void send(target ? [target] : combinableActions(), 'queue');
+                }}
+                onRunInNewSession={
+                  target
+                    ? () => {
+                        setMenu(null);
+                        void send([target], 'new-session');
+                      }
+                    : undefined
+                }
+                onSendAll={
+                  target && combinableActions().length > 1
+                    ? () => {
+                        setMenu(null);
+                        void send(combinableActions());
+                      }
+                    : undefined
+                }
+              />
+            </Portal>
+          );
+        }}
       </Show>
     </>
   );

@@ -9,19 +9,28 @@ export function FollowupActionsMenu(props: {
   onClose: () => void;
   onCopy: () => void;
   onQueue: () => void;
-  onRunInNewSession: () => void;
+  /** Omitted for the combined All action, which has no single session link. */
+  onRunInNewSession?: () => void;
+  /** Present only when two or more compatible follow-ups can be sent together. */
+  onSendAll?: () => void;
 }) {
+  const items = (): ActionsMenuItem[] => {
+    const result: ActionsMenuItem[] = [
+      { label: 'Copy description', onSelect: props.onCopy },
+      { label: 'Add to queue (paused)', onSelect: props.onQueue },
+    ];
+    if (props.onRunInNewSession)
+      result.push({ label: 'Run in new session', onSelect: props.onRunInNewSession });
+    if (props.onSendAll) result.push({ label: 'Send all follow-ups', onSelect: props.onSendAll });
+    return result;
+  };
   return (
     <ActionsMenu
       x={props.x}
       y={props.y}
       label="Follow-up actions"
       onClose={props.onClose}
-      items={[
-        { label: 'Copy description', onSelect: props.onCopy },
-        { label: 'Add to queue (paused)', onSelect: props.onQueue },
-        { label: 'Run in new session', onSelect: props.onRunInNewSession },
-      ]}
+      items={items()}
     />
   );
 }

@@ -1,8 +1,13 @@
-import { asRecord, isString } from './type-utils';
+import { asRecord, isBoolean, isString } from './type-utils';
 import type { Message, Part } from './opencode-types';
 
 export type FollowupAction = { title: string; prompt: string; sessionId?: string };
-export type FollowupSuggestionSet = { summary: string; actions: FollowupAction[] };
+/** `combinable` marks actions that are compatible and can be requested together. */
+export type FollowupSuggestionSet = {
+  summary: string;
+  actions: FollowupAction[];
+  combinable?: boolean;
+};
 export const EMPTY_FOLLOWUP_SUGGESTIONS: FollowupSuggestionSet = { summary: '', actions: [] };
 
 /** Exact visible text snapshot. IDs and text are checked against server history before inference. */
@@ -18,6 +23,7 @@ export const FOLLOWUP_GENERATION_TIMEOUT_MS = 30_000;
 export const FOLLOWUP_REQUEST_TIMEOUT_MS = FOLLOWUP_GENERATION_TIMEOUT_MS + 5_000;
 export const FOLLOWUP_MAX_ANSWER_CHARS = 12_000;
 export const FOLLOWUP_MAX_PROMPT_CHARS = 4_000;
+export const FOLLOWUP_ALL_TITLE = 'All follow-ups';
 // oxlint-disable-next-line no-control-regex -- Reject control and bidi override characters in generated button text.
 const UNSAFE_TEXT = /[\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u;
 
@@ -88,7 +94,10 @@ export function parseFollowupSuggestions(
   const record = asRecord(JSON.parse(text));
   if (
     !record ||
-    Object.keys(record).length !== 2 ||
+    Object.keys(record).some(
+      (key) => key !== 'summary' && key !== 'actions' && key !== 'combinable'
+    ) ||
+    (record.combinable !== undefined && !isBoolean(record.combinable)) ||
     !isString(record.summary) ||
     record.summary.trim().length > 400 ||
     UNSAFE_TEXT.test(record.summary) ||
@@ -138,5 +147,19 @@ export function parseFollowupSuggestions(
       ? { title, prompt, sessionId: action.sessionId }
       : { title, prompt };
   });
-  return { summary: record.summary.trim(), actions };
+  const summaryText = record.summary.trim();
+  return record.combinable === true && actions.length > 1
+    ? { summary: summaryText, actions, combinable: true }
+    : { summary: summaryText, actions };
+}
+
+/** Joins compatible actions into one request. Callers pass at least two unsent actions. */
+export function combineFollowupActions(actions: readonly FollowupAction[]): FollowupAction {
+  return {
+    title: FOLLOWUP_ALL_TITLE,
+    prompt: [
+      'Do all of the following:',
+      ...actions.map((action, index) => `${index + 1}. ${action.prompt}`),
+    ].join('\n\n'),
+  };
 }

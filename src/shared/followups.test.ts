@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  combineFollowupActions,
   parseFollowupSuggestions,
   parseFollowupSource,
   parseFollowupTitle,
@@ -65,9 +66,27 @@ describe('follow-ups validation', () => {
       actions,
     });
   });
+  it('keeps the combinable flag only for two or more actions', () => {
+    const summary = 'Two independent parser gaps remain. Both can be addressed in one request.';
+    const two = [action, { title: 'Add tests', prompt: 'Add focused parser tests.' }];
+    expect(
+      parseFollowupSuggestions(JSON.stringify({ summary, actions: two, combinable: true }))
+    ).toEqual({ summary, actions: two, combinable: true });
+    expect(
+      parseFollowupSuggestions(JSON.stringify({ summary, actions: two, combinable: false }))
+    ).toEqual({ summary, actions: two });
+    expect(
+      parseFollowupSuggestions(JSON.stringify({ summary, actions: [action], combinable: true }))
+    ).toEqual({ summary, actions: [action] });
+    expect(combineFollowupActions(two)).toEqual({
+      title: 'All follow-ups',
+      prompt: `Do all of the following:\n\n1. ${two[0]!.prompt}\n\n2. ${two[1]!.prompt}`,
+    });
+  });
   it.each([
     'not json',
     '[]',
+    JSON.stringify({ summary: 'Useful context', actions: [action], combinable: 'yes' }),
     '{"actions":[],"run":true}',
     JSON.stringify({ summary: 'Useful context', actions: [action, action] }),
     JSON.stringify({ summary: 'Useful context', actions: [{ ...action, title: 'x'.repeat(41) }] }),
