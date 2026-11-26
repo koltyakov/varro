@@ -1008,9 +1008,11 @@ export function Chat() {
   createEffect(subagentSessionsRequest, (request) => {
     if (!request) return;
     clearSubagentSessionsRequest();
-    // Editor tabs have no session list, so open the named subagent instead.
-    if (!isEditorSurface) openSubagentSessions(request.rootSessionID);
-    else if (request.childSessionID) void selectSession(request.childSessionID);
+    untrack(() => {
+      // Editor tabs have no session list, so open the named subagent instead.
+      if (!isEditorSurface) openSubagentSessions(request.rootSessionID);
+      else if (request.childSessionID) void selectSession(request.childSessionID);
+    });
   });
   onCleanup(clearSubagentSessionsRequest);
 

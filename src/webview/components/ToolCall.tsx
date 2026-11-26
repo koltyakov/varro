@@ -2662,16 +2662,17 @@ function StructuredToolCard(props: {
       {props.actions}
       <For each={nonPromptEntries()}>
         {([key, value]) => {
-          const codeLanguage = isString(value) ? props.valueLanguages?.[key] : undefined;
+          // valueLanguages derives from deferred detail state, so read it in JSX.
+          const codeLanguage = () => (isString(value) ? props.valueLanguages?.[key] : undefined);
           const blockValue = shouldShowStructuredToolValueAsBlock(key, value);
           return (
             <div class="structured-tool-row">
               <span class="structured-tool-label">{key}</span>
-              {codeLanguage ? (
+              {codeLanguage() ? (
                 <ClampedToolText
                   content={formatExpandedValue(key, value)}
                   title={`${props.toolTitle} (${key})`}
-                  language={codeLanguage}
+                  language={codeLanguage()}
                   highlight
                   unclamped={props.unclampCode}
                   class="structured-tool-value structured-tool-value-code"

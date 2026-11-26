@@ -2,7 +2,8 @@ import cssEscape from 'css.escape';
 import type * as Solid from 'solid-js';
 import type * as Signals from '@solidjs/signals';
 import type * as SolidWeb from '@solidjs/web';
-import { beforeEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+import { isString } from './src/shared/type-utils';
 
 // resetModules must reload application state, not split Solid's owner graph between
 // top-level test imports and dynamically imported hooks/components. Mock factories
@@ -29,7 +30,31 @@ if (typeof globalThis.CSS.escape !== 'function') {
   });
 }
 
+// Solid's dev runtime only warns about untracked reactive reads, so the warnings
+// scroll past in passing runs. Fail the test that produced one instead.
+// Follow-up guide lines share the prefix; only the read itself is counted.
+const STRICT_READ_WARNING = '[STRICT_READ_UNTRACKED] Reactive value';
+/* oxlint-disable no-console -- The guard wraps console.warn to observe Solid diagnostics. */
+const consoleWarn = console.warn.bind(console);
+let strictReadWarnings: string[] = [];
+console.warn = (...args: unknown[]) => {
+  const first = args[0];
+  if (isString(first) && first.startsWith(STRICT_READ_WARNING)) strictReadWarnings.push(first);
+  consoleWarn(...args);
+};
+/* oxlint-enable no-console */
+
+afterEach(() => {
+  const warnings = strictReadWarnings;
+  strictReadWarnings = [];
+  if (warnings.length > 0)
+    throw new Error(
+      `Solid reported ${warnings.length} untracked reactive read(s):\n${[...new Set(warnings)].join('\n')}`
+    );
+});
+
 beforeEach(() => {
+  strictReadWarnings = [];
   window.localStorage.clear();
   Reflect.deleteProperty(window, '__initialWebviewState');
   Reflect.deleteProperty(window, '__initialTheme');
