@@ -458,6 +458,22 @@ describe('SidebarProvider permission replay', () => {
       directory: worktree,
       payload: { type: 'permission.asked', properties: permission },
     });
+    // With containment-based delivery the ask renders immediately, before any
+    // reply can arrive — no late catalog re-authorization is needed.
+    await vi.waitFor(() =>
+      expect(posted).toContainEqual(
+        expect.objectContaining({
+          type: 'server/event',
+          payload: expect.objectContaining({ type: 'permission.asked' }),
+        })
+      )
+    );
+    const askDeliveries = () =>
+      posted.filter((message) => {
+        const record = message as { type?: string; payload?: { type?: string } };
+        return record.type === 'server/event' && record.payload?.type === 'permission.asked';
+      }).length;
+
     eventHandler({
       directory: worktree,
       payload: {
@@ -474,12 +490,9 @@ describe('SidebarProvider permission replay', () => {
         })
       )
     );
-    expect(posted).not.toContainEqual(
-      expect.objectContaining({
-        type: 'server/event',
-        payload: expect.objectContaining({ type: 'permission.asked' }),
-      })
-    );
+    // The ask must not be resurrected after its reply: still exactly one ask
+    // delivery, the one that preceded the reply.
+    expect(askDeliveries()).toBe(1);
   });
 
   it('rejects a cold snapshot only while a moved conversation cannot be verified', async () => {

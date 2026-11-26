@@ -39,7 +39,11 @@ import type {
 import { parseServerEvent } from '../shared/protocol';
 import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
-import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import {
+  getRelativePathWithinWorkspace,
+  isSameWorkspacePath,
+  normalizeWorkspaceIdentity,
+} from '../shared/workspace-path';
 
 const CHAT_FOCUSED_CONTEXT = 'varro:chatFocused';
 const FOCUSED_CHAT_SURFACE_CONTEXT = 'varro:focusedChatSurface';
@@ -2507,7 +2511,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     void endpoint.restProxy
       .refreshSessionCatalogEventAuthorization(sessionIDs, directory)
       .then((authorized) => {
-        if (!authorized || !this.endpoints.has(endpoint)) return;
+        if (!this.endpoints.has(endpoint)) return;
+        if (!authorized) {
+          // The refresh above was the last chance to deliver this event to
+          // this endpoint; without a trace the drop is fully silent. Attention
+          // events carry prompts whose tool calls block until answered.
+          if (WORKSPACE_ATTENTION_EVENT_TYPES.has(msg.payload.type)) {
+            logger.warn(
+              `Attention event ${msg.payload.type} for session(s) ${sessionIDs.join(', ')} ` +
+                `(directory ${directory ?? 'unknown'}) is not authorized for workspace ` +
+                `${endpoint.workspacePath || 'unknown'}; dropping it — its prompt will not be shown in this view.`
+            );
+          }
+          return;
+        }
         // Authorization can finish after the request was answered; a late ask must not
         // resurrect a prompt whose reply already reached this view.
         if (this.isResolvedAttentionAsk(msg.payload)) return;
@@ -2720,7 +2737,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ) {
         return true;
       }
-      return isSameWorkspacePath(event.workspaceDirectory, endpoint.workspacePath);
+      if (isSameWorkspacePath(event.workspaceDirectory, endpoint.workspacePath)) return true;
+      // Sessions in git worktrees/subfolders of an open workspace folder emit
+      // events whose directory never equals a workspace folder exactly, so the
+      // identity checks above never match them. Fall back to containment —
+      // the same semantics the session-authorization code already uses for
+      // descendant scopes — so their attention events (permission asks, agent
+      // questions) reach the endpoint owning the containing folder instead of
+      // being dropped silently.
+      return (
+        getRelativePathWithinWorkspace(event.workspaceDirectory, endpoint.workspacePath) !== null
+      );
     }
     if (sessionIDs.length === 0) return WORKSPACE_INDEPENDENT_EVENT_TYPES.has(event.type);
     let knownMatch = false;
@@ -2736,7 +2763,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         continue;
       }
       const match = this.sessionState.getSessionWorkspaceMatch(sessionID, endpoint.workspacePath);
-      if (match === false) return false;
+      if (match === false) {
+        // Containment fallback for worktree/subfolder sessions (see above).
+        if (
+          directory &&
+          getRelativePathWithinWorkspace(directory, endpoint.workspacePath) !== null
+        ) {
+          knownMatch = true;
+          continue;
+        }
+        return false;
+      }
       if (match === true) knownMatch = true;
     }
     return knownMatch;
