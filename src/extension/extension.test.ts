@@ -1379,6 +1379,11 @@ describe('extension manifest', () => {
       icon: '$(list-flat)',
     });
     expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.chat.openMcpSettings',
+      title: 'Varro: Manage MCPs',
+      shortTitle: 'Manage MCPs',
+    });
+    expect(packageJson.contributes.commands).toContainEqual({
       command: 'varro.chat.openOpenCodeConfig',
       title: 'Varro: Open Global OpenCode Config',
       shortTitle: 'OpenCode.json',
@@ -1413,8 +1418,9 @@ describe('extension manifest', () => {
     expect(packageJson.contributes.menus['varro.viewActions']).toEqual([
       { command: 'varro.about', group: '1_main@1' },
       { command: 'varro.chat.openStats', group: '1_main@2' },
-      { command: 'varro.chat.openOpenCodeConfig', group: '1_main@3' },
-      { command: 'varro.openGitHub', group: '1_main@4' },
+      { command: 'varro.chat.openMcpSettings', group: '1_main@3' },
+      { command: 'varro.chat.openOpenCodeConfig', group: '1_main@4' },
+      { command: 'varro.openGitHub', group: '1_main@5' },
     ]);
     expect(packageJson.contributes.menus.commandPalette).toEqual(
       expect.arrayContaining([

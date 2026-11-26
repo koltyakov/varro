@@ -870,6 +870,12 @@ export function Chat() {
         navigateHistory(message.payload.direction);
         return;
       }
+      if (message.type === 'command/open-mcp-settings') {
+        setShowModels(false);
+        setShowPermissionSettings(false);
+        setShowMcpSettings(true);
+        return;
+      }
       if (message.type !== 'command/switch-session') return;
       switchActiveSession(message.payload.direction === 'previous' ? -1 : 1);
     });

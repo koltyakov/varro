@@ -181,6 +181,7 @@ function register(
     openNewTerminalEditor: vi.fn(),
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
+    openMcpSettings: vi.fn(),
     switchSession: vi.fn(),
     navigateHistory: vi.fn(),
     getStatusBarClickAction: vi.fn<() => 'focus' | 'attention' | 'sibling'>(() => 'focus'),
@@ -1436,6 +1437,17 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.openStats');
 
     expect(sidebar.generateUsageReport).toHaveBeenCalledOnce();
+  });
+
+  it('opens MCP settings in the revealed view', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.openMcpSettings');
+
+    expect(sidebar.openMcpSettings).toHaveBeenCalledOnce();
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
   });
 
   it('runs the global session cleanup command', async () => {

@@ -3431,6 +3431,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  openMcpSettings() {
+    this.webviewSession.queueCommand({ type: 'command/open-mcp-settings' });
+  }
+
   switchSession(direction: 'previous' | 'next') {
     this.webviewSession.queueCommand({
       type: 'command/switch-session',

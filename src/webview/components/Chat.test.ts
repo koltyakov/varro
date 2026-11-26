@@ -1959,6 +1959,26 @@ describe('header status badges', () => {
     expect(inputText()).toBe('Keep this draft');
   });
 
+  it('opens MCP settings from the extension command', () => {
+    vi.spyOn(client.mcp, 'defaults').mockResolvedValue({
+      global: {},
+      project: {},
+      effective: {},
+      editable: true,
+    });
+    renderChat();
+    setShowMcpSettings(false);
+    flushSolid();
+
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'command/open-mcp-settings' } })
+    );
+    flushSolid();
+
+    expect(showMcpSettings()).toBe(true);
+    expect(container?.querySelector('.mcp-settings-panel')).not.toBeNull();
+  });
+
   it('leaves Escape to nested chat controls that consume it', async () => {
     applyState(storePath('sessions', [session('active', 500), session('other', 400)]));
     applyState(storePath('activeSessionId', 'active'));

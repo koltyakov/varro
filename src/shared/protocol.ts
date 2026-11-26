@@ -1169,6 +1169,7 @@ export type ExtensionMessage =
   | { type: 'command/search-sessions' }
   | { type: 'command/open-attention-sessions' }
   | { type: 'command/open-completed-sessions' }
+  | { type: 'command/open-mcp-settings' }
   | { type: 'command/switch-session'; payload: { direction: 'previous' | 'next' } }
   | { type: 'command/navigate-history'; payload: { direction: 'back' | 'forward' } }
   | { type: 'command/abort' }
