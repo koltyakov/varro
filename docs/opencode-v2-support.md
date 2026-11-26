@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.6` and v2 `2.4.1`, alongside the v1 `1.16.0` and v2 `2.0.6` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence and global reload, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.6` and v2 `2.4.2`, alongside the v1 `1.16.0` and v2 `2.0.6` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence and global reload, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -224,6 +224,37 @@ which still requires v2.0.20.
 The macOS ARM64 run passed all 164 applicable checks with no recovered server
 processes. Logs are in `artifacts/opencode-2.0.6-floor-adapters.log` and
 `artifacts/opencode-2.0.6-global-config-reload.log`.
+
+### 2.4.2 compatibility review
+
+Reviewed v2.4.1 to v2.4.2, `6f0514052a` through `fc31a48531`. The complete diff is
+retained in `artifacts/opencode-2.4.2-upstream.diff`. Existing HTTP paths, SSE events,
+and consumed session, message, part, permission, and form shapes are unchanged; most
+protocol changes are OpenAPI descriptions. New experimental push-notification routes and
+events, `GET /api/experimental/skill/:skillID/file/*`, and a 502 `SkillLoadError` on
+prompt and skill activation are additive. `Agent.Info` gains optional `instructions`,
+which Varro does not read. Prompt, command, skill, and shell requests now unarchive an
+archived session and emit `session.unarchived`, which Varro already handles. "Always
+allow" for a web fetch now saves a per-site rule; the server picks the saved pattern,
+so Varro's reply is unchanged. V1 `1.19.6` and both support floors are unchanged. No adapter changes
+were required.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 28 | None in tested cases | Yes, applicable automated cases |
+| v1.19.6 | 31 | 27 | None in tested cases | Yes, applicable automated cases |
+| v2.0.6 | 48 | 10 | None in tested cases | Yes, applicable automated cases |
+| v2.4.2 | 55 | 3 | None in tested cases | Yes, applicable automated cases |
+
+The matrix passed all 164 applicable checks, with 68 family/platform skips and no
+recovered processes. The first run failed one v2.4.2 case because the integration
+test's `vscode` mock lacked `workspace.getConfiguration`, which the usage report has
+read since `abc0e693`. The mock now returns defaults. All five compatibility-summary
+tests pass afterward. `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` pass. Evidence is
+`artifacts/opencode-2.4.2-adapters.log`, `artifacts/opencode-adapters/run-GOFUCq/`,
+and `artifacts/opencode-2.4.2-build.log`. Real-editor visuals, native Windows, and
+Docker image builds are outside this bump's verification.
 
 ### 2.4.1 compatibility review
 

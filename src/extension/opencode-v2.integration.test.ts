@@ -43,7 +43,10 @@ const exportEditor = vi.hoisted(() => ({
 vi.mock('vscode', () => ({
   ProgressLocation: { Notification: 15 },
   commands: { executeCommand: vi.fn() },
-  workspace: { openTextDocument: exportEditor.openTextDocument },
+  workspace: {
+    openTextDocument: exportEditor.openTextDocument,
+    getConfiguration: () => ({ get: <T>(_key: string, fallback: T) => fallback }),
+  },
   window: {
     showTextDocument: exportEditor.showTextDocument,
     showErrorMessage: exportEditor.showErrorMessage,
