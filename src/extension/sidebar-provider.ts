@@ -32,7 +32,11 @@ import type {
 } from '../shared/protocol';
 import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
-import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import {
+  getRelativePathWithinWorkspace,
+  isSameWorkspacePath,
+  normalizeWorkspaceIdentity,
+} from '../shared/workspace-path';
 
 const CHAT_FOCUSED_CONTEXT = 'varro:chatFocused';
 const FOCUSED_CHAT_SURFACE_CONTEXT = 'varro:focusedChatSurface';
@@ -2661,7 +2665,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private postPendingPermissionActionables() {
     for (const [permissionId, request] of this.sessionState.pending) {
       if (request.kind !== 'permission') continue;
-      this.permissionAutomationOwnerForSession(request.sessionID)?.bridge.post({
+      const owner = this.permissionAutomationOwnerForSession(request.sessionID);
+      if (!owner) {
+        // Without an owner the actionable is never delivered: no prompt is
+        // rendered, the pending permission never resolves, and the gated
+        // tool call hangs the session until the user interrupts. Warn so
+        // the drop is at least diagnosable instead of fully silent.
+        logger.warn(
+          `Permission actionable ${permissionId} for session ${request.sessionID} has no owner view ` +
+            `(directory ${this.sessionState.directoryFor(request.sessionID) ?? 'unknown'}); ` +
+            `dropping it — the permission prompt will not be shown.`
+        );
+        continue;
+      }
+      owner.bridge.post({
         type: 'permission/actionable',
         payload: { permissionId },
       });
@@ -2674,7 +2691,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const owners = [...this.endpoints].filter(
       (endpoint) => endpoint.ready && this.permissionAutomationOwnerViewIds.has(endpoint.viewId)
     );
-    return owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, directory));
+    const exact = owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, directory));
+    if (exact) return exact;
+    // Sessions in git worktrees/subfolders of an open workspace folder have
+    // no exact-match owner; without a fallback their permission prompts are
+    // silently dropped and gated tool calls hang forever. Fall back to a
+    // ready owner endpoint whose workspace folder CONTAINS the session
+    // directory — same containment semantics the session-authorization
+    // code already uses for descendant scopes.
+    return owners.find(
+      (endpoint) => getRelativePathWithinWorkspace(directory, endpoint.workspacePath) !== null
+    );
   }
 
   private reconcileInterruptedRecoveryOwners(owners: WebviewEndpoint[]) {

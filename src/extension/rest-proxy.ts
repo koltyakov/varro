@@ -2520,6 +2520,15 @@ export class RestProxy {
       )?.catalogRoot;
     }
     if (!this.callbacks.isPermissionAutomationLeaseCurrent(lease, request)) {
+      // Keep the guard (another window/view may be the current owner), but
+      // make the failure visible: for automatic replies these errors were
+      // fully suppressed, so an approved permission could fail delivery
+      // with zero trace and the gated tool call would hang forever.
+      logger.warn(
+        `Permission automation ownership changed for ${pathname} ` +
+          `(session ${request.sessionID ?? 'unknown'}, permission ${request.permissionID ?? 'unknown'}); ` +
+          `rejecting the request — if no other view holds the current lease, the pending ask is now undeliverable.`
+      );
       throw new Error('Permission automation ownership changed');
     }
   }
