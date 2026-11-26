@@ -656,6 +656,57 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   cursor: default;
 }
 
+/* Tree connectors sit between the fixed status column and the title. Each 14px column
+   draws its line 4px in, under the parent title's first letters; rows are contiguous, so
+   the lines join across rows. */
+.session-item-tree-guides {
+  --session-tree-line: color-mix(in srgb, var(--color-vscode-fg-muted) 32%, transparent);
+  --session-tree-title-y: 16px;
+  display: flex;
+  align-self: stretch;
+  flex-shrink: 0;
+  margin-block: -8px;
+  margin-right: -10px;
+}
+
+.session-item-tree-guide {
+  position: relative;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.session-item-tree-guide.is-through::before,
+.session-item-tree-guide.is-branch::before,
+.session-item-tree-guide.is-branch::after,
+.session-item-tree-guide.is-last::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  box-sizing: border-box;
+}
+
+.session-item-tree-guide.is-through::before,
+.session-item-tree-guide.is-branch::before {
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--session-tree-line);
+}
+
+.session-item-tree-guide.is-branch::after {
+  top: var(--session-tree-title-y);
+  width: 6px;
+  border-top: 1px solid var(--session-tree-line);
+}
+
+.session-item-tree-guide.is-last::before {
+  top: 0;
+  width: 6px;
+  height: calc(var(--session-tree-title-y) + 1px);
+  border-bottom: 1px solid var(--session-tree-line);
+  border-left: 1px solid var(--session-tree-line);
+  border-bottom-left-radius: 4px;
+}
+
 .session-item-content {
   display: flex;
   flex-direction: column;

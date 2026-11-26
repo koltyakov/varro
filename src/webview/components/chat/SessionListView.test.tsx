@@ -23,7 +23,9 @@ import {
   getSessionDiffSummaryStateForTests,
   resetSessionDiffSummaryStateForTests,
   deriveSessionIndicators,
+  arrangeSubagentSessions,
   getSessionStatusIndicatorKind,
+  getSubagentSessionsForParent,
   isRunningSession,
   SessionListSectionHeader,
   SessionListView,
@@ -35,6 +37,7 @@ import {
   resetSessionShareOverridesForTests,
 } from '../../lib/session-share-overrides';
 import { fixture } from '../../test-fixtures';
+import { hasNestedSubagents, setSubagentListView } from '../../lib/subagent-list-view';
 import {
   compressIcon,
   gitIcon,
@@ -2651,6 +2654,115 @@ describe('SessionListView ordering', () => {
         (element) => element.textContent
       )
     ).toEqual(['newer-created', 'older-created']);
+  });
+});
+
+describe('SessionListView sub-agent tree', () => {
+  const MINUTE = 60_000;
+  afterEach(() => setSubagentListView('tree'));
+  const rowsSummary = () =>
+    Array.from(container.querySelectorAll<HTMLElement>('.session-item')).map((row) => [
+      row.dataset.sessionId,
+      Array.from(row.querySelectorAll('.session-item-tree-guide')).map((guide) =>
+        guide.className.replace('session-item-tree-guide is-', '')
+      ),
+    ]);
+  const seedTree = () => {
+    const now = Date.now();
+    seedSessions([
+      session('parent', now),
+      session('child-a', now - 30 * MINUTE, { parentID: 'parent' }),
+      session('child-b', now - 10 * MINUTE, { parentID: 'parent' }),
+      session('grand-a', now - MINUTE, { parentID: 'child-a' }),
+      session('grand-a2', now - 20 * MINUTE, { parentID: 'child-a' }),
+      session('great-a', now - 2 * MINUTE, { parentID: 'grand-a' }),
+    ]);
+  };
+
+  it('nests sub-agents under their parents with the newest branch first', () => {
+    mockEmptyDiffSummary();
+    seedTree();
+
+    cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
+    flushSolid();
+
+    // child-a is older than child-b, but its branch has the newest update.
+    expect(rowsSummary()).toEqual([
+      ['child-a', []],
+      ['grand-a', ['branch']],
+      ['great-a', ['through', 'last']],
+      ['grand-a2', ['last']],
+      ['child-b', []],
+    ]);
+    // Status indicators stay in the fixed leading column; only the title side nests.
+    const nested = container.querySelector<HTMLElement>('[data-session-id="great-a"]')!;
+    expect(nested.firstElementChild?.classList).toContain('session-item-leading');
+    expect(nested.dataset.treeDepth).toBe('2');
+  });
+
+  it('lists sub-agents newest first in flat view and reports nesting to the header', () => {
+    mockEmptyDiffSummary();
+    seedTree();
+
+    cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
+    flushSolid();
+    expect(hasNestedSubagents('parent')).toBe(true);
+
+    setSubagentListView('flat');
+    flushSolid();
+
+    expect(rowsSummary()).toEqual([
+      ['grand-a', []],
+      ['great-a', []],
+      ['child-b', []],
+      ['grand-a2', []],
+      ['child-a', []],
+    ]);
+
+    cleanup?.();
+    cleanup = undefined;
+    flushSolid();
+    expect(hasNestedSubagents('parent')).toBe(false);
+  });
+
+  it('does not report single-level sub-agent lists as nested', () => {
+    mockEmptyDiffSummary();
+    const now = Date.now();
+    seedSessions([
+      session('parent', now),
+      session('child-a', now - MINUTE, { parentID: 'parent' }),
+      session('child-b', now - 2 * MINUTE, { parentID: 'parent' }),
+    ]);
+
+    cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
+    flushSolid();
+
+    expect(hasNestedSubagents('parent')).toBe(false);
+    expect(container.querySelector('.session-item-tree-guide')).toBeNull();
+  });
+
+  it('starts a branch for sessions whose parent is not listed', () => {
+    const now = Date.now();
+    const sessions = [
+      session('orphan', now, { parentID: 'missing' }),
+      session('child', now - MINUTE, { parentID: 'parent' }),
+      session('loop-a', now - 2 * MINUTE, { parentID: 'loop-b' }),
+      session('loop-b', now - 3 * MINUTE, { parentID: 'loop-a' }),
+    ];
+
+    const arranged = arrangeSubagentSessions(sessions, 'tree', now);
+
+    // Cyclic links never reach a root but stay visible.
+    expect(arranged.sessions.map((item) => item.id)).toEqual([
+      'orphan',
+      'child',
+      'loop-a',
+      'loop-b',
+    ]);
+    expect(arranged.guides.size).toBe(0);
+    expect(getSubagentSessionsForParent([session('parent', now), ...sessions], 'parent')).toEqual([
+      sessions[1],
+    ]);
   });
 });
 

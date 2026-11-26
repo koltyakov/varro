@@ -14,7 +14,19 @@ import { client } from '../../lib/client';
 import { useSecondClock } from '../../lib/clock';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
-import { cableTagIcon, hourglassIcon, pinIcon, xmarkIcon } from '../../lib/ui-icons';
+import {
+  alignRightIcon,
+  cableTagIcon,
+  hourglassIcon,
+  alignJustifyIcon,
+  pinIcon,
+  xmarkIcon,
+} from '../../lib/ui-icons';
+import {
+  hasNestedSubagents,
+  setSubagentListView,
+  subagentListView,
+} from '../../lib/subagent-list-view';
 import { NavArrowLeftControlIcon } from '../ControlIcons';
 import {
   setError,
@@ -60,6 +72,29 @@ function isActiveSessionRunning() {
 
 function siblingWorkspaceAlerts() {
   return state.siblingWorkspaceAlerts;
+}
+
+/** Shows the layout a click switches to: a flat list from the tree, a tree from the list. */
+function SubagentLayoutToggle() {
+  const isTree = () => subagentListView() === 'tree';
+  const label = () => (isTree() ? 'Show as flat list' : 'Show as tree');
+  return (
+    <Tooltip content={label()}>
+      <button
+        type="button"
+        class="chat-header-btn chat-header-subagent-layout"
+        onClick={() => setSubagentListView(isTree() ? 'flat' : 'tree')}
+        aria-label={label()}
+      >
+        <UiIcon
+          source={isTree() ? alignJustifyIcon : alignRightIcon}
+          class="chat-header-button-icon"
+          width={16}
+          height={16}
+        />
+      </button>
+    </Tooltip>
+  );
 }
 
 function NewChatButton(props: { onCreateSession: () => void }) {
@@ -412,6 +447,8 @@ export function SessionPickerHeader(props: {
   runningCount: number;
   pendingCount?: number;
   showNewChatButton?: boolean;
+  /** Sub-agent list shown under this header; offers the tree/flat toggle when nested. */
+  subagentParentId?: string | null;
   onBack?: () => void;
   onClearFilter: () => void;
   onMarkAllRead?: (() => void) | null;
@@ -510,6 +547,9 @@ export function SessionPickerHeader(props: {
         </Show>
         <Show when={props.showRunningBadge}>
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
+        </Show>
+        <Show when={hasNestedSubagents(props.subagentParentId)}>
+          <SubagentLayoutToggle />
         </Show>
         <Show when={props.showNewChatButton}>
           <NewChatButton onCreateSession={props.onCreateSession} />

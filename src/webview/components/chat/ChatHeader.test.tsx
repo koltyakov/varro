@@ -1,7 +1,18 @@
 import { flush as flushSolid } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { render } from '@solidjs/web';
-import { cableTagIcon, folderIcon, gitIcon } from '../../lib/ui-icons';
+import {
+  cableTagIcon,
+  folderIcon,
+  gitIcon,
+  alignJustifyIcon,
+  alignRightIcon,
+} from '../../lib/ui-icons';
+import {
+  reportNestedSubagents,
+  setSubagentListView,
+  subagentListView,
+} from '../../lib/subagent-list-view';
 import { toCssUrl } from '../UiIcon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
@@ -847,6 +858,66 @@ describe('ActiveChatHeader', () => {
     expect(send.mock.calls.filter(([message]) => message.type === 'chat/new-editor')).toEqual([
       [{ type: 'chat/new-editor' }],
     ]);
+  });
+
+  it('offers the sub-agent layout toggle only for nested sub-agent lists', () => {
+    cleanup = render(
+      () => (
+        <SessionPickerHeader
+          filterLabel="Sub-agents for Parent"
+          filterPrefix="Viewing:"
+          primarySessionsCount={1}
+          showFailedBadge={false}
+          showAttentionBadge={false}
+          showPlanReadyBadge={false}
+          showCompletedBadge={false}
+          showRunningBadge={false}
+          failedCount={0}
+          attentionCount={0}
+          planReadyCount={0}
+          completedCount={0}
+          runningCount={0}
+          showNewChatButton
+          subagentParentId="parent"
+          onClearFilter={vi.fn()}
+          onOpenFailedSessions={vi.fn()}
+          onOpenAttentionSessions={vi.fn()}
+          onOpenPlanReadySessions={vi.fn()}
+          onOpenCompletedSessions={vi.fn()}
+          onOpenRunningSessions={vi.fn()}
+          onOpenPendingSessions={vi.fn()}
+          onCreateSession={vi.fn()}
+        />
+      ),
+      container
+    );
+    flushSolid();
+    const toggle = () => container.querySelector<HTMLButtonElement>('.chat-header-subagent-layout');
+    expect(toggle()).toBeNull();
+
+    const release = reportNestedSubagents('parent');
+    flushSolid();
+    try {
+      // The button shows the layout it switches to: a flat list from the default tree.
+      expect(toggle()?.getAttribute('aria-label')).toBe('Show as flat list');
+      expect(
+        toggle()?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(alignJustifyIcon));
+
+      toggle()!.click();
+      flushSolid();
+
+      expect(subagentListView()).toBe('flat');
+      expect(toggle()?.getAttribute('aria-label')).toBe('Show as tree');
+      expect(
+        toggle()?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(alignRightIcon));
+    } finally {
+      release();
+      setSubagentListView('tree');
+      flushSolid();
+    }
+    expect(toggle()).toBeNull();
   });
 
   it('returns to the sessions list after deleting from the header menu', async () => {

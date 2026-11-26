@@ -183,6 +183,7 @@ export function ChatWorkspace(props: {
       filterTitle={useSidebarCounts ? sidebarFilterTitle() : props.sessionListFilterTitle}
       primarySessionsCount={visiblePrimarySessionsCount()}
       showBackButton={!!(useSidebarCounts ? sidebarSubagentParentId() : props.subagentParentId)}
+      subagentParentId={useSidebarCounts ? sidebarSubagentParentId() : props.subagentParentId}
       backTitle={useSidebarCounts ? 'Back to sessions' : undefined}
       showFailedBadge={props.shouldShowFailedBadge}
       showAttentionBadge={props.shouldShowAttentionBadge}

@@ -87,11 +87,15 @@ import warningTriangleIcon from 'iconoir/icons/warning-triangle.svg';
 import warningTriangleSolidIcon from 'iconoir/icons/warning-triangle-solid.svg';
 import wifiIcon from 'iconoir/icons/wifi.svg';
 import wrenchIcon from 'iconoir/icons/wrench.svg';
+import alignJustifyIcon from 'iconoir/icons/align-justify.svg';
+import alignRightIcon from 'iconoir/icons/align-right.svg';
 import xmarkIcon from 'iconoir/icons/xmark.svg';
 import xmarkCircleIcon from 'iconoir/icons/xmark-circle.svg';
 import xmarkCircleSolidIcon from 'iconoir/icons/xmark-circle-solid.svg';
 
 export {
+  alignJustifyIcon,
+  alignRightIcon,
   gymIcon,
   dollarCircleIcon,
   dollarIcon,

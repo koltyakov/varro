@@ -104,6 +104,11 @@ import { Tooltip } from '../Tooltip';
 import { sessionDiffSummaries } from './session-diff-summaries';
 import { sessionStore } from '../../lib/stores/session-store';
 import { isSessionTransferHidden } from '../../lib/session-transfer';
+import {
+  reportNestedSubagents,
+  subagentListView,
+  type SubagentListView,
+} from '../../lib/subagent-list-view';
 
 const {
   cache: sessionDiffSummaryCache,
@@ -445,6 +450,8 @@ const MIN_RECENT_SESSIONS = 50;
 const SESSION_ARCHIVE_PRELOAD_TARGET = 50;
 const SUBAGENT_SESSION_PAGE_SIZE = 100;
 const MAX_SUBAGENT_SESSION_LIMIT = 1_000_000;
+// Deeper sub-agent levels share the last indent so titles keep usable width.
+const MAX_SESSION_TREE_INDENT = 6;
 const SESSION_SEARCH_LIMIT = 30;
 const SESSION_SEARCH_DEBOUNCE_MS = 200;
 const PARTIAL_SESSION_LIST_ATTEMPTS = 2;
@@ -551,6 +558,92 @@ export function getSubagentSessionsForParent(
   const descendantIds = new Set(getSessionTreeIds(parentSessionId, sessions));
   descendantIds.delete(parentSessionId);
   return sessions.filter((session) => descendantIds.has(session.id));
+}
+
+/**
+ * One connector column of a nested row: `through` continues an ancestor's branch past this
+ * row, `branch` joins a sibling that has later siblings, and `last` closes its branch.
+ */
+export type SessionTreeGuide = 'none' | 'through' | 'branch' | 'last';
+type ArrangedSubagentSessions = {
+  sessions: typeof state.sessions;
+  /** Connector columns of nested rows; top-level rows have no entry. */
+  guides: Map<string, SessionTreeGuide[]>;
+};
+
+/**
+ * Orders sub-agent sessions newest first. Flat sorts every session by its own update; tree
+ * keeps each session above its descendants and sorts siblings by their branch's newest update,
+ * so active branches rise. Sessions whose parent is not listed start their own branch.
+ */
+export function arrangeSubagentSessions(
+  sessions: typeof state.sessions,
+  view: SubagentListView,
+  now: number
+): ArrangedSubagentSessions {
+  const guides = new Map<string, SessionTreeGuide[]>();
+  if (view === 'flat') {
+    return {
+      sessions: sessions.toSorted((a, b) => compareSessionsByActivity(a, b, now)),
+      guides,
+    };
+  }
+
+  const listedIds = new Set(sessions.map((session) => session.id));
+  const childrenByParent = new Map<string, Session[]>();
+  const roots: Session[] = [];
+  for (const session of sessions) {
+    const parentID = session.parentID;
+    if (!parentID || parentID === session.id || !listedIds.has(parentID)) {
+      roots.push(session);
+      continue;
+    }
+    const siblings = childrenByParent.get(parentID);
+    if (siblings) siblings.push(session);
+    else childrenByParent.set(parentID, [session]);
+  }
+
+  const branchUpdated = new Map<string, number>();
+  const getBranchUpdated = (session: Session, visiting: Set<string>): number => {
+    const cached = branchUpdated.get(session.id);
+    if (cached !== undefined) return cached;
+    visiting.add(session.id);
+    let updated = session.time.updated;
+    for (const child of childrenByParent.get(session.id) ?? []) {
+      if (!visiting.has(child.id)) updated = Math.max(updated, getBranchUpdated(child, visiting));
+    }
+    branchUpdated.set(session.id, updated);
+    return updated;
+  };
+  const branchActivity = (session: Session) => ({
+    time: { created: session.time.created, updated: getBranchUpdated(session, new Set()) },
+  });
+  const sortSiblings = (siblings: Session[]) =>
+    siblings.toSorted((a, b) =>
+      compareSessionsByActivity(branchActivity(a), branchActivity(b), now)
+    );
+
+  const ordered: Session[] = [];
+  const visited = new Set<string>();
+  const visit = (session: Session, sessionGuides: SessionTreeGuide[]) => {
+    if (visited.has(session.id)) return;
+    visited.add(session.id);
+    ordered.push(session);
+    if (sessionGuides.length > 0) guides.set(session.id, sessionGuides);
+    // A child inherits its parent's columns; the parent's own connector becomes a line
+    // through the child when the parent has later siblings, or blank space when it closed.
+    const inherited = sessionGuides.map((guide): SessionTreeGuide =>
+      guide === 'branch' || guide === 'through' ? 'through' : 'none'
+    );
+    const children = sortSiblings(childrenByParent.get(session.id) ?? []);
+    children.forEach((child, index) =>
+      visit(child, [...inherited, index === children.length - 1 ? 'last' : 'branch'])
+    );
+  };
+  for (const root of sortSiblings(roots)) visit(root, []);
+  // Cyclic parent links never reach a root; keep them visible at the end.
+  for (const session of sessions) if (!visited.has(session.id)) ordered.push(session);
+  return { sessions: ordered, guides };
 }
 
 export function shouldShowSessionHeaderBadge(
@@ -1429,6 +1522,27 @@ export function SessionListView(props: {
   const subagentSessions = createMemo(() =>
     getSubagentSessionsForParent(resolvedSubagentSessions(), props.subagentParentId ?? null)
   );
+  const arrangedSubagentSessions = createMemo(() =>
+    arrangeSubagentSessions(subagentSessions(), subagentListView(), ageNow())
+  );
+  // The header offers the tree/flat toggle only when some sub-agent has its own sub-agents.
+  const hasNestedSubagentSessions = createMemo(() => {
+    const parentId = props.subagentParentId;
+    const sessions = subagentSessions();
+    const ids = new Set(sessions.map((session) => session.id));
+    return sessions.some(
+      (session) => !!session.parentID && session.parentID !== parentId && ids.has(session.parentID)
+    );
+  });
+  createEffect(
+    () => (hasNestedSubagentSessions() ? (props.subagentParentId ?? null) : null),
+    (parentId) => (parentId ? reportNestedSubagents(parentId) : undefined)
+  );
+  const NO_TREE_GUIDES: SessionTreeGuide[] = [];
+  const getTreeGuides = (sessionId: string) =>
+    props.subagentParentId
+      ? (arrangedSubagentSessions().guides.get(sessionId) ?? NO_TREE_GUIDES)
+      : NO_TREE_GUIDES;
   const searchResultSessions = createMemo(() => {
     const results = nativeSearchResults();
     if (!results) return [];
@@ -1543,7 +1657,7 @@ export function SessionListView(props: {
     if (shouldPreload) void loadMoreSessions();
   });
   const directSessions = createMemo(() => {
-    if (props.subagentParentId) return subagentSessions();
+    if (props.subagentParentId) return arrangedSubagentSessions().sessions;
     if (props.sessionFilter) return filteredSessions();
     return [];
   });
@@ -1801,6 +1915,7 @@ export function SessionListView(props: {
               activeNow={activeNow}
               queuedMessageCount={queuedMessageCounts().get(sessionId) ?? 0}
               subagentCount={sessionIndicators().subagentCounts.get(sessionId) || 0}
+              treeGuides={getTreeGuides(sessionId)}
               hasPermissionRequest={sessionIndicators().permissionIds.has(sessionId)}
               hasQuestionRequest={sessionIndicators().questionIds.has(sessionId)}
               isRunning={sessionIndicators().runningIds.has(sessionId)}
@@ -2348,6 +2463,8 @@ function SessionListItem(props: {
   activeNow: () => number;
   queuedMessageCount: number;
   subagentCount: number;
+  /** Tree connector columns, one per nesting level; empty outside the sub-agent tree. */
+  treeGuides: readonly SessionTreeGuide[];
   hasPermissionRequest: boolean;
   hasQuestionRequest: boolean;
   isRunning: boolean;
@@ -2635,6 +2752,7 @@ function SessionListItem(props: {
       }}
       class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${props.isDraggingPinned ? 'is-dragging-pinned' : ''} ${props.isDragOverPinned ? 'is-drag-over-pinned' : ''} ${props.startsUnpinnedGroup ? 'starts-unpinned-group' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
       data-session-id={props.session.id}
+      data-tree-depth={props.treeGuides.length > 0 ? props.treeGuides.length : undefined}
       inert={props.actions.sessionId() ? true : undefined}
       onMouseMove={() => {
         if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
@@ -2721,6 +2839,14 @@ function SessionListItem(props: {
           if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
         }}
       >
+        <Show when={props.treeGuides.length > 0}>
+          <span class="session-item-tree-guides" aria-hidden="true">
+            {/* Deep branches keep their innermost columns so titles keep usable width. */}
+            {props.treeGuides.slice(-MAX_SESSION_TREE_INDENT).map((guide) => (
+              <span class={`session-item-tree-guide is-${guide}`} />
+            ))}
+          </span>
+        </Show>
         <div class="session-item-content">
           <span class="session-item-title">
             <span class="session-item-title-text">
