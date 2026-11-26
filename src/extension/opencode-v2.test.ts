@@ -167,6 +167,26 @@ describe('native session forms', () => {
       expect.anything()
     );
   });
+  it('recovers a form via the session-scoped route when the directory-scoped list misses it', async () => {
+    // Worktree/subfolder sessions: GET /question (directory-scoped /api/form)
+    // returns nothing, but the session-scoped form route still sees the
+    // pending form and the reply must go through.
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/api/session/ses_child/form/frm_fixture')) return {};
+      if (path === '/api/session/ses_child/form') return { data: [form] };
+      return { data: [] };
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    const answer = { proxy: false, count: 0, region: 'b', external: true };
+    await adapter.request('POST', '/question/frm_fixture/reply', {
+      kind: 'native-form',
+      sessionID: form.sessionID,
+      answer,
+    });
+    expect(
+      wire.mock.calls.find(([, path]) => path === '/api/session/ses_child/form/frm_fixture/reply')
+    ).toBeDefined();
+  });
   it('leaves location-owned MCP forms out of session snapshots and events without resolving them', async () => {
     const globalForm: FormInfo = { ...form, id: 'frm_global', sessionID: 'global' };
     const wire = vi.fn(async (_method: string) => ({ data: [globalForm, form] }));
