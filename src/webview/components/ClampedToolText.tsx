@@ -1,6 +1,7 @@
-import { createEffect, createMemo, createSignal } from 'solid-js';
+import { createEffect, createMemo, createSignal, Show } from 'solid-js';
 import { type JSX } from '@solidjs/web';
 import { postMessage } from '../lib/bridge';
+import { codeHighlighter, highlightCode, resolveCodeLanguage } from '../lib/code-highlighter';
 
 /** Logical lines shown before a value is clamped. Deliberately short: the
  *  preview is a glance at the shape of the output, not a place to read it. */
@@ -63,12 +64,19 @@ export function ClampedToolText(props: {
   /** Names the editor tab when the full text is opened. */
   title: string;
   language?: string;
+  /** Syntax-highlights the preview in `language`. Plain text renders until highlighting lands. */
+  highlight?: boolean;
   view?: 'markdown-preview';
   class?: string;
   role?: JSX.HTMLAttributes<HTMLPreElement>['role'];
   'aria-label'?: string;
 }) {
   const result = createMemo(() => clampToolText(props.content));
+  const highlightLanguage = () => {
+    if (!props.highlight) return undefined;
+    const language = resolveCodeLanguage(props.language);
+    return language === 'plaintext' ? undefined : language;
+  };
 
   // Slicing by logical lines is not enough on its own: one 2000-character line
   // wraps into far more rendered rows than the clamp promises. CSS caps the
@@ -142,7 +150,36 @@ export function ClampedToolText(props: {
       role={props.role}
       aria-label={props['aria-label']}
     >
-      {result().preview}
+      <Show when={highlightLanguage()} fallback={result().preview}>
+        {(language) => <HighlightedCode text={result().preview} language={language()} />}
+      </Show>
     </pre>
   );
+}
+
+function HighlightedCode(props: { text: string; language: string }) {
+  // oxlint-disable-next-line no-unassigned-vars -- Solid assigns the JSX ref before effects run.
+  let element!: HTMLElement;
+  createEffect(
+    () => ({ text: props.text, language: props.language }),
+    ({ text, language }) => {
+      const cached = highlightCode(text, language);
+      if (cached !== null) {
+        element.innerHTML = cached;
+        return;
+      }
+      element.textContent = text;
+      // The element and text together own the result, so a stale highlight never lands.
+      return codeHighlighter.request(
+        text,
+        language,
+        (html) => {
+          if (html !== null && element.isConnected && element.textContent === text)
+            element.innerHTML = html;
+        },
+        1
+      );
+    }
+  );
+  return <code ref={element} class="tool-text-highlighted hljs" />;
 }

@@ -80,6 +80,7 @@ import {
   bookIcon,
   cableTagIcon,
   checkCircleIcon,
+  codeIcon,
   editPencilIcon,
   eyeIcon,
   helpCircleIcon,
@@ -128,6 +129,7 @@ function ToolCallIcon(props: {
   const iconSize = () => props.size ?? (isWaiting() || kind() === 'task' ? 16 : 12);
   const source = () => {
     if (isWaiting()) return hourglassIcon;
+    if (!props.kind && isCodeModeTool(props.toolName || '')) return codeIcon;
     switch (kind()) {
       case 'terminal':
         return terminalIcon;
@@ -279,8 +281,22 @@ type CodeModeToolCall = {
   input: UnknownRecord;
 };
 
+/** Calls past this are summarized; the full list opens in an editor tab. */
+const CODE_MODE_VISIBLE_CALLS = 12;
+/** Results larger than this stay as raw text rather than being parsed and re-indented. */
+const CODE_MODE_JSON_RESULT_MAX_CHARS = 256 * 1024;
+
+function isCodeModeTool(toolName: string) {
+  return normalizeToolName(toolName) === 'execute';
+}
+
+/** A Code Mode run is an `execute` call whose input is a script. */
+function isCodeModeRun(toolName: string, state: ToolPart['state']) {
+  return isCodeModeTool(toolName) && isString(asRecord(state.input)?.code);
+}
+
 function getCodeModeToolCalls(toolName: string, state: ToolPart['state']): CodeModeToolCall[] {
-  if (normalizeToolName(toolName) !== 'execute' || state.status === 'pending') return [];
+  if (!isCodeModeTool(toolName) || state.status === 'pending') return [];
   const calls = state.metadata?.toolCalls;
   if (!Array.isArray(calls)) return [];
   return calls.flatMap((value) => {
@@ -296,11 +312,43 @@ function getCodeModeToolCalls(toolName: string, state: ToolPart['state']): CodeM
 }
 
 function isCodeModeFailure(toolName: string, state: ToolPart['state']): boolean {
-  return (
-    normalizeToolName(toolName) === 'execute' &&
-    state.status === 'completed' &&
-    state.metadata.error === true
-  );
+  return isCodeModeTool(toolName) && state.status === 'completed' && state.metadata.error === true;
+}
+
+/** Names each distinct nested tool once, in first-call order. */
+function formatCodeModeTitle(state: ToolPart['state']) {
+  const names = [...new Set(getCodeModeToolCalls('execute', state).map((call) => call.tool))];
+  return names.length ? `Code Mode: ${names.join(', ')}` : 'Code Mode';
+}
+
+function formatCodeModeCallValue<T>(value: T): string {
+  if (isString(value)) return value.replace(/\s+/g, ' ').trim();
+  if (isNumber(value) || isBoolean(value) || value === null) return String(value);
+  return JSON.stringify(value) ?? '';
+}
+
+/** One line per call, like a function signature: `node: vm, id: job-1`. */
+function formatCodeModeCallArgs(input: UnknownRecord): string {
+  return getVisibleInputEntries(input)
+    .map(([key, value]) => `${key}: ${formatCodeModeCallValue(value)}`)
+    .join(', ');
+}
+
+/** Re-indents a JSON object or array result so it reads as data, not one wrapped line. */
+export function formatCodeModeResult(output: string) {
+  const trimmed = output.trim();
+  if (
+    trimmed.length > CODE_MODE_JSON_RESULT_MAX_CHARS ||
+    !/^[[{]/.test(trimmed) ||
+    !/[\]}]$/.test(trimmed)
+  )
+    return { value: output };
+  try {
+    return { value: JSON.stringify(JSON.parse(trimmed), null, 2), language: 'json' as const };
+  } catch {
+    // Not JSON after all, e.g. a truncated payload: show it as written.
+    return { value: output };
+  }
 }
 
 export function getVisibleInputEntries(input: UnknownRecord) {
@@ -350,6 +398,8 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
     const url = input.url;
     if (isString(url) && url.trim()) return url.trim();
   }
+
+  if (isCodeModeRun(toolName, state)) return formatCodeModeTitle(state);
 
   // Running calls can carry the tool name as a placeholder title before output arrives.
   if (normalizedToolName === 'bash' && (!title || normalizeToolName(title) === 'bash')) {
@@ -1493,6 +1543,8 @@ type StructuredToolResult = {
   label: string;
   value: string;
   status?: 'error' | 'aborted';
+  /** Highlights the value and names the editor language when it is opened. */
+  language?: string;
 };
 
 type TaskUsageDisplay = {
@@ -1537,6 +1589,12 @@ function GenericToolCall(props: {
   const toolName = () => normalizeToolName(props.tool.tool);
   const codeModeCalls = createMemo(() => getCodeModeToolCalls(props.tool.tool, props.state));
   const codeModeFailure = () => isCodeModeFailure(props.tool.tool, props.state);
+  const isCodeMode = () => isCodeModeRun(props.tool.tool, props.state);
+  const codeModeResult = createMemo(() =>
+    isCodeMode() && props.state.status === 'completed'
+      ? formatCodeModeResult(props.fullOutput)
+      : { value: props.fullOutput }
+  );
   const isFailed = () => props.state.status === 'error' || codeModeFailure();
   const isAborted = () => isAbortedToolError(props.state);
   const isPermissionRejected = () => isPermissionRejectedToolError(props.state);
@@ -2041,6 +2099,10 @@ function GenericToolCall(props: {
       };
     }
     if (isTask()) return taskResult();
+    if (isCodeMode()) {
+      if (isBlank(props.fullOutput)) return { label: 'result', value: '(no output)' };
+      return { label: 'result', ...codeModeResult() };
+    }
     if (isSearchTool()) {
       return {
         label: 'results',
@@ -2310,9 +2372,10 @@ function GenericToolCall(props: {
                     </Show>
                   }
                   inputEntries={detailInputEntries()}
+                  valueLanguages={isCodeMode() ? CODE_MODE_VALUE_LANGUAGES : undefined}
                   details={
                     <Show when={codeModeCalls().length > 0}>
-                      <CodeModeToolCalls calls={codeModeCalls()} />
+                      <CodeModeToolCalls calls={codeModeCalls()} toolTitle={props.title} />
                     </Show>
                   }
                   result={structuredResult()}
@@ -2495,34 +2558,81 @@ function LiveTerminalOutput(props: { content: string }) {
   );
 }
 
-function CodeModeToolCalls(props: { calls: CodeModeToolCall[] }) {
+const CODE_MODE_VALUE_LANGUAGES = { code: 'javascript' } as const;
+
+const CODE_MODE_CALL_STATUS_LABELS: Record<CodeModeToolCall['status'], string> = {
+  running: 'Running',
+  completed: 'Completed',
+  error: 'Failed',
+};
+
+/**
+ * Nested calls read like a call log: one line each, `tool(args)`, so a script
+ * that makes several calls stays scannable. Full arguments open in an editor
+ * tab rather than expanding in place.
+ */
+function CodeModeToolCalls(props: { calls: CodeModeToolCall[]; toolTitle: string }) {
+  const visibleCalls = () => props.calls.slice(0, CODE_MODE_VISIBLE_CALLS);
+  const hiddenCount = () => Math.max(0, props.calls.length - CODE_MODE_VISIBLE_CALLS);
+  const allCallsJson = () =>
+    JSON.stringify(
+      props.calls.map((call) => ({ tool: call.tool, status: call.status, input: call.input })),
+      null,
+      2
+    );
+
   return (
-    <ol class="code-mode-tool-calls" aria-label="Code Mode tool calls">
-      {/* Calls have no IDs; OpenCode reports them in start order. Keep rows mounted by position. */}
-      <For keyed={false} each={props.calls}>
-        {(call) => (
-          <li class="code-mode-tool-call" data-status={call().status}>
-            <div class="code-mode-tool-call-header">
-              <ToolCallIcon toolName={call().tool} statusClass={`tool-status-${call().status}`} />
-              <span class="code-mode-tool-call-name">{call().tool}</span>
-              <span class="code-mode-tool-call-status" role="status" aria-live="polite">
-                {call().status === 'running'
-                  ? 'Running'
-                  : call().status === 'completed'
-                    ? 'Completed'
-                    : 'Error'}
-              </span>
-            </div>
-            <StructuredToolCard
-              inputEntries={getVisibleInputEntries(call().input)}
-              result={null}
-              onOpenPath={openGenericToolFile}
-              toolTitle={call().tool}
+    <div class="structured-tool-row code-mode-tool-calls-row">
+      <span class="structured-tool-label">calls</span>
+      <ol class="code-mode-tool-calls" aria-label="Code Mode tool calls">
+        {/* Calls have no IDs; OpenCode reports them in start order. Keep rows mounted by position. */}
+        <For keyed={false} each={visibleCalls()}>
+          {(call) => {
+            const args = () => formatCodeModeCallArgs(call().input);
+            const argsJson = () => JSON.stringify(call().input, null, 2);
+            return (
+              <li class="code-mode-tool-call" data-status={call().status}>
+                <ToolCallIcon
+                  toolName={call().tool}
+                  statusClass={`tool-status-${call().status}`}
+                  statusLabel={CODE_MODE_CALL_STATUS_LABELS[call().status]}
+                />
+                <span class="code-mode-tool-call-signature" title={`${call().tool}(${args()})`}>
+                  <span
+                    class={`code-mode-tool-call-name${call().status === 'running' ? ' shimmer-progress' : ''}`}
+                  >
+                    {call().tool}
+                  </span>
+                  <span class="code-mode-tool-call-args">({args()})</span>
+                </span>
+                <Show when={args()}>
+                  <OpenTextIconButton
+                    content={argsJson()}
+                    title={`${call().tool} (input)`}
+                    label={`${call().tool} input`}
+                    language="json"
+                  />
+                  <CopyIconButton text={argsJson()} label={`${call().tool} input`} />
+                </Show>
+              </li>
+            );
+          }}
+        </For>
+        <Show when={hiddenCount() > 0}>
+          <li class="code-mode-tool-call code-mode-tool-call-more">
+            <span class="code-mode-tool-call-signature">
+              {`+${hiddenCount()} more ${hiddenCount() === 1 ? 'call' : 'calls'}`}
+            </span>
+            <OpenTextIconButton
+              content={allCallsJson()}
+              title={`${props.toolTitle} (calls)`}
+              label="all calls"
+              language="json"
             />
           </li>
-        )}
-      </For>
-    </ol>
+        </Show>
+      </ol>
+    </div>
   );
 }
 
@@ -2530,6 +2640,8 @@ function StructuredToolCard(props: {
   actions?: JSX.Element;
   details?: JSX.Element;
   inputEntries: Array<[string, unknown]>;
+  /** Input keys whose block values are code, mapped to their highlight language. */
+  valueLanguages?: Readonly<Record<string, string>>;
   result: StructuredToolResult | null;
   onOpenPath: (path: string) => void;
   /** Prefixes editor-tab titles so an opened value says which tool it came from. */
@@ -2544,11 +2656,20 @@ function StructuredToolCard(props: {
       {props.actions}
       <For each={nonPromptEntries()}>
         {([key, value]) => {
+          const codeLanguage = isString(value) ? props.valueLanguages?.[key] : undefined;
           const blockValue = shouldShowStructuredToolValueAsBlock(key, value);
           return (
             <div class="structured-tool-row">
               <span class="structured-tool-label">{key}</span>
-              {isPathKey(key) && isString(value) ? (
+              {codeLanguage ? (
+                <ClampedToolText
+                  content={formatExpandedValue(key, value)}
+                  title={`${props.toolTitle} (${key})`}
+                  language={codeLanguage}
+                  highlight
+                  class="structured-tool-value structured-tool-value-code"
+                />
+              ) : isPathKey(key) && isString(value) ? (
                 <a
                   href="#"
                   class="file-path-link structured-tool-value"
@@ -2608,7 +2729,8 @@ function StructuredToolCard(props: {
             <ClampedToolText
               content={result().value}
               title={`${props.toolTitle} (${result().label})`}
-              language={result().status ? 'plaintext' : undefined}
+              language={result().status ? 'plaintext' : result().language}
+              highlight={!result().status && !!result().language}
               view={props.previewMarkdown && !result().status ? 'markdown-preview' : undefined}
               class={`structured-tool-value structured-tool-value-result${
                 result().status

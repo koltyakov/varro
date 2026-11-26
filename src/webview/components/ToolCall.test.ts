@@ -8,6 +8,7 @@ import { setShowFileDiffs, setState } from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
 import {
   ToolCall,
+  formatCodeModeResult,
   formatToolTitle,
   getVisibleInputEntries,
   getToolCallExpansionKey,
@@ -22,6 +23,7 @@ import {
   cableTagIcon,
   chatBubbleQuestionIcon,
   checkCircleIcon,
+  codeIcon,
   copyIcon,
   editPencilIcon,
   eyeIcon,
@@ -407,11 +409,9 @@ describe('ToolCall', () => {
       expect(
         calls.map((call) => call.querySelector('.code-mode-tool-call-name')?.textContent)
       ).toEqual(['docs.lookup', 'docs.lookup', 'docs.lookup']);
-      expect(calls.map((call) => call.querySelector('[role="status"]')?.textContent)).toEqual([
-        'Running',
-        'Completed',
-        'Error',
-      ]);
+      expect(
+        calls.map((call) => call.querySelector('[role="status"]')?.getAttribute('aria-label'))
+      ).toEqual(['Running', 'Completed', 'Failed']);
       expect(calls.map((call) => call.getAttribute('data-status'))).toEqual([
         'running',
         'completed',
@@ -422,11 +422,65 @@ describe('ToolCall', () => {
           `tool-status-${call.getAttribute('data-status')}`
         );
       }
-      expect(calls[0]?.textContent).toContain('id0');
-      expect(calls[0]?.textContent).toContain('cachedfalse');
-      expect(calls[0]?.textContent).toContain('"api"');
-      expect(calls[1]?.textContent).toContain('id2');
-      expect(calls[2]?.querySelectorAll('.structured-tool-row')).toHaveLength(0);
+      expect(
+        calls.map((call) => call.querySelector('.code-mode-tool-call-args')?.textContent)
+      ).toEqual(['(id: 0, cached: false, filter: {"tags":["api"]})', '(id: 2)', '()']);
+      expect(
+        container
+          ?.querySelector<HTMLElement>('.tool-invocation-header .tool-call-icon')
+          ?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(codeIcon));
+      expect(calls[0]?.querySelector('.tool-open-button')).not.toBeNull();
+      expect(calls[2]?.querySelector('.tool-open-button')).toBeNull();
+      expect(container?.querySelectorAll('.structured-tool-card')).toHaveLength(1);
+    });
+
+    it('titles Code Mode runs by their nested tools and keeps unrelated execute tools', () => {
+      const run = (toolCalls: unknown[]) => ({
+        ...completedState({ code: 'return 1;' }, '', 'execute'),
+        metadata: { toolCalls },
+      });
+      expect(formatToolTitle('execute', run([]))).toBe('Code Mode');
+      expect(
+        formatToolTitle(
+          'execute',
+          run([
+            { tool: 'browser.tabs.open', status: 'completed' },
+            { tool: 'browser.wait', status: 'completed' },
+            { tool: 'browser.tabs.open', status: 'running' },
+          ])
+        )
+      ).toBe('Code Mode: browser.tabs.open, browser.wait');
+      expect(formatToolTitle('execute', completedState({ query: 'x' }, '', 'execute'))).toBe(
+        'execute'
+      );
+    });
+
+    it('highlights the script and re-indents a JSON result', () => {
+      const part = executePart();
+      part.state = {
+        ...completedState({ code: 'return { ok: true };' }, '', '{"ok":true,"items":[1,2]}'),
+        metadata: {},
+      };
+      renderToolCall(part);
+      toggleHeader();
+
+      const code = container?.querySelector('.structured-tool-value-code');
+      expect(code?.querySelector('code.tool-text-highlighted')?.textContent).toBe(
+        'return { ok: true };'
+      );
+      const result = container?.querySelector('.structured-tool-value-result');
+      expect(result?.querySelector('code.tool-text-highlighted')?.textContent).toBe(
+        '{\n  "ok": true,\n  "items": [\n    1,\n    2'
+      );
+    });
+
+    it.each([
+      ['plain text', 'plain text'],
+      ['{"truncated": ', '{"truncated": '],
+      ['[1, 2]', '[\n  1,\n  2\n]'],
+    ])('formats Code Mode result %j', (output, expected) => {
+      expect(formatCodeModeResult(output).value).toBe(expected);
     });
 
     it.each([
@@ -493,7 +547,7 @@ describe('ToolCall', () => {
       flushSolid();
       const first = container!.querySelector('.code-mode-tool-call')!;
       expect(first.getAttribute('data-status')).toBe('running');
-      expect(first.textContent).toContain('id1');
+      expect(first.textContent).toContain('id: 1');
       expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-running');
 
       setPart({
@@ -511,8 +565,8 @@ describe('ToolCall', () => {
       flushSolid();
       expect(container?.querySelector('.code-mode-tool-call')).toBe(first);
       expect(first.getAttribute('data-status')).toBe('completed');
-      expect(first.querySelector('[role="status"]')?.textContent).toBe('Completed');
-      expect(first.textContent).toContain('id10');
+      expect(first.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('Completed');
+      expect(first.textContent).toContain('id: 10');
       const second = container!.querySelectorAll('.code-mode-tool-call')[1]!;
       expect(second.getAttribute('data-status')).toBe('running');
 
@@ -525,7 +579,7 @@ describe('ToolCall', () => {
       setPart({ ...part(), state: { ...part().state, metadata } });
       flushSolid();
       expect(container?.querySelectorAll('.code-mode-tool-call')[1]).toBe(second);
-      expect(second.querySelector('[role="status"]')?.textContent).toBe('Error');
+      expect(second.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('Failed');
       expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-running');
 
       setPart(executePart(metadata));
@@ -533,7 +587,7 @@ describe('ToolCall', () => {
       expect(container?.querySelector('.tool-invocation-header')).toBe(header);
       expect(container?.querySelector('.code-mode-tool-call')).toBe(first);
       expect(header.querySelector('.tool-call-icon')?.classList).toContain('tool-status-completed');
-      expect(second.querySelector('[role="status"]')?.textContent).toBe('Error');
+      expect(second.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('Failed');
       expect(container?.querySelector('.structured-tool-row-error')).toBeNull();
       expect(container?.querySelector('.structured-tool-row-result')?.textContent).toContain(
         'Result'

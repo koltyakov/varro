@@ -18,6 +18,7 @@ import checkSquareIcon from 'iconoir/icons/check-square.svg';
 import clockIcon from 'iconoir/icons/clock.svg';
 import clipboardCheckIcon from 'iconoir/icons/clipboard-check.svg';
 import codeBracketsSquareIcon from 'iconoir/icons/code-brackets-square.svg';
+import codeIcon from 'iconoir/icons/code.svg';
 import coinsIcon from 'iconoir/icons/coins.svg';
 import compressIcon from 'iconoir/icons/compress.svg';
 import copyIcon from 'iconoir/icons/copy.svg';
@@ -121,6 +122,7 @@ export {
   clockIcon,
   clipboardCheckIcon,
   codeBracketsSquareIcon,
+  codeIcon,
   coinsIcon,
   compressIcon,
   copyIcon,

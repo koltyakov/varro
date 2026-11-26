@@ -1131,43 +1131,51 @@
   white-space: pre;
 }
 
-.diff-view-line-content :is(.hljs-comment, .hljs-quote) {
+:is(.diff-view-line-content, .tool-text-highlighted) :is(.hljs-comment, .hljs-quote) {
   color: var(--color-code-comment);
 }
 
-.diff-view-line-content :is(.hljs-keyword, .hljs-selector-tag, .hljs-subst) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-keyword, .hljs-selector-tag, .hljs-subst) {
   color: var(--color-code-keyword);
 }
 
-.diff-view-line-content :is(.hljs-string, .hljs-doctag, .hljs-regexp, .hljs-meta .hljs-string) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-string, .hljs-doctag, .hljs-regexp, .hljs-meta .hljs-string) {
   color: var(--color-code-string);
 }
 
-.diff-view-line-content :is(.hljs-title, .hljs-title.class_, .hljs-title.function_) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-title, .hljs-title.class_, .hljs-title.function_) {
   color: var(--color-code-title);
 }
 
-.diff-view-line-content :is(.hljs-number, .hljs-symbol, .hljs-bullet) {
+:is(.diff-view-line-content, .tool-text-highlighted) :is(.hljs-number, .hljs-symbol, .hljs-bullet) {
   color: var(--color-code-number);
 }
 
-.diff-view-line-content :is(.hljs-literal, .hljs-type, .hljs-meta, .hljs-section) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-literal, .hljs-type, .hljs-meta, .hljs-section) {
   color: var(--color-code-literal);
 }
 
-.diff-view-line-content :is(.hljs-built_in, .hljs-code, .hljs-addition) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-built_in, .hljs-code, .hljs-addition) {
   color: var(--color-code-built_in);
 }
 
-.diff-view-line-content :is(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-template-variable) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-template-variable) {
   color: var(--color-code-attr);
 }
 
-.diff-view-line-content :is(.hljs-variable, .hljs-name, .hljs-selector-id, .hljs-selector-class) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-variable, .hljs-name, .hljs-selector-id, .hljs-selector-class) {
   color: var(--color-code-variable);
 }
 
-.diff-view-line-content :is(.hljs-operator, .hljs-punctuation, .hljs-deletion) {
+:is(.diff-view-line-content, .tool-text-highlighted)
+  :is(.hljs-operator, .hljs-punctuation, .hljs-deletion) {
   color: var(--color-code-operator);
 }
 
@@ -1835,52 +1843,89 @@ kbd {
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
 }
 
+/* Nested Code Mode calls are a call log in the value column, one line per
+   call, so they share the card's label/value alignment instead of nesting a
+   second card inside it. */
+.chat-tool-invocation-part .code-mode-tool-calls-row {
+  align-items: start;
+}
+
+/* Right inset is short because the trailing buttons carry their own 8px, as
+   in .structured-tool-value-line; text-only rows still end 10px from the edge. */
 .chat-tool-invocation-part .code-mode-tool-calls {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 8px;
+  min-width: 0;
   margin: 0;
-  padding: 10px;
+  padding: var(--space-4) 2px var(--space-4) 0;
   list-style: none;
-  border-block: 1px solid var(--color-vscode-border-soft);
+}
+
+.chat-tool-invocation-part .code-mode-tool-call-signature:last-child {
+  padding-right: 8px;
 }
 
 .chat-tool-invocation-part .code-mode-tool-call {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-vscode-border-soft);
-  border-radius: var(--radius-inset);
-}
-
-.chat-tool-invocation-part .code-mode-tool-call-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.chat-tool-invocation-part .code-mode-tool-call > .tool-call-icon {
+  flex: none;
+}
+
+.chat-tool-invocation-part .code-mode-tool-call-signature {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
 }
 
 .chat-tool-invocation-part .code-mode-tool-call-name {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
+  color: var(--color-vscode-fg);
 }
 
-.chat-tool-invocation-part .code-mode-tool-call-status {
-  flex: none;
+.chat-tool-invocation-part .code-mode-tool-call-args,
+.chat-tool-invocation-part .code-mode-tool-call-more .code-mode-tool-call-signature {
   color: var(--color-vscode-fg-muted);
 }
 
-.chat-tool-invocation-part .code-mode-tool-call[data-status='error'] {
-  border-color: var(--color-vscode-error);
-}
-
-.chat-tool-invocation-part .code-mode-tool-call[data-status='error'] .code-mode-tool-call-status {
+.chat-tool-invocation-part .code-mode-tool-call[data-status='error'] .code-mode-tool-call-name {
   color: var(--color-vscode-error);
 }
 
-.chat-tool-invocation-part .code-mode-tool-call > .structured-tool-card {
-  border-radius: 0;
-  background: transparent;
+.chat-tool-invocation-part .code-mode-tool-call-more {
+  padding-left: 18px;
+}
+
+/* The row-level hover rule would reveal every call's buttons at once; each
+   call reveals only its own. */
+.chat-tool-invocation-part
+  .code-mode-tool-calls-row:hover
+  .code-mode-tool-call
+  :is(.tool-copy-button, .tool-open-button) {
+  opacity: 0;
+}
+
+.chat-tool-invocation-part
+  .code-mode-tool-calls-row
+  .code-mode-tool-call:hover
+  :is(.tool-copy-button, .tool-open-button),
+.chat-tool-invocation-part
+  .code-mode-tool-calls-row
+  .code-mode-tool-call
+  :is(
+    .tool-copy-button.is-copied,
+    .tool-open-button:focus-visible,
+    .tool-copy-button:focus-visible
+  ) {
+  opacity: 1;
+}
+
+.chat-tool-invocation-part .code-mode-tool-call :is(.tool-copy-button, .tool-open-button) {
+  padding-block: 2px;
 }
 
 .chat-tool-invocation-part .structured-tool-label {
@@ -1968,6 +2013,14 @@ kbd {
    stacked above it, and would now push the value out of line with its label. */
 .chat-tool-invocation-part .structured-tool-value-result {
   opacity: 0.92;
+}
+
+/* Highlighted previews inherit the panel's mono text; only token colors change. */
+.chat-tool-invocation-part .tool-text-highlighted {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
 }
 
 .chat-tool-invocation-part .tool-invocation-error {
