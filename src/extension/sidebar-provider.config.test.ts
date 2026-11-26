@@ -1100,6 +1100,7 @@ describe('SidebarProvider local config routing', () => {
           commitMessageModel: null,
           autoApproveModel: null,
           promptCompletionModel: null,
+          reviewModel: null,
           providerConfigPaths: { anthropic: ['/repo/opencode.json'] },
         },
       },
@@ -1164,6 +1165,7 @@ describe('SidebarProvider local config routing', () => {
           commitMessageModel: null,
           autoApproveModel: null,
           promptCompletionModel: null,
+          reviewModel: null,
         },
       },
     });
@@ -1215,6 +1217,7 @@ describe('SidebarProvider local config routing', () => {
           commitMessageModel: null,
           autoApproveModel: null,
           promptCompletionModel: null,
+          reviewModel: null,
         },
       },
     });
@@ -1563,6 +1566,7 @@ describe('SidebarProvider local config routing', () => {
           commitMessageModel: null,
           autoApproveModel: null,
           promptCompletionModel: null,
+          reviewModel: null,
         },
       },
     });
