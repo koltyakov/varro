@@ -1912,6 +1912,40 @@ describe('header status badges', () => {
     });
   });
 
+  it('includes the session list in browser-style history', () => {
+    const selectSessionSpy = vi.spyOn(openCodeModule, 'selectSession');
+    applyState(storePath('sessions', [session('a', 300), session('b', 200)]));
+    applyState(storePath('activeSessionId', 'a'));
+    openSessionPicker();
+    const listShown = () =>
+      container?.querySelector('.session-list-view:not(.session-list-view-sidebar)') != null;
+    const navigate = (direction: 'back' | 'forward') => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'command/navigate-history', payload: { direction } },
+        })
+      );
+      flushSolid();
+    };
+
+    renderChat();
+    expect(listShown()).toBe(true);
+
+    applyState(storePath('activeSessionId', 'b'));
+    setShowSessionPicker(false);
+    flushSolid();
+    expect(listShown()).toBe(false);
+
+    navigate('back');
+    expect(listShown()).toBe(true);
+    expect(selectSessionSpy).not.toHaveBeenCalled();
+
+    navigate('forward');
+    expect(listShown()).toBe(false);
+    expect(state.activeSessionId).toBe('b');
+    expect(selectSessionSpy).not.toHaveBeenCalled();
+  });
+
   it('returns to the sessions list with Escape', async () => {
     applyState(storePath('sessions', [session('active', 500), session('other', 400)]));
     applyState(storePath('activeSessionId', 'active'));

@@ -87,6 +87,7 @@ import {
   removeFromSessionHistory,
   type SessionHistoryDirection,
   type SessionHistoryState,
+  type SessionHistoryView,
 } from '../lib/session-history';
 import { isFunction } from '../lib/runtime-values';
 import { asRecord, isString } from '../../shared/type-utils';
@@ -391,13 +392,6 @@ export function Chat() {
   });
   const [sessionHistory, setSessionHistory] =
     createSignal<SessionHistoryState>(EMPTY_SESSION_HISTORY);
-  createEffect(
-    () => [state.activeSessionId, activeSession()?.directory] as const,
-    ([sessionId, directory]) => {
-      if (!sessionId) return;
-      setSessionHistory((history) => recordSessionHistory(history, sessionId, directory));
-    }
-  );
   const forgetSessionHistoryEntries = (sessionIds: Iterable<string>) => {
     setSessionHistory((history) => {
       let next = history;
@@ -417,6 +411,22 @@ export function Chat() {
   );
   const shouldRenderWorkspace = () =>
     isEditorSurface || !showSessionPicker() || isDesktopSessionLayout();
+  // Only the narrow sidebar shows the session list in place of the chat.
+  const canShowSessionListView = () => !isEditorSurface && !isDesktopSessionLayout();
+  const sessionHistoryView = createMemo((): SessionHistoryView => {
+    if (!shouldRenderWorkspace()) {
+      return { type: 'list', filter: sessionFilter(), subagentParentId: subagentParentId() };
+    }
+    // A cross-directory selection waits for activation before it becomes active.
+    const sessionId = state.pendingSessionSelectionId ?? state.activeSessionId;
+    if (!sessionId) return null;
+    const directory = sessionsById().get(sessionId)?.directory;
+    return directory ? { type: 'session', sessionId, directory } : { type: 'session', sessionId };
+  });
+  createEffect(sessionHistoryView, (view) => {
+    if (view) setSessionHistory((history) => recordSessionHistory(history, view));
+  });
+  const getSessionHistoryOptions = () => ({ canShowList: canShowSessionListView() });
   let reconnectBannerShowTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectBannerHideTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectBannerVisibleSince = 0;
@@ -443,8 +453,18 @@ export function Chat() {
       return {
         canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
         canSwitchSessions,
-        canNavigateBack: canNavigateSessionHistory(sessionHistory(), 'back', activeSessionId),
-        canNavigateForward: canNavigateSessionHistory(sessionHistory(), 'forward', activeSessionId),
+        canNavigateBack: canNavigateSessionHistory(
+          sessionHistory(),
+          'back',
+          sessionHistoryView(),
+          getSessionHistoryOptions()
+        ),
+        canNavigateForward: canNavigateSessionHistory(
+          sessionHistory(),
+          'forward',
+          sessionHistoryView(),
+          getSessionHistoryOptions()
+        ),
         model: modelPayload,
         modelVisible: shouldRenderWorkspace() && !showModels(),
         sessionId: activeSessionId,
@@ -850,19 +870,34 @@ export function Chat() {
   };
 
   const navigateHistory = (direction: SessionHistoryDirection) => {
-    const target = navigateSessionHistory(sessionHistory(), direction, state.activeSessionId);
+    const target = navigateSessionHistory(
+      sessionHistory(),
+      direction,
+      sessionHistoryView(),
+      getSessionHistoryOptions()
+    );
     if (!target) return;
-    // The selection effect sees the entry at the new index and keeps forward entries.
+    // The view effect sees the entry at the new index and keeps forward entries.
     setSessionHistory(target.history);
-    setSessionFilter(null);
-    setSubagentParentId(null);
     setShowModels(false);
     setShowPermissionSettings(false);
     setShowSkillSettings(false);
     setShowMcpSettings(false);
+    const { entry } = target;
+    if (entry.type === 'list') {
+      setSessionFilter(entry.filter);
+      setSubagentParentId(entry.subagentParentId);
+      setShowSessionPicker(true);
+      return;
+    }
+    setSessionFilter(null);
+    setSubagentParentId(null);
     setShowSessionPicker(false);
-    const { sessionId, directory } = target.entry;
-    void (directory ? selectSession(sessionId, { directory }) : selectSession(sessionId));
+    // Returning from the list to the session it covered needs no reload.
+    if (entry.sessionId === state.activeSessionId && !state.pendingSessionSelectionId) return;
+    void (entry.directory
+      ? selectSession(entry.sessionId, { directory: entry.directory })
+      : selectSession(entry.sessionId));
   };
 
   onSettled(() => {
