@@ -956,6 +956,10 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light)
   font: 11px / 1.5 var(--font-mono);
 }
 
+.permission-reject-review textarea {
+  font: 12px / 1.45 var(--font-sans);
+}
+
 .permission-approval-review textarea:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
@@ -1113,6 +1117,31 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light)
   padding-right: 8px;
   padding-left: 8px;
   white-space: nowrap;
+}
+
+.permission-reject-split {
+  display: flex;
+  min-width: 0;
+}
+
+.permission-prompt-actions .question-btn.permission-reject-main {
+  flex: 1 1 auto;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.permission-prompt-actions .question-btn.permission-reject-instruct {
+  flex: 0 0 26px;
+  width: 26px;
+  padding: 0;
+  /* Hairline on high-DPI screens; one device pixel elsewhere. */
+  border-left: 0.5px solid color-mix(in srgb, black 30%, transparent);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.permission-reject-instruct .ui-icon {
+  flex-shrink: 0;
 }
 
 .permission-prompt-actions.permission-approval-actions {

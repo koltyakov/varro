@@ -20,7 +20,7 @@ import { AttachButton } from './AttachButton';
 import { DictationButton } from './DictationButton';
 import { BusySendMenu } from './BusySendMenu';
 import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
-import type { ContextPopupModel } from './ContextPopup';
+import type { ContextPopupModel, PromptCacheActivity } from './ContextPopup';
 import { ProviderLimitPopup } from './ProviderLimitPopup';
 import { SendControls } from './SendControls';
 import { StopButton } from './StopButton';
@@ -122,6 +122,7 @@ export type ToolbarSharedProps = {
   subagentTokens: SessionTokensInfo;
   subagentCount: number;
   sessionModels: ContextPopupModel[];
+  promptCache?: PromptCacheActivity | null;
   contextCompactDisabled: boolean;
   onToggleContextPopup: () => void;
   onCloseContextPopup: () => void;
@@ -577,6 +578,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                     subagentCount={props.subagentCount}
                     model={props.currentModel}
                     models={props.sessionModels}
+                    promptCache={props.promptCache}
                     compactDisabled={props.contextCompactDisabled}
                     onClose={props.onCloseContextPopup}
                     onCompact={props.onCompactSession}

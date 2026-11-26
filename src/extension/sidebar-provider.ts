@@ -714,6 +714,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.fontSize') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
+        event.affectsConfiguration('varro.chat.promptCacheWarningTokens') ||
         event.affectsConfiguration('varro.chat.showEmptyStateHistogram') ||
         event.affectsConfiguration('varro.chat.remoteImages') ||
         event.affectsConfiguration('varro.chat.promptCompletionModel') ||
@@ -4011,6 +4012,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.updateSessionReconcileTimer();
     this.refreshOpenCodeVersionStatus();
     this.renderOpenCodeStatusBarItem();
+    this.updateViewBadge();
     const next = this.getStatusBarState();
     const nextKey = JSON.stringify(next);
     if (nextKey === this.lastStatusBarStateKey) return;
@@ -4301,12 +4303,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.hiddenStatusBarState ?? current;
   }
 
-  private getCurrentStatusBarState(): StatusBarState {
-    const idleState = {
-      visible: false as const,
-      action: 'focus' as const,
-    };
-    const pendingRequests = [...this.sessionState.pendingForUser.values()].filter(
+  /** Workspace permissions and questions waiting for the user outside every visible chat. */
+  private getUnseenPendingRequests() {
+    return [...this.sessionState.pendingForUser.values()].filter(
       (request) =>
         !this.isSessionAttentionVisible(request.sessionID) &&
         !this.sessionTrash.isHidden(request.sessionID) &&
@@ -4323,6 +4322,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           )
         )
     );
+  }
+
+  /**
+   * Badges the Varro view icon with waiting requests, so they stay discoverable while the
+   * sidebar is collapsed or shows another session. Editor panels have no badge API.
+   */
+  private updateViewBadge() {
+    const view = this.bridge.getView();
+    if (!view || !('badge' in view)) return;
+    const count = this.getUnseenPendingRequests().length;
+    const value = view.badge?.value ?? 0;
+    if (value === count) return;
+    view.badge =
+      count > 0
+        ? {
+            value: count,
+            tooltip: `${count} ${count === 1 ? 'request' : 'requests'} waiting for your input`,
+          }
+        : undefined;
+  }
+
+  private getCurrentStatusBarState(): StatusBarState {
+    const idleState = {
+      visible: false as const,
+      action: 'focus' as const,
+    };
+    const pendingRequests = this.getUnseenPendingRequests();
     if (pendingRequests.length > 0) {
       return {
         visible: true,

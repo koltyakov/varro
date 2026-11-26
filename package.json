@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.36.15",
+  "version": "0.37.0",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -661,6 +661,12 @@
           "type": "boolean",
           "default": true,
           "description": "Enable VS Code Problems context in chat. Disable to hide the Problems attachment chip and exclude diagnostics from prompts, including queued messages."
+        },
+        "varro.chat.promptCacheWarningTokens": {
+          "type": "number",
+          "minimum": 0,
+          "default": 250000,
+          "markdownDescription": "Warn above the composer when an idle session's prompt cache has likely expired and its context holds at least this many tokens. The next message then re-sends the whole context at the uncached rate. Set to `0` to turn the warning off."
         },
         "varro.chat.showTurnTimer": {
           "type": "boolean",

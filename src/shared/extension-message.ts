@@ -400,6 +400,12 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         payload.debugResetWarningDays >= 5
       )
         config.debugResetWarningDays = payload.debugResetWarningDays;
+      if (
+        isNumber(payload.promptCacheWarningTokens) &&
+        Number.isFinite(payload.promptCacheWarningTokens) &&
+        payload.promptCacheWarningTokens >= 0
+      )
+        config.promptCacheWarningTokens = payload.promptCacheWarningTokens;
       if (isBoolean(payload.autoAttachProblems))
         config.autoAttachProblems = payload.autoAttachProblems;
       if (isBoolean(payload.autoAttachActiveFile))

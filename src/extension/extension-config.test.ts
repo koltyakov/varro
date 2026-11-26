@@ -47,6 +47,7 @@ describe('readExtensionConfigState', () => {
       followupsEnabled: true,
       debugShowQuotaWarning: false,
       debugResetWarningDays: 5,
+      promptCacheWarningTokens: 100_000,
       autoAttachProblems: true,
       autoAttachActiveFile: true,
       chatFontSize: 13,
@@ -148,6 +149,23 @@ describe('readExtensionConfigState', () => {
     mocks.values.set('varro.debug.resetWarningDays', days);
     expect(readExtensionConfigState().debugResetWarningDays).toBe(5);
   });
+
+  it.each([
+    [50_000, 50_000],
+    [0, 0],
+    [12_345.6, 12_346],
+  ])('reads a prompt cache warning threshold of %s tokens', (value, expected) => {
+    mocks.values.set('varro.chat.promptCacheWarningTokens', value);
+    expect(readExtensionConfigState().promptCacheWarningTokens).toBe(expected);
+  });
+
+  it.each([-1, NaN, Infinity, '50000'])(
+    'defaults an invalid prompt cache warning threshold %s',
+    (value) => {
+      mocks.values.set('varro.chat.promptCacheWarningTokens', value);
+      expect(readExtensionConfigState().promptCacheWarningTokens).toBe(100_000);
+    }
+  );
 
   it('reads the Problems context opt-out', () => {
     mocks.values.set('varro.chat.autoAttachProblems', false);

@@ -461,7 +461,14 @@ export type Session = {
   metadata?: UnknownRecord;
   time: { created: number; updated: number; compacting?: number; archived?: number };
   permission?: PermissionRule[];
-  revert?: { messageID: string; partID?: string; snapshot?: string; diff?: string };
+  /** `diff` is V1's rolled-back patch; `files` lists V2's rolled-back file diffs. */
+  revert?: {
+    messageID: string;
+    partID?: string;
+    snapshot?: string;
+    diff?: string;
+    files?: unknown[];
+  };
 };
 
 export type Command = {

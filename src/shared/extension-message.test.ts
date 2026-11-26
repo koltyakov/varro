@@ -1178,6 +1178,29 @@ describe('parseExtensionMessage', () => {
     }
   );
 
+  it.each([
+    [100_000, true],
+    [0, true],
+    [-1, false],
+    [Infinity, false],
+    ['100000', false],
+  ])('accepts only non-negative finite cache warning thresholds: %s', (value, accepted) => {
+    const parsed = parseExtensionMessage({
+      type: 'config/update',
+      payload: {
+        promptCacheWarningTokens: value,
+        desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'default',
+        chatFontSize: 13,
+        chatEditorFontSize: 12,
+        chatFontFamily: 'default',
+      },
+    });
+    if (parsed?.type !== 'config/update') throw new Error('Expected a config update');
+    if (accepted) expect(parsed.payload.promptCacheWarningTokens).toBe(value);
+    else expect(parsed.payload).not.toHaveProperty('promptCacheWarningTokens');
+  });
+
   it('parses config/update with strict payload', () => {
     expect(
       parseExtensionMessage({

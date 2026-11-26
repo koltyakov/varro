@@ -27,6 +27,7 @@ import { asRecord } from '../shared/type-utils';
 import type { UnknownRecord } from '../shared/type-utils';
 import { parseServerEvent } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
+import { isPermissionRejectedToolError } from '../shared/error-classification';
 import { normalizeRecycleBinSession } from '../shared/recycle-bin';
 import { formatSkillAttachment } from '../shared/skill-reference';
 import { pastedTextDataUrl } from '../shared/pasted-text';
@@ -3093,6 +3094,68 @@ describe('v2 transcript and permission projection', () => {
     expect(calls).toEqual([
       '/api/session/ses_child/permission/perm_one/reply',
       '/api/session/ses_child/permission/perm_one/reply',
+    ]);
+  });
+
+  it('sends rejection feedback with the V1 rejection wording and drops it for approvals', async () => {
+    const bodies: unknown[] = [];
+    const adapter = new OpenCodeV2Adapter(async (_method, path, body) => {
+      if (path.endsWith('/reply')) {
+        bodies.push(body);
+        return undefined;
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    for (const [id, reply, feedback] of [
+      ['perm_reject', 'reject', '  Use the existing helper instead.  '],
+      ['perm_blank', 'reject', '   '],
+      ['perm_once', 'once', 'ignored'],
+    ] as const) {
+      adapter.observe('permission.asked', { id, sessionID: 'ses_child' });
+      await adapter.request('POST', `/permission/${id}/reply`, { reply, message: feedback });
+    }
+
+    expect(bodies).toEqual([
+      {
+        decision: 'reject',
+        message:
+          'The user rejected permission to use this specific tool call with the following feedback: Use the existing helper instead.',
+      },
+      { decision: 'reject', message: undefined },
+      { decision: 'once', message: undefined },
+    ]);
+    expect(
+      isPermissionRejectedToolError({
+        status: 'error',
+        error: String(asRecord(bodies[0])?.message),
+      })
+    ).toBe(true);
+  });
+
+  it('commits a staged rewind and returns the refreshed session', async () => {
+    const calls: string[] = [];
+    const adapter = new OpenCodeV2Adapter(async (method, path) => {
+      calls.push(`${method} ${path}`);
+      if (method === 'POST' && path === '/api/session/ses_one/revert/commit') return undefined;
+      if (method === 'GET' && path === '/api/session/ses_one')
+        return {
+          data: {
+            id: 'ses_one',
+            projectID: 'project-1',
+            location: { directory: '/repo' },
+            title: 'Session',
+            time: { created: 1, updated: 2 },
+          },
+        };
+      return { data: [] };
+    });
+
+    await expect(
+      adapter.request('POST', '/session/ses_one/revert-commit', undefined)
+    ).resolves.toMatchObject({ id: 'ses_one' });
+    expect(calls.slice(0, 2)).toEqual([
+      'POST /api/session/ses_one/revert/commit',
+      'GET /api/session/ses_one',
     ]);
   });
 

@@ -273,6 +273,16 @@ function v2AuthAnswers(form: FormFields | undefined, value: unknown) {
   return Object.keys(answer).length > 0 ? answer : value;
 }
 
+/**
+ * V2 passes rejection feedback to the model verbatim as the tool error. Use V1's wording so
+ * the model reads it as a rejection with instructions, and Varro still labels the tool as
+ * rejected after reloads.
+ */
+function v2PermissionReplyMessage(reply: unknown, message: unknown): string | undefined {
+  if (reply !== 'reject' || !isString(message) || !message.trim()) return undefined;
+  return `The user rejected permission to use this specific tool call with the following feedback: ${message.trim()}`;
+}
+
 function nextBackgroundReviewAt(startedAt: number, now: number): number {
   const minutesRunning = Math.max(0, (now - startedAt) / 60_000);
   const nextMinute =
@@ -787,7 +797,7 @@ export class OpenCodeV2Adapter {
         await raw(
           'POST',
           `/api/session/${encodeURIComponent(sessionID)}/permission/${encodeURIComponent(id)}/reply`,
-          { decision: input.reply, message: input.message }
+          { decision: input.reply, message: v2PermissionReplyMessage(input.reply, input.message) }
         );
         this.permissions.delete(id);
       } else {
@@ -1650,6 +1660,10 @@ export class OpenCodeV2Adapter {
       }
       if (action === 'unrevert') {
         await raw('DELETE', `${endpoint}/revert`);
+        return this.session(await data<SessionInfo>('GET', endpoint), options);
+      }
+      if (action === 'revert-commit') {
+        await raw('POST', `${endpoint}/revert/commit`, {});
         return this.session(await data<SessionInfo>('GET', endpoint), options);
       }
       if (action === 'diff')

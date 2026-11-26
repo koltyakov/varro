@@ -1,7 +1,7 @@
 import { state } from '../../lib/state';
 import { collectSessionTreeIds } from '../../lib/session-tree-index';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
-import type { MessageEntry, Part } from '../../types';
+import type { MessageEntry, Part, Session } from '../../types';
 
 export function getRenderedMessages(
   messages: MessageEntry[],
@@ -32,14 +32,39 @@ export function getRenderedMessages(
   ];
 }
 
+/**
+ * A staged rewind keeps its messages in OpenCode until it is committed or cleared. Like OpenCode's
+ * own clients, show only messages ordered before the boundary.
+ */
+export function isMessageBehindStagedRevert(
+  entry: Pick<MessageEntry, 'info'>,
+  boundary: string | undefined
+) {
+  return boundary !== undefined && entry.info.id >= boundary;
+}
+
+function getStagedRevertBoundaries(
+  sessions: readonly Pick<Session, 'id' | 'revert'>[],
+  sessionIds: ReadonlySet<string>
+) {
+  const boundaries = new Map<string, string>();
+  for (const session of sessions) {
+    const messageID = session.revert?.messageID;
+    if (messageID && sessionIds.has(session.id)) boundaries.set(session.id, messageID);
+  }
+  return boundaries;
+}
+
 function shouldHideThreadMessage(
   entry: MessageEntry,
   activeSessionId: string,
   activeTreeIds: ReadonlySet<string>,
-  childSessionIds: ReadonlySet<string>
+  childSessionIds: ReadonlySet<string>,
+  revertBoundaries: ReadonlyMap<string, string>
 ) {
   if (entry.info.role === 'user' && entry.info.pendingDelivery === 'steer') return true;
   if (!activeTreeIds.has(entry.info.sessionID)) return true;
+  if (isMessageBehindStagedRevert(entry, revertBoundaries.get(entry.info.sessionID))) return true;
   if (entry.info.sessionID === activeSessionId) return false;
   return childSessionIds.has(entry.info.sessionID);
 }
@@ -54,8 +79,16 @@ export function getVisibleThreadMessages(
   const childSessionIds = new Set(
     sessions.filter((session) => session.parentID).map((session) => session.id)
   );
+  const revertBoundaries = getStagedRevertBoundaries(sessions, activeTreeIds);
   return messages.filter(
-    (entry) => !shouldHideThreadMessage(entry, activeSessionId, activeTreeIds, childSessionIds)
+    (entry) =>
+      !shouldHideThreadMessage(
+        entry,
+        activeSessionId,
+        activeTreeIds,
+        childSessionIds,
+        revertBoundaries
+      )
   );
 }
 

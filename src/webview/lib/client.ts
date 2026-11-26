@@ -475,10 +475,11 @@ export const client = {
       sessionId: string,
       permissionId: string,
       response: 'once' | 'always' | 'reject',
-      options?: { permissionAutomationLease?: number }
+      options?: { permissionAutomationLease?: number; message?: string }
     ): Promise<boolean> {
       const path = `/permission/${encodeURIComponent(permissionId)}/reply`;
-      const body = { reply: response };
+      const message = response === 'reject' ? options?.message?.trim() : undefined;
+      const body = message ? { reply: response, message } : { reply: response };
       return options?.permissionAutomationLease === undefined
         ? apiCall('POST', path, body)
         : apiCall('POST', path, body, {
@@ -568,6 +569,13 @@ export const client = {
       return apiCall(
         'POST',
         withDirectory(`/session/${encodeURIComponent(id)}/unrevert`, options?.directory)
+      );
+    },
+    /** V2 only: permanently removes the messages hidden by a staged rewind. */
+    async commitRevert(id: string, options?: { directory?: string }): Promise<Session> {
+      return apiCall(
+        'POST',
+        withDirectory(`/session/${encodeURIComponent(id)}/revert-commit`, options?.directory)
       );
     },
     async compact(

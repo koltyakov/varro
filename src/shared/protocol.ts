@@ -979,6 +979,7 @@ export type InitialWebviewState = {
   followupModel?: string;
   debugShowQuotaWarning?: boolean;
   debugResetWarningDays?: number;
+  promptCacheWarningTokens?: number;
   autoAttachProblems?: boolean;
   autoAttachActiveFile?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;

@@ -368,6 +368,31 @@ describe('client', () => {
     ]);
   });
 
+  it('sends trimmed rejection instructions only with reject replies', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+
+    await client.session.respondPermission('session-1', 'permission-reject', 'reject', {
+      message: '  Use pnpm instead.  ',
+    });
+    await client.session.respondPermission('session-1', 'permission-blank', 'reject', {
+      message: '   ',
+    });
+    await client.session.respondPermission('session-1', 'permission-once', 'once', {
+      message: 'ignored',
+    });
+
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      [
+        'POST',
+        '/permission/permission-reject/reply',
+        { reply: 'reject', message: 'Use pnpm instead.' },
+      ],
+      ['POST', '/permission/permission-blank/reply', { reply: 'reject' }],
+      ['POST', '/permission/permission-once/reply', { reply: 'once' }],
+    ]);
+  });
+
   it('loads a bounded session page with continuation metadata', async () => {
     const { client } = await loadClient();
     const sessions = [{ id: 'session-1' }];

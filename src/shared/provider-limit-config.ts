@@ -4,6 +4,7 @@ import type { RemoteImageMode } from './remote-images';
 export const DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS = 120;
 export const PROVIDER_LIMIT_STALE_RETENTION_MS = 15 * 60_000;
 export const DEFAULT_RESET_WARNING_DAYS = 5;
+export const DEFAULT_PROMPT_CACHE_WARNING_TOKENS = 100_000;
 
 export type ExtensionConfigState = {
   showFileDiffs?: boolean;
@@ -17,6 +18,8 @@ export type ExtensionConfigState = {
   followupModel?: string;
   debugShowQuotaWarning?: boolean;
   debugResetWarningDays?: number;
+  /** `0` disables the expired prompt-cache warning. */
+  promptCacheWarningTokens?: number;
   autoAttachProblems?: boolean;
   autoAttachActiveFile?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
@@ -38,6 +41,7 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'followupModel'
   | 'debugShowQuotaWarning'
   | 'debugResetWarningDays'
+  | 'promptCacheWarningTokens'
   | 'autoAttachProblems'
   | 'autoAttachActiveFile'
   | 'desktopSessionPaneSide'

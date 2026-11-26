@@ -271,6 +271,7 @@ import type { CompressedImage, ImageCompressionAnalysis } from '../lib/image-com
 import { loadImage } from '../lib/image-loading';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import type { ToolbarSharedProps } from './chat-input/ChatInputToolbar';
+import type { PromptCacheActivity } from './chat-input/ContextPopup';
 import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import {
   RichComposerArea,
@@ -285,9 +286,11 @@ import {
 } from './chat-input/QueuedMessages';
 import { BackgroundServices } from './chat-input/BackgroundServices';
 import { SessionGoalRow } from './chat-input/SessionGoalRow';
+import { SessionRewindRow } from './chat-input/SessionRewindRow';
 import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
+import { PromptCacheWarning } from './chat-input/PromptCacheWarning';
 import { ProviderQuotaWarning } from './chat-input/ProviderQuotaWarning';
 import {
   combineContextCharacters,
@@ -6365,6 +6368,32 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return getSessionCost(messagesBySession().get(rootId) || [], sessionsById().get(rootId));
   });
 
+  // Root-session prompt cache only: subagents run their own requests and caches.
+  const promptCacheActivity = createMemo(
+    (): PromptCacheActivity | null => {
+      const sessionId = composerSessionId();
+      if (!sessionId) return null;
+      const rootId = getSessionTreeRootId(sessionId) || sessionId;
+      const messages = messagesBySession().get(rootId) || [];
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const info = messages[index]!.info;
+        if (info.role !== 'assistant' || !info.time.completed) continue;
+        const cache = info.tokens?.cache;
+        if (!cache || (cache.read <= 0 && cache.write <= 0)) return null;
+        return { lastUsedAt: info.time.completed, inUse: isComposerBusy() };
+      }
+      return null;
+    },
+    {
+      equals: (previous, next) =>
+        previous === next ||
+        (!!previous &&
+          !!next &&
+          previous.lastUsedAt === next.lastUsedAt &&
+          previous.inUse === next.inUse),
+    }
+  );
+
   let tokenBreakdownRequestId = 0;
   onCleanup(() => tokenBreakdownRequestId++);
   async function loadCompleteTokenBreakdown() {
@@ -7074,6 +7103,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       </Show>
 
       <Show when={!props.newSession && !hasExpandedDiffOverlay() && !composerEditingMessage()}>
+        <SessionRewindRow
+          sessionID={composerSessionId()}
+          directory={composerBackgroundServiceDirectory()}
+        />
         <Show when={state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 2}>
           <SessionGoalRow
             sessionID={composerSessionId()}
@@ -7197,6 +7230,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       </Show>
 
       <Show when={!hasExpandedDiffOverlay() && !visibleUsageLimit() && !composerEditingMessage()}>
+        <PromptCacheWarning
+          sessionId={composerSessionId()}
+          activity={promptCacheActivity()}
+          contextTokens={contextUsage()?.used ?? 0}
+          thresholdTokens={state.promptCacheWarningTokens}
+        />
         <ProviderQuotaWarning
           limit={currentProviderLimit()}
           forceShow={state.debugShowQuotaWarning}
@@ -7650,6 +7689,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             subagentTokens={sessionTokenBreakdown().subagents}
             subagentCount={sessionTokenBreakdown().subagentCount}
             sessionModels={sessionModels()}
+            promptCache={promptCacheActivity()}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
             showAttachmentsControl={isToolbarControlVisible('attachments')}
             showStopButton={showStopButton()}
@@ -7749,6 +7789,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           subagentTokens={sessionTokenBreakdown().subagents}
           subagentCount={sessionTokenBreakdown().subagentCount}
           sessionModels={sessionModels()}
+          promptCache={promptCacheActivity()}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           showStopButton={showStopButton()}

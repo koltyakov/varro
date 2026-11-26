@@ -423,6 +423,8 @@ Some commands only appear when they apply. `/ralph` appears before a session exi
 
 `/diagnostics`, `/fork`, `/abort`, `/stop`, `/undo`, `/revert`, and `/redo` can be submitted directly when applicable but are intentionally hidden from slash-command completion. `/undo` or `/revert` undoes the last assistant response, and `/redo` reapplies it. These session-level actions are separate from composer undo and redo.
 
+OpenCode only stages a rewind until the next message, whether `/undo` ran in Varro, the OpenCode TUI, or another client. Varro hides the rewound messages and shows a **Rewound** row above the composer. **Restore** brings the messages back, along with any file changes the rewind rolled back. On v2, **Apply** removes them immediately; otherwise, your next message removes them.
+
 Use `Varro: Open Global AGENTS.md` to edit OpenCode's global instructions. `Varro: Initialize Project AGENTS.md` creates the project file when needed, opens it, and starts a new chat with `/init` ready to send using the current model.
 
 ### Export all-time usage as CSV
@@ -497,7 +499,7 @@ Opening a session fetches the newest 200 messages. Scrolling to the top automati
 
 On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
 
-If the sidebar is hidden, Varro can show VS Code notifications when a plan is ready, a top-level session fails, or the agent is blocked on a permission or question. It also exposes a status bar item that summarizes waiting or completed top-level sessions, including ordinary completed sessions that do not produce a notification, and alerts in sibling workspaces. Clicking that item opens pending-attention sessions first, otherwise it focuses Varro.
+If the sidebar is hidden, Varro can show VS Code notifications when a plan is ready, a top-level session fails, or the agent is blocked on a permission or question. The Varro view icon shows a badge with the number of permissions and questions waiting outside the visible chat. It also exposes a status bar item that summarizes waiting or completed top-level sessions, including ordinary completed sessions that do not produce a notification, and alerts in sibling workspaces. Clicking that item opens pending-attention sessions first, otherwise it focuses Varro.
 
 If VS Code reloads while a session was running, Varro reconnects and restores canonical history and pending inputs. OpenCode V2 owns automatic execution recovery; Varro does not send a second restart-continuation prompt. Older V2 versions or standalone services may require an explicit follow-up. V1 retains Varro's existing elected-owner continuation. Recovery can repeat external effects, and active shells are not preserved as durable processes. See [restart continuity](restart-recovery.md).
 
@@ -711,6 +713,7 @@ The composer can show model and session metadata:
 - Available OpenAI/Codex and Z.ai usage-limit resets and their expiration times. Varro displays these resets and links to the provider's usage page, but does not redeem them.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 - Reported session cost in the context popup, when OpenCode supplies cost data.
+- A prompt-cache estimate in the context popup, when the latest completed response read or wrote the provider's prompt cache. It counts down five minutes from that response, a common provider default, and then shows **Likely expired**. It is an estimate, not a provider timer. In sessions whose context reaches `varro.chat.promptCacheWarningTokens` (100,000 by default; `0` turns it off), a closable warning above the composer also appears once the estimate runs out while the session is idle, showing how many tokens the next message will re-send uncached. Closing it hides it until a later response uses the cache again.
 
 When an applicable provider quota has 25% or less remaining, a warning above the composer shows the percentage left in each low window and its reset time. The warning becomes critical at 10% remaining. A low weekly or monthly allowance appears even when the 5-hour allowance is healthy. **View usage** opens the provider's usage page in your browser and is hidden when its URL is unknown.
 

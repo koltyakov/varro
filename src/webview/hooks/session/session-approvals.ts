@@ -3,8 +3,11 @@ import type { Permission, QuestionRequest, Session } from '../../types';
 
 type PermissionResponse = 'once' | 'always' | 'reject';
 type PermissionResponseTarget = { id: string; sessionID: string };
+type PermissionReplyOptions = { message?: string };
 type PermissionResponseOptions = {
   rethrow?: boolean;
+  /** Rejection feedback for the agent; only manual rejections carry it. */
+  message?: string;
   groupMembers?: PermissionResponseTarget[];
   automatic?: boolean;
   permissionAutomationLease?: number;
@@ -40,7 +43,8 @@ export async function respondPermissionWithDependencies(
     respondPermission(
       sessionId: string,
       permissionId: string,
-      response: PermissionResponse
+      response: PermissionResponse,
+      options?: PermissionReplyOptions
     ): Promise<void | boolean | object>;
     removePermission(permissionId: string, options?: { removeGroup?: boolean }): void;
     setError(message: string): void;
@@ -55,10 +59,13 @@ export async function respondPermissionWithDependencies(
       response === 'reject' && options?.groupMembers?.length
         ? options.groupMembers
         : [{ id: permissionId, sessionID: sessionId }];
+    const message = response === 'reject' ? options?.message?.trim() : undefined;
     await Promise.all(
       targets.map(async (target) => {
         try {
-          await deps.respondPermission(target.sessionID, target.id, response);
+          await (message
+            ? deps.respondPermission(target.sessionID, target.id, response, { message })
+            : deps.respondPermission(target.sessionID, target.id, response));
         } catch (err) {
           if (!isMissingPermissionRequestError(err)) throw err;
         }
@@ -220,7 +227,8 @@ type SessionApprovalDependencies = {
   respondRemotePermission(
     sessionId: string,
     permissionId: string,
-    response: PermissionResponse
+    response: PermissionResponse,
+    options?: PermissionReplyOptions
   ): Promise<void | boolean | object>;
   respondAutomaticPermission?(
     sessionId: string,
@@ -281,12 +289,18 @@ export class SessionApprovalOperations {
       {
         respondPermission: options?.automatic
           ? (targetSessionId, targetPermissionId, targetResponse) =>
-              (this.deps.respondAutomaticPermission ?? this.deps.respondRemotePermission)(
-                targetSessionId,
-                targetPermissionId,
-                targetResponse,
-                options.permissionAutomationLease
-              )
+              this.deps.respondAutomaticPermission
+                ? this.deps.respondAutomaticPermission(
+                    targetSessionId,
+                    targetPermissionId,
+                    targetResponse,
+                    options.permissionAutomationLease
+                  )
+                : this.deps.respondRemotePermission(
+                    targetSessionId,
+                    targetPermissionId,
+                    targetResponse
+                  )
           : this.deps.respondRemotePermission,
         removePermission: this.deps.removePermission,
         setError: this.deps.setError,

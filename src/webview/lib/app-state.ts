@@ -53,6 +53,7 @@ import type {
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import { DEFAULT_PROMPT_CACHE_WARNING_TOKENS } from '../../shared/provider-limit-config';
 import { parseRemoteImageMode } from '../../shared/remote-images';
 import type { RemoteImageMode } from '../../shared/remote-images';
 import { isInlineProblem } from './editor-problems';
@@ -148,6 +149,7 @@ export interface AppState {
   remoteImages: RemoteImageMode;
   debugShowQuotaWarning: boolean;
   debugResetWarningDays?: number;
+  promptCacheWarningTokens: number;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -455,6 +457,8 @@ export function createAppState(): AppStateInstance {
     remoteImages: parseRemoteImageMode(initialWebviewState.remoteImages),
     debugShowQuotaWarning: initialWebviewState.debugShowQuotaWarning ?? false,
     debugResetWarningDays: initialWebviewState.debugResetWarningDays,
+    promptCacheWarningTokens:
+      initialWebviewState.promptCacheWarningTokens ?? DEFAULT_PROMPT_CACHE_WARNING_TOKENS,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)

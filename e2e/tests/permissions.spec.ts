@@ -96,7 +96,7 @@ test('rejects a pending permission request', async ({ page }) => {
   await expect(page.getByText('Permission Required')).toBeVisible();
   await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
   await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
-  await page.getByRole('button', { name: 'Reject' }).click();
+  await page.getByRole('button', { name: 'Reject', exact: true }).click();
 
   await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
@@ -161,7 +161,7 @@ test('restores a linked permission to full flow after its tool starts compacting
     };
   });
 
-  expect(geometry.actionCount).toBe(3);
+  expect(geometry.actionCount).toBe(4);
   expect(geometry.promptHeight).toBeGreaterThan(100);
   expect(geometry.promptFullyVisible).toBe(true);
   expect(geometry.actionsFullyVisible).toBe(true);
@@ -324,7 +324,7 @@ test('keeps grouped permission prompts bundled when rejecting them', async ({ pa
   await page.goto('/e2e/harness/index.html?scenario=grouped-permissions');
 
   await expect(page.locator('.permission-prompt-count')).toContainText('2');
-  await page.getByRole('button', { name: 'Reject' }).click();
+  await page.getByRole('button', { name: 'Reject', exact: true }).click();
 
   await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
@@ -428,7 +428,7 @@ test('shows distinct permission requests one at a time', async ({ page }) => {
   await expect(page.locator('.permission-prompt-step')).toHaveText('2 / 2');
   await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
   await expect(page.locator('.permission-meta-value')).toHaveText('npm run build');
-  await page.getByRole('button', { name: 'Reject' }).click();
+  await page.getByRole('button', { name: 'Reject', exact: true }).click();
 
   await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
@@ -480,7 +480,9 @@ test('keeps permission actions on one responsive row', async ({ page }) => {
       const allowAlwaysRect = actions
         .querySelector('[aria-label="Allow always"]')
         ?.getBoundingClientRect();
-      const rejectRect = actions.querySelector('[aria-label="Reject"]')?.getBoundingClientRect();
+      const rejectRect = actions
+        .querySelector('.permission-reject-split')
+        ?.getBoundingClientRect();
       const labels = [...actions.querySelectorAll<HTMLElement>('.permission-action-label-short')];
       const alwaysLabel = actions.querySelector<HTMLElement>(
         window.innerWidth <= 420
@@ -520,7 +522,7 @@ test('keeps permission actions on one responsive row', async ({ page }) => {
       contained: true,
       equalButtonWidths: true,
       alwaysLabelLeftAligned: true,
-      buttonCount: 3,
+      buttonCount: 4,
       chevronHasSpace: true,
       usesEllipsis: true,
     });

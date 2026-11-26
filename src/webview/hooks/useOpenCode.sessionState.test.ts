@@ -1,7 +1,7 @@
 import { flush as flushSolid, createEffect, createRoot } from 'solid-js';
 import { storePath } from '@solidjs/signals';
 import { describe, expect, it, vi } from 'vitest';
-import type { MessageEntry, Part } from '../types';
+import type { MessageEntry, Part, Session } from '../types';
 import {
   assistantMessage,
   captureBridgeHandler,
@@ -3036,6 +3036,59 @@ describe('useOpenCode session state flows', () => {
       expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
       expect(messageWindow.getSessionHistoryPrompts('session-1')).toEqual([]);
       expect(messageWindow.takeCachedSessionHistoryPage('session-1', 'page-old')).toBeUndefined();
+    } finally {
+      dispose();
+      flushSolid();
+    }
+  });
+
+  it('refreshes the session revert boundary when another client stages or clears a rewind', async () => {
+    const handlers = captureServerEventHandlers();
+    flushSolid();
+    mockRuntimeBootstrap();
+    let staged = true;
+    let updated = 1;
+    // OpenCode advances `time.updated` whenever it stages, clears, or commits a rewind.
+    clientMocks.sessionGet.mockImplementation(async (id) => {
+      // SAFETY: The fixture provides the string fields read by this statement.
+      const info: Session = { ...session(id as string), time: { created: 0, updated: updated++ } };
+      if (staged) info.revert = { messageID: 'message-reverted' };
+      return info;
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    const dispose = mountUseOpenCode(hookModule);
+    flushSolid();
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.next.revert.staged')).toBe(true));
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      stateModule.setState(storePath('activeSessionId', 'session-1'));
+      flushSolid();
+      clientMocks.sessionGet.mockClear();
+
+      handlers.get('session.next.revert.staged')?.({
+        properties: { sessionID: 'session-1', revert: { messageID: 'message-reverted' } },
+      });
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(stateModule.state.sessions[0]?.revert?.messageID).toBe('message-reverted');
+      });
+
+      staged = false;
+      handlers.get('session.next.revert.cleared')?.({ properties: { sessionID: 'session-1' } });
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(stateModule.state.sessions[0]?.revert).toBeUndefined();
+      });
+      expect(clientMocks.sessionGet).toHaveBeenCalledTimes(2);
+
+      handlers.get('session.next.revert.staged')?.({
+        properties: { sessionID: 'other-session', revert: { messageID: 'message-other' } },
+      });
+      flushSolid();
+      expect(clientMocks.sessionGet).toHaveBeenCalledTimes(2);
     } finally {
       dispose();
       flushSolid();

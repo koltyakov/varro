@@ -196,10 +196,12 @@ describe('PermissionPrompt', () => {
       'Allow once',
       'Allow always',
       'Reject',
+      'Reject with instructions',
     ]);
     expect(
       buttons.map((button) => button.querySelector('.permission-action-label-short')?.textContent)
-    ).toEqual(['Once', 'Always', 'Reject']);
+    ).toEqual(['Once', 'Always', 'Reject', undefined]);
+    expect(buttons[3]?.classList).toContain('question-btn-danger');
     expect(buttons[0]?.classList).toContain('question-btn-primary');
     expect(buttons[1]?.classList).toContain('question-btn-secondary');
     expect(buttons[1]?.getAttribute('aria-haspopup')).toBe('menu');
@@ -342,6 +344,68 @@ describe('PermissionPrompt', () => {
     flushSolid();
 
     expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', response);
+  });
+
+  it('rejects with instructions for the agent from an inline form', async () => {
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
+
+    container!.querySelector<HTMLButtonElement>('[aria-label="Reject with instructions"]')!.click();
+    flushSolid();
+    await Promise.resolve();
+    flushSolid();
+
+    expect(container!.querySelector('[aria-label="Allow once"]')).toBeNull();
+    expect(container!.querySelector('.permission-approval-scope')?.textContent).toBe(
+      'Sent to the agent'
+    );
+    const textarea = container!.querySelector<HTMLTextAreaElement>('textarea')!;
+    expect(document.activeElement).toBe(textarea);
+    const submit = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Reject & send'
+    )!;
+    expect(submit.disabled).toBe(true);
+
+    textarea.value = '  Use the existing npm script instead.  ';
+    textarea.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flushSolid();
+    expect(submit.disabled).toBe(false);
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    flushSolid();
+
+    expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', 'reject', {
+      message: 'Use the existing npm script instead.',
+    });
+  });
+
+  it('cancels rejection instructions without replying and restores the actions', async () => {
+    mountView(() => PermissionPrompt({ permission: createPermission() }));
+
+    const trigger = container!.querySelector<HTMLButtonElement>(
+      '[aria-label="Reject with instructions"]'
+    )!;
+    trigger.click();
+    flushSolid();
+    const textarea = container!.querySelector<HTMLTextAreaElement>('textarea')!;
+    textarea.value = 'Shift+Enter keeps typing';
+    textarea.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })
+    );
+    flushSolid();
+    expect(mocks.respondPermission).not.toHaveBeenCalled();
+
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSolid();
+    await Promise.resolve();
+    flushSolid();
+
+    expect(mocks.respondPermission).not.toHaveBeenCalled();
+    expect(container!.querySelector('textarea')).toBeNull();
+    const restored = container!.querySelector<HTMLButtonElement>(
+      '[aria-label="Reject with instructions"]'
+    );
+    expect(restored).not.toBeNull();
+    expect(document.activeElement).toBe(restored);
   });
 
   it.each(['session', 'server', 'project'] as const)(

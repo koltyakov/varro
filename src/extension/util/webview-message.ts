@@ -1788,6 +1788,7 @@ const SESSION_ACTIONS = new Set([
   'fork',
   'prompt_async',
   'revert',
+  'revert-commit',
   'summarize',
   'unrevert',
   'init',

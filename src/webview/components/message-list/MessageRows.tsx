@@ -844,18 +844,17 @@ function AssistantDialogSummary(props: {
               when={!props.summary.interrupted && !props.summary.collectingStats}
               fallback={props.summary.interrupted ? 'Interrupted' : 'Collecting stats...'}
             >
+              <Show when={statusSuffix()}>
+                {(status) => (
+                  <>
+                    <span class="assistant-dialog-summary-status">{status()}</span>{' '}
+                  </>
+                )}
+              </Show>
               <span class="assistant-dialog-summary-metric">
                 <UiIcon source={clockIcon} width="12" height="12" aria-label="Worked for" />
                 {formatTurnDuration(props.summary.durationMs)}
               </span>
-              <Show when={statusSuffix()}>
-                {(status) => (
-                  <>
-                    {' '}
-                    <span>{status()}</span>
-                  </>
-                )}
-              </Show>
               <Show when={tokenSuffix()}>
                 {(tokens) => (
                   <>

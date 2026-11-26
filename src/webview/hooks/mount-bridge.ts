@@ -151,6 +151,11 @@ export function createMountBridgeOperations(deps: {
           if (payload.debugResetWarningDays !== undefined) {
             appStore.setState(storePath('debugResetWarningDays', payload.debugResetWarningDays));
           }
+          if (payload.promptCacheWarningTokens !== undefined) {
+            appStore.setState(
+              storePath('promptCacheWarningTokens', payload.promptCacheWarningTokens)
+            );
+          }
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
         },

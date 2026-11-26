@@ -24,7 +24,9 @@ When OpenCode asks for permission, Varro places the request beside the action th
 - `Always` approves the request and saves matching actions through OpenCode. V1 keeps these allowances
   in server memory; v2 saves durable project-scoped approvals. Its menu also offers a session-only
   rule or a persistent project-config rule.
-- `Reject` denies the request.
+- `Reject` denies the request. The message button beside it opens `Reject with instructions`: type
+  what the agent should do instead, then press Enter or `Reject & send`. The agent receives your
+  instructions as the rejection reason. `Cancel` or Escape returns to the buttons without replying.
 
 On Varro-managed servers, rejecting a request lets the agent continue without that action. The agent
 is instructed not to retry or bypass the rejection, to continue permitted work, and to explain when

@@ -3936,6 +3936,25 @@ describe('MessageList session scoping', () => {
     expect(getVisibleThreadMessages(messages, null)).toEqual([]);
   });
 
+  it('hides messages from a staged rewind boundary until it is cleared', () => {
+    const messages: MessageEntry[] = [
+      { info: userMessage('msg_01'), parts: [] },
+      { info: assistantMessage('msg_02'), parts: [] },
+      { info: userMessage('msg_03'), parts: [] },
+      { info: assistantMessage('msg_04'), parts: [] },
+    ];
+    const rootSession = session('session-1', { time: { created: 0, updated: 0 } });
+
+    expect(
+      getVisibleThreadMessages(messages, 'session-1', [
+        { ...rootSession, revert: { messageID: 'msg_03' } },
+      ]).map((entry) => entry.info.id)
+    ).toEqual(['msg_01', 'msg_02']);
+    expect(
+      getVisibleThreadMessages(messages, 'session-1', [rootSession]).map((entry) => entry.info.id)
+    ).toEqual(['msg_01', 'msg_02', 'msg_03', 'msg_04']);
+  });
+
   it('indexes child sessions once when filtering a large transcript', () => {
     let parentIdReads = 0;
     const sessions = Array.from({ length: 100 }, (_, index) => ({
@@ -6134,7 +6153,7 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('npm run release');
     expect(container?.querySelector('.tool-invocation-error-label')?.textContent).toBe('rejected');
-    expect(container?.textContent).toContain('10s Permission rejected ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('Permission rejected 10s ↑ 42 ↓ 7');
   });
 
   it.each([
@@ -6266,7 +6285,7 @@ describe('MessageList loading row', () => {
     );
     expect(container?.querySelector('.question-summary-answer')?.textContent).toBe('Skipped');
     expect(container?.querySelector('.tool-invocation-error-label')).toBeNull();
-    expect(container?.textContent).toContain('10s Question skipped ↑ 42 ↓ 7');
+    expect(container?.textContent).toContain('Question skipped 10s ↑ 42 ↓ 7');
   });
 
   it('does not render the loading row in a draft session when stale messages leak in', async () => {

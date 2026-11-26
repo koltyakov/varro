@@ -305,6 +305,12 @@ ID and owning session against the server before changing rules.
 - In auto mode, a successful `Always` response rechecks other visible requests in the same
   conversation tree so requests that were already judged can use the new preference.
 - `Reject` denies the request.
+- `Reject with instructions` sends `reject` with trimmed, nonempty feedback in `message` for every
+  represented group member. The form replaces the action row like the standing-approval review;
+  Cancel sends no reply. V1 wraps the feedback in its own rejection error. V2 passes `message` to the
+  model verbatim, so the adapter prefixes V1's `The user rejected permission to use this specific
+  tool call with the following feedback:` wording to keep the tool classified as rejected after
+  reload. Automatic replies never carry feedback.
 
 The Permissions screen must preserve these scopes as independent layers. Project edits write only to
 the workspace config. Session edits patch only `Session.permission` and serialize with permission-mode

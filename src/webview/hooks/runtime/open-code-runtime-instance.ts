@@ -164,6 +164,9 @@ function invalidateClientWorkspaceState() {
   clientModule.invalidateClientWorkspaceCaches();
 }
 
+/** `message` is optional rejection feedback the agent receives instead of the denied action. */
+export type ManualPermissionResponseOptions = { rethrow?: boolean; message?: string };
+
 export type SendMessageOptions = {
   messageId?: string;
   agent?: string;
@@ -241,7 +244,7 @@ export interface OpenCodeRuntime {
     sessionId: string,
     permissionId: string,
     response: 'once' | 'always' | 'reject',
-    options?: { rethrow?: boolean }
+    options?: ManualPermissionResponseOptions
   ): Promise<void>;
   alwaysAllowPermissionForProject(
     sessionId: string,
@@ -2961,8 +2964,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   });
 
   const sessionApprovalOperations = new SessionApprovalOperations({
-    respondRemotePermission: (sessionId, permissionId, response) =>
-      client.session.respondPermission(sessionId, permissionId, response),
+    respondRemotePermission: (sessionId, permissionId, response, options) =>
+      options?.message
+        ? client.session.respondPermission(sessionId, permissionId, response, {
+            message: options.message,
+          })
+        : client.session.respondPermission(sessionId, permissionId, response),
     respondAutomaticPermission: (sessionId, permissionId, response, lease) => {
       const currentLease = lease ?? permissionAutomationLease;
       return currentLease === undefined
@@ -3489,7 +3496,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     sessionId: string,
     permissionId: string,
     response: 'once' | 'always' | 'reject',
-    options?: { rethrow?: boolean }
+    options?: ManualPermissionResponseOptions
   ) {
     const permission = appStore.state.permissions.find((item) => item.id === permissionId);
     const groupMembers = permission ? permissionsStore.getPermissionGroupMembers(permission) : [];
@@ -3540,7 +3547,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           member,
           response === 'reject' ? 'manually-rejected' : 'manually-approved',
           response === 'reject'
-            ? 'Rejected manually.'
+            ? options?.message?.trim()
+              ? 'Rejected manually with instructions.'
+              : 'Rejected manually.'
             : response === 'always'
               ? 'Approved manually for matching future requests.'
               : 'Approved manually once.'

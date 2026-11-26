@@ -571,6 +571,7 @@ export class WebviewSession {
       followupModel: config.followupModel,
       debugShowQuotaWarning: config.debugShowQuotaWarning,
       debugResetWarningDays: config.debugResetWarningDays,
+      promptCacheWarningTokens: config.promptCacheWarningTokens,
       autoAttachProblems: config.autoAttachProblems,
       autoAttachActiveFile: config.autoAttachActiveFile,
       desktopSessionPaneSide: config.desktopSessionPaneSide,

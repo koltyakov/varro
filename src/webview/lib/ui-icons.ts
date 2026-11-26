@@ -81,6 +81,7 @@ import transitionUpIcon from 'iconoir/icons/transition-up.svg';
 import transitionUpSolidIcon from 'iconoir/icons/transition-up-solid.svg';
 import trashIcon from 'iconoir/icons/trash.svg';
 import triangleFlagIcon from 'iconoir/icons/triangle-flag.svg';
+import redoIcon from 'iconoir/icons/redo.svg';
 import undoIcon from 'iconoir/icons/undo.svg';
 import warningCircleIcon from 'iconoir/icons/warning-circle.svg';
 import warningCircleSolidIcon from 'iconoir/icons/warning-circle-solid.svg';
@@ -180,6 +181,7 @@ export {
   transitionUpSolidIcon,
   trashIcon,
   triangleFlagIcon,
+  redoIcon,
   undoIcon,
   warningCircleIcon,
   warningCircleSolidIcon,

@@ -1,6 +1,7 @@
 import {
   createOpenCodeRuntime,
   type EditMessageOptions,
+  type ManualPermissionResponseOptions,
   type OpenCodeRuntime,
   type SendMessageOptions,
 } from './open-code-runtime-instance';
@@ -181,7 +182,7 @@ export async function respondPermission(
   sessionId: string,
   permissionId: string,
   response: 'once' | 'always' | 'reject',
-  options?: { rethrow?: boolean }
+  options?: ManualPermissionResponseOptions
 ) {
   await getCurrentOpenCodeRuntime().respondPermission(sessionId, permissionId, response, options);
 }

@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import type { ExtensionConfigState } from '../shared/provider-limit-config';
-import { DEFAULT_RESET_WARNING_DAYS } from '../shared/provider-limit-config';
+import {
+  DEFAULT_PROMPT_CACHE_WARNING_TOKENS,
+  DEFAULT_RESET_WARNING_DAYS,
+} from '../shared/provider-limit-config';
 import { isPermissionMode } from '../shared/protocol';
 import { isNumber, isString } from '../shared/type-utils';
 import { parseRemoteImageMode } from '../shared/remote-images';
@@ -26,6 +29,7 @@ export function readExtensionConfigState(
     followupModel: readFollowupModel(config),
     debugShowQuotaWarning: config.get<boolean>('debug.showQuotaWarning', false),
     debugResetWarningDays: readResetWarningDays(config),
+    promptCacheWarningTokens: readPromptCacheWarningTokens(config),
     autoAttachProblems: config.get<boolean>('chat.autoAttachProblems', true),
     autoAttachActiveFile: config.get<boolean>('chat.autoAttachActiveFile', true),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
@@ -65,6 +69,16 @@ function readResetWarningDays(config: vscode.WorkspaceConfiguration): number {
   return isNumber(value) && Number.isFinite(value) && value >= DEFAULT_RESET_WARNING_DAYS
     ? value
     : DEFAULT_RESET_WARNING_DAYS;
+}
+
+function readPromptCacheWarningTokens(config: vscode.WorkspaceConfiguration): number {
+  const value = config.get<unknown>(
+    'chat.promptCacheWarningTokens',
+    DEFAULT_PROMPT_CACHE_WARNING_TOKENS
+  );
+  return isNumber(value) && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : DEFAULT_PROMPT_CACHE_WARNING_TOKENS;
 }
 
 function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {

@@ -75,6 +75,45 @@ describe('session-approvals helpers', () => {
     expect(removePermission).toHaveBeenCalledWith('perm-1', { removeGroup: true });
   });
 
+  it('sends rejection instructions to every grouped request', async () => {
+    const removePermission = vi.fn();
+    const respondPermission = vi.fn(async () => {});
+
+    await respondPermissionWithDependencies(
+      { respondPermission, removePermission, setError: vi.fn() },
+      'session-1',
+      'perm-1',
+      'reject',
+      {
+        message: '  Run the focused test instead.  ',
+        groupMembers: [
+          { id: 'perm-1', sessionID: 'session-1' },
+          { id: 'perm-2', sessionID: 'session-1' },
+        ],
+      }
+    );
+
+    expect(respondPermission.mock.calls).toEqual([
+      ['session-1', 'perm-1', 'reject', { message: 'Run the focused test instead.' }],
+      ['session-1', 'perm-2', 'reject', { message: 'Run the focused test instead.' }],
+    ]);
+    expect(removePermission).toHaveBeenCalledWith('perm-1', { removeGroup: true });
+  });
+
+  it('never forwards rejection instructions with an approval', async () => {
+    const respondPermission = vi.fn(async () => {});
+
+    await respondPermissionWithDependencies(
+      { respondPermission, removePermission: vi.fn(), setError: vi.fn() },
+      'session-1',
+      'perm-1',
+      'once',
+      { message: 'ignored' }
+    );
+
+    expect(respondPermission.mock.calls).toEqual([['session-1', 'perm-1', 'once']]);
+  });
+
   it('keeps one-time approvals scoped to the selected permission', async () => {
     const removePermission = vi.fn();
     const respondPermission = vi.fn(async () => {});

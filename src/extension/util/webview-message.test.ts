@@ -275,6 +275,8 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('DELETE', '/session/abc/message/message-1')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/todo')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/unrevert')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/revert-commit')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/session/abc/revert-commit')).toBe(false);
     expect(isAllowedApiRequest('POST', '/question/request-1/reply')).toBe(true);
     expect(isAllowedApiRequest('GET', '/permission')).toBe(true);
     expect(isAllowedApiRequest('POST', '/permission/request-1/reply')).toBe(true);

@@ -304,6 +304,48 @@ describe('SidebarProvider permission replay', () => {
     expect(provider.getStatusBarClickAction()).toBe('attention');
   });
 
+  it('badges the sidebar view with waiting requests until they are answered', async () => {
+    const { provider } = await createSidebarProviderInstance();
+    const { view } = attachTestView(provider);
+    const badgedView = Object.assign(view, {
+      visible: false,
+      badge: undefined as { value: number; tooltip: string } | undefined,
+    });
+    const providerState = provider as unknown as {
+      sessionState: {
+        handleServerEvent(event: unknown): void;
+        revealPermission(permissionId: string): void;
+      };
+    };
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-local', title: 'Current repo', directory: '/repo' } },
+    });
+    for (const id of ['perm-one', 'perm-two']) {
+      providerState.sessionState.handleServerEvent({
+        type: 'permission.asked',
+        properties: { id, sessionID: 'session-local', permission: 'bash', title: 'Run' },
+      });
+    }
+    expect(badgedView.badge).toBeUndefined();
+
+    providerState.sessionState.revealPermission('perm-one');
+    expect(badgedView.badge).toEqual({
+      value: 1,
+      tooltip: '1 request waiting for your input',
+    });
+    providerState.sessionState.revealPermission('perm-two');
+    expect(badgedView.badge?.value).toBe(2);
+
+    for (const requestID of ['perm-one', 'perm-two']) {
+      providerState.sessionState.handleServerEvent({
+        type: 'permission.replied',
+        properties: { sessionID: 'session-local', requestID, reply: 'once' },
+      });
+    }
+    expect(badgedView.badge).toBeUndefined();
+  });
+
   it('accepts an automatic reply with a known session when host pending state is missing', async () => {
     const server = createServer({ request: vi.fn(() => Promise.resolve(true)) });
     const { provider } = await createSidebarProviderInstance({ server });
