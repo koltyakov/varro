@@ -1590,6 +1590,9 @@ function GenericToolCall(props: {
   const codeModeCalls = createMemo(() => getCodeModeToolCalls(props.tool.tool, props.state));
   const codeModeFailure = () => isCodeModeFailure(props.tool.tool, props.state);
   const isCodeMode = () => isCodeModeRun(props.tool.tool, props.state);
+  // The script is what a running call is doing, so it reads in full until the result lands.
+  const isCodeModeActive = () =>
+    isCodeMode() && (props.state.status === 'pending' || props.state.status === 'running');
   const codeModeResult = createMemo(() =>
     isCodeMode() && props.state.status === 'completed'
       ? formatCodeModeResult(props.fullOutput)
@@ -2373,6 +2376,7 @@ function GenericToolCall(props: {
                   }
                   inputEntries={detailInputEntries()}
                   valueLanguages={isCodeMode() ? CODE_MODE_VALUE_LANGUAGES : undefined}
+                  unclampCode={isCodeModeActive()}
                   details={
                     <Show when={codeModeCalls().length > 0}>
                       <CodeModeToolCalls calls={codeModeCalls()} toolTitle={props.title} />
@@ -2642,6 +2646,8 @@ function StructuredToolCard(props: {
   inputEntries: Array<[string, unknown]>;
   /** Input keys whose block values are code, mapped to their highlight language. */
   valueLanguages?: Readonly<Record<string, string>>;
+  /** Shows `valueLanguages` code in full instead of clamped. */
+  unclampCode?: boolean;
   result: StructuredToolResult | null;
   onOpenPath: (path: string) => void;
   /** Prefixes editor-tab titles so an opened value says which tool it came from. */
@@ -2667,6 +2673,7 @@ function StructuredToolCard(props: {
                   title={`${props.toolTitle} (${key})`}
                   language={codeLanguage}
                   highlight
+                  unclamped={props.unclampCode}
                   class="structured-tool-value structured-tool-value-code"
                 />
               ) : isPathKey(key) && isString(value) ? (

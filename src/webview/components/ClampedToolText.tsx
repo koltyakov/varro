@@ -66,12 +66,18 @@ export function ClampedToolText(props: {
   language?: string;
   /** Syntax-highlights the preview in `language`. Plain text renders until highlighting lands. */
   highlight?: boolean;
+  /** Shows the whole text at its natural height, e.g. while the value is being worked on. */
+  unclamped?: boolean;
   view?: 'markdown-preview';
   class?: string;
   role?: JSX.HTMLAttributes<HTMLPreElement>['role'];
   'aria-label'?: string;
 }) {
-  const result = createMemo(() => clampToolText(props.content));
+  const result = createMemo(() => {
+    if (!props.unclamped) return clampToolText(props.content);
+    const preview = trimBlankEdges(props.content.replace(/\r\n/g, '\n'));
+    return { clamped: false as const, preview, lineCount: countLines(preview) };
+  });
   const highlightLanguage = () => {
     if (!props.highlight) return undefined;
     const language = resolveCodeLanguage(props.language);
@@ -138,7 +144,10 @@ export function ClampedToolText(props: {
       id={props.id}
       ref={(el) => (preRef = el)}
 
-      class={[`${props.class ?? ''} tool-text-clamped`, { 'is-truncated': truncated() }]}
+      class={[
+        props.class ?? '',
+        { 'tool-text-clamped': !props.unclamped, 'is-truncated': truncated() },
+      ]}
       onClick={openUnlessSelecting}
       title={
         truncated()

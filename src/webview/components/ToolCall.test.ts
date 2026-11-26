@@ -475,6 +475,37 @@ describe('ToolCall', () => {
       );
     });
 
+    it('shows the whole script while the run is active and clamps it once it completes', () => {
+      const code = Array.from({ length: 8 }, (_, line) => `const v${line} = ${line};`).join('\n');
+      const completed = executePart();
+      completed.state = { ...completedState({ code }, '', 'done'), metadata: {} };
+      const [part, setPart] = createSignal<ToolPart>({
+        ...completed,
+        state: { status: 'running', input: { code }, time: { start: 0 }, metadata: {} },
+      });
+      cleanup = render(
+        () =>
+          createComponent(ToolCall, {
+            get part() {
+              return part();
+            },
+          }),
+        container!
+      );
+      flushSolid();
+      container!.querySelector<HTMLButtonElement>('.tool-invocation-header')!.click();
+      flushSolid();
+
+      const value = () => container?.querySelector('.structured-tool-value-code');
+      expect(value()?.classList).not.toContain('tool-text-clamped');
+      expect(value()?.textContent).toBe(code);
+
+      setPart(completed);
+      flushSolid();
+      expect(value()?.classList).toContain('tool-text-clamped');
+      expect(value()?.textContent).toBe(code.split('\n').slice(0, 5).join('\n'));
+    });
+
     it.each([
       ['plain text', 'plain text'],
       ['{"truncated": ', '{"truncated": '],

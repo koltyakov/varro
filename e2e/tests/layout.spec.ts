@@ -342,9 +342,11 @@ test('bounds active tools and moves completed tools into Explored without collap
 test('keeps active-tray wheel input local before outer transcript movement', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 320 });
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1');
-  // A constrained host can still make one expanded tool scroll internally.
+  // An expanded item normally lifts the tray's cap and scroller; force both back so the
+  // nested-scroller wheel ownership in MessageList is still exercised.
   await page.addStyleTag({
-    content: '.assistant-active-activity-items { max-height: 40px !important; }',
+    content:
+      '.assistant-active-activity-items { max-height: 40px !important; overflow-y: auto !important; }',
   });
   const list = page.locator('.interactive-list');
   const trayItems = page.locator('.assistant-active-activity-items');

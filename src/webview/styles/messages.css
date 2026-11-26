@@ -448,9 +448,19 @@
   display: none;
 }
 
-.assistant-active-activity-items:has(> .assistant-active-activity-item .thinking-chevron.expanded) {
+/* An expanded item is the only one shown (see below), so it gets its natural height rather than
+   scrolling inside the tray's few-row viewport. It must also stop being a scroll container:
+   `overflow-x: hidden` turns `overflow-y: visible` into `auto`, and a non-scrolling scroller
+   under the pointer makes every transcript wheel event wait on a busy main thread. `clip`
+   still trims horizontal overflow without creating a scroller. */
+.assistant-active-activity-items:has(
+  > .assistant-active-activity-item
+    :is(.tool-invocation-chevron.expanded, .thinking-chevron.expanded)
+) {
   max-height: none;
+  overflow-x: clip;
   overflow-y: visible;
+  overscroll-behavior: auto;
 }
 
 .assistant-active-activity-items:has(
