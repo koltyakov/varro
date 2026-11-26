@@ -1250,6 +1250,14 @@ export const client = {
     },
   },
 
+  skill: {
+    async list(): Promise<SkillSummary[]> {
+      return requireArray<unknown>(await apiCall('GET', '/skill'), '/skill').flatMap(
+        parseSkillSummary
+      );
+    },
+  },
+
   question: {
     async list(): Promise<QuestionRequest[]> {
       // Each reconciliation captures its own baseline and needs a fresh snapshot.
@@ -1298,6 +1306,33 @@ function requireArray<T, V = unknown>(value: V, path: string): T[] {
   // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
   return value as T[];
 }
+
+export type SkillSummary = {
+  id: string;
+  name: string;
+  description: string;
+  /** SKILL.md location; absent for skills served on demand, such as MCP skills. */
+  path?: string;
+};
+
+/* oxlint-disable anti-slop/no-unknown-parameters -- Validate untrusted skill entries at the client boundary. */
+function parseSkillSummary(value: unknown): SkillSummary[] {
+  const record = asRecord(value);
+  if (!record) return [];
+  // V2 skills have an invocable ID; V1 skills are invoked by name.
+  const id = isString(record.id) && record.id ? record.id : record.name;
+  if (!isString(id) || !id) return [];
+  const location = isString(record.path) ? record.path : record.location;
+  const skill: SkillSummary = {
+    id,
+    name: isString(record.name) && record.name ? record.name : id,
+    description: isString(record.description) ? record.description : '',
+  };
+  // Built-in skills report virtual locations: V2 uses skill:// URIs and V1 uses "<built-in>".
+  if (isString(location) && /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(location)) skill.path = location;
+  return [skill];
+}
+/* oxlint-enable anti-slop/no-unknown-parameters */
 
 /* oxlint-disable anti-slop/no-unknown-parameters -- Validate the untrusted MCP defaults REST response at the client boundary. */
 function parseMcpDefaults(value: unknown): McpDefaults {

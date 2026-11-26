@@ -24,7 +24,12 @@ await test('bundles diagram helpers within the VSIX file budget and keeps render
     for (const imported of chunk.imports) visit(imported);
   }
   visit(entry.fileName);
-  for (const name of ['ModelsPanel', 'PermissionSettingsPanel', 'McpSettingsPanel']) {
+  for (const name of [
+    'ModelsPanel',
+    'PermissionSettingsPanel',
+    'SkillSettingsPanel',
+    'McpSettingsPanel',
+  ]) {
     const panel = chunks.find((chunk) =>
       Object.keys(chunk.modules).some((id) => id.endsWith(`/components/${name}.tsx`))
     );

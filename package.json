@@ -224,6 +224,11 @@
         "shortTitle": "Usage Stats"
       },
       {
+        "command": "varro.chat.openSkillSettings",
+        "title": "Varro: Manage Skills",
+        "shortTitle": "Manage Skills"
+      },
+      {
         "command": "varro.chat.openMcpSettings",
         "title": "Varro: Manage MCPs",
         "shortTitle": "Manage MCPs"
@@ -442,16 +447,20 @@
           "group": "1_main@2"
         },
         {
-          "command": "varro.chat.openMcpSettings",
+          "command": "varro.chat.openSkillSettings",
           "group": "1_main@3"
         },
         {
-          "command": "varro.chat.openOpenCodeConfig",
+          "command": "varro.chat.openMcpSettings",
           "group": "1_main@4"
         },
         {
-          "command": "varro.openGitHub",
+          "command": "varro.chat.openOpenCodeConfig",
           "group": "1_main@5"
+        },
+        {
+          "command": "varro.openGitHub",
+          "group": "1_main@6"
         }
       ],
       "commandPalette": [

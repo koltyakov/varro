@@ -43,6 +43,25 @@ async function loadClient() {
 
 type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
 
+it('normalizes V1 and V2 skills and only exposes file paths that can be opened', async () => {
+  const { client } = await loadClient();
+  bridgeMocks.apiCall.mockResolvedValueOnce([
+    { id: 'review', name: 'Review', description: 'Review code', path: '/skills/review/SKILL.md' },
+    { id: 'browser', name: 'Browser', path: 'skill://browser/SKILL.md' },
+    { name: 'pdf', description: 'PDFs', location: 'C:\\skills\\pdf\\SKILL.md' },
+    { name: 'customize-opencode', location: '<built-in>' },
+    { description: 'missing ID' },
+  ]);
+
+  await expect(client.skill.list()).resolves.toEqual([
+    { id: 'review', name: 'Review', description: 'Review code', path: '/skills/review/SKILL.md' },
+    { id: 'browser', name: 'Browser', description: '' },
+    { id: 'pdf', name: 'pdf', description: 'PDFs', path: 'C:\\skills\\pdf\\SKILL.md' },
+    { id: 'customize-opencode', name: 'customize-opencode', description: '' },
+  ]);
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/skill');
+});
+
 it('reads and validates session-scoped goals', async () => {
   const { client } = await loadClient();
   const goal = {

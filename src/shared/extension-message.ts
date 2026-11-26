@@ -76,6 +76,7 @@ const KNOWN_TYPES = new Set<string>([
   'command/search-sessions',
   'command/open-attention-sessions',
   'command/open-completed-sessions',
+  'command/open-skill-settings',
   'command/open-mcp-settings',
   'command/switch-session',
   'command/navigate-history',
@@ -185,6 +186,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
     case 'command/search-sessions':
     case 'command/open-attention-sessions':
     case 'command/open-completed-sessions':
+    case 'command/open-skill-settings':
     case 'command/open-mcp-settings':
     case 'command/abort':
       return { type };

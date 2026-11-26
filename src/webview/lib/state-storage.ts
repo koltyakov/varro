@@ -46,6 +46,7 @@ export const STORAGE_KEYS = {
   manualWorkspaceSelection: 'varro.manualWorkspaceSelection',
   showThinking: 'varro.showThinking',
   todoListCollapsed: 'varro.todoListCollapsed',
+  skillSettingsHideDisabled: 'varro.skillSettingsHideDisabled',
   starterHintsDismissed: 'varro.starterHintsDismissed',
 } as const;
 

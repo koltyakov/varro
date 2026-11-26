@@ -264,3 +264,25 @@
 .mcp-settings-import textarea {
   resize: vertical;
 }
+
+.skill-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Overflow clips at the padding edge, so keep the row spacing outside the clamped box. */
+.mcp-settings-content .skill-settings-description {
+  display: -webkit-box;
+  margin-bottom: 8px;
+  padding-bottom: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.mcp-settings-content .skill-settings-filter {
+  align-self: flex-start;
+  padding-block: 0;
+  font-size: 11px;
+}

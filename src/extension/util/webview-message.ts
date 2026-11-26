@@ -1884,6 +1884,7 @@ const API_ROUTES: ApiRoute[] = [
   route('/provider/auth', methodsNoQuery('GET')),
   route('/auth/:id', methodsNoQuery('PUT', 'DELETE')),
   route('/command', methodsNoQuery('GET')),
+  route('/skill', methodsNoQuery('GET')),
   route('/mcp', methodsNoQuery('GET')),
   route(VARRO_API_ENDPOINTS.mcpDefaults, methodsNoQuery('GET', 'POST')),
   route(VARRO_API_ENDPOINTS.mcpConfig, methodsNoQuery('POST')),

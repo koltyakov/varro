@@ -28,6 +28,8 @@ import {
   setShowModels,
   showPermissionSettings,
   setShowPermissionSettings,
+  showSkillSettings,
+  setShowSkillSettings,
   showMcpSettings,
   setShowMcpSettings,
   requestComposerFocus,
@@ -856,6 +858,7 @@ export function Chat() {
     setSubagentParentId(null);
     setShowModels(false);
     setShowPermissionSettings(false);
+    setShowSkillSettings(false);
     setShowMcpSettings(false);
     setShowSessionPicker(false);
     const { sessionId, directory } = target.entry;
@@ -870,9 +873,17 @@ export function Chat() {
         navigateHistory(message.payload.direction);
         return;
       }
+      if (message.type === 'command/open-skill-settings') {
+        setShowModels(false);
+        setShowPermissionSettings(false);
+        setShowMcpSettings(false);
+        setShowSkillSettings(true);
+        return;
+      }
       if (message.type === 'command/open-mcp-settings') {
         setShowModels(false);
         setShowPermissionSettings(false);
+        setShowSkillSettings(false);
         setShowMcpSettings(true);
         return;
       }
@@ -917,6 +928,11 @@ export function Chat() {
         }
         if (showMcpSettings()) {
           setShowMcpSettings(false);
+          requestComposerFocus();
+          return;
+        }
+        if (showSkillSettings()) {
+          setShowSkillSettings(false);
           requestComposerFocus();
           return;
         }
@@ -1133,6 +1149,7 @@ export function Chat() {
         showSessionPicker={isEditorSurface ? false : showSessionPicker()}
         showModels={showModels()}
         showPermissionSettings={showPermissionSettings()}
+        showSkillSettings={showSkillSettings()}
         showMcpSettings={showMcpSettings()}
         showReconnectBanner={showReconnectBanner()}
         showProviderSetupBanner={showProviderSetupBanner()}

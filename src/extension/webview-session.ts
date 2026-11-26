@@ -66,6 +66,7 @@ type QueuedCommand = Extract<
       | 'command/new-session'
       | 'command/attach-problems'
       | 'command/abort'
+      | 'command/open-skill-settings'
       | 'command/open-mcp-settings'
       | 'command/switch-session'
       | 'command/navigate-history'

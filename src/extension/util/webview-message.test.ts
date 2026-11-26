@@ -243,6 +243,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/prompt-completion/test')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/prompt-completion/test?model=other')).toBe(false);
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/skill')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/skill?directory=%2Frepo')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/skill')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session?limit=100')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session?limit=30&search=dark+mode&roots=true')).toBe(true);

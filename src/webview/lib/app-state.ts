@@ -303,6 +303,8 @@ export interface AppStateInstance {
   setShowModels: Setter<boolean>;
   showPermissionSettings: Accessor<boolean>;
   setShowPermissionSettings: Setter<boolean>;
+  showSkillSettings: Accessor<boolean>;
+  setShowSkillSettings: Setter<boolean>;
   showMcpSettings: Accessor<boolean>;
   setShowMcpSettings: Setter<boolean>;
   composerFocusKey: Accessor<number>;
@@ -754,6 +756,7 @@ export function createAppState(): AppStateInstance {
   const [showModelPicker, setShowModelPicker] = createSignal(false);
   const [showModels, setShowModels] = createSignal(false);
   const [showPermissionSettings, setShowPermissionSettings] = createSignal(false);
+  const [showSkillSettings, setShowSkillSettings] = createSignal(false);
   const [showMcpSettings, setShowMcpSettings] = createSignal(false);
   const [composerFocusKey, setComposerFocusKey] = createSignal(0);
   const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
@@ -864,6 +867,8 @@ export function createAppState(): AppStateInstance {
     setShowModels,
     showPermissionSettings,
     setShowPermissionSettings,
+    showSkillSettings,
+    setShowSkillSettings,
     showMcpSettings,
     setShowMcpSettings,
     composerFocusKey,
@@ -996,6 +1001,8 @@ export const showModels = defaultAppState.showModels;
 export const setShowModels = defaultAppState.setShowModels;
 export const showPermissionSettings = defaultAppState.showPermissionSettings;
 export const setShowPermissionSettings = defaultAppState.setShowPermissionSettings;
+export const showSkillSettings = defaultAppState.showSkillSettings;
+export const setShowSkillSettings = defaultAppState.setShowSkillSettings;
 export const showMcpSettings = defaultAppState.showMcpSettings;
 export const setShowMcpSettings = defaultAppState.setShowMcpSettings;
 export const composerFocusKey = defaultAppState.composerFocusKey;
@@ -1055,6 +1062,7 @@ export function resetDefaultAppState() {
   setShowModelPicker(next.showModelPicker());
   setShowModels(next.showModels());
   setShowPermissionSettings(next.showPermissionSettings());
+  setShowSkillSettings(next.showSkillSettings());
   setShowMcpSettings(next.showMcpSettings());
   setComposerFocusKey(next.composerFocusKey());
   setOpenAttentionSessionsKey(next.openAttentionSessionsKey());

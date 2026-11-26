@@ -316,6 +316,9 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'command/open-completed-sessions' })).toEqual({
       type: 'command/open-completed-sessions',
     });
+    expect(parseExtensionMessage({ type: 'command/open-skill-settings' })).toEqual({
+      type: 'command/open-skill-settings',
+    });
     expect(parseExtensionMessage({ type: 'command/open-mcp-settings' })).toEqual({
       type: 'command/open-mcp-settings',
     });

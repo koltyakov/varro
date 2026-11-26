@@ -181,6 +181,7 @@ function register(
     openNewTerminalEditor: vi.fn(),
     requestInputFocus: vi.fn(),
     searchSessions: vi.fn(),
+    openSkillSettings: vi.fn(),
     openMcpSettings: vi.fn(),
     switchSession: vi.fn(),
     navigateHistory: vi.fn(),
@@ -1437,6 +1438,17 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.chat.openStats');
 
     expect(sidebar.generateUsageReport).toHaveBeenCalledOnce();
+  });
+
+  it('opens skill settings in the revealed view', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.openSkillSettings');
+
+    expect(sidebar.openSkillSettings).toHaveBeenCalledOnce();
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
   });
 
   it('opens MCP settings in the revealed view', async () => {

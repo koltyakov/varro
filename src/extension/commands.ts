@@ -203,6 +203,11 @@ export function registerCommands(
       }
     }),
 
+    vscode.commands.registerCommand('varro.chat.openSkillSettings', async () => {
+      sidebar.openSkillSettings();
+      await revealSidebar();
+    }),
+
     vscode.commands.registerCommand('varro.chat.openMcpSettings', async () => {
       sidebar.openMcpSettings();
       await revealSidebar();

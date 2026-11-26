@@ -50,6 +50,8 @@ import {
   setShowModels,
   setShowMcpSettings,
   showMcpSettings,
+  setShowSkillSettings,
+  showSkillSettings,
   setShowSessionPicker,
   setSessionUsageLimit,
   setMessagesIncremental,
@@ -343,6 +345,8 @@ afterEach(() => {
   setShowModels(false);
   flushSolid();
   setShowMcpSettings(false);
+  flushSolid();
+  setShowSkillSettings(false);
   flushSolid();
   setConnectionInitialized(false);
   flushSolid();
@@ -1977,6 +1981,43 @@ describe('header status badges', () => {
 
     expect(showMcpSettings()).toBe(true);
     expect(container?.querySelector('.mcp-settings-panel')).not.toBeNull();
+  });
+
+  it('opens skill settings from the extension command and closes them with Escape', async () => {
+    vi.spyOn(client.skill, 'list').mockResolvedValue([
+      { id: 'review', name: 'review', description: 'Review code' },
+    ]);
+    vi.spyOn(client.varro, 'openCodePermissionConfig').mockResolvedValue({
+      targetPath: '/workspace/opencode.json',
+      projectRules: [],
+      inheritedSources: [],
+      effectiveRules: [],
+    });
+    vi.spyOn(client.varro, 'openCodeGlobalPermissionConfig').mockResolvedValue({
+      targetPath: '/home/.config/opencode/opencode.json',
+      rules: [],
+      supportsPatterns: false,
+    });
+    renderChat();
+    flushSolid();
+
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'command/open-skill-settings' } })
+    );
+    flushSolid();
+    await vi.dynamicImportSettled();
+    flushSolid();
+    await Promise.resolve();
+    flushSolid();
+
+    expect(showSkillSettings()).toBe(true);
+    expect(container?.querySelector('h1')?.textContent).toBe('Skill settings');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    flushSolid();
+    await Promise.resolve();
+    flushSolid();
+    expect(showSkillSettings()).toBe(false);
+    expect(container?.querySelector('.skill-settings-panel')).toBeNull();
   });
 
   it('leaves Escape to nested chat controls that consume it', async () => {
