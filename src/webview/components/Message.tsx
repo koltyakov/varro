@@ -481,6 +481,18 @@ export function Message(props: {
     return request ? `${request.sessionID}\u0000${request.messageID}` : null;
   });
 
+  // The walkthrough explains exactly the range this reply's change summary lists.
+  const walkThroughTurn = createMemo(() => {
+    const [sessionId, messageId] = diffRequest()?.split('\u0000') ?? [];
+    if (!sessionId || !messageId) return null;
+    return () => {
+      const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
+      postMessage({
+        type: 'walkthrough/session',
+        payload: directory ? { sessionId, messageId, directory } : { sessionId, messageId },
+      });
+    };
+  });
   const [diffs, setDiffs] = createSignal<FileDiff[]>();
   const [diffsLoading, setDiffsLoading] = createSignal(false);
   createEffect(
@@ -897,6 +909,7 @@ export function Message(props: {
             <DiffSummary
               diffs={visibleDiffs()}
               stateKey={`diff-summary\u0000${props.info.sessionID}\u0000${props.info.id}`}
+              onWalkThrough={walkThroughTurn() ?? undefined}
             />
           </Show>
         </div>

@@ -153,6 +153,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'session/export': true,
   'usage/report': true,
   'usage/session-report': true,
+  'walkthrough/session': true,
   'webview/reload': true,
   'vscode/open-folder': true,
   'vscode/open-settings': true,
@@ -189,6 +190,8 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'ralph/resume': true,
   'ralph/update-model': true,
   'ralph/sync': true,
+  'warming/sync': true,
+  'warming/set': true,
   log: true,
   'server/restart': true,
   'server/restart/check': true,
@@ -228,6 +231,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'vscode/show-output':
     case 'chat/new-editor':
     case 'chat/new-window':
+    case 'warming/sync':
       return { type };
 
     case 'vscode/open-folder': {
@@ -505,6 +509,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
     }
 
+    case 'warming/set': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
+      if (typeof payload?.enabled !== 'boolean') return null;
+      return { type, payload: { sessionId, enabled: payload.enabled } };
+    }
+
     case 'server/restart/check': {
       const payload = asRecord(message?.payload);
       return Number.isSafeInteger(payload?.checkId) && (payload?.checkId as number) >= 0
@@ -603,6 +615,23 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         { type: 'session/export' | 'usage/session-report' }
       >['payload'] = { sessionId };
       if (directory) parsedPayload.directory = directory;
+      return { type, payload: parsedPayload };
+    }
+
+    case 'walkthrough/session': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      const directory = getBoundedString(payload?.directory, MAX_PATH_LENGTH);
+      const messageId = getBoundedString(payload?.messageId, 512);
+      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
+      if (payload?.directory !== undefined && !directory) return null;
+      if (payload?.messageId !== undefined && (!messageId || !/^[A-Za-z0-9_-]+$/.test(messageId)))
+        return null;
+      const parsedPayload: Extract<WebviewMessage, { type: 'walkthrough/session' }>['payload'] = {
+        sessionId,
+      };
+      if (directory) parsedPayload.directory = directory;
+      if (messageId) parsedPayload.messageId = messageId;
       return { type, payload: parsedPayload };
     }
 

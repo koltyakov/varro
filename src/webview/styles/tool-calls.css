@@ -622,6 +622,21 @@
   opacity: 1;
 }
 
+.diff-summary .diff-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.diff-summary .diff-summary-walkthrough {
+  color: var(--color-vscode-muted);
+  opacity: 1;
+}
+
+.diff-summary .diff-summary-walkthrough:hover {
+  color: var(--color-vscode-fg);
+}
+
 .diff-summary .diff-summary-content {
   margin-top: 4px;
 }

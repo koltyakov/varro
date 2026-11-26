@@ -23,6 +23,7 @@ The following describes the routes in the current Varro implementation, based on
 | `session-title` | Varro's stateless title generation or hidden-helper fallback | Source session and verified root, plus helper ID when applicable. Does not cover OpenCode's own automatic title requests. |
 | `side-question` | Existing V2 session `/generate` endpoint | Source session, verified root, and a purpose marker. Session hooks already have identity; the marker distinguishes a side question from other transient generation. |
 | `background-process-judge` | Stateless text generation | Shell owner's session and verified root, plus shell ID as `requestID`. This classification request is not an agent turn or a permission approval. |
+| `walkthrough` | Stateless text generation | Purpose and hashed workspace ID when available. A walkthrough explains a Git or session diff and does not run in the source conversation. |
 | `prompt-completion` | Direct provider Chat Completions, Responses, or Messages API | Purpose and hashed workspace ID when available. The completion boundary has a draft and recent text but no source session ID, so Varro does not infer one from active UI state. Model-picker tests may have purpose-only attribution. |
 
 Ordinary chat sends, commands, tools, subagents, compaction, and OpenCode-owned title generation are unchanged. Their session identity belongs to OpenCode's request hooks.

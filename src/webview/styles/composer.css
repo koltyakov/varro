@@ -320,6 +320,34 @@
   color: var(--color-vscode-muted);
 }
 
+.context-popup-prompt-cache-warming {
+  flex-wrap: wrap;
+}
+
+/* The 16px checkbox would otherwise sit on the label's text baseline, above the row's center. */
+.context-popup-prompt-cache-warming .context-popup-row-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.context-popup-warming-toggle {
+  height: auto;
+  color: inherit;
+  font-size: inherit;
+  white-space: nowrap;
+}
+
+.context-popup-warming-status {
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.context-popup-warming-detail {
+  flex-basis: 100%;
+  color: var(--color-vscode-muted);
+  font-size: 10.5px;
+}
+
 .context-popup-row-total {
   margin-top: 2px;
   padding-top: 4px;
@@ -2233,6 +2261,21 @@
   max-height: 128px;
 }
 
+.changed-files-walkthrough {
+  display: block;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: var(--color-vscode-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.changed-files-walkthrough:hover {
+  text-decoration: underline;
+}
+
 .changed-files-item {
   padding: 0;
 }
@@ -3048,8 +3091,36 @@
   border-color: var(--color-vscode-border-strong);
 }
 
+.chat-usage-limit-action.primary {
+  border-color: color-mix(in srgb, var(--color-vscode-button-fg) 16%, transparent);
+  background: var(--color-vscode-button-bg);
+  color: var(--color-vscode-button-fg);
+}
+
+.chat-usage-limit-action.primary:hover {
+  background: var(--color-vscode-button-hover);
+}
+
 .chat-usage-limit-action.danger {
   color: var(--color-vscode-error);
+}
+
+/* Throttling, overload, and automatic retries are transient, so they use the warning tone. */
+.chat-usage-limit-banner[data-tone='warning'] {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 26%, var(--color-vscode-border));
+  background: color-mix(
+    in srgb,
+    var(--color-vscode-warning) 9%,
+    var(--color-vscode-surface-softer)
+  );
+}
+
+.chat-usage-limit-banner[data-tone='warning'] .chat-usage-limit-title {
+  color: var(--color-vscode-warning);
+}
+
+.chat-usage-limit-banner[data-tone='warning'] .chat-usage-limit-meta {
+  color: var(--color-vscode-fg-soft);
 }
 
 .chat-retry-notice.usage-limit {

@@ -39,7 +39,7 @@ type GitCommit = {
   message?: string;
 };
 
-type GitRepository = {
+export type GitRepository = {
   rootUri: vscode.Uri;
   inputBox: { value: string };
   ui?: { selected?: boolean };
@@ -53,7 +53,7 @@ type GitRepository = {
   log?(options: { maxEntries: number }): Promise<readonly GitCommit[]>;
 };
 
-type GitApi = {
+export type GitApi = {
   repositories: readonly GitRepository[];
   getRepository(uri: vscode.Uri): GitRepository | null;
 };
@@ -86,7 +86,7 @@ type CommitHistoryContext = {
   examples: string[];
 };
 
-type ChangeScope = 'staged' | 'unstaged';
+export type ChangeScope = 'staged' | 'unstaged';
 
 type CapturedChanges = {
   patch: string;
@@ -149,10 +149,15 @@ export class CommitMessageService {
 
   async generate(sourceControl?: vscode.SourceControl): Promise<void> {
     try {
-      const api = await this.resolveGitApi();
+      const api = await resolveGitApi('generate a commit message');
       if (!api) return;
 
-      const repository = await this.resolveRepository(api, sourceControl);
+      const repository = await resolveRepository(
+        api,
+        sourceControl,
+        this.getWorkspacePath(),
+        'Select a repository for the commit message'
+      );
       if (!repository) return;
 
       const root = repository.rootUri.fsPath;
@@ -193,84 +198,6 @@ export class CommitMessageService {
       logger.error(`Commit message generation failed: ${message}`);
       await vscode.window.showErrorMessage(`Could not generate commit message: ${message}`);
     }
-  }
-
-  private async resolveGitApi(): Promise<GitApi | null> {
-    const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
-    if (!extension) {
-      await vscode.window.showErrorMessage('The built-in Git extension is unavailable.');
-      return null;
-    }
-
-    let git: GitExtension;
-    try {
-      git = extension.isActive ? extension.exports : await extension.activate();
-    } catch (err) {
-      await vscode.window.showErrorMessage(
-        `Could not activate the built-in Git extension: ${sanitizeError(err)}`
-      );
-      return null;
-    }
-
-    if (!git || git.enabled === false) {
-      await vscode.window.showWarningMessage(
-        'Git integration is disabled. Enable the built-in Git extension to generate a commit message.'
-      );
-      return null;
-    }
-
-    try {
-      const api = git.getAPI(1);
-      if (!api || !Array.isArray(api.repositories) || typeof api.getRepository !== 'function') {
-        throw new Error('Git API version 1 is unavailable');
-      }
-      return api;
-    } catch (err) {
-      await vscode.window.showErrorMessage(
-        `Could not access the built-in Git API: ${sanitizeError(err)}`
-      );
-      return null;
-    }
-  }
-
-  private async resolveRepository(
-    api: GitApi,
-    sourceControl?: vscode.SourceControl
-  ): Promise<GitRepository | null> {
-    if (sourceControl?.rootUri) {
-      const repository = findRepository(api, sourceControl.rootUri);
-      if (repository) return repository;
-    }
-
-    const selected = api.repositories.find((repository) => repository.ui?.selected === true);
-    if (selected) return selected;
-
-    const activeUri = vscode.window.activeTextEditor?.document.uri;
-    if (activeUri) {
-      const repository = api.getRepository(activeUri);
-      if (repository) return repository;
-    }
-
-    const workspacePath = this.getWorkspacePath();
-    if (workspacePath) {
-      const repository = api.getRepository(vscode.Uri.file(workspacePath));
-      if (repository) return repository;
-    }
-
-    if (api.repositories.length === 1) return api.repositories[0] || null;
-    if (api.repositories.length === 0) {
-      await vscode.window.showWarningMessage('No Git repository is available.');
-      return null;
-    }
-
-    const items: RepositoryQuickPickItem[] = api.repositories.map((repository) => ({
-      label: repository.rootUri.fsPath,
-      repository,
-    }));
-    const selectedItem = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Select a repository for the commit message',
-    });
-    return selectedItem?.repository || null;
   }
 
   private async generateForRepository(
@@ -550,6 +477,85 @@ export class CommitMessageService {
   }
 }
 
+export async function resolveGitApi(purpose: string): Promise<GitApi | null> {
+  const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
+  if (!extension) {
+    await vscode.window.showErrorMessage('The built-in Git extension is unavailable.');
+    return null;
+  }
+
+  let git: GitExtension;
+  try {
+    git = extension.isActive ? extension.exports : await extension.activate();
+  } catch (err) {
+    await vscode.window.showErrorMessage(
+      `Could not activate the built-in Git extension: ${sanitizeError(err)}`
+    );
+    return null;
+  }
+
+  if (!git || git.enabled === false) {
+    await vscode.window.showWarningMessage(
+      `Git integration is disabled. Enable the built-in Git extension to ${purpose}.`
+    );
+    return null;
+  }
+
+  try {
+    const api = git.getAPI(1);
+    if (!api || !Array.isArray(api.repositories) || typeof api.getRepository !== 'function') {
+      throw new Error('Git API version 1 is unavailable');
+    }
+    return api;
+  } catch (err) {
+    await vscode.window.showErrorMessage(
+      `Could not access the built-in Git API: ${sanitizeError(err)}`
+    );
+    return null;
+  }
+}
+
+export async function resolveRepository(
+  api: GitApi,
+  sourceControl: vscode.SourceControl | undefined,
+  workspacePath: string | undefined,
+  placeHolder: string
+): Promise<GitRepository | null> {
+  if (sourceControl?.rootUri) {
+    const repository = findRepository(api, sourceControl.rootUri);
+    if (repository) return repository;
+  }
+
+  const selected = api.repositories.find((repository) => repository.ui?.selected === true);
+  if (selected) return selected;
+
+  const activeUri = vscode.window.activeTextEditor?.document.uri;
+  if (activeUri) {
+    const repository = api.getRepository(activeUri);
+    if (repository) return repository;
+  }
+
+  if (workspacePath) {
+    const repository = api.getRepository(vscode.Uri.file(workspacePath));
+    if (repository) return repository;
+  }
+
+  if (api.repositories.length === 1) return api.repositories[0] || null;
+  if (api.repositories.length === 0) {
+    await vscode.window.showWarningMessage('No Git repository is available.');
+    return null;
+  }
+
+  const items: RepositoryQuickPickItem[] = api.repositories.map((repository) => ({
+    label: repository.rootUri.fsPath,
+    repository,
+  }));
+  const selectedItem = await vscode.window.showQuickPick(items, {
+    placeHolder,
+  });
+  return selectedItem?.repository || null;
+}
+
 class GenerationCancelledError extends Error {
   constructor() {
     super('Commit message generation was cancelled');
@@ -574,7 +580,7 @@ function findRepository(api: GitApi, uri: vscode.Uri): GitRepository | null {
   );
 }
 
-function collectChangePaths(repository: GitRepository, scope: ChangeScope): string[] {
+export function collectChangePaths(repository: GitRepository, scope: ChangeScope): string[] {
   const paths = new Set<string>();
   const changes =
     scope === 'staged' ? repository.state.indexChanges : repository.state.workingTreeChanges;
@@ -585,7 +591,7 @@ function collectChangePaths(repository: GitRepository, scope: ChangeScope): stri
   return [...paths];
 }
 
-async function captureRepositoryChanges(
+export async function captureRepositoryChanges(
   repository: GitRepository,
   scope: ChangeScope,
   stagedPatch?: string

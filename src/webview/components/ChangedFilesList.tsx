@@ -179,6 +179,15 @@ export function ChangedFilesList() {
     summaryStats()?.deletions ??
     changes().reduce((sum, change) => sum + (change.deletions ?? 0), 0);
   const hasLineCounts = () => !truncated() && (additions() > 0 || deletions() > 0);
+  const walkThroughSession = () => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+    const directory = getActiveSession()?.directory;
+    postMessage({
+      type: 'walkthrough/session',
+      payload: directory ? { sessionId, directory } : { sessionId },
+    });
+  };
   // The board always starts collapsed; the user opens it on demand.
   const [collapsed, setCollapsed] = createSignal(true);
 
@@ -210,6 +219,16 @@ export function ChangedFilesList() {
           <ul class="todo-block-list changed-files-list">
             <For each={visibleChanges()}>{(change) => <ChangedFileItem change={change} />}</For>
           </ul>
+          <Show when={!isActiveSessionWorking()}>
+            <button
+              type="button"
+              class="changed-files-walkthrough"
+              title="Explain this session's changes in reading order. Uses the helper model and opens a Markdown report."
+              onClick={walkThroughSession}
+            >
+              Walk through these changes
+            </button>
+          </Show>
         </Show>
       </div>
     </Show>

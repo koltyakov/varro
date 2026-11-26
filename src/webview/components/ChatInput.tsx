@@ -271,7 +271,7 @@ import type { CompressedImage, ImageCompressionAnalysis } from '../lib/image-com
 import { loadImage } from '../lib/image-loading';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import type { ToolbarSharedProps } from './chat-input/ChatInputToolbar';
-import type { PromptCacheActivity } from './chat-input/ContextPopup';
+import type { PromptCacheActivity, PromptCacheWarmingView } from './chat-input/ContextPopup';
 import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import {
   RichComposerArea,
@@ -313,6 +313,7 @@ import {
   isPdfBytes,
 } from '../../shared/native-pdf';
 import {
+  getExhaustedQuotaResetAt,
   getSafeUsageLimitAction,
   getUsageLimitPresentation,
   isUsageLimitNoticeVisibleForModel,
@@ -2595,6 +2596,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       },
       onGenerateStats: (includeAllTime) => {
         postMessage({ type: 'usage/report', payload: { includeAllTime } });
+      },
+      onWalkThroughSession: () => {
+        const sessionId = getSessionTreeRootId(composerSessionId()) || composerSessionId();
+        if (!sessionId) return;
+        const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
+        postMessage({
+          type: 'walkthrough/session',
+          payload: directory ? { sessionId, directory } : { sessionId },
+        });
       },
       customCommands: state.commands,
     })
@@ -6369,18 +6379,47 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   // Root-session prompt cache only: subagents run their own requests and caches.
+  const promptCacheWarmingView = createMemo((): PromptCacheWarmingView | null => {
+    const warming = state.promptCacheWarming;
+    const sessionId = composerSessionId();
+    if (!warming?.available || !sessionId || warming.mode === 'off') return null;
+    if (warming.openCodeWarming || warming.mode === 'all') return { kind: 'opencode' };
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    const session = warming.sessions[rootId] ?? null;
+    return {
+      kind: 'chosen',
+      enabled: session !== null,
+      session,
+      intervalMs: warming.intervalMs,
+      durationMs: warming.durationMs,
+    };
+  });
+
+  function togglePromptCacheWarming(enabled: boolean) {
+    const sessionId = composerSessionId();
+    if (!sessionId) return;
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    postMessage({ type: 'warming/set', payload: { sessionId: rootId, enabled } });
+  }
+
   const promptCacheActivity = createMemo(
     (): PromptCacheActivity | null => {
       const sessionId = composerSessionId();
       if (!sessionId) return null;
       const rootId = getSessionTreeRootId(sessionId) || sessionId;
       const messages = messagesBySession().get(rootId) || [];
+      // A keep-alive re-sends the context without adding a message, so it renews the cache too.
+      const warming = promptCacheWarmingView();
+      const pingedAt =
+        warming?.kind === 'chosen' && warming.session?.stopped !== 'cache-miss'
+          ? (warming.session?.sentAt ?? 0)
+          : 0;
       for (let index = messages.length - 1; index >= 0; index -= 1) {
         const info = messages[index]!.info;
         if (info.role !== 'assistant' || !info.time.completed) continue;
         const cache = info.tokens?.cache;
         if (!cache || (cache.read <= 0 && cache.write <= 0)) return null;
-        return { lastUsedAt: info.time.completed, inUse: isComposerBusy() };
+        return { lastUsedAt: Math.max(info.time.completed, pingedAt), inUse: isComposerBusy() };
       }
       return null;
     },
@@ -6517,6 +6556,26 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const activeUsageLimitAction = createMemo(() =>
     getSafeUsageLimitAction(visibleUsageLimit()?.action)
   );
+  const activeUsageLimitModelLabel = createMemo(() => {
+    const notice = visibleUsageLimit();
+    if (!notice) return null;
+    const current = currentModel();
+    if (notice.providerID && current.providerID && notice.providerID !== current.providerID) {
+      return notice.modelID || notice.providerID;
+    }
+    if (notice.modelID && current.modelID && notice.modelID !== current.modelID) {
+      return notice.modelID;
+    }
+    return current.modelName || notice.modelID || null;
+  });
+  // A stopped turn's own retry hint is the reset time; otherwise fall back to polled quotas,
+  // which the quota warning would show if the banner did not replace it.
+  const activeUsageLimitResetAt = createMemo(() => {
+    const notice = visibleUsageLimit();
+    if (!notice) return null;
+    if (notice.source !== 'status' && notice.retryAt !== null) return notice.retryAt;
+    return getExhaustedQuotaResetAt(currentProviderLimit(), Date.now());
+  });
   const activeRalphManagerSessionId = createMemo(() =>
     ralphStore.isRalphSession(composerSessionId())
       ? composerSessionId()
@@ -7201,15 +7260,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
       <Show when={!hasExpandedDiffOverlay() && visibleUsageLimit()}>
         <UsageLimitBanner
+          kind={activeUsageLimitPresentation()!.kind}
           title={activeUsageLimitPresentation()!.title}
           message={visibleUsageLimit()!.action?.message.trim() || visibleUsageLimit()!.message}
-          meta={describeUsageLimit(
-            activeUsageLimitPresentation()!.summary,
-            visibleUsageLimit()!.retryAt,
-            visibleUsageLimit()!.attempt
-          )}
-          primaryActionLabel="Continue"
-          onPrimaryAction={() => void handleUsageLimitContinue()}
+          summary={activeUsageLimitPresentation()!.summary}
+          modelLabel={activeUsageLimitModelLabel()}
+          retrying={visibleUsageLimit()!.source === 'status'}
+          retryAt={visibleUsageLimit()!.retryAt}
+          attempt={visibleUsageLimit()!.attempt}
+          resetAt={activeUsageLimitResetAt()}
+          onContinue={() => void handleUsageLimitContinue()}
           externalAction={activeUsageLimitAction()}
           onExternalAction={(link) =>
             postMessage({ type: 'vscode/open-external', payload: { url: link } })
@@ -7222,7 +7282,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             !composerHasActivePermission()
           }
           onStopRetrying={requestAbortSession}
-          onSwitchProvider={() => {
+          onSwitchModel={() => {
             closePopups();
             setShowModelPicker(true);
           }}
@@ -7690,6 +7750,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             subagentCount={sessionTokenBreakdown().subagentCount}
             sessionModels={sessionModels()}
             promptCache={promptCacheActivity()}
+            promptCacheWarming={promptCacheWarmingView()}
+            onTogglePromptCacheWarming={togglePromptCacheWarming}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
             showAttachmentsControl={isToolbarControlVisible('attachments')}
             showStopButton={showStopButton()}
@@ -7790,6 +7852,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           subagentCount={sessionTokenBreakdown().subagentCount}
           sessionModels={sessionModels()}
           promptCache={promptCacheActivity()}
+          promptCacheWarming={promptCacheWarmingView()}
+          onTogglePromptCacheWarming={togglePromptCacheWarming}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           showStopButton={showStopButton()}
@@ -7816,18 +7880,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       </Show>
     </div>
   );
-}
-
-function describeUsageLimit(summary: string, retryAt: number | null, attempt: number | null) {
-  const parts = [summary];
-  if (retryAt) {
-    const seconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
-    parts.push(`retry in ${seconds}s`);
-  }
-  if (attempt) {
-    parts.push(`attempt #${attempt}`);
-  }
-  return parts.join(' · ');
 }
 
 function getPastedImageFilename(index: number) {

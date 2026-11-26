@@ -4,7 +4,7 @@ import {
   DEFAULT_PROMPT_CACHE_WARNING_TOKENS,
   DEFAULT_RESET_WARNING_DAYS,
 } from '../shared/provider-limit-config';
-import { isPermissionMode } from '../shared/protocol';
+import { isPermissionMode, type PromptCacheWarmingMode } from '../shared/protocol';
 import { isNumber, isString } from '../shared/type-utils';
 import { parseRemoteImageMode } from '../shared/remote-images';
 
@@ -62,6 +62,22 @@ export function readPromptTrace(
   config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
 ): boolean {
   return config.inspect?.<boolean>('chat.promptTrace')?.globalValue === true;
+}
+
+/** Warming spends tokens on every ping, so only user settings can turn it on. */
+export function readPromptCacheWarmingMode(
+  config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
+): PromptCacheWarmingMode {
+  const value = config.inspect?.<unknown>('chat.promptCacheWarming')?.globalValue;
+  return value === 'chosen' || value === 'all' ? value : 'off';
+}
+
+export function readPromptCacheWarmingDurationMs(
+  config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
+): number {
+  const value = config.get<unknown>('chat.promptCacheWarmingMinutes');
+  const minutes = value === 60 || value === 120 || value === 180 ? value : 30;
+  return minutes * 60_000;
 }
 
 function readResetWarningDays(config: vscode.WorkspaceConfiguration): number {

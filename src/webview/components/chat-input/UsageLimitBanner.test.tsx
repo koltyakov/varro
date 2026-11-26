@@ -5,7 +5,11 @@ import { UsageLimitBanner } from './UsageLimitBanner';
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
+const NOW = new Date('2026-03-04T10:00:00').getTime();
+
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
   container = document.createElement('div');
   document.body.appendChild(container);
 });
@@ -15,84 +19,112 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  vi.useRealTimers();
 });
 
+type BannerProps = Parameters<typeof UsageLimitBanner>[0];
+
+function renderBanner(overrides: Partial<BannerProps> = {}) {
+  const props: BannerProps = {
+    kind: 'quota',
+    title: 'Usage limit reached',
+    message: 'You have hit your plan limit.',
+    summary: 'messages exhausted',
+    modelLabel: 'GPT-5',
+    retrying: false,
+    retryAt: null,
+    attempt: null,
+    resetAt: null,
+    showStopRetrying: false,
+    onStopRetrying: vi.fn(),
+    onContinue: vi.fn(),
+    onSwitchModel: vi.fn(),
+    ...overrides,
+  };
+  cleanup = render(() => UsageLimitBanner(props), container!);
+  return props;
+}
+
+function buttons() {
+  return Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+}
+
+function button(label: string) {
+  return buttons().find((candidate) => candidate.textContent === label);
+}
+
 describe('UsageLimitBanner', () => {
-  it('renders the usage-limit copy and all actions when stop retrying is available', () => {
-    const onPrimaryAction = vi.fn();
-    const onStopRetrying = vi.fn();
-    const onSwitchProvider = vi.fn();
-    const onExternalAction = vi.fn();
+  it('offers Continue first when a stopped limit has no known reset', () => {
+    const props = renderBanner({
+      externalAction: { label: 'Manage billing', link: 'https://example.com/billing' },
+      onExternalAction: vi.fn(),
+    });
 
-    cleanup = render(
-      () =>
-        UsageLimitBanner({
-          title: 'Request throttled',
-          message: 'OpenAI has temporarily rate limited requests.',
-          meta: '5 requests remaining',
-          primaryActionLabel: 'Continue',
-          onPrimaryAction,
-          externalAction: {
-            label: 'Manage billing',
-            link: 'https://example.com/billing',
-          },
-          onExternalAction,
-          showStopRetrying: true,
-          onStopRetrying,
-          onSwitchProvider,
-        }),
-      container!
+    const banner = container?.querySelector('[role="status"]');
+    expect(banner?.getAttribute('aria-live')).toBe('polite');
+    expect(banner?.getAttribute('data-tone')).toBe('error');
+    expect(container?.querySelector('.chat-usage-limit-meta')?.textContent).toBe(
+      'GPT-5 · messages exhausted'
     );
+    expect(buttons().map((candidate) => candidate.textContent)).toEqual([
+      'Continue',
+      'Switch model…',
+      'Manage billing',
+    ]);
+    expect(button('Continue')?.classList.contains('primary')).toBe(true);
 
-    const status = container?.querySelector('[role="status"]');
-    expect(status?.getAttribute('aria-live')).toBe('polite');
-    expect(container?.textContent).toContain('Request throttled');
-    expect(container?.textContent).toContain('5 requests remaining');
-    expect(container?.textContent).toContain('OpenAI has temporarily rate limited requests.');
-
-    const continueButton = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent === 'Continue'
-    );
-    const stopRetryingButton = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent === 'Stop retrying'
-    );
-    const externalActionButton = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent === 'Manage billing'
-    );
-    const switchProviderButton = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent === 'Switch provider'
-    );
-
-    continueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    externalActionButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    stopRetryingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-
-    expect(onPrimaryAction).toHaveBeenCalledOnce();
-    expect(onExternalAction).toHaveBeenCalledWith('https://example.com/billing');
-    expect(onStopRetrying).toHaveBeenCalledOnce();
-    expect(onSwitchProvider).toHaveBeenCalledOnce();
+    button('Continue')?.click();
+    button('Switch model…')?.click();
+    button('Manage billing')?.click();
+    expect(props.onContinue).toHaveBeenCalledOnce();
+    expect(props.onSwitchModel).toHaveBeenCalledOnce();
+    expect(props.onExternalAction).toHaveBeenCalledWith('https://example.com/billing');
   });
 
-  it('omits the stop-retrying action when it is not available', () => {
-    cleanup = render(
-      () =>
-        UsageLimitBanner({
-          title: 'Service temporarily unavailable',
-          message: 'Claude is unavailable until the window resets.',
-          meta: 'Resets in 12 minutes',
-          primaryActionLabel: 'Continue',
-          onPrimaryAction: () => {},
-          showStopRetrying: false,
-          onStopRetrying: () => {},
-          onSwitchProvider: () => {},
-        }),
-      container!
-    );
+  it('counts down an automatic retry and offers no Continue while retrying', async () => {
+    const props = renderBanner({
+      kind: 'throttled',
+      title: 'Request throttled',
+      message: 'Request throttled',
+      retrying: true,
+      retryAt: NOW + 75_000,
+      attempt: 3,
+      showStopRetrying: true,
+    });
 
-    expect(container?.textContent).not.toContain('Stop retrying');
-    expect(container?.textContent).toContain('Continue');
-    expect(container?.textContent).toContain('Switch provider');
-    expect(container?.querySelectorAll('button')).toHaveLength(2);
+    const banner = container?.querySelector('[role="status"]');
+    expect(banner?.getAttribute('data-tone')).toBe('warning');
+    expect(banner?.getAttribute('data-state')).toBe('retrying');
+    const meta = () => container?.querySelector('.chat-usage-limit-meta')?.textContent;
+    expect(meta()).toBe('GPT-5 · retrying in 1:15 · attempt 3');
+    // The provider message only repeats the title, so it is not shown twice.
+    expect(container?.querySelector('.chat-usage-limit-message')).toBeNull();
+    expect(button('Continue')).toBeUndefined();
+    expect(button('Switch model…')?.classList.contains('primary')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(meta()).toBe('GPT-5 · retrying in 1:10 · attempt 3');
+    await vi.advanceTimersByTimeAsync(75_000);
+    expect(meta()).toBe('GPT-5 · retrying now · attempt 3');
+
+    button('Stop retrying')?.click();
+    expect(props.onStopRetrying).toHaveBeenCalledOnce();
+  });
+
+  it('shows the quota reset and leads with switching models until it passes', async () => {
+    renderBanner({ resetAt: NOW + 2 * 3_600_000 + 10 * 60_000 });
+
+    const meta = () => container?.querySelector('.chat-usage-limit-meta')?.textContent ?? '';
+    expect(meta()).toMatch(/^GPT-5 · resets at .+ \(in 2h 10m\)$/);
+    expect(buttons().map((candidate) => candidate.textContent)).toEqual([
+      'Switch model…',
+      'Try anyway',
+    ]);
+    expect(button('Switch model…')?.classList.contains('primary')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(2 * 3_600_000 + 11 * 60_000);
+    expect(meta()).toBe('GPT-5 · limit window has reset');
+    expect(button('Continue')?.classList.contains('primary')).toBe(true);
+    expect(button('Try anyway')).toBeUndefined();
   });
 });

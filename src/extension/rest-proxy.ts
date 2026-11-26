@@ -565,6 +565,10 @@ export class RestProxy {
       callbacks.internalHelperCleanupCoordinator ?? new InternalHelperCleanupCoordinator();
   }
 
+  updateGlobalWarming(value: true | { duration: string } | null): Promise<void> {
+    return this.openCodeConfig.updateGlobalWarming(value);
+  }
+
   cancelRequest(payload: ApiCancelPayload) {
     const request = this.activeRequests.get(payload.cancelKey);
     if (!request || request.id !== payload.id) return;

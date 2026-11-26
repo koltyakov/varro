@@ -18,7 +18,8 @@ export type PromptTraceContext = {
     | 'session-title'
     | 'side-question'
     | 'background-process-judge'
-    | 'prompt-completion';
+    | 'prompt-completion'
+    | 'walkthrough';
   sessionID?: string;
   requestID?: string;
   helperSessionID?: string;

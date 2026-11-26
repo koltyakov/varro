@@ -29,6 +29,7 @@ export function getSlashCommands(props: {
   onExportSession: () => void;
   onPauseSession: () => Promise<void>;
   onGenerateStats: (includeAllTime: boolean) => void;
+  onWalkThroughSession?: () => void;
   onSideQuestion?: (question: string) => void;
   customCommands: Command[];
 }): SlashCommand[] {
@@ -50,6 +51,7 @@ export function getSlashCommands(props: {
     'settings',
     'export',
     'stats',
+    'walkthrough',
     'fork',
     'thinking',
     'reasoning',
@@ -168,6 +170,16 @@ export function getSlashCommands(props: {
         props.onGenerateStats(args.trim().toLowerCase() === 'all');
       },
     },
+    ...(props.hasCurrentSession && props.onWalkThroughSession
+      ? [
+          {
+            name: 'walkthrough',
+            aliases: [],
+            description: "Explain this session's changes in reading order",
+            action: () => props.onWalkThroughSession?.(),
+          },
+        ]
+      : []),
     {
       name: 'thinking',
       aliases: ['reasoning'],

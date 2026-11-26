@@ -504,6 +504,13 @@ export function registerCommands(
     ),
 
     vscode.commands.registerCommand(
+      'varro.walkThroughChanges',
+      async (sourceControl?: vscode.SourceControl) => {
+        await sidebar.walkThroughChanges({ kind: 'git', sourceControl });
+      }
+    ),
+
+    vscode.commands.registerCommand(
       'varro.cancelCommitMessage',
       async (sourceControl?: vscode.SourceControl) => {
         await sidebar.cancelCommitMessage(sourceControl);

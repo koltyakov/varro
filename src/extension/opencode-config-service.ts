@@ -1509,6 +1509,77 @@ export class OpenCodeConfigService {
     );
   }
 
+  /**
+   * Sets or removes OpenCode's global `warming` setting, which keeps every root session's prompt
+   * cache alive. `null` removes it from every global config file so no copy keeps it on.
+   */
+  async updateGlobalWarming(value: true | { duration: string } | null): Promise<void> {
+    if (this.callbacks.server.isAttachOnly) {
+      throw new Error(
+        'Keeping all sessions warm edits the global OpenCode config, which is unavailable in attach-only mode.'
+      );
+    }
+    const globalPaths = getOpenCodeConfigPaths();
+    const readGlobalFiles = async () => {
+      const files: OpenCodeConfigFile[] = [];
+      for (const path of globalPaths) {
+        const uri = vscode.Uri.file(path);
+        if (!(await readConfigStat(uri))) continue;
+        const raw = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+        files.push({ path, uri, raw, config: parseOpenCodeConfig(raw, path) });
+      }
+      return files;
+    };
+    const files = await readGlobalFiles();
+    const configured = files.filter((file) => Object.hasOwn(file.config, 'warming'));
+    const defaultPath = globalPaths.find(
+      (candidate) => getOpenCodePathApi(candidate).basename(candidate) === 'opencode.json'
+    );
+    if (!defaultPath) throw new Error('Could not resolve global OpenCode config');
+    const targets =
+      value === null
+        ? configured.map((file) => file.path)
+        : [configured.at(-1)?.path ?? files.at(-1)?.path ?? defaultPath];
+    let changed = false;
+    for (const path of targets) {
+      const wrote = await withOpenCodeConfigUpdateLock(
+        getCanonicalOpenCodeConfigPath(path),
+        async () => {
+          const uri = vscode.Uri.file(path);
+          if (
+            vscode.workspace.textDocuments.some(
+              (document) => document.isDirty && isSameWorkspacePath(document.uri.fsPath, path)
+            )
+          ) {
+            throw new Error(`${path} has unsaved changes; save before changing session warming`);
+          }
+          const initialStat = await readConfigStat(uri);
+          const raw = initialStat
+            ? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri))
+            : '{\n  "$schema": "https://opencode.ai/config.json"\n}\n';
+          const current = parseOpenCodeConfig(raw, path);
+          if (isDeepStrictEqual(current.warming, value ?? undefined)) return false;
+          if (value === null && !Object.hasOwn(current, 'warming')) return false;
+          const next = applyJsoncChange(raw, ['warming'], value ?? undefined);
+          if (!this.areConfigStatsEqual(initialStat, await readConfigStat(uri))) {
+            throw new Error(`${path} changed while updating session warming; please retry`);
+          }
+          if (!initialStat)
+            await vscode.workspace.fs.createDirectory(
+              vscode.Uri.file(getOpenCodePathApi(path).dirname(path))
+            );
+          await vscode.workspace.fs.writeFile(
+            uri,
+            new TextEncoder().encode(next.endsWith('\n') ? next : `${next}\n`)
+          );
+          return true;
+        }
+      );
+      changed = wrote || changed;
+    }
+    if (changed) await this.callbacks.refreshOpenCodeGlobalConfig?.();
+  }
+
   private areConfigStatsEqual(left: vscode.FileStat | null, right: vscode.FileStat | null) {
     if (left === null || right === null) {
       return left === right;

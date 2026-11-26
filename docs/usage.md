@@ -713,7 +713,7 @@ The composer can show model and session metadata:
 - Available OpenAI/Codex and Z.ai usage-limit resets and their expiration times. Varro displays these resets and links to the provider's usage page, but does not redeem them.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 - Reported session cost in the context popup, when OpenCode supplies cost data.
-- A prompt-cache estimate in the context popup, when the latest completed response read or wrote the provider's prompt cache. It counts down five minutes from that response, a common provider default, and then shows **Likely expired**. It is an estimate, not a provider timer. In sessions whose context reaches `varro.chat.promptCacheWarningTokens` (100,000 by default; `0` turns it off), a closable warning above the composer also appears once the estimate runs out while the session is idle, showing how many tokens the next message will re-send uncached. Closing it hides it until a later response uses the cache again.
+- A prompt-cache estimate in the context popup, when the latest completed response read or wrote the provider's prompt cache. It counts down five minutes from that response, a common provider default, and then shows **Likely expired**. It is an estimate, not a provider timer. In sessions whose context reaches `varro.chat.promptCacheWarningTokens` (250,000 by default; `0` turns it off), a closable warning above the composer also appears once the estimate runs out while the session is idle, showing how many tokens the next message will re-send uncached. Closing it hides it until a later response uses the cache again. See [Keep the prompt cache warm](#keep-the-prompt-cache-warm) to avoid the expiry.
 
 When an applicable provider quota has 25% or less remaining, a warning above the composer shows the percentage left in each low window and its reset time. The warning becomes critical at 10% remaining. A low weekly or monthly allowance appears even when the 5-hour allowance is healthy. **View usage** opens the provider's usage page in your browser and is hidden when its URL is unknown.
 
@@ -721,7 +721,21 @@ Closing a yellow warning hides each displayed quota until it becomes critical at
 
 For UI debugging, set `varro.debug.showQuotaWarning` to `true` to show available quotas regardless of remaining allowance or saved dismissals. The setting updates live. Closing the debug preview does not save a dismissal; toggle the setting off and on to show it again.
 
-If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers. This error notice takes priority over quota warnings.
+If a provider or model hits a usage limit, Varro shows a usage-limit banner above the composer. It replaces quota warnings and names the limited model.
+
+- While OpenCode retries on its own, the banner counts down to the next attempt and offers **Switch model…** and **Stop retrying**. It offers no **Continue**, because a new message would race the retry.
+- After the turn stops, the banner shows when the limit resets, from the provider's retry hint or Varro's polled quota. Until then **Switch model…** comes first and **Try anyway** sends `Continue` early. Once the reset time passes, **Continue** comes first.
+- Picking another model from **Switch model…** stops a retrying turn and continues it on the new model.
+- Throttling and provider overload use the warning color; an exhausted quota uses the error color. Varro never switches models on its own.
+
+### Keep the prompt cache warm
+
+Providers drop an idle session's prompt cache after a few minutes, so the next message re-sends the whole context at the uncached rate. On OpenCode v2, `varro.chat.promptCacheWarming` sends short keep-alive requests after each reply instead. Each keep-alive re-reads the whole context from the cache, which costs money or subscription quota: with typical cache pricing, about twelve keep-alives cost as much as re-sending the context once. Warming is off by default, and only user settings can turn it on.
+
+- `chosen` - turn **Keep warm** on per root session in the context popup's Prompt cache section. Varro sends OpenCode's transient `/generate` keep-alive every four minutes while VS Code runs, for `varro.chat.promptCacheWarmingMinutes` (30 by default) after each reply. It skips running sessions, never warms subagent or helper sessions, and stops early when a keep-alive finds the cache already gone or fails. The popup shows the time left and why warming stopped. Choices are kept per workspace.
+- `all` - writes `warming` to the global OpenCode config, so OpenCode keeps every root session warm, including sessions from the TUI. Switching away from `all` removes the key from every global config file. This needs file-based configuration and is unavailable in attach-only mode.
+
+When OpenCode's own `warming` setting is already on, Varro sends no keep-alives of its own and the popup shows **Kept warm by OpenCode**.
 
 Provider and configuration changes are revalidated without interrupting running agents. When applying a refresh must wait, the Models view shows a queued configuration update and applies it after active work finishes. Embedded reauthentication can refresh an authentication-only change immediately.
 
@@ -928,6 +942,20 @@ When no explicit route is available, the helper request omits its model and Open
 
 All paths, up to the first 100,000 characters of the selected patch, and up to ten recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Untracked file content has separate per-file and total size limits. On native Windows, Varro includes each untracked path with a `content unavailable` marker but omits its contents because Windows does not provide the atomic no-follow file read used to prevent path replacement during generation. Tracked unstaged diffs are unaffected. Split larger changes into smaller commits for the most accurate result. Varro never logs the patch, stages files, or executes the commit. It also rechecks the selected changes and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
 
+## Walk Through Changes
+
+A walkthrough explains a diff in reading order: it groups related hunks across files into stops, orders them so each builds on the last, and explains in a few sentences what the code now does differently. Stops the change rests on are marked **Key change**; supporting ones are marked **Context**. A few stops carry a factual note, such as a design decision, a new dependency, or an untested promise. Walkthroughs never review or judge the code.
+
+Nothing runs automatically. Start a walkthrough from:
+
+- The list icon in the Source Control title bar, or `Varro: Walk Through Changes`. It explains staged or unstaged changes, or asks which when both exist, including all uncommitted changes.
+- **Walk through** next to a reply's file-change summary, for the changes that summary lists.
+- **Walk through these changes** in the changed-files panel, or `/walkthrough`, for the whole session.
+
+The result opens as a Markdown report in the preview, like `/stats`. Each stop shows the exact diff hunks with links to the files, and **Not covered** lists the hunks no stop explains: routine edits, generated files such as lockfiles, which are never sent to the model, and binary or omitted content. The explanations are AI-written; regenerate after the code changes.
+
+Walkthroughs require OpenCode v2. They use the same helper model as commit messages without `varro.commitMessage.model`: OpenCode's `small_model`, then GPT Luna, then the active chat model. The diff is treated as untrusted input. A diff that does not fit in one request is refused rather than truncated; stage a subset and walk through the staged changes instead.
+
 ## Output In The Chat
 
 Varro renders OpenCode output as structured UI instead of plain text only.
@@ -979,6 +1007,7 @@ Editable user messages expose an edit action. Sending the replacement removes th
 - `Varro: Show Output`
 - `Varro: Open Source Control`
 - `Varro: Generate Commit Message` generates from staged changes, or from the unstaged working tree when the index is empty, using the configured VS Code commit-message model, OpenCode `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, or the active chat model at low reasoning, in that order. It fills the selected Git repository's commit input without committing
+- `Varro: Walk Through Changes` explains staged, unstaged, or all uncommitted changes of the selected Git repository in reading order and opens the result as a Markdown report
 - `Varro: Open Global AGENTS.md`
 - `Varro: Initialize Project AGENTS.md`
 - `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
@@ -1029,6 +1058,8 @@ Chat view:
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - Use the scope picker inside the session search field to choose which OpenCode sessions appear. **Folder** shows exact working-directory matches, **Nested** includes folders beneath it in the same OpenCode project, and **Project** shows the entire containing Git project. Varro remembers the choice for each project; non-Git folders offer Folder and Nested independently.
 - `varro.chat.autoRenameUntitledSessions` - generate a fallback title when OpenCode leaves a session untitled; defaults to `false`
+- `varro.chat.promptCacheWarming` - `off`, `chosen`, or `all`; keeps idle sessions' prompt caches alive after each reply on OpenCode v2. User settings only; defaults to `off`. See [Keep the prompt cache warm](#keep-the-prompt-cache-warm)
+- `varro.chat.promptCacheWarmingMinutes` - how long a session stays warm after each reply: `30`, `60`, `120`, or `180`; defaults to `30`
 
 Commit messages:
 

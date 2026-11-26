@@ -99,6 +99,9 @@ export interface MessageRouterCallbacks {
   exportSession(sessionId: string, directory?: string): Promise<void>;
   generateUsageReport(includeAllTime: boolean): Promise<void>;
   generateSessionUsageReport(sessionId: string, directory?: string): Promise<void>;
+  walkThroughSessionChanges(
+    payload: Extract<WebviewMessage, { type: 'walkthrough/session' }>['payload']
+  ): Promise<void>;
   reloadWebview(): Promise<void>;
   openFolder(
     payload?: Extract<WebviewMessage, { type: 'vscode/open-folder' }>['payload']
@@ -132,6 +135,9 @@ export interface MessageRouterCallbacks {
   handleApiRequest(payload: ApiRequestPayload): Promise<void>;
   cancelApiRequest(payload: ApiCancelPayload): void;
   handleRalphMessage(msg: RalphMessage): void;
+  handleWarmingMessage(
+    msg: Extract<WebviewMessage, { type: 'warming/sync' | 'warming/set' }>
+  ): void;
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
   claimQueuedMessage(
     payload: Extract<WebviewMessage, { type: 'queued-messages/claim' }>['payload']
@@ -316,6 +322,9 @@ export class MessageRouter {
               )
             : this.callbacks.generateSessionUsageReport(msg.payload.sessionId));
           break;
+        case 'walkthrough/session':
+          await this.callbacks.walkThroughSessionChanges(msg.payload);
+          break;
         case 'webview/reload':
           await this.callbacks.reloadWebview();
           break;
@@ -399,6 +408,10 @@ export class MessageRouter {
         case 'ralph/update-model':
         case 'ralph/sync':
           this.callbacks.handleRalphMessage(msg);
+          break;
+        case 'warming/sync':
+        case 'warming/set':
+          this.callbacks.handleWarmingMessage(msg);
           break;
         case 'log':
           this.handleLogMessage(msg);

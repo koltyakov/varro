@@ -303,6 +303,11 @@
         "icon": "$(wand)"
       },
       {
+        "command": "varro.walkThroughChanges",
+        "title": "Varro: Walk Through Changes",
+        "icon": "$(list-ordered)"
+      },
+      {
         "command": "varro.cancelCommitMessage",
         "title": "Varro: Cancel Commit Message Generation",
         "icon": "$(debug-stop)",
@@ -404,6 +409,11 @@
         }
       ],
       "scm/title": [
+        {
+          "command": "varro.walkThroughChanges",
+          "when": "scmProvider == git",
+          "group": "navigation@98"
+        },
         {
           "command": "varro.generateCommitMessage",
           "when": "scmProvider == git && scmProviderRootUri not in varro:commitMessageGenerationRoots",
@@ -668,6 +678,33 @@
           "default": 250000,
           "markdownDescription": "Warn above the composer when an idle session's prompt cache has likely expired and its context holds at least this many tokens. The next message then re-sends the whole context at the uncached rate. Set to `0` to turn the warning off."
         },
+        "varro.chat.promptCacheWarming": {
+          "type": "string",
+          "scope": "application",
+          "enum": [
+            "off",
+            "chosen",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Never send keep-alive requests.",
+            "Keep warm only the sessions you turn on with Keep warm in the context popup. Varro sends the keep-alives while VS Code runs.",
+            "Turn on OpenCode's own `warming` setting in the global OpenCode config, which keeps every root session warm, also in the TUI."
+          ],
+          "default": "off",
+          "markdownDescription": "Keep an idle session's provider prompt cache alive after each reply, so the next message is cheaper and faster. Each keep-alive sends a short prompt with the whole session context and costs money or subscription quota; with typical cache pricing, about twelve keep-alives cost as much as re-sending the context once uncached. Requires OpenCode v2. `all` writes `warming` to the global OpenCode config and removes it when you switch away. Only user settings can turn this on."
+        },
+        "varro.chat.promptCacheWarmingMinutes": {
+          "type": "number",
+          "enum": [
+            30,
+            60,
+            120,
+            180
+          ],
+          "default": 30,
+          "markdownDescription": "How long a session stays warm after each reply when `#varro.chat.promptCacheWarming#` is on."
+        },
         "varro.chat.showTurnTimer": {
           "type": "boolean",
           "default": true,
@@ -741,7 +778,7 @@
           "type": "boolean",
           "scope": "application",
           "default": false,
-          "markdownDescription": "Include a VARRO_TRACE_V1 attribution line in auxiliary inference prompts for compatible proxy hooks: follow-ups, permission judging, commit messages, titles, side questions, background-process judging, and prompt completion. Sends purpose, known session/root IDs, and available request/helper IDs; requests without a source session use a hashed workspace ID when available. Requires a proxy hook to apply accounting metadata and strip the line before inference; otherwise the model receives it. Does not change conversation history, permissions, or enable inference features."
+          "markdownDescription": "Include a VARRO_TRACE_V1 attribution line in auxiliary inference prompts for compatible proxy hooks: follow-ups, permission judging, commit messages, titles, side questions, background-process judging, walkthroughs, and prompt completion. Sends purpose, known session/root IDs, and available request/helper IDs; requests without a source session use a hashed workspace ID when available. Requires a proxy hook to apply accounting metadata and strip the line before inference; otherwise the model receives it. Does not change conversation history, permissions, or enable inference features."
         },
         "varro.chat.followupModel": {
           "type": "string",

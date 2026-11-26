@@ -16,7 +16,10 @@ export type UsageLimitNotice = {
   action?: NonNullable<Extract<SessionStatus, { type: 'retry' }>['action']>;
 };
 
+export type UsageLimitKind = 'overloaded' | 'quota' | 'throttled';
+
 export type UsageLimitPresentation = {
+  kind: UsageLimitKind;
   title: string;
   summary: string;
 };
@@ -30,6 +33,7 @@ export function getUsageLimitPresentation(
   const normalized = notice.message.toLowerCase();
   if (isServiceUnavailableMessage(notice.message)) {
     return {
+      kind: 'overloaded',
       title: actionTitle || 'Service temporarily unavailable',
       summary: 'service disruption',
     };
@@ -42,15 +46,37 @@ export function getUsageLimitPresentation(
 
   if (isQuotaExhausted) {
     return {
+      kind: 'quota',
       title: actionTitle || 'Usage limit reached',
-      summary: `${getUsageLimitLabel(notice.unit).toLowerCase()} exhausted`,
+      summary:
+        notice.unit === 'unknown'
+          ? 'quota exhausted'
+          : `${getUsageLimitLabel(notice.unit).toLowerCase()} exhausted`,
     };
   }
 
   return {
+    kind: 'throttled',
     title: actionTitle || 'Request throttled',
     summary: 'request throttled',
   };
+}
+
+/**
+ * The reset time of the provider quota that blocks the model, from polled provider limits. All
+ * exhausted windows must reset before requests succeed, so the latest future reset wins.
+ */
+export function getExhaustedQuotaResetAt(
+  limit: ProviderLimitStatus | null | undefined,
+  now: number
+): number | null {
+  if (limit?.status !== 'available') return null;
+  let resetAt: number | null = null;
+  for (const window of limit.windows) {
+    if (window.remaining > 0 || window.resetAt === null || window.resetAt <= now) continue;
+    resetAt = resetAt === null ? window.resetAt : Math.max(resetAt, window.resetAt);
+  }
+  return resetAt;
 }
 
 export function getSafeUsageLimitAction(
@@ -79,7 +105,12 @@ export function shouldDisplayUsageLimitNotice(
 
 export function parseUsageLimitNotice(
   message: string | null | undefined,
-  options?: { retryAt?: number | null; attempt?: number | null }
+  options?: {
+    retryAt?: number | null;
+    attempt?: number | null;
+    /** When the error was reported; relative hints such as "retry in 45s" count from here. */
+    reportedAt?: number;
+  }
 ): UsageLimitNotice | null {
   const normalizedMessage = message?.trim();
   if (!normalizedMessage) return null;
@@ -107,7 +138,8 @@ export function parseUsageLimitNotice(
     statusCode: 429,
     message: normalizedMessage,
     unit: inferUsageLimitUnit(normalizedMessage),
-    retryAt: normalizeRetryAt(options?.retryAt) ?? extractRetryAt(normalizedMessage),
+    retryAt:
+      normalizeRetryAt(options?.retryAt) ?? extractRetryAt(normalizedMessage, options?.reportedAt),
     attempt: options?.attempt ?? extractRetryAttempt(normalizedMessage),
   };
 }
@@ -140,9 +172,10 @@ export function deriveUsageLimitNotice(params: {
     }
     if (isAbortedAssistantError(entry.info.error)) return null;
 
+    // A stopped reply's "retry in 45s" counts from when it failed, not from each re-read.
     const assistantNotice = parseUsageLimitNotice(
       entry.info.error?.data?.message || entry.info.error?.name,
-      undefined
+      { reportedAt: entry.info.time.completed ?? entry.info.time.created }
     );
     if (assistantNotice) {
       return {
@@ -238,7 +271,7 @@ function extractRetryAttempt(message: string) {
   return Number.isFinite(attempt) ? attempt : null;
 }
 
-function extractRetryAt(message: string) {
+function extractRetryAt(message: string, reportedAt = Date.now()) {
   const match = message.match(
     /(?:retry(?:ing)?|try\s+again)\s+(?:in|after)\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|seconds?|m|minutes?|h|hours?)\b/i
   );
@@ -256,7 +289,7 @@ function extractRetryAt(message: string) {
         : unitStr === 'm' || unitStr.startsWith('minute')
           ? 60_000
           : 3_600_000;
-  return Date.now() + Math.round(amount * multiplier);
+  return reportedAt + Math.round(amount * multiplier);
 }
 
 function normalizeRetryAt(value: number | null | undefined) {
@@ -277,7 +310,7 @@ function getUsageLimitLabel(unit: ProviderLimitUnit) {
 
 function parseJsonErrorBody(
   message: string,
-  options?: { retryAt?: number | null; attempt?: number | null }
+  options?: { retryAt?: number | null; attempt?: number | null; reportedAt?: number }
 ): UsageLimitNotice | null {
   let json: UnknownRecord;
   try {
@@ -313,7 +346,8 @@ function parseJsonErrorBody(
     statusCode: 429,
     message: displayMessage,
     unit: inferUsageLimitUnit(displayMessage),
-    retryAt: normalizeRetryAt(options?.retryAt) ?? extractRetryAt(displayMessage),
+    retryAt:
+      normalizeRetryAt(options?.retryAt) ?? extractRetryAt(displayMessage, options?.reportedAt),
     attempt: options?.attempt ?? extractRetryAttempt(displayMessage),
   };
 }

@@ -2129,6 +2129,7 @@ describe('parseWebviewMessage protocol coverage', () => {
     'chat/new-window',
     'vscode/open-settings',
     'server/restart',
+    'warming/sync',
   ]);
   const GARBAGE_PAYLOAD_TYPES = new Set<WebviewMessage['type']>(
     [...OPTIONAL_PAYLOAD_TYPES].filter((type) => type !== 'vscode/open-folder')

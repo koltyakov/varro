@@ -23,6 +23,7 @@ import type {
   ExtensionMessage,
   QueuedMessageSnapshot,
   PermissionMode,
+  PromptCacheWarmingMode,
   ServerEvent,
   WebviewInstanceContext,
   WebviewMessage,
@@ -30,6 +31,7 @@ import type {
   SiblingWorkspaceAlert,
   TerminalSelection,
 } from '../shared/protocol';
+import { parseServerEvent } from '../shared/protocol';
 import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
@@ -94,7 +96,11 @@ import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
-import { readExtensionConfigState } from './extension-config';
+import {
+  readExtensionConfigState,
+  readPromptCacheWarmingDurationMs,
+  readPromptCacheWarmingMode,
+} from './extension-config';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
 import { FileSearchService } from './file-search-service';
@@ -121,6 +127,8 @@ import { ProviderLimitStatusBar } from './provider-limit-status-bar';
 import { PinnedSessionManager } from './pinned-session-manager';
 import { TodoSessionManager } from './todo-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
+import { PromptCacheWarming } from './prompt-cache-warming';
+import { WalkthroughService, type WalkthroughRequest } from './walkthrough-service';
 import { RalphHost } from './ralph-host';
 import { InternalHelperCleanupCoordinator, RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
@@ -266,8 +274,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly decisionProviders: DecisionProviders;
   private readonly jevDecisions: JevDecisions;
   private readonly commitMessageService: CommitMessageService;
+  private readonly walkthroughService: WalkthroughService;
   private readonly sessionTitleFallback: SessionTitleFallback;
   private readonly ralphHost: RalphHost;
+  private readonly promptCacheWarming: PromptCacheWarming;
+  private promptCacheWarmingMode: PromptCacheWarmingMode;
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Raw server events are parsed by parseServerEvent.
+  private readonly promptCacheWarmingEvents: (event: unknown) => void;
   private readonly messageRouter: MessageRouter;
   private readonly restProxy: RestProxy;
   public readonly sessionExportService: SessionExportService;
@@ -624,6 +637,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           .getConfiguration('varro', repository)
           .get<string>('commitMessage.rules', '')
     );
+    this.walkthroughService = new WalkthroughService(
+      server,
+      () => this.runtime.ensureServerStarted(),
+      () => this.contextProvider.context.workspacePath || undefined,
+      () => this.activeChatModel,
+      isOpenAIPro,
+      async (content, title) => {
+        const uri = await this.openMarkdownDocument(content, title, false);
+        if (!uri) throw new Error('Could not open the generated walkthrough.');
+        return uri;
+      }
+    );
 
     this.serverEventBridge = new ServerEventBridge(
       server,
@@ -685,6 +710,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.restProxy = sidebarEndpoint.restProxy;
     this.messageRouter = sidebarEndpoint.messageRouter;
 
+    this.promptCacheWarmingMode = readPromptCacheWarmingMode();
+    this.promptCacheWarming = new PromptCacheWarming({
+      readMode: () => readPromptCacheWarmingMode(),
+      readDurationMs: () => readPromptCacheWarmingDurationMs(),
+      isAvailable: () => this.server.apiVersion === 2 && this.server.status.state === 'running',
+      isWarmable: (sessionID) =>
+        this.sessionState.rootSessionIdFor(sessionID) === sessionID &&
+        !this.hiddenSessions.isHidden(sessionID) &&
+        !this.sessionTrash.isHidden(sessionID),
+      isBusy: (sessionID) => this.sessionState.busy.has(sessionID),
+      directoryFor: (sessionID) => this.sessionState.directoryFor(sessionID),
+      generate: async (sessionID, directory, prompt, signal) => {
+        const response = await this.server.request(
+          'POST',
+          `/api/session/${encodeURIComponent(sessionID)}/generate`,
+          { prompt },
+          { directory, signal }
+        );
+        const tokens = asRecord(asRecord(asRecord(response)?.data)?.tokens);
+        const cache = asRecord(tokens?.cache);
+        return {
+          cacheRead: typeof cache?.read === 'number' ? cache.read : 0,
+          cacheWrite: typeof cache?.write === 'number' ? cache.write : 0,
+        };
+      },
+      readOpenCodeWarming: async () => {
+        const config = asRecord(await this.server.request('GET', '/config'));
+        const warming = config?.warming;
+        return warming === true || asRecord(warming) !== null;
+      },
+      writeOpenCodeWarming: (value) => this.restProxy.updateGlobalWarming(value),
+      persistence,
+      post: (payload) => this.post({ type: 'warming/state', payload }),
+      logWarning: (message) => logger.warn(message),
+    });
+    this.promptCacheWarmingEvents = (event) => {
+      const parsed = parseServerEvent(event);
+      if (parsed) this.promptCacheWarming.handleServerEvent(parsed);
+    };
+
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
       this.updateStatusBarItem();
       this.attentionNotifications.update();
@@ -707,6 +772,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       if (event.affectsConfiguration('varro.server.autoUpdate')) {
         this.updateStatusBarItem();
+      }
+      if (
+        event.affectsConfiguration('varro.chat.promptCacheWarming') ||
+        event.affectsConfiguration('varro.chat.promptCacheWarmingMinutes')
+      ) {
+        const previousMode = this.promptCacheWarmingMode;
+        this.promptCacheWarmingMode = readPromptCacheWarmingMode();
+        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection boundary.
+        void this.promptCacheWarming.applySettings(previousMode).catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn(`Could not apply prompt cache warming settings: ${message}`);
+          void vscode.window.showWarningMessage(
+            `Could not update OpenCode's warming setting: ${message}`
+          );
+        });
       }
       if (event.affectsConfiguration('varro.server.autoStart')) {
         // Activation's configuration listener applies launch settings after this listener.
@@ -748,6 +828,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this.serverEventBridge.attach();
+    // After the bridge, so session state already reflects an event when warming reads it.
+    server.on('event', this.promptCacheWarmingEvents);
   }
 
   private createEndpoint(
@@ -1180,6 +1262,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 SidebarProvider.EXPORT_TIMEOUT_MS
               ),
         usageReportService: this.usageReportService,
+        walkThroughChanges: (request) => this.walkthroughService.run(request),
         restProxy,
         getWorkspaceDirectory: () => endpointServer.getWorkspaceCwd(),
         sessionDiffProvider: {
@@ -1327,6 +1410,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         openNewWindow: () => this.openNewWindow(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
+        handleWarmingMessage: (msg) => {
+          if (msg.type === 'warming/set') {
+            this.promptCacheWarming.setSessionWarm(msg.payload.sessionId, msg.payload.enabled);
+          } else this.promptCacheWarming.sync();
+        },
         updateQueuedMessages: ({ messages, mutationId }) =>
           this.updateQueuedMessages(webviewContext.viewId, messages, mutationId),
         claimQueuedMessage: (payload) => this.claimQueuedMessage(webviewContext.viewId, payload),
@@ -3544,6 +3632,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewSession.searchSessions();
   }
 
+  async walkThroughChanges(request: WalkthroughRequest) {
+    await this.walkthroughService.run(request);
+  }
+
   async generateCommitMessage(sourceControl?: vscode.SourceControl) {
     await this.commitMessageService.generate(sourceControl);
   }
@@ -3644,6 +3736,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     await this.webviewSession.dispose();
     await this.ralphHost.dispose();
+    this.server.off('event', this.promptCacheWarmingEvents);
+    this.promptCacheWarming.dispose();
     await this.serverEventBridge.dispose();
     await this.queuedMessages.dispose();
     await this.draftImages.dispose();

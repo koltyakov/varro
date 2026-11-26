@@ -4,15 +4,16 @@ import type { WebviewMessage } from '../../src/shared/protocol';
 
 import { appendDeltaToRapidStreaming } from './scroll-helpers';
 
-test('shows usage-limit retry state and lets the user switch providers', async ({ page }) => {
+test('shows usage-limit retry state and lets the user switch models', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
   await expect(page.getByText('Usage limit reached', { exact: true })).toBeVisible();
-  await expect(page.locator('.chat-usage-limit-meta')).toContainText('messages exhausted');
+  await expect(page.locator('.chat-usage-limit-meta')).toContainText(/retrying (in \d+:\d{2}|now) · attempt 2/);
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toHaveCount(0);
   await expect(page.locator('.chat-usage-limit-message')).toContainText('429 usage limit reached');
   await expect(page.locator('.toolbar-limit-chip')).toContainText('0%');
 
-  await page.getByRole('button', { name: 'Switch provider' }).click();
+  await page.getByRole('button', { name: 'Switch model…' }).click();
   const providerHeaders = page.locator('.model-picker-menu .dropdown-group-header');
   await expect(providerHeaders.filter({ hasText: /^OpenAI/ })).toBeVisible();
   await expect(providerHeaders.filter({ hasText: /^OpenCode Go/ })).toBeVisible();
@@ -53,7 +54,7 @@ test('stops retrying a usage-limited session', async ({ page }) => {
 test('keeps the manually selected provider model as the default after reload', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
-  await page.getByRole('button', { name: 'Switch provider' }).click();
+  await page.getByRole('button', { name: 'Switch model…' }).click();
   await page.getByText('Go Plan', { exact: true }).click();
   await expect(page.getByLabel('OpenCode Go / Go Plan')).toBeVisible();
 
@@ -65,7 +66,7 @@ test('keeps the manually selected provider model as the default after reload', a
 test('supports escape in the provider switcher', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
-  await page.getByRole('button', { name: 'Switch provider' }).click();
+  await page.getByRole('button', { name: 'Switch model…' }).click();
   await expect(page.getByText('Go Plan', { exact: true })).toBeVisible();
   const picker = page.locator('.dropdown-menu').first();
   await picker.press('Escape');

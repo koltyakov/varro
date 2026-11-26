@@ -17,6 +17,7 @@ import {
   type EditorContext,
   type InlineProblemAttachment,
   type ExtensionMessage,
+  type PromptCacheWarmingSession,
   type ProviderLimitStatus,
   type RalphStatePayload,
   type RestartBlockedState,
@@ -83,6 +84,7 @@ const KNOWN_TYPES = new Set<string>([
   'command/navigate-history',
   'command/abort',
   'ralph/state',
+  'warming/state',
 ]);
 
 /**
@@ -804,9 +806,57 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       };
     }
 
+    case 'warming/state': {
+      const payload = asRecord(record.payload);
+      const sessionsRecord = asRecord(payload?.sessions);
+      if (
+        !payload ||
+        !sessionsRecord ||
+        !isBoolean(payload.available) ||
+        !isBoolean(payload.openCodeWarming) ||
+        (payload.mode !== 'off' && payload.mode !== 'chosen' && payload.mode !== 'all') ||
+        !isPositiveFinite(payload.durationMs) ||
+        !isPositiveFinite(payload.intervalMs)
+      ) {
+        return null;
+      }
+      const sessions: Record<string, PromptCacheWarmingSession> = {};
+      for (const [sessionId, entry] of Object.entries(sessionsRecord)) {
+        const session = asRecord(entry);
+        if (!session || !isSafePersistedSessionId(sessionId)) return null;
+        const { warmUntil, sentAt, stopped } = session;
+        if (
+          (warmUntil !== null && !isPositiveFinite(warmUntil)) ||
+          (sentAt !== null && !isPositiveFinite(sentAt)) ||
+          (stopped !== null &&
+            stopped !== 'expired' &&
+            stopped !== 'cache-miss' &&
+            stopped !== 'failed')
+        ) {
+          return null;
+        }
+        sessions[sessionId] = { warmUntil, sentAt, stopped };
+      }
+      return {
+        type,
+        payload: {
+          available: payload.available,
+          mode: payload.mode,
+          durationMs: payload.durationMs,
+          intervalMs: payload.intervalMs,
+          openCodeWarming: payload.openCodeWarming,
+          sessions,
+        },
+      };
+    }
+
     default:
       return null;
   }
+}
+
+function isPositiveFinite<T>(value: T): value is T & number {
+  return isNumber(value) && Number.isFinite(value) && value > 0;
 }
 
 function isChatFontSize<T>(value: T): value is T & number {

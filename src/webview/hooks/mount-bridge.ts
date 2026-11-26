@@ -308,6 +308,8 @@ export function handleExtensionMessageWithDependencies(
       }
       if (msg.payload.state === 'running') {
         deps.ensureConnectionInitialized();
+        // Warming needs a running v2 server, so its availability follows the server state.
+        if (previousServerState !== 'running') postMessage({ type: 'warming/sync' });
       } else {
         if (previousServerState === 'running') deps.invalidateConnection();
         deps.clearProvidersState();
@@ -523,6 +525,9 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'ralph/state':
       ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);
+      break;
+    case 'warming/state':
+      appStore.setState(storePath('promptCacheWarming', msg.payload));
       break;
   }
 }

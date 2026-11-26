@@ -15147,7 +15147,7 @@ describe('ChatInput', () => {
 
     const switchProviderButton = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('button')
-    ).find((button) => button.textContent === 'Switch provider');
+    ).find((button) => button.textContent === 'Switch model…');
     clickAndFlush(switchProviderButton);
     await waitForDropdown();
     flushSolid();
@@ -15176,7 +15176,7 @@ describe('ChatInput', () => {
 
     const switchProviderButton = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('button')
-    ).find((button) => button.textContent === 'Switch provider');
+    ).find((button) => button.textContent === 'Switch model…');
     clickAndFlush(switchProviderButton);
     await waitForDropdown();
     flushSolid();
@@ -15304,8 +15304,13 @@ describe('ChatInput', () => {
 
       expect(container?.textContent).toContain('Add credits to continue');
       expect(container?.textContent).toContain('Your OpenAI balance is empty.');
-      expect(container?.textContent).toContain('request throttled · retry in');
-      expect(container?.textContent).toContain('attempt #4');
+      expect(container?.textContent).toMatch(/retrying in 0:(29|30) · attempt 4/);
+      // A turn OpenCode is still retrying offers no Continue; sending would race the retry.
+      expect(
+        Array.from(container!.querySelectorAll<HTMLButtonElement>('button')).some(
+          (button) => button.textContent === 'Continue'
+        )
+      ).toBe(false);
 
       const actionButton = Array.from(
         container!.querySelectorAll<HTMLButtonElement>('button')
@@ -15741,7 +15746,7 @@ describe('ChatInput', () => {
 
     expect(container?.textContent).toContain('Usage limit reached');
     expect(container?.textContent).toContain('Stop retrying');
-    expect(container?.textContent).toContain('Switch provider');
+    expect(container?.textContent).toContain('Switch model…');
   });
 
   it('shows a temporary service failure only from the fourth retry', () => {

@@ -43,6 +43,7 @@ import type {
   McpDefaults,
   McpStatus,
   PermissionMode,
+  PromptCacheWarmingState,
   ProviderLimitStatus,
   RecycleBinEntry,
   RestartBlockedState,
@@ -150,6 +151,8 @@ export interface AppState {
   debugShowQuotaWarning: boolean;
   debugResetWarningDays?: number;
   promptCacheWarningTokens: number;
+  /** Host-owned keep-alive state; `null` until the host first reports it. */
+  promptCacheWarming: PromptCacheWarmingState | null;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -461,6 +464,7 @@ export function createAppState(): AppStateInstance {
     debugResetWarningDays: initialWebviewState.debugResetWarningDays,
     promptCacheWarningTokens:
       initialWebviewState.promptCacheWarningTokens ?? DEFAULT_PROMPT_CACHE_WARNING_TOKENS,
+    promptCacheWarming: null,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)

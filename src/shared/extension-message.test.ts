@@ -754,6 +754,33 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
+  it('parses warming/state and rejects malformed session entries', () => {
+    const payload = {
+      available: true,
+      mode: 'chosen',
+      durationMs: 1_800_000,
+      intervalMs: 240_000,
+      openCodeWarming: false,
+      sessions: { 'session-1': { warmUntil: 2_000, sentAt: 1_000, stopped: null } },
+    } as const;
+    expect(parseExtensionMessage({ type: 'warming/state', payload })).toEqual({
+      type: 'warming/state',
+      payload,
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'warming/state',
+        payload: {
+          ...payload,
+          sessions: { 'session-1': { warmUntil: 'soon', sentAt: null, stopped: null } },
+        },
+      })
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({ type: 'warming/state', payload: { ...payload, mode: 'sometimes' } })
+    ).toBeNull();
+  });
+
   it('parses server/event requiring a type', () => {
     expect(
       parseExtensionMessage({
