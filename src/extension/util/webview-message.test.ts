@@ -496,14 +496,6 @@ describe('webview message validation', () => {
       })
     ).toBeNull();
 
-    // Unknown languages would be handed straight to setTextDocumentLanguage.
-    expect(
-      parseWebviewMessage({
-        type: 'vscode/open-text',
-        payload: { content: 'x', title: 'tool', language: 'javascript' },
-      })
-    ).toBeNull();
-
     expect(parseWebviewMessage({ type: 'vscode/open-text', payload: { content: 'x' } })).toBeNull();
 
     expect(
@@ -675,6 +667,46 @@ describe('webview message validation', () => {
     ).toEqual({
       type: 'vscode/open-text',
       payload: { content: '<svg />', title: 'SVG user message', language: 'xml' },
+    });
+  });
+
+  it('truncates long titles instead of dropping the open request', () => {
+    // Shell output titles carry the whole command, which can run far past the cap.
+    const command = `gh api repos/owner/repo/actions/runs/1 --jq '${'.x | '.repeat(80)}.y'`;
+    const parsed = parseWebviewMessage({
+      type: 'vscode/open-text',
+      payload: { content: '{}', title: `${command} (output)` },
+    });
+
+    expect(parsed?.type).toBe('vscode/open-text');
+    const title = parsed?.type === 'vscode/open-text' ? parsed.payload.title : '';
+    expect(title).toHaveLength(200);
+    expect(command.startsWith(title)).toBe(true);
+  });
+
+  it('passes editor language IDs through and degrades malformed hints to plain text', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: {
+          content: 'const x = 1;',
+          title: 'a.ts unsaved selection',
+          language: 'typescript',
+        },
+      })
+    ).toEqual({
+      type: 'vscode/open-text',
+      payload: { content: 'const x = 1;', title: 'a.ts unsaved selection', language: 'typescript' },
+    });
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: 'x', title: 'snippet', language: 'ts title="a b"' },
+      })
+    ).toEqual({
+      type: 'vscode/open-text',
+      payload: { content: 'x', title: 'snippet', language: 'plaintext' },
     });
   });
 

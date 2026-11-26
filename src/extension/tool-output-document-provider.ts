@@ -46,7 +46,12 @@ export class ToolOutputDocumentProvider implements vscode.TextDocumentContentPro
     // Tool prompts and results are written as Markdown, so that is the default
     // rather than plaintext; callers with something more specific (a bash
     // command, a JSON blob) pass their own language.
-    const language = payload.language ?? 'markdown';
+    const requested = payload.language ?? 'markdown';
+    // Hints such as a code fence's `text` are not VS Code language IDs, and
+    // setTextDocumentLanguage rejects unknown IDs instead of ignoring them.
+    const known = await vscode.languages.getLanguages();
+    if (this.disposed) return undefined;
+    const language = known.includes(requested) ? requested : 'plaintext';
     // The last path segment becomes the tab label, so the extension carries the
     // language hint for editors that infer highlighting from the filename.
     const filename = toFilename(payload.title, language);

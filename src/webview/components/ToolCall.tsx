@@ -72,6 +72,7 @@ import { DiffView } from './DiffView';
 import type { DiffViewFile } from './DiffView';
 import { ClampedToolText } from './ClampedToolText';
 import { CopyIconButton } from './CopyIconButton';
+import { OpenTextIconButton } from './OpenTextIconButton';
 import { FileTypeIcon } from './FileTypeIcon';
 import { FolderTypeIcon, hasRecognizedFolderType } from './FolderTypeIcon';
 import { isBoolean, isNumber, isString } from '../lib/runtime-values';
@@ -2265,6 +2266,12 @@ function GenericToolCall(props: {
           </Show>
         </button>
         <Show when={showHeaderCommandCopy()}>
+          <OpenTextIconButton
+            content={bashCommand()}
+            title={`${props.title} (command)`}
+            label="command"
+            language="shellscript"
+          />
           <CopyIconButton text={bashCommand()} label="command" />
         </Show>
       </div>
@@ -2317,7 +2324,7 @@ function GenericToolCall(props: {
             >
               <div class="terminal-command-card">
                 <Show when={showBashCommandRow()}>
-                  <TerminalCommandRow command={bashCommand()} />
+                  <TerminalCommandRow command={bashCommand()} title={props.title} />
                 </Show>
                 <Show when={props.state.status === 'completed'}>
                   <div class="terminal-command-row terminal-command-row-output">
@@ -2421,13 +2428,19 @@ function GenericToolCall(props: {
  * below it, not something to read in full here. Copy is the escape hatch, so
  * an ellipsized command is still recoverable in one click.
  */
-function TerminalCommandRow(props: { command: string }) {
+function TerminalCommandRow(props: { command: string; title: string }) {
   return (
     <div class="terminal-command-row terminal-command-row-input">
       <span class="terminal-command-prompt" aria-hidden="true">
         $
       </span>
       <pre class="terminal-command-text terminal-command-single-line">{props.command}</pre>
+      <OpenTextIconButton
+        content={props.command}
+        title={`${props.title} (command)`}
+        label="command"
+        language="shellscript"
+      />
       <CopyIconButton text={props.command} label="command" />
     </div>
   );
@@ -2559,6 +2572,12 @@ function StructuredToolCard(props: {
                   <pre class="structured-tool-value structured-tool-value-single">
                     {formatExpandedValue(key, value)}
                   </pre>
+                  <OpenTextIconButton
+                    content={formatExpandedValue(key, value)}
+                    title={`${props.toolTitle} (${key})`}
+                    label={key}
+                    language="plaintext"
+                  />
                   <CopyIconButton text={formatExpandedValue(key, value)} label={key} />
                 </div>
               )}

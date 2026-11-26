@@ -67,8 +67,11 @@ const MAX_SEARCH_QUERY_LENGTH = 200;
 /** Full tool output opened in an editor tab; generous but bounded so a runaway
  *  tool cannot push an unbounded string through the bridge. */
 const MAX_OPEN_TEXT_LENGTH = 2_000_000;
+/** Titles are display-only and derived from tool input such as a full shell
+ *  command, so longer ones are truncated rather than rejected. */
 const MAX_OPEN_TEXT_TITLE_LENGTH = 200;
-const OPEN_TEXT_LANGUAGES = new Set(['plaintext', 'json', 'markdown', 'shellscript', 'xml']);
+/** Shape of a VS Code language ID; the provider still checks it is registered. */
+const OPEN_TEXT_LANGUAGE_ID = /^[A-Za-z0-9][\w.+#-]{0,39}$/;
 const MAX_DROPPED_PATHS = 100;
 const MAX_DROPPED_CONTENT_NAME_LENGTH = 512;
 const MAX_DROPPED_CONTENT_BASE64_LENGTH = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
@@ -899,11 +902,17 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'vscode/open-text': {
       const payload = asRecord(message?.payload);
       const content = getBoundedString(payload?.content, MAX_OPEN_TEXT_LENGTH, true);
-      const title = getBoundedString(payload?.title, MAX_OPEN_TEXT_TITLE_LENGTH);
-      const language = getOptionalBoundedString(payload?.language, 40);
+      const title = getString(payload?.title)?.slice(0, MAX_OPEN_TEXT_TITLE_LENGTH);
+      const rawLanguage = payload?.language;
+      // A bad hint costs highlighting, not the click that asked to open the text.
+      const language =
+        rawLanguage === undefined || rawLanguage === null
+          ? undefined
+          : typeof rawLanguage === 'string' && OPEN_TEXT_LANGUAGE_ID.test(rawLanguage)
+            ? rawLanguage
+            : 'plaintext';
       const view = getOptionalBoundedString(payload?.view, 40);
       if (content === null || !title) return null;
-      if (language !== undefined && !OPEN_TEXT_LANGUAGES.has(language)) return null;
       if (view !== undefined && view !== 'markdown-preview') return null;
       const openTextPayload: Extract<WebviewMessage, { type: 'vscode/open-text' }>['payload'] = {
         content,

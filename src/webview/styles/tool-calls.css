@@ -1320,7 +1320,9 @@ kbd {
   caret-color: transparent;
 }
 
-.chat-tool-invocation-part .tool-invocation-header-shell > .tool-copy-button {
+.chat-tool-invocation-part
+  .tool-invocation-header-shell
+  > :is(.tool-copy-button, .tool-open-button) {
   position: absolute;
   z-index: var(--z-chrome);
   top: 50%;
@@ -1333,6 +1335,15 @@ kbd {
 
 .chat-tool-invocation-part .tool-invocation-header-shell.has-command-only-copy > .tool-copy-button {
   right: var(--space-5);
+}
+
+/* Sits flush left of the copy button: 4px padding either side of a 12px icon. */
+.chat-tool-invocation-part .tool-invocation-header-shell > .tool-open-button {
+  right: calc(var(--space-5) + 14px + 20px);
+}
+
+.chat-tool-invocation-part .tool-invocation-header-shell.has-command-only-copy > .tool-open-button {
+  right: calc(var(--space-5) + 20px);
 }
 
 .chat-tool-invocation-part .tool-invocation-header:hover {
@@ -1647,10 +1658,10 @@ kbd {
   align-items: start;
 }
 
-/* Third column holds the copy button, which is why the command may ellipsize
-   rather than wrap: the row is a fixed-height label for the output below. */
+/* Trailing columns hold the open and copy buttons, which is why the command may
+   ellipsize rather than wrap: the row is a fixed-height label for the output below. */
 .chat-tool-invocation-part .terminal-command-row-input {
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
   align-items: center;
 }
 
@@ -1667,7 +1678,7 @@ kbd {
   word-break: normal;
 }
 
-.chat-tool-invocation-part .tool-copy-button {
+.chat-tool-invocation-part :is(.tool-copy-button, .tool-open-button) {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1685,19 +1696,31 @@ kbd {
 
 /* Revealed on hover like the rest of the row affordances, but focus must also
    reveal it or it becomes a keyboard trap the user cannot see. */
-.chat-tool-invocation-part .terminal-command-row-input:hover .tool-copy-button,
-.chat-tool-invocation-part .structured-tool-row:hover .tool-copy-button,
-.chat-tool-invocation-part .tool-invocation-header-shell:hover > .tool-copy-button,
+.chat-tool-invocation-part
+  .terminal-command-row-input:hover
+  :is(.tool-copy-button, .tool-open-button),
+.chat-tool-invocation-part .structured-tool-row:hover :is(.tool-copy-button, .tool-open-button),
+.chat-tool-invocation-part
+  .tool-invocation-header-shell:hover
+  > :is(.tool-copy-button, .tool-open-button),
 .chat-tool-invocation-part .tool-copy-button.is-copied,
-.chat-tool-invocation-part .tool-copy-button:focus-visible {
+.chat-tool-invocation-part :is(.tool-copy-button, .tool-open-button):focus-visible {
   opacity: 1;
 }
 
-.chat-tool-invocation-part .tool-copy-button:hover {
+/* The open glyph spans 18 of its 24 viewBox units against copy's 16, so at the
+   same 12px box it reads larger. Scale the mask, not the box, so both buttons
+   keep the same footprint and the header offsets stay exact. */
+.chat-tool-invocation-part .tool-open-button > .ui-icon {
+  -webkit-mask-size: 88.9%;
+  mask-size: 88.9%;
+}
+
+.chat-tool-invocation-part :is(.tool-copy-button, .tool-open-button):hover {
   color: var(--color-vscode-fg);
 }
 
-.chat-tool-invocation-part .tool-copy-button:focus-visible {
+.chat-tool-invocation-part :is(.tool-copy-button, .tool-open-button):focus-visible {
   outline: 1px solid var(--color-vscode-accent);
   outline-offset: -1px;
 }

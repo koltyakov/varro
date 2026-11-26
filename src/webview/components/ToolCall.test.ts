@@ -895,6 +895,49 @@ describe('ToolCall', () => {
     vi.unstubAllGlobals();
   });
 
+  it('opens the full command in an editor tab from the expanded header', () => {
+    const send = setExtensionSender();
+    flushSolid();
+    const command = `gh api repos/owner/repo/actions/runs/1 --jq '${'.jobs[] | '.repeat(6)}.name'`;
+
+    renderToolCall(toolPart('bash', completedState({ command }, command, '{}')));
+    toggleHeader();
+    container
+      ?.querySelector<HTMLButtonElement>('.tool-invocation-header-shell > .tool-open-button')
+      ?.click();
+    flushSolid();
+
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'vscode/open-text',
+      payload: { content: command, title: `${command} (command)`, language: 'shellscript' },
+    });
+  });
+
+  it('opens the full command in an editor tab from the $ row', () => {
+    const send = setExtensionSender();
+    flushSolid();
+    const command = `gh api repos/owner/repo/actions/runs/1 --jq '${'.jobs[] | '.repeat(6)}.name'`;
+
+    renderToolCall(toolPart('bash', completedState({ command }, 'Inspect workflow jobs', '{}')));
+    toggleHeader();
+    const row = container?.querySelector('.terminal-command-row-input');
+    // Open sits before copy so copy keeps its place at the row's trailing edge.
+    expect(
+      Array.from(row?.querySelectorAll('button') || []).map((button) => button.className)
+    ).toEqual(['tool-open-button', 'tool-copy-button']);
+    row?.querySelector<HTMLButtonElement>('.tool-open-button')?.click();
+    flushSolid();
+
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: command,
+        title: 'Inspect workflow jobs (command)',
+        language: 'shellscript',
+      },
+    });
+  });
+
   it('copies the full command even though the $ row renders one ellipsized line', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });
@@ -1130,6 +1173,25 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-search-count')?.textContent).toBe(
       '0 results'
     );
+  });
+
+  it('opens a single-line structured value in an editor tab', () => {
+    const send = setExtensionSender();
+    flushSolid();
+    const pattern = 'normalizeToolName|SEARCH_TOOL_NAMES|FILE_CHANGE_TOOL_NAMES|COMMAND_TOOL_NAMES';
+    renderToolCall(toolPart('grep', completedState({ pattern }, 'Search code', 'No files found')));
+    toggleHeader();
+
+    const row = Array.from(container?.querySelectorAll('.structured-tool-row') || []).find(
+      (candidate) => candidate.querySelector('.structured-tool-label')?.textContent === 'pattern'
+    );
+    row?.querySelector<HTMLButtonElement>('.tool-open-button')?.click();
+    flushSolid();
+
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'vscode/open-text',
+      payload: { content: pattern, title: `Search: ${pattern} (pattern)`, language: 'plaintext' },
+    });
   });
 
   it('renders web fetch details and errors in the structured table', () => {
