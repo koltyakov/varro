@@ -129,10 +129,6 @@ export const VALID_WEBVIEW_MESSAGES = {
   'session/export': { type: 'session/export', payload: { sessionId: 'session-1' } },
   'usage/report': { type: 'usage/report', payload: { includeAllTime: true } },
   'usage/session-report': { type: 'usage/session-report', payload: { sessionId: 'session-1' } },
-  'walkthrough/session': {
-    type: 'walkthrough/session',
-    payload: { sessionId: 'session-1', messageId: 'message-1' },
-  },
   'vscode/open-settings': { type: 'vscode/open-settings', payload: { query: 'varro.server' } },
   'vscode/mermaid-preview': { type: 'vscode/mermaid-preview', payload: { open: true } },
   'server/restart': { type: 'server/restart', payload: { force: true } },

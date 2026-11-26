@@ -944,17 +944,18 @@ All paths, up to the first 100,000 characters of the selected patch, and up to t
 
 ## Walk Through Changes
 
-A walkthrough explains a diff in reading order: it groups related hunks across files into stops, orders them so each builds on the last, and explains in a few sentences what the code now does differently. Stops the change rests on are marked **Key change**; supporting ones are marked **Context**. A few stops carry a factual note, such as a design decision, a new dependency, or an untested promise. Walkthroughs never review or judge the code.
+A walkthrough explains a diff briefly and in reading order. It covers only what matters, such as changed behavior, contracts, and risky logic, in a few stops that each build on the last, with one or two sentences per stop. Trivial edits like formatting, imports, renames, and comments stay out of the stops and get one compact summary at the end. Stops the change rests on are marked **Key change**; supporting ones are marked **Context**. A few stops carry a factual note, such as a design decision, a new dependency, or an untested promise. Walkthroughs never review or judge the code.
 
-Nothing runs automatically. Start a walkthrough from:
+Nothing runs automatically. Start a walkthrough with the list icon in the Source Control title bar, or run `Varro: Walk Through Changes`. It explains staged or unstaged changes, or asks which when both exist, including all uncommitted changes.
 
-- The list icon in the Source Control title bar, or `Varro: Walk Through Changes`. It explains staged or unstaged changes, or asks which when both exist, including all uncommitted changes.
-- **Walk through** next to a reply's file-change summary, for the changes that summary lists.
-- **Walk through these changes** in the changed-files panel, or `/walkthrough`, for the whole session.
+The result opens as a Markdown report in the preview, like `/stats`. Each stop shows the exact diff hunks under one header per file, with the file and each hunk's start line linked so they open in the editor (in VS Code and VS Code Insiders; other forks show plain paths). **Also changed** holds the summary of trivial edits and one line listing the files no stop explains, including generated files such as lockfiles, which are never sent to the model, and binary or omitted content. The explanations are AI-written; regenerate after the code changes.
 
-The result opens as a Markdown report in the preview, like `/stats`. Each stop shows the exact diff hunks with links to the files, and **Not covered** lists the hunks no stop explains: routine edits, generated files such as lockfiles, which are never sent to the model, and binary or omitted content. The explanations are AI-written; regenerate after the code changes.
+Walkthroughs require OpenCode v2. They need a capable model, so they never use OpenCode's `small_model` or the commit-message model chain:
 
-Walkthroughs require OpenCode v2. They use the same helper model as commit messages without `varro.commitMessage.model`: OpenCode's `small_model`, then GPT Luna, then the active chat model. The diff is treated as untrusted input. A diff that does not fit in one request is refused rather than truncated; stage a subset and walk through the staged changes instead.
+1. The review model from `varro.review.model`, set with **Use for reviews** in a model's context menu in the Models view, where it shows a **review** tag. Add `#variant` to the setting, such as `openai/gpt-6-sol#high`, to pick its reasoning.
+2. Otherwise the active chat's selected model and reasoning.
+
+The diff is treated as untrusted input. How much diff a walkthrough sends depends on the model: up to half its context window, at most about 200k tokens, or about 50k when OpenCode does not report the window. The progress notification shows the estimated size. A larger diff first leaves out tests, then docs; the report header says so and lists those files under **Also changed**. If the rest still does not fit, Varro refuses rather than truncating and suggests staging a subset or picking a model with a larger context window.
 
 ## Output In The Chat
 
@@ -1064,6 +1065,7 @@ Chat view:
 Commit messages:
 
 - `varro.commitMessage.model` - provider/model used to generate commit messages; stored in VS Code user settings and selected from Varro's Models view
+- `varro.review.model` - provider/model, optionally `#variant`, used for changes walkthroughs; empty uses the active chat's selected model and reasoning. Stored in VS Code user settings and selected with **Use for reviews** in Varro's Models view
 - `varro.commitMessage.rules` - style and format instructions, resolved from user, workspace, and folder settings for the selected Git repository
 
 There are also deprecated debug-only settings used for development and recovery testing:

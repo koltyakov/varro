@@ -135,7 +135,7 @@ import { PinnedSessionManager } from './pinned-session-manager';
 import { TodoSessionManager } from './todo-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
 import { PromptCacheWarming } from './prompt-cache-warming';
-import { WalkthroughService, type WalkthroughRequest } from './walkthrough-service';
+import { WalkthroughService } from './walkthrough-service';
 import { RalphHost } from './ralph-host';
 import { InternalHelperCleanupCoordinator, RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
@@ -651,7 +651,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       () => this.runtime.ensureServerStarted(),
       () => this.contextProvider.context.workspacePath || undefined,
       () => this.activeChatModel,
-      isOpenAIPro,
+      () => vscode.workspace.getConfiguration('varro').get<string>('review.model', ''),
       async (content, title) => {
         const uri = await this.openMarkdownDocument(content, title, false);
         if (!uri) throw new Error('Could not open the generated walkthrough.');
@@ -1272,7 +1272,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 SidebarProvider.EXPORT_TIMEOUT_MS
               ),
         usageReportService: this.usageReportService,
-        walkThroughChanges: (request) => this.walkthroughService.run(request),
         restProxy,
         getWorkspaceDirectory: () => endpointServer.getWorkspaceCwd(),
         sessionDiffProvider: {
@@ -3671,8 +3670,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewSession.searchSessions();
   }
 
-  async walkThroughChanges(request: WalkthroughRequest) {
-    await this.walkthroughService.run(request);
+  async walkThroughChanges(sourceControl?: vscode.SourceControl) {
+    await this.walkthroughService.run(sourceControl);
   }
 
   async generateCommitMessage(sourceControl?: vscode.SourceControl) {

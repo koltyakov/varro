@@ -141,7 +141,7 @@ Supported providers expose quota windows and reset times. After a limit error, t
 
 Select the Source Control wand or run `Varro: Generate Commit Message`. Varro drafts from staged changes, or unstaged changes if nothing is staged, and fills the commit input for review. It never stages or commits files and asks before replacing a draft. On native Windows, untracked files contribute paths only, not contents.
 
-Select the Source Control list icon, run `Varro: Walk Through Changes`, choose **Walk through** on a reply's file changes, or type `/walkthrough` to get an AI-guided reading order through a diff as a Markdown report. Nothing runs automatically. See [walkthroughs](https://github.com/koltyakov/varro/blob/main/docs/usage.md#walk-through-changes).
+Select the Source Control list icon or run `Varro: Walk Through Changes` to get an AI-guided reading order through your uncommitted changes as a Markdown report. Nothing runs automatically. See [walkthroughs](https://github.com/koltyakov/varro/blob/main/docs/usage.md#walk-through-changes).
 
 ## Server and updates
 

@@ -47,7 +47,6 @@ function createCallbacks(): MessageRouterCallbacks {
     exportSession: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
     generateSessionUsageReport: vi.fn(() => Promise.resolve()),
-    walkThroughSessionChanges: vi.fn(() => Promise.resolve()),
     reloadWebview: vi.fn(() => Promise.resolve()),
     openFolder: vi.fn(() => Promise.resolve()),
     openTransferredSession: vi.fn(() => Promise.resolve()),
@@ -624,12 +623,6 @@ const DISPATCH_EXPECTATIONS = {
   'session/export': [{ callback: 'exportSession', args: ['session-1'] }],
   'usage/report': [{ callback: 'generateUsageReport', args: [true] }],
   'usage/session-report': [{ callback: 'generateSessionUsageReport', args: ['session-1'] }],
-  'walkthrough/session': [
-    {
-      callback: 'walkThroughSessionChanges',
-      args: [{ sessionId: 'session-1', messageId: 'message-1' }],
-    },
-  ],
   'vscode/open-settings': [{ callback: 'openSettings', args: ['varro.server'] }],
   'vscode/mermaid-preview': [{ callback: 'setMermaidPreviewOpen', args: [true] }],
   'server/restart': [{ callback: 'restartServer', args: [true] }],

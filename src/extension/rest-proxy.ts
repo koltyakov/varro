@@ -5394,6 +5394,7 @@ export class RestProxy {
 
     if (
       target === 'commit_message' ||
+      target === 'review' ||
       target === 'auto_approve' ||
       target === 'prompt_completion' ||
       target === 'followups'

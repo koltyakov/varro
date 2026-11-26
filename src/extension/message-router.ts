@@ -99,9 +99,6 @@ export interface MessageRouterCallbacks {
   exportSession(sessionId: string, directory?: string): Promise<void>;
   generateUsageReport(includeAllTime: boolean): Promise<void>;
   generateSessionUsageReport(sessionId: string, directory?: string): Promise<void>;
-  walkThroughSessionChanges(
-    payload: Extract<WebviewMessage, { type: 'walkthrough/session' }>['payload']
-  ): Promise<void>;
   reloadWebview(): Promise<void>;
   openFolder(
     payload?: Extract<WebviewMessage, { type: 'vscode/open-folder' }>['payload']
@@ -321,9 +318,6 @@ export class MessageRouter {
                 msg.payload.directory
               )
             : this.callbacks.generateSessionUsageReport(msg.payload.sessionId));
-          break;
-        case 'walkthrough/session':
-          await this.callbacks.walkThroughSessionChanges(msg.payload);
           break;
         case 'webview/reload':
           await this.callbacks.reloadWebview();

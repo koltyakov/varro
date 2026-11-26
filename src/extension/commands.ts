@@ -506,7 +506,7 @@ export function registerCommands(
     vscode.commands.registerCommand(
       'varro.walkThroughChanges',
       async (sourceControl?: vscode.SourceControl) => {
-        await sidebar.walkThroughChanges({ kind: 'git', sourceControl });
+        await sidebar.walkThroughChanges(sourceControl);
       }
     ),
 

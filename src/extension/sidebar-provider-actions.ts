@@ -14,7 +14,6 @@ import type { ToolOutputDocumentProvider } from './tool-output-document-provider
 import type { OpenCodeServer } from './server';
 import { assertSessionInCurrentWorkspace } from './session-workspace';
 import type { UsageReportService } from './usage-report-service';
-import type { WalkthroughRequest } from './walkthrough-service';
 import { isAllowedExternalUrl } from './util/webview-message';
 import type {
   ChatModelSelection,
@@ -52,7 +51,6 @@ export interface SidebarProviderActionDeps {
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
   usageReportService: UsageReportService;
-  walkThroughChanges: (request: WalkthroughRequest) => Promise<void>;
   restProxy: RestProxy;
   getWorkspaceDirectory(): string | undefined;
   sessionDiffProvider: Pick<SessionDiffDocumentProvider, 'open'>;
@@ -278,21 +276,6 @@ export function createSidebarProviderActions(
         directory ?? undefined
       );
       await deps.usageReportService.openSessionReport(sessionId, validatedDirectory);
-    },
-    walkThroughSessionChanges: async ({ sessionId, directory: requestedDirectory, messageId }) => {
-      const directory = await getAuthorizedSessionDirectory(sessionId, requestedDirectory);
-      const validatedDirectory = await assertSessionInCurrentWorkspace(
-        deps.sessionServer ?? deps.server,
-        sessionId,
-        directory ?? undefined
-      );
-      const request: Extract<WalkthroughRequest, { kind: 'session' }> = {
-        kind: 'session',
-        sessionId,
-      };
-      if (validatedDirectory) request.directory = validatedDirectory;
-      if (messageId) request.messageId = messageId;
-      await deps.walkThroughChanges(request);
     },
     reloadWebview: () => deps.webviewSession.reload(),
     openFolder: async (payload) => {

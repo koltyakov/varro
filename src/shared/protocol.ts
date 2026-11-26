@@ -1288,11 +1288,6 @@ export type WebviewMessage =
   | { type: 'session/export'; payload: { sessionId: string; directory?: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
   | { type: 'usage/session-report'; payload: { sessionId: string; directory?: string } }
-  | {
-      /** Walk through a session's changes, or only the reply `messageId` when given. */
-      type: 'walkthrough/session';
-      payload: { sessionId: string; directory?: string; messageId?: string };
-    }
   | { type: 'webview/reload' }
   | { type: 'vscode/open-folder'; payload?: { sessionId: string; directory: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }

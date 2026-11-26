@@ -40,6 +40,7 @@ export type OpenCodeConfigRequest =
         | 'small_model'
         | 'agent'
         | 'commit_message'
+        | 'review'
         | 'auto_approve'
         | 'prompt_completion'
         | 'followups';
@@ -158,6 +159,7 @@ export class OpenCodeConfigService {
       smallModel,
       agentModels,
       commitMessageModel: parseModelRoute(extensionConfig.get('commitMessage.model')),
+      reviewModel: parseModelRoute(extensionConfig.get('review.model')),
       autoApproveModel: parseModelRoute(extensionConfig.get('chat.autoApproveModel')),
       promptCompletionModel: parseModelRoute(extensionConfig.get('chat.promptCompletionModel')),
     };
@@ -542,6 +544,7 @@ export class OpenCodeConfigService {
   ): Promise<OpenCodeModelRouting> {
     if (
       request.target === 'commit_message' ||
+      request.target === 'review' ||
       request.target === 'auto_approve' ||
       request.target === 'prompt_completion' ||
       request.target === 'followups'
@@ -549,11 +552,13 @@ export class OpenCodeConfigService {
       const key =
         request.target === 'commit_message'
           ? 'commitMessage.model'
-          : request.target === 'prompt_completion'
-            ? 'chat.promptCompletionModel'
-            : request.target === 'followups'
-              ? 'chat.followupModel'
-              : 'chat.autoApproveModel';
+          : request.target === 'review'
+            ? 'review.model'
+            : request.target === 'prompt_completion'
+              ? 'chat.promptCompletionModel'
+              : request.target === 'followups'
+                ? 'chat.followupModel'
+                : 'chat.autoApproveModel';
       await vscode.workspace
         .getConfiguration('varro')
         .update(

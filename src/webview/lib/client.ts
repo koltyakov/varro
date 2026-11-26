@@ -1122,6 +1122,7 @@ export const client = {
         | 'small_model'
         | 'agent'
         | 'commit_message'
+        | 'review'
         | 'auto_approve'
         | 'prompt_completion'
         | 'followups';

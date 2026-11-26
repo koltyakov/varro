@@ -43,30 +43,6 @@ afterEach(() => {
 });
 
 describe('DiffSummary', () => {
-  it('offers a walkthrough only when the reply has a walkthrough range', () => {
-    const onWalkThrough = vi.fn();
-    cleanup = render(
-      () => (
-        <DiffSummary diffs={diffs} stateKey="session-1:message-1" onWalkThrough={onWalkThrough} />
-      ),
-      container
-    );
-    flushSolid();
-    const button = container.querySelector<HTMLButtonElement>('.diff-summary-walkthrough');
-    expect(button?.textContent).toBe('Walk through');
-    button?.click();
-    expect(onWalkThrough).toHaveBeenCalledOnce();
-    // The walkthrough does not toggle the summary.
-    expect(container.querySelector('.diff-summary-content')).toBeNull();
-
-    cleanup();
-    flushSolid();
-    container.innerHTML = '';
-    cleanup = render(() => <DiffSummary diffs={diffs} stateKey="session-1:message-2" />, container);
-    flushSolid();
-    expect(container.querySelector('.diff-summary-walkthrough')).toBeNull();
-  });
-
   it('keeps an expanded summary open when its virtualized row remounts', () => {
     cleanup = render(() => <DiffSummary diffs={diffs} stateKey="session-1:message-1" />, container);
     flushSolid();

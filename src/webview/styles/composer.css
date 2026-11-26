@@ -2261,21 +2261,6 @@
   max-height: 128px;
 }
 
-.changed-files-walkthrough {
-  display: block;
-  margin: 2px 0 0;
-  padding: 2px 0;
-  border: none;
-  background: none;
-  color: var(--color-vscode-link);
-  font: inherit;
-  cursor: pointer;
-}
-
-.changed-files-walkthrough:hover {
-  text-decoration: underline;
-}
-
 .changed-files-item {
   padding: 0;
 }

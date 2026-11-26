@@ -9,12 +9,7 @@ import { navArrowRightIcon } from '../../lib/ui-icons';
 import { DiffView } from '../DiffView';
 import { UiIcon } from '../UiIcon';
 
-export function DiffSummary(props: {
-  diffs: FileDiff[];
-  stateKey: string;
-  /** Opens an AI walkthrough of the same changes this summary lists. */
-  onWalkThrough?: () => void;
-}) {
+export function DiffSummary(props: { diffs: FileDiff[]; stateKey: string }) {
   // Writable derived state: the remembered expansion is the seed, and it follows a new key.
   const [expanded, setExpanded] = createSignal(
     () => getMessageBlockExpanded(props.stateKey) ?? false
@@ -34,37 +29,23 @@ export function DiffSummary(props: {
 
   return (
     <div class="diff-summary">
-      <div class="diff-summary-header">
-        <button
-          onClick={toggleExpanded}
-          class="diff-summary-btn"
-          aria-expanded={ariaBoolean(expanded())}
-        >
-          <UiIcon
-            source={navArrowRightIcon}
-            class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}
-            width="10"
-            height="10"
-          />
-          <span>
-            {props.diffs.length} file{props.diffs.length !== 1 ? 's' : ''} changed ·{' '}
-            <span class="diff-lines-added">+{summary().add}</span>{' '}
-            <span class="diff-lines-removed">-{summary().del}</span>
-          </span>
-        </button>
-        <Show when={props.onWalkThrough}>
-          {(walkThrough) => (
-            <button
-              type="button"
-              class="diff-summary-btn diff-summary-walkthrough"
-              title="Explain these changes in reading order. Uses the helper model and opens a Markdown report."
-              onClick={() => walkThrough()()}
-            >
-              Walk through
-            </button>
-          )}
-        </Show>
-      </div>
+      <button
+        onClick={toggleExpanded}
+        class="diff-summary-btn"
+        aria-expanded={ariaBoolean(expanded())}
+      >
+        <UiIcon
+          source={navArrowRightIcon}
+          class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}
+          width="10"
+          height="10"
+        />
+        <span>
+          {props.diffs.length} file{props.diffs.length !== 1 ? 's' : ''} changed ·{' '}
+          <span class="diff-lines-added">+{summary().add}</span>{' '}
+          <span class="diff-lines-removed">-{summary().del}</span>
+        </span>
+      </button>
       <Show when={expanded()}>
         <div class="diff-summary-content animate-fade-in">
           <DiffView diffs={props.diffs} />

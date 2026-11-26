@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildWalkthroughDigest,
   buildWalkthroughPrompt,
+  DEFAULT_WALKTHROUGH_DIGEST_CHARS,
   MAX_WALKTHROUGH_DIGEST_CHARS,
   normalizeWalkthrough,
   parseUnifiedDiff,
   renderWalkthroughMarkdown,
+  walkthroughDigestBudget,
   WalkthroughTooLargeError,
 } from './walkthrough';
 
@@ -53,7 +55,7 @@ describe('walkthrough diff parsing', () => {
     expect(files[0]!.hunks[0]!.newStart).toBe(1);
   });
 
-  it('parses OpenCode session patches without a git header', () => {
+  it('parses patches without a git header', () => {
     const files = parseUnifiedDiff(
       [
         'Index: src/app.ts',
@@ -64,8 +66,7 @@ describe('walkthrough diff parsing', () => {
         '-old();',
         '+next();',
       ].join('\n'),
-      'session',
-      'src/app.ts'
+      'unstaged'
     );
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({ path: 'src/app.ts', additions: 1, deletions: 1 });
@@ -80,19 +81,52 @@ describe('walkthrough generation', () => {
     expect(digest).toContain('[h1] @@ -1,3 +1,4 @@ export function reset()');
     expect(digest).toContain('FILE package-lock.json (modified, +1 -1): generated file');
     expect(digest).not.toContain('"version": "2"');
-    expect(buildWalkthroughPrompt(digest, 'Staged changes')).toContain(
-      '----- BEGIN UNTRUSTED STAGED CHANGES DIFF -----'
-    );
+    const prompt = buildWalkthroughPrompt(digest, 'Staged changes');
+    expect(prompt).toContain('----- BEGIN UNTRUSTED STAGED CHANGES DIFF -----');
+    // Brief by design: few stops, short explanations, trivial changes folded into "minor".
+    expect(prompt).toContain('never more than 8');
+    expect(prompt).toContain('Summarize them together in "minor"');
   });
 
-  it('refuses a diff that does not fit instead of truncating it', () => {
-    const body = Array.from({ length: 4_000 }, (_, index) => `+line ${index} ${'x'.repeat(40)}`);
+  it('leaves tests and then docs out before refusing a diff that does not fit', () => {
+    const body = (count: number) =>
+      Array.from({ length: count }, (_, index) => `+line ${index} ${'x'.repeat(40)}`);
+    const patch = (path: string, count: number) =>
+      [`--- a/${path}`, `+++ b/${path}`, `@@ -0,0 +1,${count} @@`, ...body(count)].join('\n');
     const files = parseUnifiedDiff(
-      ['--- a/big.ts', '+++ b/big.ts', '@@ -0,0 +1,4000 @@', ...body].join('\n'),
+      [
+        patch('src/core.ts', 400),
+        patch('src/core.test.ts', 2_000),
+        patch('docs/usage.md', 2_000),
+      ].join('\n'),
       'unstaged'
     );
-    expect(() => buildWalkthroughDigest(files)).toThrow(WalkthroughTooLargeError);
-    expect(MAX_WALKTHROUGH_DIGEST_CHARS).toBeLessThan(body.join('\n').length);
+    const { digest, hunkByAlias } = buildWalkthroughDigest(files, 60_000);
+    expect(digest.length).toBeLessThanOrEqual(60_000);
+    expect([...hunkByAlias.values()].map((hunk) => hunk.path)).toEqual(['src/core.ts']);
+    expect(digest).toContain(
+      'FILE src/core.test.ts (modified, +2000 -0): content not shown to fit'
+    );
+    expect(files.map((file) => file.omitted ?? false)).toEqual([false, true, true]);
+    const walkthrough = normalizeWalkthrough(
+      { title: 'Core', stops: [{ title: 'Core', hunks: ['h1'], explanation: 'x' }] },
+      files,
+      hunkByAlias
+    );
+    expect(walkthrough.uncovered.map((entry) => entry.note)).toEqual([
+      'not sent to the model, to fit the request',
+      'not sent to the model, to fit the request',
+    ]);
+
+    const source = parseUnifiedDiff(patch('src/big.ts', 4_000), 'unstaged');
+    expect(() => buildWalkthroughDigest(source, 60_000)).toThrow(WalkthroughTooLargeError);
+  });
+
+  it('sizes the walkthrough budget to half the context window, within bounds', () => {
+    expect(walkthroughDigestBudget(null)).toBe(DEFAULT_WALKTHROUGH_DIGEST_CHARS);
+    expect(walkthroughDigestBudget(128_000)).toBe(192_000);
+    expect(walkthroughDigestBudget(1_000_000)).toBe(MAX_WALKTHROUGH_DIGEST_CHARS);
+    expect(walkthroughDigestBudget(8_000)).toBe(60_000);
   });
 
   it('drops unknown or reused aliases and reports what no stop covers', () => {
@@ -116,7 +150,7 @@ describe('walkthrough generation', () => {
           { title: 'Reuse', importance: 'normal', hunks: ['h1'], explanation: 'Dropped.' },
           { title: 'Fresh module', importance: 'context', hunks: ['h3'], explanation: 'Adds it.' },
         ],
-        routine: [{ path: 'src/limits.ts', note: 'Formatting only' }],
+        minor: 'Reformats the `keep()` call.',
       },
       files,
       hunkByAlias
@@ -125,14 +159,15 @@ describe('walkthrough generation', () => {
       'New reset values',
       'Fresh module',
     ]);
+    expect(walkthrough.minor).toBe('Reformats the `keep()` call.');
     expect(walkthrough.stops[0]!.observations).toEqual([
       { kind: 'decision', note: 'Three, not four.' },
     ]);
     expect(
       walkthrough.uncovered.map((entry) => [entry.file.path, entry.hunks.length, entry.note])
     ).toEqual([
-      ['src/limits.ts', 1, 'Formatting only'],
-      ['package-lock.json', 1, 'Generated file, not sent to the model'],
+      ['src/limits.ts', 1, null],
+      ['package-lock.json', 1, 'generated, not sent to the model'],
     ]);
   });
 
@@ -152,7 +187,7 @@ describe('walkthrough generation', () => {
             observations: [],
           },
         ],
-        routine: [],
+        minor: 'Bumps the lockfile.',
       },
       files,
       hunkByAlias
@@ -161,16 +196,23 @@ describe('walkthrough generation', () => {
       scopeLabel: 'Staged changes',
       modelLabel: 'openai/gpt-5',
       generatedAt: new Date(0),
-      linkFor: (path, line) => `file:///repo/${path}#L${line}`,
+      linkFor: (path, line) => `vscode://file/repo/${path}:${line}`,
     });
     expect(markdown).toContain('# Walkthrough: Reset &lt;b&gt;limits&lt;/b&gt;');
     expect(markdown).toContain('> See \\[here\\](https://example.com).');
     expect(markdown).toContain('1. [Values](#1-values) · Key change');
     expect(markdown).toContain('## 1. Values');
     expect(markdown).toContain('\\# not a heading');
-    expect(markdown).toContain('**[`src/limits.ts`](file:///repo/src/limits.ts#L1)** · line 1');
-    expect(markdown).toContain('```diff\n@@ -1,3 +1,4 @@ export function reset()\n const a = 1;');
+    // One header for both hunks of a file, each start line linked; no file: links, which the preview drops.
+    expect(markdown).toContain(
+      '[**`src/limits.ts`**](<vscode://file/repo/src/limits.ts:1>) · [L1](<vscode://file/repo/src/limits.ts:1>) · [L11](<vscode://file/repo/src/limits.ts:11>)\n\n```diff\n@@ -1,3 +1,4 @@ export function reset()\n const a = 1;'
+    );
+    expect(markdown.match(/src\/limits\.ts`\*\*\]/g)).toHaveLength(1);
+    expect(markdown).toContain('**`src/new.ts`**');
+    expect(markdown).not.toContain('file:');
     expect(markdown).toContain('Staged changes · 3 files · +4 −3 · openai/gpt-5');
-    expect(markdown).toContain('## Not covered');
+    expect(markdown).toContain(
+      '## Also changed\n\nBumps the lockfile.\n\nNot explained above: [`package-lock.json`](<vscode://file/repo/package-lock.json:1>) (generated, not sent to the model)'
+    );
   });
 });

@@ -1529,6 +1529,10 @@
   --models-route-color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2a759);
 }
 
+.models-route-tag-review {
+  --models-route-color: var(--vscode-charts-purple, #b180d7);
+}
+
 .models-route-tag-old {
   border-style: dashed;
   background: transparent;

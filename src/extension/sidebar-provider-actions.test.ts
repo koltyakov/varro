@@ -141,7 +141,6 @@ function createActionFixture() {
       sessionExportService as unknown as SidebarProviderActionDeps['sessionExportService'],
     usageReportService:
       usageReportService as unknown as SidebarProviderActionDeps['usageReportService'],
-    walkThroughChanges: vi.fn<SidebarProviderActionDeps['walkThroughChanges']>(async () => {}),
     restProxy: restProxy as unknown as SidebarProviderActionDeps['restProxy'],
     getWorkspaceDirectory: vi.fn(() => '/repo'),
     sessionDiffProvider,

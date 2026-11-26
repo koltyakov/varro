@@ -55,6 +55,8 @@ export type OpenCodeModelRouting = {
   agentModels: Record<string, OpenCodeModelRoute>;
   globalVisionModel?: OpenCodeModelRoute | null;
   commitMessageModel: OpenCodeModelRoute | null;
+  /** `varro.review.model`: walkthroughs use it instead of the chat's selected model. */
+  reviewModel?: OpenCodeModelRoute | null;
   autoApproveModel: OpenCodeModelRoute | null;
   promptCompletionModel?: OpenCodeModelRoute | null;
   followupModel?: OpenCodeModelRoute | null;

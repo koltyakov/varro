@@ -9,7 +9,6 @@ import {
   resolveRepository,
   type GitRepository,
 } from './commit-message-service';
-import { resolveHelperModel } from './helper-model-selection';
 import { logger } from './logger';
 import { parseJsonObject, tryGenerateOneShot } from './one-shot-generation';
 import type { OpenCodeServer } from './server';
@@ -18,15 +17,14 @@ import {
   buildWalkthroughPrompt,
   normalizeWalkthrough,
   parseUnifiedDiff,
+  formatTokens,
   renderWalkthroughMarkdown,
+  selectWalkthroughModel,
+  walkthroughDigestBudget,
   WalkthroughTooLargeError,
   type WalkthroughDigest,
   type WalkthroughFile,
 } from './walkthrough';
-
-export type WalkthroughRequest =
-  | { kind: 'git'; sourceControl?: vscode.SourceControl }
-  | { kind: 'session'; sessionId: string; directory?: string; messageId?: string };
 
 type WalkthroughSource = {
   files: WalkthroughFile[];
@@ -58,11 +56,12 @@ export class WalkthroughService {
     private readonly ensureServerStarted: () => Promise<unknown>,
     private readonly getWorkspacePath: () => string | undefined,
     private readonly getActiveChatModel: () => ChatModelSelection | null,
-    private readonly isOpenAIPro: () => Promise<boolean>,
+    /** `varro.review.model`, as `provider/model` or `provider/model#variant`. */
+    private readonly readReviewModel: () => string,
     private readonly openReport: (content: string, title: string) => Promise<vscode.Uri>
   ) {}
 
-  async run(request: WalkthroughRequest): Promise<void> {
+  async run(sourceControl?: vscode.SourceControl): Promise<void> {
     if (this.active) {
       await vscode.window.showInformationMessage(
         'A changes walkthrough is already being generated.'
@@ -71,21 +70,20 @@ export class WalkthroughService {
     }
     this.active = true;
     try {
-      const source =
-        request.kind === 'git'
-          ? await this.readGitSource(request.sourceControl)
-          : await this.readSessionSource(request);
+      const source = await this.readGitSource(sourceControl);
       if (!source) return;
+      const model = selectWalkthroughModel(this.readReviewModel(), this.getActiveChatModel());
       if (!source.files.some((file) => file.hunks.length > 0)) {
         await vscode.window.showInformationMessage('There are no textual changes to walk through.');
         return;
       }
-      // Refuse an oversized diff before spending a request on it.
-      const { digest, hunkByAlias } = buildWalkthroughDigest(source.files);
+      // Size the request to the model, and refuse an oversized diff before spending a request.
+      const budget = walkthroughDigestBudget(await this.readContextLimit(model, source.directory));
+      const { digest, hunkByAlias } = buildWalkthroughDigest(source.files, budget);
       const report = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'Generating changes walkthrough',
+          title: `Generating changes walkthrough (${formatTokens(digest.length)} tokens)`,
           cancellable: true,
         },
         async (_progress, token) => {
@@ -93,7 +91,14 @@ export class WalkthroughService {
           const timeout = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS);
           const cancellation = token.onCancellationRequested(() => controller.abort());
           try {
-            return await this.generate(source, digest, hunkByAlias, controller.signal, token);
+            return await this.generate(
+              source,
+              model,
+              digest,
+              hunkByAlias,
+              controller.signal,
+              token
+            );
           } finally {
             clearTimeout(timeout);
             cancellation.dispose();
@@ -105,17 +110,50 @@ export class WalkthroughService {
     } catch (error) {
       if (error instanceof WalkthroughCancelledError) return;
       const message = error instanceof Error ? error.message : String(error);
-      if (!(error instanceof WalkthroughTooLargeError)) {
-        logger.error(`Changes walkthrough failed: ${message}`);
+      if (error instanceof WalkthroughTooLargeError) {
+        await vscode.window.showErrorMessage(
+          `${message} Stage a subset and walk through the staged changes, or pick a model with a larger context window.`
+        );
+        return;
       }
+      logger.error(`Changes walkthrough failed: ${message}`);
       await vscode.window.showErrorMessage(`Could not generate the walkthrough: ${message}`);
     } finally {
       this.active = false;
     }
   }
 
+  /** The model's context window in tokens, when OpenCode reports it; best effort. */
+  private async readContextLimit(
+    model: ChatModelSelection | null,
+    directory: string | undefined
+  ): Promise<number | null> {
+    if (!model) return null;
+    try {
+      await this.ensureServerStarted();
+      const config = asRecord(
+        await this.server.request('GET', '/config/providers', undefined, { directory })
+      );
+      const providers = Array.isArray(config?.providers) ? config.providers : [];
+      const provider = providers
+        .map((value) => asRecord(value))
+        .find((value) => value?.id === model.providerID);
+      const models = asRecord(provider?.models);
+      const entry =
+        asRecord(models?.[model.modelID]) ??
+        Object.values(models ?? {})
+          .map((value) => asRecord(value))
+          .find((value) => value?.id === model.modelID);
+      const context = asRecord(entry?.limit)?.context;
+      return typeof context === 'number' ? context : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async generate(
     source: WalkthroughSource,
+    model: ChatModelSelection | null,
     digest: string,
     hunkByAlias: WalkthroughDigest['hunkByAlias'],
     signal: AbortSignal,
@@ -126,17 +164,6 @@ export class WalkthroughService {
     if (this.server.apiVersion !== 2) {
       throw new Error('Changes walkthroughs require OpenCode v2.');
     }
-    const model = await resolveHelperModel({
-      configuredModel: null,
-      loadSmallModel: async () =>
-        asRecord(
-          await this.server.request('GET', '/config', undefined, { directory: source.directory })
-        )?.small_model,
-      loadProviderConfig: () =>
-        this.server.request('GET', '/config/providers', undefined, { directory: source.directory }),
-      fallbackModel: this.getActiveChatModel(),
-      isOpenAIPro: this.isOpenAIPro,
-    });
     let generated: { text: string } | null;
     try {
       generated = await tryGenerateOneShot(this.server, {
@@ -155,7 +182,7 @@ export class WalkthroughService {
     if (!generated) {
       throw new Error(
         model
-          ? `${model.providerID}/${model.modelID} is unavailable for one-shot generation. Set a small model in OpenCode or pick another chat model.`
+          ? `${model.providerID}/${model.modelID} is unavailable for one-shot generation. Pick another model, or set one with Use for reviews in the Models view.`
           : 'This OpenCode server has no one-shot generation API. Update OpenCode to use walkthroughs.'
       );
     }
@@ -169,7 +196,9 @@ export class WalkthroughService {
     );
     const content = renderWalkthroughMarkdown(walkthrough, source.files, {
       scopeLabel: source.scopeLabel,
-      modelLabel: model ? `${model.providerID}/${model.modelID}` : null,
+      modelLabel: model
+        ? `${model.providerID}/${model.modelID}${model.variant ? ` (${model.variant})` : ''}`
+        : null,
       generatedAt: new Date(),
       linkFor: (path, line) => {
         if (deleted.has(path)) return null;
@@ -178,9 +207,7 @@ export class WalkthroughService {
           : source.directory
             ? join(source.directory, path)
             : null;
-        if (!absolute) return null;
-        const uri = vscode.Uri.file(absolute);
-        return (line && line > 0 ? uri.with({ fragment: `L${line}` }) : uri).toString();
+        return absolute ? editorLink(absolute, line) : null;
       },
     });
     return { content, title: walkthrough.title };
@@ -218,58 +245,22 @@ export class WalkthroughService {
       directory: repository.rootUri.fsPath,
     };
   }
+}
 
-  private async readSessionSource(
-    request: Extract<WalkthroughRequest, { kind: 'session' }>
-  ): Promise<WalkthroughSource | null> {
-    await this.ensureServerStarted();
-    const query = request.messageId ? `?messageID=${encodeURIComponent(request.messageId)}` : '';
-    const value = await this.server.request(
-      'GET',
-      `/session/${encodeURIComponent(request.sessionId)}/diff${query}`,
-      undefined,
-      request.directory ? { directory: request.directory } : undefined
-    );
-    if (!Array.isArray(value)) throw new Error('OpenCode returned an invalid session diff.');
-    const files: WalkthroughFile[] = [];
-    for (const entry of value) {
-      const diff = asRecord(entry);
-      const path = typeof diff?.file === 'string' ? diff.file : null;
-      if (!path) continue;
-      if (typeof diff?.patch !== 'string') {
-        throw new Error('Session walkthroughs require OpenCode v2 session diffs.');
-      }
-      const parsed = parseUnifiedDiff(diff.patch, 'session', path);
-      // A session diff names its file outside the patch; the patch headers may be relative.
-      for (const file of parsed) file.path = path;
-      for (const file of parsed) for (const hunk of file.hunks) hunk.path = path;
-      if (parsed.length === 0) {
-        files.push({
-          path,
-          section: 'session',
-          status: diff.status === 'added' || diff.status === 'deleted' ? diff.status : 'modified',
-          additions: typeof diff.additions === 'number' ? diff.additions : 0,
-          deletions: typeof diff.deletions === 'number' ? diff.deletions : 0,
-          hunks: [],
-          generated: false,
-          note: 'No textual changes',
-        });
-      } else files.push(...parsed);
-    }
-    if (files.length === 0) {
-      await vscode.window.showInformationMessage(
-        request.messageId
-          ? 'This reply did not change any files.'
-          : 'This session has not changed any files.'
-      );
-      return null;
-    }
-    return {
-      files,
-      scopeLabel: request.messageId ? 'Changes in this reply' : 'Session changes',
-      directory: request.directory ?? this.getWorkspacePath(),
-    };
-  }
+/**
+ * VS Code's Markdown preview drops `file:` links and renders them as text; it only adds its own
+ * `vscode:` scheme to markdown-it's defaults. `vscode://file/<path>:<line>` opens the file at the
+ * line, and remote windows need the `vscode-remote` form with the folder's authority.
+ */
+function editorLink(absolutePath: string, line: number | null): string | null {
+  const scheme = vscode.env.uriScheme;
+  if (scheme !== 'vscode' && scheme !== 'vscode-insiders') return null;
+  const path = vscode.Uri.file(absolutePath).path;
+  const authority = vscode.workspace.workspaceFolders?.find(
+    (folder) => folder.uri.scheme === 'vscode-remote'
+  )?.uri.authority;
+  const target = authority ? `vscode-remote/${authority}${path}` : `file${path}`;
+  return `${scheme}://${encodeURI(target)}${line && line > 0 ? `:${line}` : ''}`;
 }
 
 async function pickGitScope(

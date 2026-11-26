@@ -2597,15 +2597,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       onGenerateStats: (includeAllTime) => {
         postMessage({ type: 'usage/report', payload: { includeAllTime } });
       },
-      onWalkThroughSession: () => {
-        const sessionId = getSessionTreeRootId(composerSessionId()) || composerSessionId();
-        if (!sessionId) return;
-        const directory = state.sessions.find((session) => session.id === sessionId)?.directory;
-        postMessage({
-          type: 'walkthrough/session',
-          payload: directory ? { sessionId, directory } : { sessionId },
-        });
-      },
       customCommands: state.commands,
     })
   );

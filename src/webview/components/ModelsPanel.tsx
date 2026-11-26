@@ -102,7 +102,7 @@ type ModelRenameState = {
   displayName: string;
 };
 type ModelRouteTag = {
-  kind: 'agent' | 'small' | 'approve' | 'commit' | 'complete' | 'followups';
+  kind: 'agent' | 'small' | 'approve' | 'commit' | 'review' | 'complete' | 'followups';
   text: string;
   label: string;
   change?: 'old' | 'new' | 'removed' | 'overridden';
@@ -395,6 +395,7 @@ export function ModelsPanel() {
       | 'small_model'
       | 'agent'
       | 'commit_message'
+      | 'review'
       | 'auto_approve'
       | 'prompt_completion'
       | 'followups';
@@ -1086,6 +1087,27 @@ export function ModelsPanel() {
                   ? "Don't use for "
                   : 'Use for '}
                 <strong>commit messages</strong>
+              </button>
+              <button
+                type="button"
+                class="models-context-menu-item"
+                disabled={isSaving()}
+                title="Changes walkthroughs use this model. Leave unset to use the active chat's selected model and reasoning."
+                onClick={() =>
+                  void saveRouting({
+                    target: 'review',
+                    providerID: menu.providerID,
+                    modelID: menu.modelID,
+                    unset: isModelRoute(routing().reviewModel, menu.providerID, menu.modelID)
+                      ? true
+                      : undefined,
+                  })
+                }
+              >
+                {isModelRoute(routing().reviewModel, menu.providerID, menu.modelID)
+                  ? "Don't use for "
+                  : 'Use for '}
+                <strong>reviews</strong>
               </button>
               <button
                 type="button"
@@ -2221,6 +2243,10 @@ function getModelRouteTags(
     tags.push({ kind: 'commit', text: 'commit', label: 'Commit message model' });
   }
 
+  if (isModelRoute(routing.reviewModel, providerID, modelID)) {
+    tags.push({ kind: 'review', text: 'review', label: 'Review model (changes walkthroughs)' });
+  }
+
   if (
     routing.autoApproveModel?.providerID === providerID &&
     routing.autoApproveModel.modelID === modelID
@@ -2323,6 +2349,7 @@ function createEmptyRouting(): OpenCodeModelRouting {
     smallModel: null,
     agentModels: {},
     commitMessageModel: null,
+    reviewModel: null,
     autoApproveModel: null,
     promptCompletionModel: null,
     followupModel: null,
@@ -2336,6 +2363,7 @@ function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
   // preview.html proxies directly to OpenCode, which may expose raw opencode.json keys.
   const smallModel = parseModelRoute(record.smallModel) ?? parseModelRoute(record.small_model);
   const commitMessageModel = parseModelRoute(record.commitMessageModel);
+  const reviewModel = parseModelRoute(record.reviewModel);
   const autoApproveModel = parseModelRoute(record.autoApproveModel);
   const promptCompletionModel = parseModelRoute(record.promptCompletionModel);
   const followupModel = parseModelRoute(record.followupModel);
@@ -2372,6 +2400,7 @@ function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
     smallModel,
     agentModels,
     commitMessageModel,
+    reviewModel,
     autoApproveModel,
     promptCompletionModel,
     followupModel,
