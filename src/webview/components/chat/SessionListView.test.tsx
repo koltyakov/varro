@@ -39,14 +39,18 @@ import {
 import { fixture } from '../../test-fixtures';
 import { hasNestedSubagents, setSubagentListView } from '../../lib/subagent-list-view';
 import {
+  clipboardCheckIcon,
   compressIcon,
   gitIcon,
   flashSolidIcon,
   forwardMessageIcon,
   hourglassIcon,
+  pasteClipboardIcon,
+  squareIcon,
 } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 import * as locationActions from '../../lib/session-location-actions';
+import { resetSessionGoalStoreForTests } from '../../lib/stores/session-goal-store';
 
 type TestRuntimeValue =
   | string
@@ -344,6 +348,8 @@ beforeEach(() => {
   applyState(storePath('providers', []));
   clearStateRecord('sessionSelectedModels');
   applyState(storePath('pinnedSessionIds', []));
+  applyState(storePath('todoSessionIds', []));
+  resetSessionGoalStoreForTests();
   applyState(storePath('activeSessionId', null));
   applyState(storePath('editorTabsOpen', false));
   applyState(storePath('editorSessionIds', []));
@@ -380,6 +386,8 @@ afterEach(() => {
   applyState(storePath('providers', []));
   clearStateRecord('sessionSelectedModels');
   applyState(storePath('pinnedSessionIds', []));
+  applyState(storePath('todoSessionIds', []));
+  resetSessionGoalStoreForTests();
   applyState(storePath('sessionStatus', {}));
   applyState(storePath('compactingSessionIds', []));
   applyState(storePath('queuedMessages', []));
@@ -2167,6 +2175,126 @@ describe('SessionListView pins', () => {
       expect(row().querySelector('[aria-label="Pinned session"]')).toBeNull();
     });
     flushSolid();
+  });
+
+  it('marks a session as todo from its row menu without changing its order', async () => {
+    const setTodo = vi
+      .spyOn(client.varro.session, 'setTodo')
+      .mockResolvedValueOnce(['older'])
+      .mockResolvedValueOnce([]);
+    mockEmptyDiffSummary();
+    const now = Date.now();
+    applyState(storePath('sessions', [session('newer', now), session('older', now - 1_000)]));
+    renderSessionList();
+
+    const row = () => container.querySelector<HTMLElement>('[data-session-id="older"]')!;
+    const order = () =>
+      [...container.querySelectorAll<HTMLElement>('.session-item')].map(
+        (item) => item.dataset.sessionId
+      );
+    expect(row().querySelector('.session-item-indicator.is-todo')).toBeNull();
+    openSessionActions(row());
+    clickMenuItem('Mark as todo');
+
+    await vi.waitFor(() =>
+      expect(setTodo).toHaveBeenCalledWith('older', true, { directory: '/repo' })
+    );
+    flushSolid();
+    await vi.waitFor(() => {
+      const marker = row().querySelector<HTMLElement>('.session-item-indicator.is-todo');
+      expect(marker?.getAttribute('aria-label')).toBe('Todo');
+      expect(
+        marker?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+      ).toBe(toCssUrl(squareIcon));
+    });
+    expect(order()).toEqual(['newer', 'older']);
+
+    // The host clears the mark when the next prompt reaches the session.
+    applyState(storePath('todoSessionIds', []));
+    expect(row().querySelector('.session-item-indicator.is-todo')).toBeNull();
+
+    applyState(storePath('todoSessionIds', ['older']));
+    openSessionActions(row());
+    clickMenuItem('Remove todo mark');
+    await vi.waitFor(() =>
+      expect(setTodo).toHaveBeenLastCalledWith('older', false, { directory: '/repo' })
+    );
+    flushSolid();
+    await vi.waitFor(() =>
+      expect(row().querySelector('.session-item-indicator.is-todo')).toBeNull()
+    );
+  });
+
+  it('prefers a live status indicator over the todo mark', () => {
+    applyState(storePath('sessions', [session('busy', Date.now())]));
+    applyState(storePath('todoSessionIds', ['busy']));
+    applyState(storePath('sessionStatus', { busy: { type: 'busy' } }));
+    renderSessionList();
+
+    const row = container.querySelector<HTMLElement>('[data-session-id="busy"]');
+    expect(row?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
+    expect(row?.querySelector('.session-item-indicator.is-todo')).toBeNull();
+  });
+
+  it('shows active and resolved goals beside the session counters', async () => {
+    const goal = (status: 'active' | 'paused' | 'complete') => ({
+      id: 'goal-1',
+      objective: 'Ship it',
+      status,
+      rounds: 0,
+      maxRounds: 50,
+      updatedAt: 1,
+    });
+    const readGoal = vi
+      .spyOn(client.session, 'goal')
+      .mockImplementation(async (sessionID) => (sessionID === 'with-goal' ? goal('active') : null));
+    mockEmptyDiffSummary();
+    const previousStatus = appState.serverStatus;
+    applyState(storePath('serverStatus', { state: 'running', apiVersion: 2 }));
+    const now = Date.now();
+    applyState(storePath('sessions', [session('with-goal', now), session('no-goal', now - 1)]));
+    try {
+      renderSessionList();
+      const badge = () =>
+        container.querySelector<HTMLElement>('[data-session-id="with-goal"] .session-item-goal');
+      await vi.waitFor(() => expect(badge()?.getAttribute('aria-label')).toBe('Goal active'));
+      const iconMask = () =>
+        badge()?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask');
+      expect(iconMask()).toBe(toCssUrl(pasteClipboardIcon));
+      expect(readGoal).toHaveBeenCalledWith('with-goal', { directory: '/repo' });
+      expect(container.querySelector('[data-session-id="no-goal"] .session-item-goal')).toBeNull();
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'server/event',
+            payload: {
+              type: 'session.goal.updated',
+              properties: { sessionID: 'with-goal', goal: goal('complete') },
+            },
+          },
+        })
+      );
+      flushSolid();
+      expect(badge()?.getAttribute('aria-label')).toBe('Goal complete');
+      expect(iconMask()).toBe(toCssUrl(clipboardCheckIcon));
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'server/event',
+            payload: {
+              type: 'session.goal.updated',
+              properties: { sessionID: 'with-goal', goal: null },
+            },
+          },
+        })
+      );
+      flushSolid();
+      expect(badge()).toBeNull();
+    } finally {
+      applyState(storePath('serverStatus', previousStatus));
+    }
   });
 
   it('separates the pinned group from the first unpinned session', () => {

@@ -631,6 +631,7 @@ describe('ActiveChatHeader', () => {
       'Open in Terminal',
       'Rename',
       'Pin session',
+      'Mark as todo',
       'Copy session ID',
       'Move to Recycle Bin',
     ]);

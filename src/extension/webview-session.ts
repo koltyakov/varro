@@ -141,6 +141,7 @@ export class WebviewSession {
       sessionPlanState(): InitialWebviewState['sessionPlanState'];
       sessionReadState(): InitialWebviewState['sessionReadState'];
       sessionPlanAgents(): Record<string, string>;
+      todoSessionIds(): string[];
       sessionModelMigrationPending(): boolean;
       modelPreferences(): InitialWebviewState['modelPreferences'];
       modelPreferencesMigrationPending(): boolean;
@@ -603,6 +604,7 @@ export class WebviewSession {
         .filter((item) => isSessionInWorkspace(item.sessionID))
         .map((item) => item.props),
       pinnedSessionIds: this.pinnedSessions.list(),
+      todoSessionIds: this.deps.todoSessionIds(),
       queuedMessages: this.deps.queuedMessages(),
     };
   }

@@ -164,6 +164,8 @@ export interface AppState {
   messagesLoading: boolean;
   pendingSessionSelectionId: string | null;
   pinnedSessionIds: string[];
+  /** Sessions marked to come back to; the host clears a marker on the session's next prompt. */
+  todoSessionIds: string[];
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
   transferredSessions: Record<string, string>;
@@ -482,6 +484,7 @@ export function createAppState(): AppStateInstance {
     transferredSessions: {},
     pendingSessionSelectionId: null,
     pinnedSessionIds: initialWebviewState.pinnedSessionIds ?? [],
+    todoSessionIds: initialWebviewState.todoSessionIds ?? [],
     recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
     activeSessionId: null,
     editorTabsOpen: initialWebviewState.editorTabsOpen ?? false,

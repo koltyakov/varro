@@ -206,6 +206,7 @@ function createSession(options?: {
     sessionPlanState: vi.fn<() => InitialWebviewState['sessionPlanState']>(() => ({})),
     sessionReadState: vi.fn<() => InitialWebviewState['sessionReadState']>(() => ({})),
     sessionPlanAgents: vi.fn(() => ({})),
+    todoSessionIds: vi.fn(() => ['todo-session']),
     sessionModelMigrationPending: vi.fn(() => false),
     modelPreferences: vi.fn<() => InitialWebviewState['modelPreferences']>(() => ({
       modelVariantSelections: {},
@@ -691,7 +692,7 @@ describe('WebviewSession', () => {
     expect(session.blockingRequestsForWebview).toHaveLength(1);
   });
 
-  it('includes pinned sessions in the initial webview state', async () => {
+  it('includes pinned and todo sessions in the initial webview state', async () => {
     const { session, bridge } = createSession();
     const view = createWebviewView(true);
 
@@ -701,6 +702,7 @@ describe('WebviewSession', () => {
     expect(bridge.renderHtml).toHaveBeenCalledWith(
       expect.objectContaining({
         pinnedSessionIds: ['pinned-session'],
+        todoSessionIds: ['todo-session'],
       })
     );
   });

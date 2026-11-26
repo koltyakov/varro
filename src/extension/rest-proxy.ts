@@ -70,6 +70,7 @@ import { ModelPricingCatalog } from './model-pricing';
 import { StartupDiagnostics } from './startup-diagnostics';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
+import type { TodoSessionManager } from './todo-session-manager';
 import type { OpenCodeServer } from './server';
 import {
   OpenCodeResponseTooLargeError,
@@ -369,6 +370,7 @@ export interface RestProxyCallbacks {
     | 'restore'
   >;
   pinnedSessions: Pick<PinnedSessionManager, 'reorder' | 'setPinned'>;
+  todoSessions: Pick<TodoSessionManager, 'setTodo'>;
   hiddenSessions: Pick<
     HiddenSessionManager,
     | 'filterVisibleSessionRequests'
@@ -1455,6 +1457,21 @@ export class RestProxy {
         const data = await this.callbacks.pinnedSessions.setPinned(
           pinRequest.sessionID,
           pinRequest.pinned
+        );
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const todoRequest = this.parseTodoRequest(method, payload.path, payload.body);
+      if (todoRequest) {
+        await this.assertSessionInWorkspace(
+          todoRequest.sessionID,
+          explicitWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
+          explicitWorkspaceDirectory ?? undefined
+        );
+        const data = await this.callbacks.todoSessions.setTodo(
+          todoRequest.sessionID,
+          todoRequest.todo
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -3637,6 +3654,16 @@ export class RestProxy {
     const record = asRecord(body);
     if (typeof record?.pinned !== 'boolean') throw new Error('Invalid pin request');
     return { sessionID: decodeURIComponent(match[1]!), pinned: record.pinned };
+  }
+
+  private parseTodoRequest(method: string, path: string, body: unknown) {
+    if (method !== 'POST') return null;
+    const url = new URL(path, 'http://localhost');
+    const match = url.pathname.match(/^\/varro\/session\/([^/]+)\/todo$/);
+    if (!match) return null;
+    const record = asRecord(body);
+    if (typeof record?.todo !== 'boolean') throw new Error('Invalid todo request');
+    return { sessionID: decodeURIComponent(match[1]!), todo: record.todo };
   }
 
   private parseReorderPinRequest(method: string, path: string, body: unknown) {

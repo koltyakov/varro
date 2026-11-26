@@ -592,6 +592,7 @@ export type VarroSessionEndpointAction =
   | 'permission-mode'
   | 'pin'
   | 'reorder-pin'
+  | 'todo'
   | 'rename-if-untitled';
 
 export function buildVarroSessionEndpoint(
@@ -1007,6 +1008,8 @@ export type InitialWebviewState = {
   pendingQuestions?: UnknownRecord[];
   recycleBinEntries?: RecycleBinEntry[];
   pinnedSessionIds?: string[];
+  /** Sessions the user marked to come back to. */
+  todoSessionIds?: string[];
   queuedMessages?: QueuedMessageSnapshot[];
 };
 
@@ -1122,6 +1125,7 @@ export type ExtensionMessage =
       };
     }
   | { type: 'pinned-sessions/sync'; payload: { sessionIds: string[] } }
+  | { type: 'todo-sessions/sync'; payload: { sessionIds: string[] } }
   | {
       type: 'permission-modes/sync';
       payload: { modes: Record<string, PermissionMode>; recoveringSessionIds?: string[] };

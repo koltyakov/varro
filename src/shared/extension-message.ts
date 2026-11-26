@@ -58,6 +58,7 @@ const KNOWN_TYPES = new Set<string>([
   'queued-messages/session-status',
   'queued-messages/claim-result',
   'pinned-sessions/sync',
+  'todo-sessions/sync',
   'permission-modes/sync',
   'session-models/sync',
   'session-plan-state/sync',
@@ -413,7 +414,8 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       return { type, payload: config };
     }
 
-    case 'pinned-sessions/sync': {
+    case 'pinned-sessions/sync':
+    case 'todo-sessions/sync': {
       const payload = asRecord(record.payload);
       if (
         !Array.isArray(payload?.sessionIds) ||

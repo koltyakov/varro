@@ -72,7 +72,10 @@ import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity, compareSessionsForDisplay } from '../../lib/session-order';
 import {
   archiveIcon,
+  clipboardCheckIcon,
   forwardMessageIcon,
+  pasteClipboardIcon,
+  squareIcon,
   navArrowRightIcon,
   cableTagIcon,
   compressIcon,
@@ -103,6 +106,7 @@ import {
 import { Tooltip } from '../Tooltip';
 import { sessionDiffSummaries } from './session-diff-summaries';
 import { sessionStore } from '../../lib/stores/session-store';
+import { sessionGoalStore } from '../../lib/stores/session-goal-store';
 import { isSessionTransferHidden } from '../../lib/session-transfer';
 import {
   reportNestedSubagents,
@@ -2583,6 +2587,13 @@ function SessionListItem(props: {
       isPlanReady: props.isCompletedPlanSession && hasUnreadCompletion(),
       isCompleted: hasUnreadCompletion(),
     });
+  const isTodo = () => state.todoSessionIds.includes(props.session.id);
+  const goalStatus = () => sessionGoalStore.status(props.session.id);
+  const goalLabel = () => {
+    const goal = goalStatus();
+    if (goal === 'complete') return 'Goal complete';
+    return goal === 'paused' ? 'Goal paused' : 'Goal active';
+  };
   const indicatorTitle = (kind: SessionStatusIndicatorKind) => {
     if (kind === 'attention') {
       if (props.hasPermissionRequest && props.hasQuestionRequest) return 'Attention needed';
@@ -2692,6 +2703,19 @@ function SessionListItem(props: {
     }
   );
 
+  createEffect(
+    () =>
+      shouldLoadSummary() &&
+      !props.session.parentID &&
+      state.serverStatus.state === 'running' &&
+      state.serverStatus.apiVersion === 2
+        ? { sessionId: props.session.id, directory: props.session.directory }
+        : null,
+    (request) => {
+      if (request) sessionGoalStore.request(request.sessionId, request.directory);
+    }
+  );
+
   onCleanup(() => {
     if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
   });
@@ -2780,11 +2804,24 @@ function SessionListItem(props: {
     >
       <span
         class={[
-          `session-item-leading ${indicatorKind() ? 'has-status' : ''}`,
+          `session-item-leading ${indicatorKind() || isTodo() ? 'has-status' : ''}`,
           { 'can-reorder': props.canReorderPinned },
         ]}
       >
-        <Show when={indicatorKind()}>
+        <Show
+          when={indicatorKind()}
+          fallback={
+            <Show when={isTodo()}>
+              <span
+                class="session-item-indicator session-status-indicator is-todo"
+                title="Todo: the next prompt clears this mark"
+                aria-label="Todo"
+              >
+                <UiIcon source={squareIcon} width={12} height={12} />
+              </span>
+            </Show>
+          }
+        >
           {(kind) => (
             <span
               class={`session-item-indicator session-status-indicator ${getSessionStatusIndicatorClass(kind())}`}
@@ -2982,6 +3019,23 @@ function SessionListItem(props: {
           <span class="session-item-plan-tag" title="Plan mode" aria-label="Plan mode">
             Plan
           </span>
+        </Show>
+        <Show when={goalStatus()}>
+          {(goal) => (
+            <span
+              class={`session-item-queued-counter session-item-goal is-${goal()}`}
+              data-goal-status={goal()}
+              title={goalLabel()}
+              aria-label={goalLabel()}
+            >
+              <UiIcon
+                source={goal() === 'complete' ? clipboardCheckIcon : pasteClipboardIcon}
+                class="session-item-queued-icon"
+                width={16}
+                height={16}
+              />
+            </span>
+          )}
         </Show>
         <Show when={props.queuedMessageCount > 0}>
           <span

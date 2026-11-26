@@ -332,6 +332,8 @@ describe('webview message validation', () => {
       isAllowedApiRequest('GET', '/varro/session/session-1/followup-usage?directory=%2Frepo')
     ).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/pin')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session/session-1/todo')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/session/session-1/todo')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/reorder-pin')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session-transfer/hide')).toBe(true);

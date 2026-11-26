@@ -701,6 +701,23 @@ describe('mount bridge helpers', () => {
     expect(deps.clearError).not.toHaveBeenCalled();
   });
 
+  it('applies host todo marks, including marks cleared by a new prompt', () => {
+    const deps = createMessageDependencies();
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'todo-sessions/sync',
+      payload: { sessionIds: ['session-1'] },
+    });
+    flushSolid();
+    expect([...state.todoSessionIds]).toEqual(['session-1']);
+
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'todo-sessions/sync',
+      payload: { sessionIds: [] },
+    });
+    flushSolid();
+    expect([...state.todoSessionIds]).toEqual([]);
+  });
+
   it('binds extension message handling to shared webview state', () => {
     setState((draft) => {
       draft.remoteImages = 'off';

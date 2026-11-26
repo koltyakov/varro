@@ -460,6 +460,9 @@ export function handleExtensionMessageWithDependencies(
     case 'pinned-sessions/sync':
       appStore.applyPinnedSessionsSync(msg.payload.sessionIds);
       break;
+    case 'todo-sessions/sync':
+      appStore.setState(storePath('todoSessionIds', [...msg.payload.sessionIds]));
+      break;
     case 'queued-messages/sync':
       applyQueuedMessagesSnapshot(msg.payload.messages, msg.payload.mutationId);
       break;

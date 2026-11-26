@@ -167,6 +167,11 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
         Promise.resolve(pinned ? ['session-1'] : [])
       ),
     },
+    todoSessions: {
+      setTodo: vi.fn((_sessionID: string, todo: boolean) =>
+        Promise.resolve(todo ? ['session-1'] : [])
+      ),
+    },
     hiddenSessions: {
       registerPendingTitle: vi.fn(),
       forgetPendingTitle: vi.fn(),
@@ -2634,6 +2639,26 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 8,
       data: ['session-1'],
+    });
+  });
+
+  it('updates todo sessions and rejects malformed todo requests', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(
+      makePayload(10, 'POST', '/varro/session/session-1/todo', { todo: true })
+    );
+    expect(callbacks.todoSessions.setTodo).toHaveBeenCalledWith('session-1', true);
+    expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 10, data: ['session-1'] });
+
+    await proxy.handleRequest(
+      makePayload(11, 'POST', '/varro/session/session-1/todo', { todo: 'yes' })
+    );
+    expect(callbacks.todoSessions.setTodo).toHaveBeenCalledTimes(1);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 11,
+      error: 'Invalid todo request',
     });
   });
 

@@ -876,6 +876,17 @@ export const client = {
           { pinned }
         );
       },
+      async setTodo(
+        sessionID: string,
+        todo: boolean,
+        options?: { directory?: string }
+      ): Promise<string[]> {
+        return apiCall(
+          'POST',
+          withDirectory(buildVarroSessionEndpoint(sessionID, 'todo'), options?.directory),
+          { todo }
+        );
+      },
       async reorderPinned(
         sourceSessionID: string,
         targetSessionID: string,

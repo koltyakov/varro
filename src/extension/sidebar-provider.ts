@@ -119,6 +119,7 @@ import type { ProviderSignatureFileSystem } from './provider-file-refresh-contro
 import { ProviderLimitService } from './provider-limit-service';
 import { ProviderLimitStatusBar } from './provider-limit-status-bar';
 import { PinnedSessionManager } from './pinned-session-manager';
+import { TodoSessionManager } from './todo-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
 import { RalphHost } from './ralph-host';
 import { InternalHelperCleanupCoordinator, RestProxy } from './rest-proxy';
@@ -250,6 +251,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private nativeNotificationErrorShown = false;
   private readonly sessionTrash: SessionTrashManager;
   private readonly pinnedSessions: PinnedSessionManager;
+  private readonly todoSessions: TodoSessionManager;
   private readonly queuedMessages: QueuedMessageStore;
   private readonly sessionPermissionModes: SessionPermissionModeStore;
   private readonly sessionSelectedModels: SessionModelSelectionStore;
@@ -405,6 +407,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       // A timed-out RPC can still finish persisting. Keep every view authoritative
       // independently of whether its original response is still being awaited.
       this.post({ type: 'pinned-sessions/sync', payload: { sessionIds } });
+    });
+    this.todoSessions = new TodoSessionManager(persistence, (sessionIds) => {
+      this.post({ type: 'todo-sessions/sync', payload: { sessionIds } });
     });
     this.queuedMessages = new QueuedMessageStore(persistence);
     this.sessionPermissionModes = new SessionPermissionModeStore(persistence);
@@ -821,6 +826,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         sessionPlanState: () => this.sessionPlanState.list(),
         sessionReadState: () => this.sessionReadState.list(),
         sessionPlanAgents: () => this.sessionPlanState.listAgents(),
+        todoSessionIds: () => this.todoSessions.list(),
         sessionModelMigrationPending: () => this.sessionSelectedModels.needsMigration(),
         modelPreferences: () =>
           this.modelPreferences.needsMigration() ? undefined : this.modelPreferences.get(),
@@ -874,6 +880,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       sessionState: this.sessionState,
       sessionTrash: this.sessionTrash,
       pinnedSessions: this.pinnedSessions,
+      todoSessions: this.todoSessions,
       hiddenSessions: this.hiddenSessions,
       internalHelperCleanupCoordinator: this.internalHelperCleanupCoordinator,
       autoApproveJudge: this.autoApproveJudge,
@@ -2043,6 +2050,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       void this.recoverPendingPermissionModeFallbacks();
     }
     if (msg.type === 'server/event') this.postQueuedSessionStatus(msg.payload);
+    if (msg.type === 'server/event') this.clearTodoSessionForEvent(msg.payload);
     if (msg.type === 'server/event') this.releaseDeletedEditorRestorations(msg.payload);
     if (msg.type === 'server/event') this.removeDeletedSessionPersistence(msg.payload);
     if (msg.type === 'server/event' && this.shouldDeferWorkspaceEvent(msg.payload)) {
@@ -2434,6 +2442,42 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       (error: unknown) => {
         logger.warn(
           `Failed to remove persisted state for deleted session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    );
+  }
+
+  /** A todo marker lasts until the next prompt reaches the session, or the session is deleted. */
+  private clearTodoSessionForEvent(event: ServerEvent) {
+    let pending: Promise<string[]> | undefined;
+    if (event.type === 'session.deleted') {
+      const sessionId = event.properties?.info?.id || event.properties?.sessionID;
+      if (sessionId) pending = this.todoSessions.remove(sessionId);
+    } else if (event.type === 'session.next.prompt.admitted') {
+      const sessionId = event.properties?.sessionID;
+      const timestamp = event.properties?.timestamp;
+      if (sessionId) {
+        pending = this.todoSessions.clearForPrompt(
+          sessionId,
+          typeof timestamp === 'number' ? timestamp : Date.now()
+        );
+      }
+    } else if (event.type === 'message.updated') {
+      const info = asRecord(event.properties?.info);
+      const created = asRecord(info?.time)?.created;
+      if (
+        info?.role === 'user' &&
+        typeof info.sessionID === 'string' &&
+        typeof created === 'number'
+      ) {
+        pending = this.todoSessions.clearForPrompt(info.sessionID, created);
+      }
+    }
+    void pending?.catch(
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection reasons are normalized for logging at this boundary.
+      (error: unknown) => {
+        logger.warn(
+          `Failed to update todo session marker: ${error instanceof Error ? error.message : String(error)}`
         );
       }
     );
