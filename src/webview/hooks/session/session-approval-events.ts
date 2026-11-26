@@ -16,6 +16,8 @@ type ApprovalEventDependencies = {
   judgePermission?(permission: Permission): Promise<void | boolean | object>;
   permissionReplied?(permissionId: string): void;
   permissionVisible?(permissionId: string): void;
+  /** Recovers a full-access reply that failed while the session is still in full access. */
+  fullAccessReplyFailed?(permission: Permission, cause: unknown): void;
   respondPermission(
     sessionId: string,
     permissionId: string,
@@ -46,12 +48,17 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
     if (deps.shouldAutoApprovePermissions(permission.sessionID)) {
       const respond = deps.respondAutomaticPermission ?? deps.respondPermission;
       // Full access belongs to this session, not the server's saved approval layer.
-      void respond(permission.sessionID, permission.id, 'once', { rethrow: true }).catch(() => {
-        if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
-          permissionsStore.addPermission(permission);
-          deps.permissionVisible?.(permission.id);
+      void respond(permission.sessionID, permission.id, 'once', { rethrow: true }).catch(
+        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Reply transports may reject with arbitrary thrown values.
+        (error: unknown) => {
+          if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
+            permissionsStore.addPermission(permission);
+            deps.permissionVisible?.(permission.id);
+            return;
+          }
+          deps.fullAccessReplyFailed?.(permission, error);
         }
-      });
+      );
       return;
     }
     if (isSharedDirectPermission(permission.type)) {

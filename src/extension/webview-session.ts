@@ -78,6 +78,10 @@ type QueuedCommand = Extract<
 export class WebviewSession {
   public interruptedSessionsForWebview: InterruptedSessionSnapshot[] = [];
   public blockingRequestsForWebview: BlockingRequestSnapshot[] = [];
+  private embeddedBlockingRequests: BlockingRequestSnapshot[] = [];
+  private embeddedWorkspacePath: string | null = null;
+  /** Embedded requests that only catalog visibility (worktrees, moved conversations) admitted. */
+  private embeddedThroughCatalog = new Set<string>();
 
   private webviewReady = false;
   private pendingInputFocus = false;
@@ -106,6 +110,7 @@ export class WebviewSession {
       | 'consumeRecoverySnapshot'
       | 'isSessionInWorkspace'
       | 'isSessionVisibleInWorkspace'
+      | 'isSessionAttentionVisibleInWorkspace'
       | 'replayBlockingRequests'
     >,
     private readonly sessionTrash: Pick<
@@ -540,12 +545,31 @@ export class WebviewSession {
       isSameWorkspacePath(folder.path, editorContext.workspaceDirectory)
     );
     const isSessionInWorkspace = (sessionID: string) =>
-      this.sessionState.isSessionVisibleInWorkspace(
+      this.sessionState.isSessionAttentionVisibleInWorkspace(
         sessionID,
         editorContext.workspacePath,
         editorContext.workspaceDirectory,
         workspaceDirectoryIsOpenRoot
       );
+    // Boot replay clears only prompts this HTML actually embedded. A pending request that was
+    // filtered out here is not resolved, and a synthetic reply would tombstone it in the view.
+    this.embeddedBlockingRequests = this.blockingRequestsForWebview.filter(
+      (item) => !this.isHiddenSession(item.sessionID) && isSessionInWorkspace(item.sessionID)
+    );
+    this.embeddedWorkspacePath = editorContext.workspacePath ?? null;
+    this.embeddedThroughCatalog = new Set(
+      this.embeddedBlockingRequests
+        .filter(
+          (item) =>
+            !this.sessionState.isSessionVisibleInWorkspace(
+              item.sessionID,
+              editorContext.workspacePath,
+              editorContext.workspaceDirectory,
+              workspaceDirectoryIsOpenRoot
+            )
+        )
+        .map((item) => item.id)
+    );
     return {
       webviewContext: this.webviewContext,
       // VS Code recreates hidden editors from the same HTML, even after requests are invalidated.
@@ -593,15 +617,11 @@ export class WebviewSession {
       openEditorSessionIds: this.deps.openEditorSessionIds(),
       permissionAutomation: this.deps.permissionAutomation(),
       interruptedSessionIds: [],
-      pendingPermissions: this.blockingRequestsForWebview
+      pendingPermissions: this.embeddedBlockingRequests
         .filter((item) => item.kind === 'permission')
-        .filter((item) => !this.isHiddenSession(item.sessionID))
-        .filter((item) => isSessionInWorkspace(item.sessionID))
         .map((item) => item.props),
-      pendingQuestions: this.blockingRequestsForWebview
+      pendingQuestions: this.embeddedBlockingRequests
         .filter((item) => item.kind === 'question')
-        .filter((item) => !this.isHiddenSession(item.sessionID))
-        .filter((item) => isSessionInWorkspace(item.sessionID))
         .map((item) => item.props),
       pinnedSessionIds: this.pinnedSessions.list(),
       todoSessionIds: this.deps.todoSessionIds(),
@@ -684,14 +704,24 @@ export class WebviewSession {
       type: 'permission-automation/update',
       payload: this.deps.permissionAutomation(),
     });
+    // In the same workspace, a catalog-admitted prompt that briefly lost catalog visibility, as
+    // during transfer re-verification, is not resolved while the host still has it pending; a
+    // synthetic reply would tombstone it. Another workspace's stale prompts still clear.
+    const sameWorkspace = isSameWorkspacePath(
+      this.embeddedWorkspacePath,
+      editorContext.workspacePath
+    );
     const replayOptions: BlockingRequestReplayOptions = {
-      previousRequests: this.blockingRequestsForWebview,
+      previousRequests: this.embeddedBlockingRequests,
       clearResolvedEmbedded: options?.clearResolvedEmbedded,
       workspacePath: editorContext.workspacePath,
     };
     if (editorContext.workspaceDirectory) {
       replayOptions.workspaceDirectory = editorContext.workspaceDirectory;
       replayOptions.workspaceDirectoryIsOpenRoot = workspaceDirectoryIsOpenRoot;
+    }
+    if (sameWorkspace && this.embeddedThroughCatalog.size > 0) {
+      replayOptions.keepPendingRequestIds = this.embeddedThroughCatalog;
     }
     this.sessionState.replayBlockingRequests(
       this.bridge.post.bind(this.bridge),

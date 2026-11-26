@@ -104,6 +104,12 @@ describe('diagnostic export', () => {
       '/api/experimental/session/ses_private/instructions/entries/varro.system',
       '/api/experimental/session/:id/instructions/entries/:id',
     ],
+    ['/api/session/ses_private/diff?from=msg_private', '/api/session/:id/diff'],
+    [
+      '/api/session/ses_private/permission/per_private/reply',
+      '/api/session/:id/permission/:id/reply',
+    ],
+    ['/api/permission/request?location[directory]=%2Fprivate', '/api/permission/request'],
   ])('identifies native v2 failures without exposing IDs or directories: %s', (path, route) => {
     expect(diagnosticRoute(path)).toBe(route);
   });

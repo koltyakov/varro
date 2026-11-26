@@ -43,6 +43,7 @@ type WebviewSessionState = Pick<
   | 'consumeRecoverySnapshot'
   | 'isSessionInWorkspace'
   | 'isSessionVisibleInWorkspace'
+  | 'isSessionAttentionVisibleInWorkspace'
   | 'replayBlockingRequests'
 >;
 
@@ -135,15 +136,20 @@ function createSession(options?: {
     isSessionVisibleInWorkspace: vi.fn<WebviewSessionState['isSessionVisibleInWorkspace']>(
       () => true
     ),
+    isSessionAttentionVisibleInWorkspace: vi.fn<
+      WebviewSessionState['isSessionAttentionVisibleInWorkspace']
+    >(() => true),
     replayBlockingRequests: vi.fn<WebviewSessionState['replayBlockingRequests']>(),
   } satisfies WebviewSessionState;
-  sessionState.isSessionVisibleInWorkspace.mockImplementation(
-    (sessionID, workspacePath, workspaceDirectory) =>
-      sessionState.isSessionInWorkspace(sessionID, workspacePath) ||
-      Boolean(
-        workspaceDirectory && sessionState.isSessionInWorkspace(sessionID, workspaceDirectory)
-      )
-  );
+  const isVisibleInWorkspace: WebviewSessionState['isSessionVisibleInWorkspace'] = (
+    sessionID,
+    workspacePath,
+    workspaceDirectory
+  ) =>
+    sessionState.isSessionInWorkspace(sessionID, workspacePath) ||
+    Boolean(workspaceDirectory && sessionState.isSessionInWorkspace(sessionID, workspaceDirectory));
+  sessionState.isSessionVisibleInWorkspace.mockImplementation(isVisibleInWorkspace);
+  sessionState.isSessionAttentionVisibleInWorkspace.mockImplementation(isVisibleInWorkspace);
 
   const sessionTrash = {
     hiddenSessionIds: vi.fn(() => new Set<string>()),
@@ -989,20 +995,27 @@ describe('WebviewSession', () => {
     sessionTrash.hiddenSessionIds.mockReturnValue(hiddenSessionIds);
     hiddenSessions.hiddenSessionIds.mockReturnValue(hiddenJudgeSessionIds);
 
+    const embedded = {
+      id: 'perm-1',
+      sessionID: 'session-1',
+      kind: 'permission' as const,
+      props: { id: 'perm-1', sessionID: 'session-1' },
+    };
+    sessionState.consumeRecoverySnapshot.mockResolvedValue({
+      interruptedSessions: [],
+      blockingRequests: [embedded],
+    });
     await session.resolve(view as never);
     await flushMicrotasks();
     expect(bridge.renderHtml).toHaveBeenCalledWith(
-      expect.objectContaining({ clipboardImages: [] })
+      expect.objectContaining({ clipboardImages: [], pendingPermissions: [embedded.props] })
     );
 
     session.interruptedSessionsForWebview = [{ id: 'session-1', title: 'Needs attention' }];
+    // A request the HTML did not embed is not cleared by boot replay.
     session.blockingRequestsForWebview = [
-      {
-        id: 'perm-1',
-        sessionID: 'session-1',
-        kind: 'permission',
-        props: { id: 'perm-1', sessionID: 'session-1' },
-      },
+      embedded,
+      { ...embedded, id: 'perm-2', props: { id: 'perm-2', sessionID: 'session-1' } },
     ];
 
     await session.handleReady();
@@ -1013,7 +1026,7 @@ describe('WebviewSession', () => {
       expect.any(Function),
       new Set(['session-hidden', 'session-judge']),
       {
-        previousRequests: session.blockingRequestsForWebview,
+        previousRequests: [embedded],
         clearResolvedEmbedded: true,
         workspacePath: '/repo',
       }

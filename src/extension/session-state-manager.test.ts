@@ -3062,6 +3062,48 @@ describe('SessionStateManager notifications', () => {
       },
     });
   });
+
+  it.each([
+    ['keeps a still-pending catalog prompt without a synthetic reply', true, 0],
+    ['clears a catalog prompt whose reply already arrived', false, 1],
+  ] as const)('%s on boot replay', (_label, stillPending, replies) => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'worktree-session', directory: '/repo/.worktrees/a' } },
+    });
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'worktree-question', sessionID: 'worktree-session', questions: [] },
+    });
+    if (!stillPending) {
+      manager.handleServerEvent({
+        type: 'question.replied',
+        properties: { requestID: 'worktree-question', sessionID: 'worktree-session' },
+      });
+    }
+    const post = vi.fn();
+
+    manager.replayBlockingRequests(post, new Set(), {
+      workspacePath: '/repo',
+      clearResolvedEmbedded: true,
+      keepPendingRequestIds: new Set(['worktree-question']),
+      previousRequests: [
+        {
+          id: 'worktree-question',
+          sessionID: 'worktree-session',
+          kind: 'question',
+          props: { id: 'worktree-question', sessionID: 'worktree-session' },
+        },
+      ],
+    });
+
+    const synthetic = post.mock.calls.filter(
+      ([message]) =>
+        (message as { payload?: { type?: string } }).payload?.type === 'question.replied'
+    );
+    expect(synthetic).toHaveLength(replies);
+  });
 });
 
 describe('SessionStateManager.reconcileStaleBusySessions', () => {

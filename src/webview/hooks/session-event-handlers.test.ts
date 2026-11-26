@@ -650,6 +650,33 @@ describe('registerSessionEventHandlers', () => {
     expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-1' }));
   });
 
+  it('hands a failed full-access reply to bounded recovery while full access remains', async () => {
+    const handlers = installHandlers();
+    const error = new Error('Permission backend unavailable');
+    const fullAccessReplyFailed = vi.fn();
+
+    registerSessionEventHandlers({
+      ...createDefaultDeps(),
+      setSessionStatusEntry: vi.fn(),
+      shouldAutoApprovePermissions: () => true,
+      respondPermission: vi.fn().mockRejectedValue(error),
+      fullAccessReplyFailed,
+    });
+
+    handlers.get('permission.asked')?.({
+      properties: { id: 'perm-1', sessionID: 'session-1', permission: 'bash', title: 'Run' },
+    });
+    flushSolid();
+
+    await vi.waitFor(() =>
+      expect(fullAccessReplyFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'perm-1', sessionID: 'session-1' }),
+        error
+      )
+    );
+    expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-1' }));
+  });
+
   it('restores the permission prompt when auto-approval fails after leaving full access', async () => {
     const handlers = installHandlers();
 

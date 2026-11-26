@@ -58,6 +58,13 @@ const WORKSPACE_ATTENTION_EVENT_TYPES = new Set<ServerEvent['type']>([
   'question.v2.replied',
   'question.v2.rejected',
 ]);
+const ATTENTION_ASK_EVENT_TYPES = new Set<ServerEvent['type']>([
+  'permission.updated',
+  'permission.asked',
+  'permission.v2.asked',
+  'question.asked',
+  'question.v2.asked',
+]);
 const WORKSPACE_INDEPENDENT_EVENT_TYPES = new Set<ServerEvent['type']>([
   'server.connected',
   'server.heartbeat',
@@ -483,6 +490,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           );
         },
         onSessionDirectoryChange: () => this.scheduleSessionDirectoryReconciliation(),
+        isCatalogSessionInWorkspace: (sessionID, workspacePath) =>
+          this.isCatalogSessionInWorkspace(sessionID, workspacePath),
       },
       {
         shouldShow: (sessionID) =>
@@ -1046,9 +1055,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           return false;
         }
         const directory = sessionID ? this.sessionState.directoryFor(sessionID) : undefined;
-        const permissionWorkspace =
-          request.workspaceDirectory ??
-          (directory ? (this.getOpenSessionDirectory(directory) ?? undefined) : undefined);
+        // Same owning-root order as permissionAutomationOwnerForSession: an exact open root
+        // wins over a catalog root that also contains the session, as with nested roots.
+        const exactWorkspace = directory ? this.getOpenSessionDirectory(directory) : null;
+        const permissionWorkspace = exactWorkspace ?? request.workspaceDirectory;
         return normalizeWorkspaceIdentity(permissionWorkspace) === workspace;
       },
       beginQueuedMessageDispatchClaim: async (sessionId, itemId, lease, requestId, messageId) =>
@@ -2350,7 +2360,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     for (const endpoint of this.endpoints) {
       endpoint.restProxy.cancelRequestsOutsideDirectories(workspaceDirectories);
     }
-    this.sessionState.removeSessionsOutsideWorkspaceDirectories(workspaceDirectories);
+    this.sessionState.removeSessionsOutsideWorkspaceDirectories(workspaceDirectories, (sessionID) =>
+      [...this.endpoints].some((endpoint) => {
+        const catalogRoot = endpoint.restProxy.getAuthorizedSessionOwningRoot(sessionID);
+        return Boolean(
+          catalogRoot && workspaceDirectories.some((root) => isSameWorkspacePath(root, catalogRoot))
+        );
+      })
+    );
     const fallbackWorkspacePath = context.workspacePath
       ? this.contextProvider.getOpenWorkspaceRoot(context.workspacePath)
       : workspaceDirectories[0];
@@ -2432,7 +2449,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       sessionIDs.length > 0 &&
       sessionIDs.every((sessionID) =>
         attentionEvent
-          ? endpoint.restProxy.isSessionCatalogInventoryAuthorized(sessionID, directory)
+          ? endpoint.restProxy.isSessionCatalogInventoryAuthorized(sessionID, directory) &&
+            // Attention follows the session's catalog root, as pending snapshots do; another
+            // root's view would show the prompt and then drop it on its next snapshot.
+            (!endpoint.workspacePath ||
+              isSameWorkspacePath(
+                endpoint.restProxy.getAuthorizedSessionOwningRoot(sessionID),
+                endpoint.workspacePath
+              ))
           : endpoint.restProxy.isSessionCatalogEventAuthorized(sessionID, directory)
       );
     if (
@@ -2467,10 +2491,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       .refreshSessionCatalogEventAuthorization(sessionIDs, directory)
       .then((authorized) => {
         if (!authorized || !this.endpoints.has(endpoint)) return;
+        // Authorization can finish after the request was answered; a late ask must not
+        // resurrect a prompt whose reply already reached this view.
+        if (this.isResolvedAttentionAsk(msg.payload)) return;
         const projected = this.projectEventForEndpoint(msg, endpoint);
         if (projected) endpoint.bridge.post(projected);
       })
       .catch(() => undefined);
+  }
+
+  private isResolvedAttentionAsk(event: ServerEvent) {
+    if (!ATTENTION_ASK_EVENT_TYPES.has(event.type)) return false;
+    const properties = asRecord(event.properties);
+    const props = asRecord(properties?.info) ?? properties;
+    const id = [props?.id, props?.requestID, props?.permissionID].find(
+      (value): value is string => typeof value === 'string' && value.length > 0
+    );
+    return Boolean(id && !this.sessionState.pending.has(id));
   }
 
   private getEventDirectory(event: ServerEvent, sessionIDs: readonly string[]) {
@@ -2833,19 +2870,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private permissionAutomationOwnerForSession(sessionID: string) {
     const directory = this.sessionState.directoryFor(sessionID);
-    if (!directory) return undefined;
     const owners = [...this.endpoints].filter(
       (endpoint) => endpoint.ready && this.permissionAutomationOwnerViewIds.has(endpoint.viewId)
     );
-    return (
-      owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, directory)) ??
-      // Nested folders, project worktrees, and moved conversations belong to the open
-      // root whose session catalog authorizes them. The lease check uses the same root.
-      owners.find((endpoint) => {
-        const catalogRoot = endpoint.restProxy.getAuthorizedSessionCatalogRoot(sessionID);
-        return Boolean(catalogRoot && isSameWorkspacePath(catalogRoot, endpoint.workspacePath));
-      })
-    );
+    // The lease check resolves the same owning root: an exact open root, else the catalog root.
+    // A session in an open root belongs only to that root, even while no view there is ready.
+    const exactRoot = directory ? this.getOpenSessionDirectory(directory) : null;
+    if (exactRoot) {
+      return owners.find((endpoint) => isSameWorkspacePath(endpoint.workspacePath, exactRoot));
+    }
+    // Nested folders, project worktrees, and moved conversations belong to the open root
+    // whose session catalog authorizes them.
+    return owners.find((endpoint) => {
+      const catalogRoot = endpoint.restProxy.getAuthorizedSessionOwningRoot(sessionID);
+      return Boolean(catalogRoot && isSameWorkspacePath(catalogRoot, endpoint.workspacePath));
+    });
   }
 
   private reconcileInterruptedRecoveryOwners(owners: WebviewEndpoint[]) {
@@ -4481,7 +4520,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private isCatalogSessionInWorkspace(sessionID: string, workspacePath: string | null | undefined) {
     if (!normalizeWorkspaceIdentity(workspacePath)) return false;
     return [...this.endpoints].some((endpoint) => {
-      const catalogRoot = endpoint.restProxy.getAuthorizedSessionCatalogRoot(sessionID);
+      const catalogRoot = endpoint.restProxy.getAuthorizedSessionOwningRoot(sessionID);
       return Boolean(catalogRoot && isSameWorkspacePath(catalogRoot, workspacePath));
     });
   }

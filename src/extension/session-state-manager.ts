@@ -74,6 +74,11 @@ export type RecoverySnapshot = {
 export type BlockingRequestReplayOptions = {
   previousRequests?: BlockingRequestSnapshot[];
   clearResolvedEmbedded?: boolean;
+  /**
+   * Embedded requests that may only have lost catalog visibility. While still pending on the
+   * host they are not resolved, so no synthetic reply is sent for them.
+   */
+  keepPendingRequestIds?: ReadonlySet<string>;
   workspacePath?: string | null;
   workspaceDirectory?: string | null;
   workspaceDirectoryIsOpenRoot?: boolean;
@@ -123,6 +128,11 @@ export interface SessionStateListener {
   /** Called when routing learns or changes a session's workspace directory. */
   onSessionDirectoryChange?(): void;
   onSessionMetadata?(session: Record<string, unknown>): void;
+  /**
+   * Whether an open root's session catalog authorizes a session outside its exact folder,
+   * such as a nested folder, project worktree, or moved conversation.
+   */
+  isCatalogSessionInWorkspace?(sessionID: string, workspacePath: string): boolean;
 }
 
 export interface NotificationGate {
@@ -447,6 +457,29 @@ export class SessionStateManager {
     return !workspaceDirectoryIsOpenRoot || this.workspaceScopeFor(sessionID) === 'workspace';
   }
 
+  /**
+   * Visibility for presenting pending attention: the exact workspace rules plus sessions the
+   * workspace's session catalog authorizes. Snapshot omission handling keeps the narrower rule.
+   */
+  isSessionAttentionVisibleInWorkspace(
+    sessionID: string,
+    workspacePath: string | null | undefined,
+    workspaceDirectory: string | null | undefined,
+    workspaceDirectoryIsOpenRoot: boolean
+  ): boolean {
+    return (
+      this.isSessionVisibleInWorkspace(
+        sessionID,
+        workspacePath,
+        workspaceDirectory,
+        workspaceDirectoryIsOpenRoot
+      ) ||
+      Boolean(
+        workspacePath && this.listener.isCatalogSessionInWorkspace?.(sessionID, workspacePath)
+      )
+    );
+  }
+
   workspaceScopeFor(sessionID: string): SessionWorkspaceScope {
     for (const lineageSessionID of this.sessionLineageFor(sessionID)) {
       const scope = this.sessionWorkspaceScopes.get(lineageSessionID);
@@ -476,12 +509,20 @@ export class SessionStateManager {
     }
   }
 
-  removeSessionsOutsideWorkspaceDirectories(workspaceDirectories: readonly string[]): string[] {
+  /**
+   * Drops sessions outside the open folders. `retain` keeps sessions whose owning root is
+   * still open through its session catalog, such as worktrees and moved conversations.
+   */
+  removeSessionsOutsideWorkspaceDirectories(
+    workspaceDirectories: readonly string[],
+    retain?: (sessionID: string) => boolean
+  ): string[] {
     const removed = [...this.sessionDirectories]
-      .filter(([, directory]) =>
-        workspaceDirectories.every(
-          (workspaceDirectory) => !isSameWorkspacePath(directory, workspaceDirectory)
-        )
+      .filter(
+        ([sessionID, directory]) =>
+          workspaceDirectories.every(
+            (workspaceDirectory) => !isSameWorkspacePath(directory, workspaceDirectory)
+          ) && !retain?.(sessionID)
       )
       .map(([sessionID]) => sessionID);
     this.removeSessions(removed);
@@ -961,10 +1002,15 @@ export class SessionStateManager {
     };
   }
 
+  /**
+   * Applies a pending snapshot. `coveredSessionIDs` names catalog sessions outside the exact
+   * workspace whose directories the snapshot queried, so their omissions also count as resolved.
+   */
   reconcilePendingAttention(
     kind: PendingAttentionKind,
     requests: readonly unknown[],
-    reconciliation: PendingAttentionReconciliation = this.beginPendingAttentionReconciliation(kind)
+    reconciliation: PendingAttentionReconciliation = this.beginPendingAttentionReconciliation(kind),
+    coveredSessionIDs?: ReadonlySet<string>
   ): void {
     try {
       if (reconciliation.kind !== kind) {
@@ -990,7 +1036,8 @@ export class SessionStateManager {
         mutationRevision,
         reconciliation.workspacePath,
         reconciliation.workspaceDirectory,
-        reconciliation.workspaceDirectoryIsOpenRoot ?? false
+        reconciliation.workspaceDirectoryIsOpenRoot ?? false,
+        coveredSessionIDs
       );
     } finally {
       this.finishPendingAttentionReconciliation(reconciliation);
@@ -1010,7 +1057,8 @@ export class SessionStateManager {
     startedAtRevision: number,
     workspacePath?: string,
     workspaceDirectory?: string,
-    workspaceDirectoryIsOpenRoot = false
+    workspaceDirectoryIsOpenRoot = false,
+    coveredSessionIDs?: ReadonlySet<string>
   ): void {
     const snapshotCandidates = requests
       .map((value) => {
@@ -1034,6 +1082,7 @@ export class SessionStateManager {
       if (request.kind !== kind || snapshotIDs.has(id)) continue;
       if (
         workspacePath &&
+        !coveredSessionIDs?.has(request.sessionID) &&
         !this.isSessionVisibleInWorkspace(
           request.sessionID,
           workspacePath,
@@ -1164,7 +1213,7 @@ export class SessionStateManager {
       .filter(
         (item) =>
           !hiddenSessionIds.has(item.sessionID) &&
-          this.isSessionVisibleInWorkspace(
+          this.isSessionAttentionVisibleInWorkspace(
             item.sessionID,
             options?.workspacePath,
             options?.workspaceDirectory,
@@ -1176,6 +1225,9 @@ export class SessionStateManager {
     if (options?.clearResolvedEmbedded) {
       for (const item of options.previousRequests || []) {
         if (hiddenSessionIds.has(item.sessionID) || currentRequestIds.has(item.id)) continue;
+        if (options.keepPendingRequestIds?.has(item.id) && this.pendingAttention.has(item.id)) {
+          continue;
+        }
         if (item.kind === 'question') {
           post({
             type: 'server/event',

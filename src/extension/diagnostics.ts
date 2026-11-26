@@ -165,6 +165,11 @@ export function diagnosticRoute(path: string): string {
     'mcp',
     'question',
     'permission',
+    'reply',
+    'reject',
+    'request',
+    'diff',
+    'form',
     'config',
   ]);
   return new URL(path, 'http://localhost').pathname

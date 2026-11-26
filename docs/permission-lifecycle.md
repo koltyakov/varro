@@ -139,9 +139,25 @@ whose session catalog authorizes it: nested folders under `descendants`, project
 `project`, and conversations moved out of an open folder. Owner lookup, lease validation, pending
 snapshots, and host attention (notifications, badge, status bar) must all use that same catalog
 root. A path-containment check alone is not enough, because it misses worktrees outside the folder
-and ignores the configured history scope. Moving one conversation must not revoke another moved
-conversation's verified transfer; after a full catalog invalidation, an attention event for a
-retained transfer re-verifies it before routing.
+and ignores the configured history scope. An exact open root wins over a catalog root that also
+contains the session, as with nested roots. Moving one conversation must not revoke another moved
+conversation's verified transfer. A transfer is verified through the open folder it moved out of,
+never another open root; concurrent verifications share one canonical lookup, and a confirmed
+mismatch is not retried for a minute. After a full catalog invalidation or reload, an attention
+event for a visible retained link re-verifies it before routing, and the pending snapshot
+re-verifies every unverified visible link for its folder so a request asked before the reload is
+not stranded. Automatic re-verification goes only through a folder whose link is still visible.
+A verification that fails for an uncertain reason, including malformed data or a missing origin
+location, rejects the snapshot rather than letting the omission read as resolution; only a missing
+canonical session or a well-formed project or directory mismatch is a confirmed mismatch. A
+conversation linked from several open roots is verified through the first one still showing the
+link, so exactly one root owns it. A session whose directory is itself an open root belongs to that
+root even when a parent root's catalog also contains it. A catalog load or
+snapshot whose catalog generation changed while loading publishes no authorization. Overlapping
+catalogs resolve a session to the earlier open root, and live attention for a non-exact session
+goes only to views of its catalog root. An attention ask whose routing waited on verification is
+dropped if the host has already seen its reply. Changing the selected folder keeps host state for
+sessions whose catalog root is still open.
 
 - Only the elected owner for a workspace may run the model judge, answer full-mode requests, or
   automatically process that workspace's pending-permission snapshot. This also applies to direct
@@ -156,6 +172,11 @@ retained transfer re-verifies it before routing.
   actionable and notifies the current owner so it can reconcile the pending snapshot.
 - Losing ownership must not remove the visible fallback. A late automatic decision still needs a
   current lease before its reply can reach OpenCode.
+- An owner whose lease rotates without losing ownership reconciles its pending snapshot again, so
+  replies rejected under the old lease are retried with the new one.
+- A full-access reply that fails while the session stays in full access follows the bounded retry
+  described under full mode below. An automatic reply that fails after its hidden judge attempt
+  was superseded triggers a fresh snapshot instead of being dropped.
 - Interrupted-session recovery is claimed by one elected endpoint, not by every webview that loads.
 
 The lease check belongs in the extension host, not only in webview state. Multiple runtimes can be
@@ -234,10 +255,12 @@ An actionable survey replaces its question tool card. Linked requests render onl
 standalone requests also suppress pending or running question cards in their owning session, without
 duplicating the form inline. Completed question summaries and tools from other sessions stay visible.
 
-Full mode intentionally does not restore a prompt while the mode remains `full`. A failed full-mode
-reply currently surfaces an error and remains pending for a later permission sync to retry. Do not
-copy that exception into default or auto mode; changes to full mode should prefer adding bounded
-automatic retry rather than exposing a manual approval that contradicts full access.
+Full mode keeps a failed reply hidden while the mode remains `full`: it surfaces an error and
+retries through fresh pending snapshots after 1, 4, and 15 seconds; a failed snapshot read counts
+as an attempt. Only after the last retry fails does the request become a visible prompt, so a
+persistent failure never leaves a tool call waiting with nothing to act on. That fallback stays
+visible on later snapshots until a reply or an authoritative omission resolves it. Do not copy the
+hidden retry phase into default or auto mode.
 
 ## Manual Approval
 
@@ -579,7 +602,13 @@ sessions before reconciling host attention. It must first collect each snapshot 
 directory instance that can own a visible session, including verified transfer destinations, and
 keep requests from every catalog-authorized session. The webview treats an omission as
 resolution, so a snapshot that drops a session whose live events are routed makes its prompt
-flash and disappear while the tool call hangs. If any required directory or session catalog fails,
+flash and disappear while the tool call hangs. Host reconciliation removes an omitted request for
+a catalog session only when that snapshot queried the session's current directory.
+
+Initial webview state and boot replay use the same catalog-aware visibility. Boot replay may
+synthesize a reply only for requests that this view's HTML actually embedded; a pending request
+that was filtered out of the HTML is not resolved, and a synthetic `question.replied` would
+tombstone it. If any required directory or session catalog fails,
 reject the snapshot rather than using partial omissions as proof that a request resolved. Keep
 permission and question reconciliation independent.
 

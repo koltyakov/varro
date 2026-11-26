@@ -3325,3 +3325,62 @@ describe('v2 transcript and permission projection', () => {
     await expect(state.read('../escape')).rejects.toThrow('Invalid OpenCode session ID');
   });
 });
+
+describe('OpenCodeV2Adapter turn diffs', () => {
+  it.each([
+    ['the user prompt that opened an assistant reply', 'msg_assistant', '?from=msg_user'],
+    ['a requested user prompt', 'msg_user', '?from=msg_user'],
+    ['an older message outside the recent page as given', 'msg_old', '?from=msg_old'],
+  ])('anchors a diff on %s', async (_label, messageID, query) => {
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/api/session/ses_one/message?'))
+        return {
+          data: [
+            { id: 'msg_assistant', type: 'assistant' },
+            { id: 'msg_user', type: 'user' },
+            { id: 'msg_previous', type: 'assistant' },
+          ],
+          cursor: {},
+        };
+      if (path.startsWith('/api/session/ses_one/diff')) return { data: [{ file: 'a.ts' }] };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+
+    await expect(
+      adapter.request('GET', `/session/ses_one/diff?messageID=${messageID}`, undefined)
+    ).resolves.toEqual([{ file: 'a.ts' }]);
+
+    expect(wire).toHaveBeenCalledWith(
+      'GET',
+      '/api/session/ses_one/message?limit=200&order=desc',
+      undefined,
+      expect.anything()
+    );
+    expect(wire).toHaveBeenCalledWith(
+      'GET',
+      `/api/session/ses_one/diff${query}`,
+      undefined,
+      expect.anything()
+    );
+  });
+});
+
+describe('OpenCodeV2Adapter turn diffs without an anchor', () => {
+  it('returns no diff for a reply whose opening prompt is outside the scanned page', async () => {
+    const wire = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/api/session/ses_one/message?'))
+        return { data: [{ id: 'msg_assistant', type: 'assistant' }], cursor: {} };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    await expect(
+      new OpenCodeV2Adapter(wire).request(
+        'GET',
+        '/session/ses_one/diff?messageID=msg_assistant',
+        undefined
+      )
+    ).resolves.toEqual([]);
+    expect(wire.mock.calls.some(([, path]) => path.includes('/diff'))).toBe(false);
+  });
+});

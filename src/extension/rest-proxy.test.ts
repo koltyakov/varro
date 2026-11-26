@@ -513,7 +513,8 @@ describe('native-form proxy boundary', () => {
     expect(callbacks.sessionState.reconcilePendingAttention).toHaveBeenCalledWith(
       'question',
       [expect.objectContaining({ id: 'frm_child', sessionID: 'ses_child' })],
-      expect.anything()
+      expect.anything(),
+      new Set()
     );
     expect(wire).toHaveBeenCalledTimes(1);
     proxy.dispose();
@@ -9207,11 +9208,12 @@ describe('RestProxy handleRequest', () => {
 
       await proxy.handleRequest(makePayload(231, 'GET', path));
 
-      expect(reconcilePendingAttention).toHaveBeenCalledWith(kind, [visible], {
+      expect(reconcilePendingAttention).toHaveBeenCalledWith(
         kind,
-        mutationRevision: 0,
-        requestGeneration: 1,
-      });
+        [visible],
+        { kind, mutationRevision: 0, requestGeneration: 1 },
+        new Set()
+      );
       expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 231, data: [visible] });
     }
   );
@@ -10282,5 +10284,31 @@ describe('RestProxy handleRequest', () => {
       1,
       expect.objectContaining({ id: 402, data: expect.any(Object) })
     );
+  });
+});
+
+describe('RestProxy session owning root', () => {
+  it('assigns a nested open root to itself even when a parent catalog contains it', () => {
+    const roots = ['/repo', '/repo/sub'];
+    const base = createCallbacks().contextProvider;
+    const { proxy } = createProxy({
+      getSessionHistoryScope: () => 'descendants',
+      contextProvider: {
+        ...base,
+        context: {
+          ...base.context,
+          workspaceFolders: roots.map((path) => ({ name: path, path })),
+        },
+        getOpenWorkspaceRoot: vi.fn((path: string) => (roots.includes(path) ? path : null)),
+      },
+    });
+
+    // `/repo`'s descendants catalog admits both sessions.
+    expect(proxy.isSessionCatalogEventAuthorized('nested-root', '/repo/sub')).toBe(true);
+    expect(proxy.isSessionCatalogEventAuthorized('nested-folder', '/repo/other')).toBe(true);
+
+    expect(proxy.getAuthorizedSessionOwningRoot('nested-root')).toBe('/repo/sub');
+    expect(proxy.getAuthorizedSessionOwningRoot('nested-folder')).toBe('/repo');
+    proxy.dispose();
   });
 });

@@ -120,6 +120,7 @@ const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
 const SESSION_SUMMARY_CACHE_LIMIT = 200;
 const CURRENT_PROJECT_CACHE_TTL_MS = 2_000;
 const SESSION_EVENT_CATALOG_REFRESH_MS = 1_000;
+const TRANSFER_VERIFICATION_MISS_TTL_MS = 60_000;
 const SESSION_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_MESSAGE_FALLBACK_MAX_BYTES = 256 * 1024 * 1024;
 const PERMANENT_DELETION_TOMBSTONE_LIMIT = 256;
@@ -492,6 +493,13 @@ export class RestProxy {
   private sessionDirectories = new Map<string, string>();
   private authorizedSessionDirectories = new Map<string, AuthorizedSessionDirectory>();
   private readonly authorizedTransferredSessions = new Map<string, AuthorizedSessionDirectory>();
+  private readonly transferVerifications = new Map<string, Promise<boolean>>();
+  /** Catalog sessions whose directories each workspace pending snapshot queried. */
+  private readonly pendingAttentionCoverage = new WeakMap<
+    readonly unknown[],
+    { generation: number; sessionIDs: ReadonlySet<string> }
+  >();
+  private readonly transferVerificationMisses = new Map<string, number>();
   private sessionCatalogGeneration = 0;
   private readonly projectGitWorktrees = new Map<
     string,
@@ -605,9 +613,17 @@ export class RestProxy {
     this.currentProjects.clear();
     this.sessionEventCatalogRefreshes.clear();
     this.authorizedSessionDirectories.clear();
+    this.transferVerifications.clear();
+    this.transferVerificationMisses.clear();
     if (options.movedSessionID !== undefined) {
       this.authorizedTransferredSessions.delete(options.movedSessionID);
+      const roots = this.getOpenWorkspaceRoots();
       for (const [sessionID, authorized] of this.authorizedTransferredSessions) {
+        // A transfer verified through a folder that has since closed must be verified again.
+        if (!roots.some((root) => isSameWorkspacePath(root, authorized.catalogRoot))) {
+          this.authorizedTransferredSessions.delete(sessionID);
+          continue;
+        }
         this.authorizedSessionDirectories.set(sessionID, authorized);
       }
     } else {
@@ -699,60 +715,152 @@ export class RestProxy {
     return this.authorizeTransferredSession(sessionID, directory, generation);
   }
 
+  /**
+   * Verifies a retained moved-conversation link against the canonical session. Explicit access
+   * may use a hidden link; automatic attention recovery passes `visibleOrigin`, the open folder
+   * whose visible link discovered it, and records the transfer only through that folder.
+   */
   private async authorizeTransferredSession(
     sessionID: string,
     directory: string,
-    generation: number
+    generation: number,
+    options: { rethrow?: boolean; visibleOrigin?: string } = {}
   ): Promise<boolean> {
     const roots = this.getOpenWorkspaceRoots();
-    const transfer = this.callbacks
-      .getTransferredSessions?.(roots, { includeHidden: true })
-      .find(
-        (session) => session.id === sessionID && isSameWorkspacePath(session.directory, directory)
-      );
+    const isLink = (session: Session) =>
+      session.id === sessionID && isSameWorkspacePath(session.directory, directory);
+    const visibleOrigin = options.visibleOrigin;
+    const linkFor = (root: string) =>
+      this.callbacks
+        .getTransferredSessions?.([root], { includeHidden: visibleOrigin === undefined })
+        .find(isLink);
+    const transfer = visibleOrigin
+      ? linkFor(visibleOrigin)
+      : this.callbacks.getTransferredSessions?.(roots, { includeHidden: true }).find(isLink);
     if (!transfer || !isSafePersistedSessionId(sessionID)) return false;
+    // A retained link grants access only to its canonical session, not the destination's
+    // catalog. Verify and record it through an open folder the conversation moved out of,
+    // never an unrelated open root.
+    // Explicit access prefers the same root automatic recovery picks: the first open root that
+    // still shows the link. A hidden link falls back to its origin, then any listing root.
+    const root = visibleOrigin
+      ? roots.find((candidate) => isSameWorkspacePath(candidate, visibleOrigin))
+      : (roots.find((candidate) =>
+          this.callbacks.getTransferredSessions?.([candidate]).some(isLink)
+        ) ??
+        roots.find((candidate) =>
+          isSameWorkspacePath(candidate, transfer.transfer?.originDirectory)
+        ) ??
+        roots.find((candidate) => linkFor(candidate) !== undefined));
+    if (!root) return false;
     const previous = this.authorizedTransferredSessions.get(sessionID);
     this.authorizedTransferredSessions.delete(sessionID);
     if (previous && this.authorizedSessionDirectories.get(sessionID) === previous) {
       this.authorizedSessionDirectories.delete(sessionID);
     }
     try {
-      const signal = AbortSignal.timeout(5_000);
-      for (const root of roots) {
-        this.requireOpenWorkspaceRoot(root);
-        // A retained link grants access only to its canonical session, not the
-        // destination's catalog. Verify through an already open origin folder.
-        const session = asRecord(
-          await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
-            directory: root,
-            signal,
-          })
-        );
-        if (
-          session?.id !== sessionID ||
-          session.projectID !== transfer.projectID ||
+      this.requireOpenWorkspaceRoot(root);
+      const session = asRecord(
+        await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
+          directory: root,
+          signal: AbortSignal.timeout(5_000),
+        })
+      );
+      if (
+        visibleOrigin !== undefined &&
+        (session?.id !== sessionID ||
           typeof session.directory !== 'string' ||
-          !isSameWorkspacePath(session.directory, directory)
-        )
-          return false;
-        if (
-          this.disposed ||
-          generation !== this.sessionCatalogGeneration ||
-          !this.getOpenWorkspaceRoots().some((candidate) => isSameWorkspacePath(candidate, root))
-        )
-          return false;
-        this.requireOpenWorkspaceRoot(root);
-        const authorized = { directory: session.directory, catalogRoot: root };
-        this.authorizedTransferredSessions.set(sessionID, authorized);
-        this.authorizedSessionDirectories.set(sessionID, authorized);
-        return true;
+          typeof session.projectID !== 'string')
+      ) {
+        // Malformed data proves nothing about the conversation; keep the outcome uncertain.
+        throw new Error(`Malformed canonical session response for ${sessionID}`);
       }
+      if (
+        session?.id !== sessionID ||
+        session.projectID !== transfer.projectID ||
+        typeof session.directory !== 'string' ||
+        !isSameWorkspacePath(session.directory, directory)
+      )
+        return false;
+      if (
+        this.disposed ||
+        generation !== this.sessionCatalogGeneration ||
+        !this.getOpenWorkspaceRoots().some((candidate) => isSameWorkspacePath(candidate, root)) ||
+        // The link may have been hidden while the canonical lookup was in flight.
+        (visibleOrigin !== undefined && !linkFor(root))
+      )
+        return false;
+      this.requireOpenWorkspaceRoot(root);
+      const authorized = { directory: session.directory, catalogRoot: root };
+      this.authorizedTransferredSessions.set(sessionID, authorized);
+      this.authorizedSessionDirectories.set(sessionID, authorized);
+      return true;
     } catch (error) {
+      if (options.rethrow) throw error;
       logger.warn(
         `Could not verify moved conversation: ${error instanceof Error ? error.message : String(error)}`
       );
     }
     return false;
+  }
+
+  /**
+   * Re-verifies a visible moved-conversation link for attention routing. Concurrent callers
+   * share one canonical lookup, and a confirmed mismatch is not retried for a short time.
+   */
+  private verifyRetainedTransfer(
+    sessionID: string,
+    directory: string,
+    visibleOrigin: string,
+    options: { rethrow?: boolean } = {}
+  ): Promise<boolean> {
+    if (this.isSessionCatalogInventoryAuthorized(sessionID, directory))
+      return Promise.resolve(true);
+    const generation = this.sessionCatalogGeneration;
+    const key = [
+      generation,
+      sessionID,
+      normalizeWorkspaceIdentity(directory) ?? directory,
+      normalizeWorkspaceIdentity(visibleOrigin) ?? visibleOrigin,
+    ].join('\0');
+    const missedAt = this.transferVerificationMisses.get(key);
+    if (missedAt !== undefined && Date.now() - missedAt < TRANSFER_VERIFICATION_MISS_TTL_MS) {
+      return Promise.resolve(false);
+    }
+    let verification = this.transferVerifications.get(key);
+    if (!verification) {
+      const started = this.authorizeTransferredSession(sessionID, directory, generation, {
+        rethrow: true,
+        visibleOrigin,
+      })
+        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Transport failures may reject with arbitrary values.
+        .catch((error: unknown) => {
+          // Only a missing canonical session is a confirmed mismatch. Other failures, including
+          // `404 Location not found` for the origin, stay uncertain.
+          if (error instanceof Error && /^404\b.*session not found/i.test(error.message)) {
+            return false;
+          }
+          throw error;
+        })
+        .then((verified) => {
+          if (!verified) this.transferVerificationMisses.set(key, Date.now());
+          return verified;
+        });
+      verification = started;
+      this.transferVerifications.set(key, started);
+      const forget = () => {
+        if (this.transferVerifications.get(key) === started) this.transferVerifications.delete(key);
+      };
+      void started.then(forget, forget);
+    }
+    if (options.rethrow) return verification;
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Transport failures may reject with arbitrary values.
+    return verification.catch((error: unknown) => {
+      logger.warn(
+        `Could not verify moved conversation: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return false;
+    });
   }
 
   async refreshSessionCatalogEventAuthorization(
@@ -776,20 +884,21 @@ export class RestProxy {
       (sessionID) => !this.isSessionCatalogInventoryAuthorized(sessionID, directory)
     );
     if (pending.length === 0) return true;
-    const transfers = this.callbacks.getTransferredSessions?.(this.getOpenWorkspaceRoots()) ?? [];
-    if (
-      !pending.every((sessionID) =>
-        transfers.some(
-          (transfer) =>
-            transfer.id === sessionID && isSameWorkspacePath(transfer.directory, directory)
-        )
+    const roots = this.getOpenWorkspaceRoots();
+    // Each conversation is verified through an open folder that still shows its link.
+    const origins = pending.map((sessionID) =>
+      roots.find((root) =>
+        this.callbacks
+          .getTransferredSessions?.([root])
+          .some(
+            (transfer) =>
+              transfer.id === sessionID && isSameWorkspacePath(transfer.directory, directory)
+          )
       )
-    ) {
-      return false;
-    }
-    const generation = this.sessionCatalogGeneration;
-    for (const sessionID of pending) {
-      if (!(await this.authorizeTransferredSession(sessionID, directory, generation))) return false;
+    );
+    if (origins.some((origin) => origin === undefined)) return false;
+    for (const [index, sessionID] of pending.entries()) {
+      if (!(await this.verifyRetainedTransfer(sessionID, directory, origins[index]!))) return false;
     }
     return true;
   }
@@ -818,9 +927,15 @@ export class RestProxy {
     ) {
       return true;
     }
+    const generation = this.sessionCatalogGeneration;
     const scopes = await Promise.all(
       this.getOpenWorkspaceRoots().map((root) => this.resolveSessionCatalogScope(root))
     );
+    // Scopes resolved across an invalidation may predate a narrower history scope; decide
+    // again under the current one instead of writing stale authorization.
+    if (generation !== this.sessionCatalogGeneration) {
+      return this.refreshCatalogEventAuthorization(sessionIDs, directory);
+    }
     const matchingDescendantScope = directory
       ? scopes.find(
           (scope) =>
@@ -2845,6 +2960,9 @@ export class RestProxy {
     }
 
     let perRootLimit = requestedLimit === null ? FULL_SESSION_LIST_LIMIT : requestedLimit;
+    // A list loaded across an invalidation, such as a narrower history scope, must not
+    // republish the authorization that invalidation revoked.
+    const catalogGeneration = this.sessionCatalogGeneration;
     const scopeRequests = new Map(
       roots.map((root) => [root, this.resolveSessionCatalogScope(root, signal)] as const)
     );
@@ -2929,6 +3047,7 @@ export class RestProxy {
         rootResults.flatMap((result) => result.sessions)
       );
       for (const result of rootResults) {
+        if (catalogGeneration !== this.sessionCatalogGeneration) break;
         this.rememberAuthorizedSessionCatalog(
           result.root,
           result.scope,
@@ -3152,6 +3271,8 @@ export class RestProxy {
       return response;
     }
 
+    // Authorization changes, such as a narrower history scope, invalidate this snapshot's plan.
+    const generation = this.sessionCatalogGeneration;
     const scopes = await Promise.all(
       roots.map((root) => this.resolveSessionCatalogScope(root, signal))
     );
@@ -3176,19 +3297,62 @@ export class RestProxy {
       }
       for (const session of catalog.sessions) rememberDirectory(session.directory);
     }
-    // A conversation moved out of an open folder stays authorized here, and its
-    // pending requests live in the destination instance.
+    // A conversation moved out of this folder keeps its pending requests in the destination
+    // instance. After a reload its verification is gone, so re-verify visible links first;
+    // otherwise a request asked before the reload stays hidden until another event arrives.
+    const workspaceRoot = roots.find((root) =>
+      isSameWorkspacePath(root, this.getCurrentWorkspacePath())
+    );
+    if (workspaceRoot) {
+      const links = this.filterWorkspaceVisibleSessions(
+        this.callbacks.getTransferredSessions?.([workspaceRoot]) ?? []
+      ).filter((link) => !this.isSessionCatalogInventoryAuthorized(link.id, link.directory));
+      // Omission means resolution to the webview, so an uncertain verification rejects the
+      // snapshot instead of silently dropping that conversation's requests.
+      await mapWithConcurrency(links, SESSION_VISIBILITY_LOOKUP_CONCURRENCY, async (link) => {
+        signal?.throwIfAborted();
+        // Every view picks the same origin, the first open root still showing the link, so a
+        // conversation linked from two roots is owned by one of them.
+        const origin =
+          roots.find((root) =>
+            this.callbacks
+              .getTransferredSessions?.([root])
+              .some(
+                (candidate) =>
+                  candidate.id === link.id &&
+                  isSameWorkspacePath(candidate.directory, link.directory)
+              )
+          ) ?? workspaceRoot;
+        await this.verifyRetainedTransfer(link.id, link.directory, origin, { rethrow: true });
+      });
+    }
     for (const transferred of this.authorizedTransferredSessions.values()) {
       if (roots.some((root) => isSameWorkspacePath(root, transferred.catalogRoot))) {
         rememberDirectory(transferred.directory);
       }
     }
+    // Host reconciliation may treat an omission as resolution only for catalog sessions
+    // whose current directory this snapshot queries.
+    const workspacePath = this.getCurrentWorkspacePath();
+    const coveredSessionIDs = new Set<string>();
+    for (const [sessionID, authorized] of this.authorizedSessionDirectories) {
+      const identity = normalizeWorkspaceIdentity(authorized.directory);
+      if (
+        identity &&
+        directories.has(identity) &&
+        isSameWorkspacePath(this.getAuthorizedSessionOwningRoot(sessionID), workspacePath)
+      ) {
+        coveredSessionIDs.add(sessionID);
+      }
+    }
+    this.assertSessionCatalogGeneration(generation);
 
     const responses = await Promise.all(
       [...directories.values()].map((directory) =>
         this.requestServer('GET', path, undefined, { directory, signal })
       )
     );
+    this.assertSessionCatalogGeneration(generation);
     const requests: unknown[] = [];
     const seenIDs = new Set<string>();
     const seenValues = new Set<unknown>();
@@ -3212,7 +3376,24 @@ export class RestProxy {
         requests.push(value);
       }
     }
+    this.pendingAttentionCoverage.set(requests, { generation, sessionIDs: coveredSessionIDs });
     return requests;
+  }
+
+  /** Coverage of a workspace pending snapshot, rejecting one loaded across an invalidation. */
+  private currentPendingAttentionCoverage(
+    snapshot: readonly unknown[]
+  ): ReadonlySet<string> | undefined {
+    const coverage = this.pendingAttentionCoverage.get(snapshot);
+    if (!coverage) return undefined;
+    this.assertSessionCatalogGeneration(coverage.generation);
+    return coverage.sessionIDs;
+  }
+
+  private assertSessionCatalogGeneration(generation: number) {
+    if (generation !== this.sessionCatalogGeneration) {
+      throw new Error('Session catalog changed while loading pending requests');
+    }
   }
 
   private requestWorkspaceStatusForDirectory(
@@ -3235,6 +3416,7 @@ export class RestProxy {
     force = false,
     resolvedScope?: ResolvedSessionCatalogScope
   ) {
+    const generation = this.sessionCatalogGeneration;
     const scope = resolvedScope ?? (await this.resolveSessionCatalogScope(root, signal));
     const identity = this.getSessionCatalogIdentity(root, scope);
     const scopedListPath = this.getScopedSessionListPath(FULL_SESSION_LIST_PATH, scope);
@@ -3249,6 +3431,13 @@ export class RestProxy {
           sessions: await this.requestSessionCatalog(scopedListPath, scope, root, signal),
         };
     if (!Array.isArray(sharedCatalog.sessions)) throw new Error('Malformed session list response');
+    // Catalog rows authorize pending requests, so recognize internal helper sessions before
+    // a cold snapshot can expose their requests ahead of the first session list load.
+    this.callbacks.hiddenSessions.observeSessionList(
+      sharedCatalog.sessions.filter(
+        (session): session is { id: string } => typeof asRecord(session)?.id === 'string'
+      )
+    );
     let catalogValid = true;
     const sessions = this.readSessionCatalog(sharedCatalog.sessions, scope, () => {
       catalogValid = false;
@@ -3257,12 +3446,15 @@ export class RestProxy {
         !this.isDedicatedWorkspaceDirectory(root) ||
         this.getSessionWorkspaceScope(session.id) === 'workspace'
     );
+    // A load that finishes after invalidation, such as a narrower history scope, must not
+    // restore the authorization the invalidation revoked. Report it incomplete instead.
+    const current = generation === this.sessionCatalogGeneration;
     const catalog = {
-      complete: catalogValid && sharedCatalog.sessions.length < FULL_SESSION_LIST_LIMIT,
+      complete: current && catalogValid && sharedCatalog.sessions.length < FULL_SESSION_LIST_LIMIT,
       loadedAt: sharedCatalog.loadedAt,
       sessions,
     };
-    this.rememberAuthorizedSessionCatalog(root, scope, sessions, catalog.complete);
+    if (current) this.rememberAuthorizedSessionCatalog(root, scope, sessions, catalog.complete);
     return catalog;
   }
 
@@ -3545,8 +3737,18 @@ export class RestProxy {
       rootIdentity,
       sessions: authorized,
     });
+    // Overlapping catalogs, such as two roots of one project, resolve to the earlier open root
+    // regardless of load order, so every view agrees on a session's catalog root.
+    const rootOrder = this.getOpenWorkspaceRoots().map((openRoot) =>
+      normalizeWorkspaceIdentity(openRoot)
+    );
+    const rank = (catalogRootIdentity: string) => {
+      const index = rootOrder.indexOf(catalogRootIdentity);
+      return index < 0 ? rootOrder.length : index;
+    };
     this.authorizedSessionDirectories = new Map(
       [...this.authorizedSessionCatalogs.values()]
+        .toSorted((left, right) => rank(right.rootIdentity) - rank(left.rootIdentity))
         .flatMap((catalog) => [...catalog.sessions.entries()])
         .concat([...this.authorizedTransferredSessions.entries()])
     );
@@ -4058,7 +4260,8 @@ export class RestProxy {
       this.callbacks.sessionState.reconcilePendingAttention(
         'question',
         requests,
-        pendingAttentionReconciliation
+        pendingAttentionReconciliation,
+        this.currentPendingAttentionCoverage(data)
       );
       return requests;
     }
@@ -4074,7 +4277,8 @@ export class RestProxy {
       this.callbacks.sessionState.reconcilePendingAttention(
         'permission',
         requests,
-        pendingAttentionReconciliation
+        pendingAttentionReconciliation,
+        this.currentPendingAttentionCoverage(data)
       );
       return requests;
     }
@@ -4350,13 +4554,22 @@ export class RestProxy {
   }
 
   private isCatalogSessionInWorkspace(sessionID: string, workspacePath: string) {
-    const catalogRoot = this.getAuthorizedSessionCatalogRoot(sessionID);
-    return Boolean(catalogRoot && isSameWorkspacePath(catalogRoot, workspacePath));
+    const owningRoot = this.getAuthorizedSessionOwningRoot(sessionID);
+    return Boolean(owningRoot && isSameWorkspacePath(owningRoot, workspacePath));
   }
 
-  /** Returns the open workspace root whose session catalog authorizes this session. */
-  getAuthorizedSessionCatalogRoot(sessionID: string): string | undefined {
-    return this.authorizedSessionDirectories.get(sessionID)?.catalogRoot;
+  /**
+   * Returns the one open root that owns an authorized session's attention and automation: the
+   * open root equal to its directory, as with a nested open root inside a descendants catalog,
+   * otherwise the root whose session catalog or verified transfer authorizes it.
+   */
+  getAuthorizedSessionOwningRoot(sessionID: string): string | undefined {
+    const authorized = this.authorizedSessionDirectories.get(sessionID);
+    if (!authorized) return undefined;
+    return (
+      this.callbacks.contextProvider.getOpenWorkspaceRoot(authorized.directory) ??
+      authorized.catalogRoot
+    );
   }
 
   private async getVisibleWorkspaceSessionIDs(

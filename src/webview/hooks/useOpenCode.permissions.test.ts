@@ -463,6 +463,157 @@ describe('useOpenCode permission and config flows', () => {
     }
   );
 
+  it.each([
+    ['reveals it after bounded retries', 'pending'],
+    ['counts failed retry reads toward the reveal', 'read-fails'],
+    ['drops the retry once the request resolves', 'resolved'],
+  ] as const)('retries a failed full-access reply and %s', async (_label, variant) => {
+    const staysPending = variant !== 'resolved';
+    vi.useFakeTimers();
+    const bridge = captureBridgeHandler();
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const pending = permissionListItem('perm-full-retry');
+    clientMocks.permissionList.mockResolvedValue([pending]);
+    clientMocks.sessionRespondPermission.mockRejectedValue(
+      new Error('Permission backend unavailable')
+    );
+
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
+    const dispose = mountUseOpenCode(hookModule);
+    flushSolid();
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({ properties: pending });
+      flushSolid();
+      await vi.advanceTimersByTimeAsync(0);
+      flushSolid();
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalled();
+      expect(stateModule.state.permissions).toEqual([]);
+      if (variant === 'resolved') clientMocks.permissionList.mockResolvedValue([]);
+      if (variant === 'read-fails') {
+        clientMocks.permissionList.mockRejectedValue(new Error('Pending list unavailable'));
+      }
+
+      // Retries run 1s, 4s, and 15s apart; the prompt stays hidden until the last one fails.
+      await vi.advanceTimersByTimeAsync(5_000);
+      flushSolid();
+      expect(stateModule.state.permissions).toEqual([]);
+      await vi.advanceTimersByTimeAsync(15_000);
+      flushSolid();
+
+      if (staysPending) {
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-full-retry' }),
+        ]);
+        expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+          type: 'permission/reveal',
+          payload: { permissionId: 'perm-full-retry' },
+        });
+        if (variant === 'pending') {
+          expect(clientMocks.sessionRespondPermission.mock.calls.length).toBeGreaterThanOrEqual(4);
+        }
+
+        // A later snapshot keeps the exhausted fallback visible instead of hiding it again.
+        clientMocks.permissionList.mockResolvedValue([pending]);
+        const replies = clientMocks.sessionRespondPermission.mock.calls.length;
+        bridge.send({ type: 'permission-automation/update', payload: { owner: true, lease: 2 } });
+        flushSolid();
+        await vi.advanceTimersByTimeAsync(0);
+        flushSolid();
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-full-retry' }),
+        ]);
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(replies);
+      } else {
+        const replies = clientMocks.sessionRespondPermission.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(30_000);
+        flushSolid();
+        expect(stateModule.state.permissions).toEqual([]);
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(replies);
+      }
+      expect(stateModule.error()).toBe('Permission backend unavailable');
+    } finally {
+      dispose();
+      flushSolid();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not resurrect a full-access reply answered while its retry read was in flight', async () => {
+    vi.useFakeTimers();
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const pending = permissionListItem('perm-full-answered');
+    clientMocks.sessionRespondPermission.mockRejectedValue(
+      new Error('Permission backend unavailable')
+    );
+
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    stateModule.setPermissionModeForSession('session-1', 'full');
+    flushSolid();
+    const dispose = mountUseOpenCode(hookModule);
+    flushSolid();
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({ properties: pending });
+      flushSolid();
+      await vi.advanceTimersByTimeAsync(0);
+      const read = deferred<unknown[]>();
+      clientMocks.permissionList.mockReturnValue(read.promise);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(clientMocks.permissionList).toHaveBeenCalled();
+
+      serverEventHandlers.get('permission.replied')?.({
+        properties: { sessionID: 'session-1', requestID: 'perm-full-answered', reply: 'once' },
+      });
+      flushSolid();
+      read.reject(new Error('Pending list unavailable'));
+      clientMocks.permissionList.mockRejectedValue(new Error('Pending list unavailable'));
+      await vi.advanceTimersByTimeAsync(30_000);
+      flushSolid();
+
+      expect(stateModule.state.permissions).toEqual([]);
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-full-answered' },
+      });
+    } finally {
+      dispose();
+      flushSolid();
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconciles pending permissions when the owner keeps its view but its lease rotates', async () => {
+    const bridge = captureBridgeHandler();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockResolvedValue([]);
+
+    const { dispose } = await mountRuntimeInAutoMode();
+
+    try {
+      const listCalls = clientMocks.permissionList.mock.calls.length;
+      bridge.send({ type: 'permission-automation/update', payload: { owner: true, lease: 1 } });
+      flushSolid();
+      await Promise.resolve();
+      expect(clientMocks.permissionList).toHaveBeenCalledTimes(listCalls);
+
+      bridge.send({ type: 'permission-automation/update', payload: { owner: true, lease: 2 } });
+      flushSolid();
+      await vi.waitFor(() =>
+        expect(clientMocks.permissionList).toHaveBeenCalledTimes(listCalls + 1)
+      );
+    } finally {
+      dispose();
+      flushSolid();
+    }
+  });
+
   it('reconciles visible prompts once when a non-owner acquires automation', async () => {
     const bridge = captureBridgeHandler();
     const serverEventHandlers = captureServerEventHandlers();

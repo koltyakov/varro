@@ -92,6 +92,9 @@ type WireRequest = (
   options?: OpenCodeRequestOptions
 ) => Promise<unknown>;
 
+/** Recent messages scanned for the user prompt that opens a requested reply's turn. */
+const V2_DIFF_ANCHOR_SCAN_LIMIT = 200;
+
 function legacyModel(value: unknown): string | undefined {
   if (isString(value)) return value;
   const model = asRecord(value);
@@ -1666,11 +1669,26 @@ export class OpenCodeV2Adapter {
         await raw('POST', `${endpoint}/revert/commit`, {});
         return this.session(await data<SessionInfo>('GET', endpoint), options);
       }
-      if (action === 'diff')
-        return data(
-          'GET',
-          `${endpoint}/diff${url.searchParams.has('messageID') ? `?from=${encodeURIComponent(url.searchParams.get('messageID')!)}` : ''}`
-        );
+      if (action === 'diff') {
+        const messageID = url.searchParams.get('messageID');
+        // V2 anchors a turn diff on one of its user messages, while callers usually name the
+        // assistant reply. Only an unspecified message means the newest turn.
+        let from = messageID ?? undefined;
+        if (messageID) {
+          const messages = await data<SessionMessageInfo[]>(
+            'GET',
+            `${endpoint}/message?limit=${V2_DIFF_ANCHOR_SCAN_LIMIT}&order=desc`
+          );
+          const index = messages.findIndex((message) => message.id === messageID);
+          // An older message outside the scanned page is passed through unchanged.
+          if (index >= 0) {
+            from = messages.slice(index).find((message) => message.type === 'user')?.id;
+            // A reply whose opening prompt is outside the page has no diff we can name.
+            if (!from) return [];
+          }
+        }
+        return data('GET', `${endpoint}/diff${from ? `?from=${encodeURIComponent(from)}` : ''}`);
+      }
       if (action === 'todo') {
         const messages = await data<SessionMessageInfo[]>(
           'GET',

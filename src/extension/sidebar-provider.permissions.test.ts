@@ -70,6 +70,10 @@ async function createProviderWithEmbeddedPermission() {
   providerState.blockingRequestsForWebview = [
     { id: 'perm-1', sessionID: 'session-1', kind: 'permission', props: embeddedPermission() },
   ];
+  // These tests start from a view whose HTML already embedded the recovered request.
+  (
+    provider as unknown as { webviewSession: { embeddedBlockingRequests: unknown[] } }
+  ).webviewSession.embeddedBlockingRequests = providerState.blockingRequestsForWebview;
   return { provider, posted, providerState };
 }
 
@@ -149,6 +153,109 @@ async function createProjectAttentionHarness() {
   return { eventHandler, posted, provider, server };
 }
 
+/** Opens `/repo` and moves `moved-session` (plus `laterMoves`) into worktrees under it. */
+async function createMovedConversationHarness(
+  options: {
+    laterMoves?: readonly string[];
+    roots?: readonly string[];
+    workspacePath?: string;
+  } = {}
+) {
+  let canonicalLookupError: Error | undefined;
+  const worktreeFor = (sessionID: string) => `/repo/.worktrees/${sessionID}`;
+  const worktree = worktreeFor('moved-session');
+  const permission = {
+    id: 'moved-permission',
+    sessionID: 'moved-session',
+    permission: 'external_directory',
+    title: 'Access external directory',
+    always: [],
+  };
+  let pending: unknown[] = [permission];
+  const roots = options.roots ?? ['/repo'];
+  const contextProvider = createContextProvider();
+  contextProvider.context.workspaceFolders = roots.map((path) => ({ name: path, path }));
+  if (options.workspacePath) contextProvider.context.workspacePath = options.workspacePath;
+  contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
+    roots.includes(path) ? path : null
+  );
+  const server = createServer({
+    request: vi.fn(
+      async (method: string, path: string, _body?: unknown, requestOptions?: unknown) => {
+        const directory = (requestOptions as { directory?: string } | undefined)?.directory;
+        const sessionMatch = path.match(/^\/session\/([^/?]+)$/);
+        if (method === 'GET' && sessionMatch) {
+          if (canonicalLookupError) throw canonicalLookupError;
+          const sessionID = decodeURIComponent(sessionMatch[1]!);
+          return {
+            id: sessionID,
+            directory: worktreeFor(sessionID),
+            projectID: 'project-1',
+            title: 'Moved chat',
+            version: '2',
+            time: { created: 1, updated: 2 },
+          };
+        }
+        if (method === 'GET' && path === '/permission')
+          return directory === worktree ? pending : [];
+        return [];
+      }
+    ),
+  });
+  const { provider } = await createSidebarProviderInstance({ contextProvider, server });
+  const { posted } = attachTestView(provider);
+  await provider.handleMessage({ type: 'ready' });
+  const lease = lastPermissionAutomationLease(posted);
+  if (lease === undefined) throw new Error('Expected a permission automation lease');
+  const providerState = provider as unknown as {
+    sessionState: { handleServerEvent(event: unknown): void };
+  };
+  for (const sessionID of ['moved-session', ...(options.laterMoves ?? [])]) {
+    providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: sessionID, directory: '/repo', projectID: 'project-1' } },
+    });
+    provider.post({
+      type: 'server/event',
+      payload: {
+        type: 'session.next.moved',
+        workspaceDirectory: '/repo',
+        properties: { sessionID, location: { directory: worktreeFor(sessionID) } },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(posted).toContainEqual({
+        type: 'session/transferred',
+        payload: { sessionId: sessionID, directory: worktreeFor(sessionID), available: true },
+      })
+    );
+  }
+  const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1] as
+    | ((event: unknown) => void)
+    | undefined;
+  if (!eventHandler) throw new Error('Expected the server event bridge to be attached');
+  return {
+    eventHandler,
+    lease,
+    permission,
+    posted,
+    provider,
+    server,
+    worktree,
+    setPending: (requests: unknown[]) => {
+      pending = requests;
+    },
+    failCanonicalLookups: (error: Error | undefined) => {
+      canonicalLookupError = error;
+    },
+    invalidateCatalogs: () => {
+      const { endpoints } = provider as unknown as {
+        endpoints: Set<{ restProxy: { invalidateSessionCatalog(): void } }>;
+      };
+      for (const endpoint of endpoints) endpoint.restProxy.invalidateSessionCatalog();
+    },
+  };
+}
 describe('SidebarProvider permission replay', () => {
   it.each(projectAttentionCases)(
     'forwards nested project-catalog $kind events to the owning endpoint',
@@ -229,101 +336,39 @@ describe('SidebarProvider permission replay', () => {
   });
 
   it.each([
-    ['alone', [], false],
-    ['after another conversation moves', ['second-session'], false],
-    ['after the session catalog is invalidated', [], true],
+    ['alone', [], false, true],
+    ['after another conversation moves', ['second-session'], false, true],
+    ['after the session catalog is invalidated', [], true, true],
+    ['after its verification is dropped with no new ask', [], true, false],
   ] as const)(
     'keeps a moved conversation permission actionable %s',
-    async (_label, laterMoves, invalidate) => {
-      const worktreeFor = (sessionID: string) => `/repo/.worktrees/${sessionID}`;
-      const worktree = worktreeFor('moved-session');
-      const permission = {
-        id: 'moved-permission',
-        sessionID: 'moved-session',
-        permission: 'external_directory',
-        title: 'Access external directory',
-        always: [],
-      };
-      const contextProvider = createContextProvider();
-      contextProvider.getOpenWorkspaceRoot = vi.fn((path: string) =>
-        path === '/repo' ? path : null
-      );
-      const server = createServer({
-        request: vi.fn(async (method: string, path: string, _body?: unknown, options?: unknown) => {
-          const directory = (options as { directory?: string } | undefined)?.directory;
-          const sessionMatch = path.match(/^\/session\/([^/?]+)$/);
-          if (method === 'GET' && sessionMatch) {
-            const sessionID = decodeURIComponent(sessionMatch[1]!);
-            return {
-              id: sessionID,
-              directory: worktreeFor(sessionID),
-              projectID: 'project-1',
-              title: 'Moved chat',
-              version: '2',
-              time: { created: 1, updated: 2 },
-            };
-          }
-          if (method === 'GET' && path === '/permission') {
-            return directory === worktree ? [permission] : [];
-          }
-          if (method === 'GET' && path === '/question') return [];
-          return [];
-        }),
-      });
-      const { provider } = await createSidebarProviderInstance({ contextProvider, server });
-      const { posted } = attachTestView(provider);
-      await provider.handleMessage({ type: 'ready' });
-      const lease = lastPermissionAutomationLease(posted);
-      expect(lease).toBeTypeOf('number');
-      const providerState = provider as unknown as {
-        sessionState: { handleServerEvent(event: unknown): void };
-      };
-      for (const sessionID of ['moved-session', ...laterMoves]) {
-        providerState.sessionState.handleServerEvent({
-          type: 'session.updated',
-          properties: { info: { id: sessionID, directory: '/repo', projectID: 'project-1' } },
-        });
-        provider.post({
-          type: 'server/event',
-          payload: {
-            type: 'session.next.moved',
-            workspaceDirectory: '/repo',
-            properties: { sessionID, location: { directory: worktreeFor(sessionID) } },
-          },
-        });
-        await vi.waitFor(() =>
-          expect(posted).toContainEqual({
-            type: 'session/transferred',
-            payload: { sessionId: sessionID, directory: worktreeFor(sessionID), available: true },
-          })
-        );
-      }
-      const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1] as
-        | ((event: unknown) => void)
-        | undefined;
-      if (!eventHandler) throw new Error('Expected the server event bridge to be attached');
-      if (invalidate) {
-        const { endpoints } = provider as unknown as {
-          endpoints: Set<{ restProxy: { invalidateSessionCatalog(): void } }>;
-        };
-        for (const endpoint of endpoints) endpoint.restProxy.invalidateSessionCatalog();
-      }
-      posted.length = 0;
-
+    async (_label, laterMoves, invalidate, askAgain) => {
+      const harness = await createMovedConversationHarness({ laterMoves });
+      const { eventHandler, lease, permission, posted, provider, server, worktree } = harness;
       eventHandler({
         directory: worktree,
         payload: { type: 'permission.asked', properties: permission },
       });
-      await vi.waitFor(() =>
-        expect(posted).toContainEqual({
-          type: 'server/event',
-          payload: {
-            type: 'permission.asked',
-            properties: permission,
-            workspaceDirectory: worktree,
-          },
-        })
-      );
+      // A reload drops in-memory catalog and transfer verification but keeps the retained link.
+      if (invalidate) harness.invalidateCatalogs();
+      posted.length = 0;
+
+      if (askAgain) {
+        eventHandler({
+          directory: worktree,
+          payload: { type: 'permission.asked', properties: permission },
+        });
+        await vi.waitFor(() =>
+          expect(posted).toContainEqual({
+            type: 'server/event',
+            payload: {
+              type: 'permission.asked',
+              properties: permission,
+              workspaceDirectory: worktree,
+            },
+          })
+        );
+      }
       await provider.handleMessage({
         type: 'api/request',
         payload: { id: 303, method: 'GET', path: '/permission' },
@@ -355,7 +400,7 @@ describe('SidebarProvider permission replay', () => {
           method: 'POST',
           path: '/permission/moved-permission/reply',
           body: { reply: 'once' },
-          permissionAutomationLease: lease!,
+          permissionAutomationLease: lease,
           permissionAutomationSessionID: 'moved-session',
         },
       });
@@ -367,6 +412,160 @@ describe('SidebarProvider permission replay', () => {
       );
     }
   );
+
+  it('verifies a moved conversation through the folder it moved out of', async () => {
+    const harness = await createMovedConversationHarness({ roots: ['/other', '/repo'] });
+
+    const { endpoints } = harness.provider as unknown as {
+      endpoints: Set<{
+        restProxy: { getAuthorizedSessionOwningRoot(id: string): string | undefined };
+      }>;
+    };
+    for (const endpoint of endpoints) {
+      expect(endpoint.restProxy.getAuthorizedSessionOwningRoot('moved-session')).toBe('/repo');
+    }
+  });
+
+  it('clears host attention for a moved conversation once its snapshot omits the request', async () => {
+    const harness = await createMovedConversationHarness();
+    const { eventHandler, permission, provider, worktree } = harness;
+    eventHandler({
+      directory: worktree,
+      payload: { type: 'permission.asked', properties: permission },
+    });
+    const { sessionState } = provider as unknown as {
+      sessionState: { pending: ReadonlyMap<string, unknown> };
+    };
+    expect(sessionState.pending.has('moved-permission')).toBe(true);
+
+    // The reply event was missed; the destination no longer lists the request.
+    harness.setPending([]);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 305, method: 'GET', path: '/permission' },
+    });
+
+    expect(sessionState.pending.has('moved-permission')).toBe(false);
+  });
+
+  it('does not deliver a late moved-conversation ask after its reply', async () => {
+    const harness = await createMovedConversationHarness();
+    const { eventHandler, permission, posted, worktree } = harness;
+    harness.invalidateCatalogs();
+    posted.length = 0;
+
+    eventHandler({
+      directory: worktree,
+      payload: { type: 'permission.asked', properties: permission },
+    });
+    eventHandler({
+      directory: worktree,
+      payload: {
+        type: 'permission.replied',
+        properties: { sessionID: 'moved-session', requestID: 'moved-permission', reply: 'once' },
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(posted).toContainEqual(
+        expect.objectContaining({
+          type: 'server/event',
+          payload: expect.objectContaining({ type: 'permission.replied' }),
+        })
+      )
+    );
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'server/event',
+        payload: expect.objectContaining({ type: 'permission.asked' }),
+      })
+    );
+  });
+
+  it('rejects a cold snapshot only while a moved conversation cannot be verified', async () => {
+    const harness = await createMovedConversationHarness();
+    const { posted, provider } = harness;
+    harness.invalidateCatalogs();
+    harness.failCanonicalLookups(new Error('503 Service Unavailable'));
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 306, method: 'GET', path: '/permission' },
+    });
+    // An unverified conversation must not look resolved to the webview.
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 306, error: expect.stringContaining('503') },
+    });
+
+    // A missing origin location says nothing about the destination conversation.
+    harness.failCanonicalLookups(new Error('404 Location not found'));
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 309, method: 'GET', path: '/permission' },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 309, error: expect.stringContaining('Location not found') },
+    });
+
+    harness.failCanonicalLookups(new Error('404 Session not found'));
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 307, method: 'GET', path: '/permission' },
+    });
+    expect(posted).toContainEqual({ type: 'api/response', payload: { id: 307, data: [] } });
+  });
+
+  it('keeps moved-conversation attention when the selected folder changes', async () => {
+    const harness = await createMovedConversationHarness({ roots: ['/repo', '/other'] });
+    const { eventHandler, permission, provider, worktree } = harness;
+    eventHandler({
+      directory: worktree,
+      payload: { type: 'permission.asked', properties: permission },
+    });
+    const access = provider as unknown as {
+      sessionState: { pending: ReadonlyMap<string, unknown> };
+      reconcileWorkspaceMembership(context: unknown): void;
+    };
+
+    access.reconcileWorkspaceMembership({
+      workspacePath: '/other',
+      workspaceFolders: [
+        { name: 'repo', path: '/repo' },
+        { name: 'other', path: '/other' },
+      ],
+    });
+
+    expect(access.sessionState.pending.has('moved-permission')).toBe(true);
+  });
+
+  it('routes moved-conversation attention only to the view of its catalog root', async () => {
+    const harness = await createMovedConversationHarness({
+      roots: ['/repo', '/other'],
+      workspacePath: '/other',
+    });
+    const { eventHandler, permission, posted, provider, worktree } = harness;
+    posted.length = 0;
+
+    eventHandler({
+      directory: worktree,
+      payload: { type: 'permission.asked', properties: permission },
+    });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 308, method: 'GET', path: '/permission' },
+    });
+
+    // The `/other` view neither shows the prompt nor lists it, so it cannot flash there.
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'server/event',
+        payload: expect.objectContaining({ type: 'permission.asked' }),
+      })
+    );
+    expect(posted).toContainEqual({ type: 'api/response', payload: { id: 308, data: [] } });
+  });
 
   it('replays pending permission requests after the webview becomes ready', async () => {
     const { provider, posted, providerState } = await createProviderWithEmbeddedPermission();
