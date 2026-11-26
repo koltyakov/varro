@@ -23,6 +23,7 @@ import type {
   ChatModelSelection,
   DesktopSessionPaneSide,
   PermissionMode,
+  PromptCacheHistorySample,
   WebviewMessage,
 } from '../../shared/protocol';
 import type {
@@ -73,6 +74,8 @@ const MAX_OPEN_TEXT_TITLE_LENGTH = 200;
 /** Shape of a VS Code language ID; the provider still checks it is registered. */
 const OPEN_TEXT_LANGUAGE_ID = /^[A-Za-z0-9][\w.+#-]{0,39}$/;
 const MAX_DROPPED_PATHS = 100;
+/** A session history contributes at most this many idle-gap samples per message. */
+export const MAX_PROMPT_CACHE_SAMPLES = 500;
 const MAX_DROPPED_CONTENT_NAME_LENGTH = 512;
 const MAX_DROPPED_CONTENT_BASE64_LENGTH = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
 const MAX_NATIVE_PDF_BASE64_LENGTH = Math.ceil(MAX_NATIVE_PDF_TOTAL_BYTES / 3) * 4;
@@ -191,6 +194,7 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'ralph/sync': true,
   'warming/sync': true,
   'warming/set': true,
+  'warming/samples': true,
   log: true,
   'server/restart': true,
   'server/restart/check': true,
@@ -514,6 +518,32 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
       if (typeof payload?.enabled !== 'boolean') return null;
       return { type, payload: { sessionId, enabled: payload.enabled } };
+    }
+
+    case 'warming/samples': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
+      if (!Array.isArray(payload?.samples) || payload.samples.length > MAX_PROMPT_CACHE_SAMPLES)
+        return null;
+      const samples: PromptCacheHistorySample[] = [];
+      for (const entry of payload.samples) {
+        const sample = asRecord(entry);
+        const providerID = getBoundedString(sample?.providerID, 256);
+        const modelID = getBoundedString(sample?.modelID, 256);
+        const { at, gapMs, hit } = sample ?? {};
+        if (
+          !providerID ||
+          !modelID ||
+          !Number.isFinite(at) ||
+          !Number.isFinite(gapMs) ||
+          Number(gapMs) <= 0 ||
+          typeof hit !== 'boolean'
+        )
+          return null;
+        samples.push({ providerID, modelID, at: Number(at), gapMs: Number(gapMs), hit });
+      }
+      return { type, payload: { sessionId, samples } };
     }
 
     case 'server/restart/check': {

@@ -26,16 +26,15 @@ import { isFunction } from '../../lib/runtime-values';
 import { useSecondClock } from '../../lib/clock';
 import { formatDuration } from '../../lib/time-format';
 import type { PromptCacheWarmingSession } from '../../../shared/protocol';
+import { promptCacheKeepAliveIntervalMs } from '../../../shared/prompt-cache-lifetime';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
 const CONTEXT_COMPACT_ACTION_PERCENT = 30;
 const CACHE_READ_TOOLTIP =
   "Tokens reused from the provider's prompt cache. They count toward the context window but are excluded from session totals.";
-/** Common provider default; Anthropic and OpenAI both keep an idle prompt cache about this long. */
-export const PROMPT_CACHE_TTL_ESTIMATE_MS = 5 * 60_000;
-const PROMPT_CACHE_TOOLTIP =
-  "Estimated from the last response that read or wrote the provider's prompt cache. Most providers keep it about 5 minutes after the last request, some longer. Sending while it is warm is usually cheaper and faster.";
+const PROMPT_CACHE_TOOLTIP_SUFFIX =
+  'Estimated from the last request that read or wrote it. Sending while it is warm is usually cheaper and faster.';
 const CACHE_WRITE_TOOLTIP =
   "Tokens stored in the provider's prompt cache for reuse by later requests. They count toward session input and totals.";
 
@@ -61,8 +60,17 @@ type ContextTokens = {
 
 export type ContextPopupModel = { providerName: string; modelName: string };
 
-/** When the session's latest completed response last used the prompt cache. */
-export type PromptCacheActivity = { lastUsedAt: number; inUse: boolean };
+/** When the session's latest completed response last used the prompt cache, and for how long it lives. */
+export type PromptCacheActivity = {
+  /** When the request that last read or wrote the cache was sent. */
+  lastUsedAt: number;
+  inUse: boolean;
+  /** How long the model's cache is sure to live, from `resolvePromptCacheLifetime`. */
+  ttlMs: number;
+  /** How long it usually lives; at least `ttlMs`. Past this it is likely expired. */
+  likelyMs: number;
+  description: string;
+};
 
 /** Keep-alive state for the composer's root session; absent when warming is off or unavailable. */
 export type PromptCacheWarmingView =
@@ -71,7 +79,8 @@ export type PromptCacheWarmingView =
       kind: 'chosen';
       enabled: boolean;
       session: PromptCacheWarmingSession | null;
-      intervalMs: number;
+      /** The cache lifetime the keep-alive schedule follows. */
+      ttlMs: number;
       durationMs: number;
     };
 
@@ -115,25 +124,32 @@ function getTokenRows(tokens: ContextTokens): ContextTokenRow[] {
 
 function formatCountdown(ms: number) {
   const seconds = Math.ceil(ms / 1000);
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds % 60)}`
+    : `${minutes}:${pad(seconds % 60)}`;
 }
 
 function PromptCacheRow(props: { activity: PromptCacheActivity }) {
   const now = useSecondClock(() => !props.activity.inUse);
-  const remaining = () => props.activity.lastUsedAt + PROMPT_CACHE_TTL_ESTIMATE_MS - now();
   const status = () => {
-    if (props.activity.inUse) return { tone: 'warm', text: 'In use', countdown: '' };
-    const left = remaining();
-    return left > 0
-      ? { tone: 'warm', text: 'Warm', countdown: formatCountdown(left) }
-      : { tone: 'cold', text: 'Likely expired', countdown: '' };
+    const activity = props.activity;
+    if (activity.inUse) return { tone: 'warm', text: 'In use', countdown: '' };
+    const idle = now() - activity.lastUsedAt;
+    if (idle < activity.ttlMs)
+      return { tone: 'warm', text: 'Warm', countdown: formatCountdown(activity.ttlMs - idle) };
+    // Past the provider's minimum, some caches usually still last a while.
+    if (idle < activity.likelyMs) return { tone: 'warm', text: 'May be warm', countdown: '' };
+    return { tone: 'cold', text: 'Likely expired', countdown: '' };
   };
 
   return (
     <div class="context-popup-row context-popup-prompt-cache" data-tone={status().tone}>
       <span class="context-popup-row-label">
         Prompt cache
-        <Tooltip content={PROMPT_CACHE_TOOLTIP}>
+        <Tooltip content={`${props.activity.description} ${PROMPT_CACHE_TOOLTIP_SUFFIX}`}>
           <span class="context-popup-cost-info" tabindex="0" aria-label="Prompt cache estimate">
             <UiIcon source={infoCircleIcon} width="11" height="11" />
           </span>
@@ -158,11 +174,15 @@ function describeWarming(
 ): WarmingDescription {
   const session = view.session;
   if (!view.enabled || !session) {
+    if (view.ttlMs >= view.durationMs) {
+      return {
+        status: 'Off',
+        detail: `Not needed: the cache lasts ${formatDuration(view.ttlMs)} after each request`,
+      };
+    }
     const tokens = contextTokens > 0 ? `~${formatTokenCount(contextTokens)}` : 'the';
-    return {
-      status: 'Off',
-      detail: `Re-reads ${tokens} cached tokens every ${Math.round(view.intervalMs / 60_000)} min while on`,
-    };
+    const interval = formatDuration(promptCacheKeepAliveIntervalMs(view.ttlMs));
+    return { status: 'Off', detail: `Re-reads ${tokens} cached tokens every ${interval} while on` };
   }
   if (session.stopped === 'cache-miss') {
     return { status: 'Stopped', detail: 'The cache had already expired' };
@@ -172,10 +192,15 @@ function describeWarming(
   if (session.stopped === 'expired' || session.warmUntil <= now) {
     return { status: 'Ended', detail: 'Restarts after the next reply' };
   }
-  return {
-    status: `${formatDuration(Math.ceil((session.warmUntil - now) / 60_000) * 60_000)} left`,
-    detail: null,
-  };
+  const left = `${formatDuration(Math.ceil((session.warmUntil - now) / 60_000) * 60_000)} left`;
+  // A cache that outlives the window stays warm without keep-alives.
+  if (
+    session.sentAt !== null &&
+    session.ttlMs !== null &&
+    session.sentAt + session.ttlMs >= session.warmUntil
+  )
+    return { status: left, detail: 'No keep-alive needed' };
+  return { status: left, detail: null };
 }
 
 function PromptCacheWarmingRow(props: {

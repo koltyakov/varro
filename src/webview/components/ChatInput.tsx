@@ -180,6 +180,11 @@ import {
 import { normalizeModelVariant } from '../../shared/model-variant';
 import { getPromptCompletionVariant } from '../../shared/prompt-completion';
 import {
+  promptCacheHistorySamples,
+  promptCacheLifetimeFor,
+  promptCacheUsedAt,
+} from '../../shared/prompt-cache-lifetime';
+import {
   editingMessage,
   getMessageEditDraftBackup,
   resetMessageEditState,
@@ -409,6 +414,8 @@ import { McpPicker } from './McpPicker';
 import { ModelPicker } from './ModelPicker';
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
+/** Root sessions whose history this webview already sent for prompt cache learning. */
+const sentPromptCacheHistory = new Set<string>();
 const AUTHORITATIVE_QUEUED_STATUS_MAX_AGE_MS = 5_000;
 const QUEUED_STATUS_RECONCILIATION_DELAY_MS = 1_000;
 const QUEUED_RUNNING_STATUS_RECONCILIATION_DELAY_MS = 5_000;
@@ -6377,14 +6384,42 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (warming.openCodeWarming || warming.mode === 'all') return { kind: 'opencode' };
     const rootId = getSessionTreeRootId(sessionId) || sessionId;
     const session = warming.sessions[rootId] ?? null;
+    // Before the extension resolves the lifetime, estimate it for the model the next reply uses.
+    const current = currentModel();
     return {
       kind: 'chosen',
       enabled: session !== null,
       session,
-      intervalMs: warming.intervalMs,
+      ttlMs:
+        session?.ttlMs ??
+        promptCacheLifetimeFor(
+          state.providers,
+          { providerID: current.providerID ?? '', modelID: current.modelID ?? '' },
+          warming.learned
+        ).ttlMs,
       durationMs: warming.durationMs,
     };
   });
+
+  // Each session's history teaches the extension how long this user's caches last. It is sent once
+  // per webview; the extension also ignores samples it has already counted.
+  createEffect(
+    () => {
+      const sessionId = composerSessionId();
+      if (!sessionId || !state.promptCacheWarming) return null;
+      const rootId = getSessionTreeRootId(sessionId) || sessionId;
+      if (sentPromptCacheHistory.has(rootId)) return null;
+      const messages = messagesBySession().get(rootId);
+      return messages && messages.length > 1 ? { rootId, messages } : null;
+    },
+    (history) => {
+      if (!history) return;
+      sentPromptCacheHistory.add(history.rootId);
+      const samples = promptCacheHistorySamples(history.messages, state.providers);
+      if (samples.length > 0)
+        postMessage({ type: 'warming/samples', payload: { sessionId: history.rootId, samples } });
+    }
+  );
 
   function togglePromptCacheWarming(enabled: boolean) {
     const sessionId = composerSessionId();
@@ -6406,11 +6441,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           ? (warming.session?.sentAt ?? 0)
           : 0;
       for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const info = messages[index]!.info;
+        const entry = messages[index]!;
+        const info = entry.info;
         if (info.role !== 'assistant' || !info.time.completed) continue;
         const cache = info.tokens?.cache;
         if (!cache || (cache.read <= 0 && cache.write <= 0)) return null;
-        return { lastUsedAt: Math.max(info.time.completed, pingedAt), inUse: isComposerBusy() };
+        const lifetime = promptCacheLifetimeFor(
+          state.providers,
+          { providerID: info.providerID, modelID: info.modelID },
+          state.promptCacheWarming?.learned
+        );
+        let steps = 0;
+        for (const part of entry.parts) if (part.type === 'step-finish') steps += 1;
+        const usedAt = promptCacheUsedAt(
+          { created: info.time.created, completed: info.time.completed },
+          steps,
+          lifetime
+        );
+        return {
+          lastUsedAt: Math.max(usedAt, pingedAt),
+          inUse: isComposerBusy(),
+          ttlMs: lifetime.ttlMs,
+          likelyMs: lifetime.likelyMs ?? lifetime.ttlMs,
+          description: lifetime.description,
+        };
       }
       return null;
     },
@@ -6420,7 +6474,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         (!!previous &&
           !!next &&
           previous.lastUsedAt === next.lastUsedAt &&
-          previous.inUse === next.inUse),
+          previous.inUse === next.inUse &&
+          previous.ttlMs === next.ttlMs &&
+          previous.likelyMs === next.likelyMs &&
+          previous.description === next.description),
     }
   );
 

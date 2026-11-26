@@ -759,25 +759,35 @@ describe('parseExtensionMessage', () => {
       available: true,
       mode: 'chosen',
       durationMs: 1_800_000,
-      intervalMs: 240_000,
       openCodeWarming: false,
-      sessions: { 'session-1': { warmUntil: 2_000, sentAt: 1_000, stopped: null } },
+      sessions: {
+        'session-1': { warmUntil: 2_000, sentAt: 1_000, ttlMs: 300_000, stopped: null },
+        'session-2': { warmUntil: null, sentAt: null, ttlMs: null, stopped: null },
+      },
+      learned: { 'claude-agent/opus': { ms: 3_600_000, bounded: true } },
     } as const;
     expect(parseExtensionMessage({ type: 'warming/state', payload })).toEqual({
       type: 'warming/state',
       payload,
     });
+    for (const session of [
+      { warmUntil: 'soon', sentAt: null, ttlMs: null, stopped: null },
+      { warmUntil: null, sentAt: null, ttlMs: -1, stopped: null },
+    ])
+      expect(
+        parseExtensionMessage({
+          type: 'warming/state',
+          payload: { ...payload, sessions: { 'session-1': session } },
+        })
+      ).toBeNull();
+    expect(
+      parseExtensionMessage({ type: 'warming/state', payload: { ...payload, mode: 'sometimes' } })
+    ).toBeNull();
     expect(
       parseExtensionMessage({
         type: 'warming/state',
-        payload: {
-          ...payload,
-          sessions: { 'session-1': { warmUntil: 'soon', sentAt: null, stopped: null } },
-        },
+        payload: { ...payload, learned: { 'openai/*': { ms: 0, bounded: true } } },
       })
-    ).toBeNull();
-    expect(
-      parseExtensionMessage({ type: 'warming/state', payload: { ...payload, mode: 'sometimes' } })
     ).toBeNull();
   });
 

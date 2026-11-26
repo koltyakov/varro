@@ -133,7 +133,7 @@ export interface MessageRouterCallbacks {
   cancelApiRequest(payload: ApiCancelPayload): void;
   handleRalphMessage(msg: RalphMessage): void;
   handleWarmingMessage(
-    msg: Extract<WebviewMessage, { type: 'warming/sync' | 'warming/set' }>
+    msg: Extract<WebviewMessage, { type: 'warming/sync' | 'warming/set' | 'warming/samples' }>
   ): void;
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
   claimQueuedMessage(
@@ -405,6 +405,7 @@ export class MessageRouter {
           break;
         case 'warming/sync':
         case 'warming/set':
+        case 'warming/samples':
           this.callbacks.handleWarmingMessage(msg);
           break;
         case 'log':

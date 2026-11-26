@@ -5,6 +5,11 @@ import type { PromptCacheActivity } from './ContextPopup';
 import { PromptCacheWarning } from './PromptCacheWarning';
 
 const THRESHOLD = 100_000;
+const LIFETIME = {
+  ttlMs: 5 * 60_000,
+  likelyMs: 5 * 60_000,
+  description: 'Claude keeps the cache 5 min.',
+};
 
 const NOW = 10_000_000;
 let container: HTMLDivElement;
@@ -35,7 +40,7 @@ describe('PromptCacheWarning', () => {
       () => (
         <PromptCacheWarning
           sessionId="ses_expiry"
-          activity={{ lastUsedAt: NOW - 4 * 60_000, inUse: false }}
+          activity={{ lastUsedAt: NOW - 4 * 60_000, inUse: false, ...LIFETIME }}
           contextTokens={127_400}
           thresholdTokens={THRESHOLD}
         />
@@ -51,10 +56,39 @@ describe('PromptCacheWarning', () => {
     expect(warning()?.textContent).toContain('re-sends 127.4K tokens uncached');
   });
 
+  it("waits for the model's usual cache lifetime, not its minimum", async () => {
+    cleanup = render(
+      () => (
+        <PromptCacheWarning
+          sessionId="ses_openai"
+          activity={{
+            lastUsedAt: NOW - 10 * 60_000,
+            inUse: false,
+            ttlMs: 30 * 60_000,
+            likelyMs: 3 * 60 * 60_000,
+            description: 'OpenAI keeps the cache at least 30 min, and often up to about 3 h.',
+          }}
+          contextTokens={127_400}
+          thresholdTokens={THRESHOLD}
+        />
+      ),
+      container
+    );
+    flushSolid();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    flushSolid();
+    expect(warning()).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(110 * 60_000);
+    flushSolid();
+    expect(warning()?.querySelector('[title]')?.getAttribute('title')).toContain('over 3h');
+  });
+
   it('stays hidden for working sessions, below the threshold, or when turned off', () => {
     const [activity, setActivity] = createSignal<PromptCacheActivity>({
       lastUsedAt: NOW - 10 * 60_000,
       inUse: true,
+      ...LIFETIME,
     });
     const [tokens, setTokens] = createSignal(THRESHOLD);
     const [threshold, setThreshold] = createSignal(THRESHOLD);
@@ -72,7 +106,7 @@ describe('PromptCacheWarning', () => {
     flushSolid();
     expect(warning()).toBeNull();
 
-    setActivity({ lastUsedAt: NOW - 10 * 60_000, inUse: false });
+    setActivity({ lastUsedAt: NOW - 10 * 60_000, inUse: false, ...LIFETIME });
     flushSolid();
     expect(warning()).not.toBeNull();
 
@@ -93,6 +127,7 @@ describe('PromptCacheWarning', () => {
     const [activity, setActivity] = createSignal<PromptCacheActivity>({
       lastUsedAt: NOW - 10 * 60_000,
       inUse: false,
+      ...LIFETIME,
     });
     cleanup = render(
       () => (
@@ -112,7 +147,7 @@ describe('PromptCacheWarning', () => {
     flushSolid();
     expect(warning()).toBeNull();
 
-    setActivity({ lastUsedAt: NOW - 8 * 60_000, inUse: false });
+    setActivity({ lastUsedAt: NOW - 8 * 60_000, inUse: false, ...LIFETIME });
     flushSolid();
     expect(warning()).not.toBeNull();
   });

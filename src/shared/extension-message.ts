@@ -27,6 +27,7 @@ import {
 } from './protocol';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from './native-pdf';
 import { parseModelPreferences } from './model-preferences';
+import type { LearnedPromptCacheLifetime } from './prompt-cache-lifetime';
 import { asRecord, isBoolean, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
 
@@ -815,8 +816,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         !isBoolean(payload.available) ||
         !isBoolean(payload.openCodeWarming) ||
         (payload.mode !== 'off' && payload.mode !== 'chosen' && payload.mode !== 'all') ||
-        !isPositiveFinite(payload.durationMs) ||
-        !isPositiveFinite(payload.intervalMs)
+        !isPositiveFinite(payload.durationMs)
       ) {
         return null;
       }
@@ -824,10 +824,11 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       for (const [sessionId, entry] of Object.entries(sessionsRecord)) {
         const session = asRecord(entry);
         if (!session || !isSafePersistedSessionId(sessionId)) return null;
-        const { warmUntil, sentAt, stopped } = session;
+        const { warmUntil, sentAt, ttlMs, stopped } = session;
         if (
           (warmUntil !== null && !isPositiveFinite(warmUntil)) ||
           (sentAt !== null && !isPositiveFinite(sentAt)) ||
+          (ttlMs !== null && !isPositiveFinite(ttlMs)) ||
           (stopped !== null &&
             stopped !== 'expired' &&
             stopped !== 'cache-miss' &&
@@ -835,7 +836,16 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         ) {
           return null;
         }
-        sessions[sessionId] = { warmUntil, sentAt, stopped };
+        sessions[sessionId] = { warmUntil, sentAt, ttlMs, stopped };
+      }
+      const learnedRecord = asRecord(payload.learned);
+      if (!learnedRecord) return null;
+      const learned: Record<string, LearnedPromptCacheLifetime> = {};
+      for (const [key, entry] of Object.entries(learnedRecord)) {
+        const lifetime = asRecord(entry);
+        if (key.length > 1024 || !isPositiveFinite(lifetime?.ms) || !isBoolean(lifetime?.bounded))
+          return null;
+        learned[key] = { ms: lifetime.ms, bounded: lifetime.bounded };
       }
       return {
         type,
@@ -843,9 +853,9 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
           available: payload.available,
           mode: payload.mode,
           durationMs: payload.durationMs,
-          intervalMs: payload.intervalMs,
           openCodeWarming: payload.openCodeWarming,
           sessions,
+          learned,
         },
       };
     }

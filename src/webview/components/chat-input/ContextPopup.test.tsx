@@ -7,6 +7,11 @@ import {
   type PromptCacheWarmingView,
 } from './ContextPopup';
 
+const LIFETIME = {
+  ttlMs: 5 * 60_000,
+  likelyMs: 5 * 60_000,
+  description: 'Claude keeps the cache 5 min.',
+};
 const tokens = { total: 0, input: 10, output: 5, reasoning: 0, cacheRead: 100, cacheWrite: 0 };
 const emptyTokens = { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
 let container: HTMLDivElement;
@@ -64,7 +69,7 @@ afterEach(() => {
 
 describe('ContextPopup prompt cache', () => {
   it('counts down the estimated warm window and then reports it as likely expired', async () => {
-    mount(() => ({ lastUsedAt: 1_000_000 - 60_000, inUse: false }));
+    mount(() => ({ lastUsedAt: 1_000_000 - 60_000, inUse: false, ...LIFETIME }));
     expect(cacheStatus()).toBe('Warm 4:00');
 
     await vi.advanceTimersByTimeAsync(3 * 60_000 + 30_000);
@@ -79,10 +84,41 @@ describe('ContextPopup prompt cache', () => {
     );
   });
 
+  it("counts down the model's own lifetime, with hours for long caches", () => {
+    mount(() => ({
+      lastUsedAt: 1_000_000,
+      inUse: false,
+      ttlMs: 60 * 60_000,
+      likelyMs: 60 * 60_000,
+      description: 'Claude keeps the cache 1 h (cache.ttl).',
+    }));
+    expect(cacheStatus()).toBe('Warm 1:00:00');
+  });
+
+  it("reports a cache past the provider's minimum as maybe warm until its usual lifetime", async () => {
+    mount(() => ({
+      lastUsedAt: 1_000_000,
+      inUse: false,
+      ttlMs: 30 * 60_000,
+      likelyMs: 3 * 60 * 60_000,
+      description: 'OpenAI keeps the cache at least 30 min, and often up to about 3 h.',
+    }));
+    expect(cacheStatus()).toBe('Warm 30:00');
+
+    await vi.advanceTimersByTimeAsync(31 * 60_000);
+    flushSolid();
+    expect(cacheStatus()).toBe('May be warm');
+
+    await vi.advanceTimersByTimeAsync(150 * 60_000);
+    flushSolid();
+    expect(cacheStatus()).toBe('Likely expired');
+  });
+
   it('shows in-use while the session works and hides without cache activity', () => {
     const [activity, setActivity] = createSignal<PromptCacheActivity | null>({
       lastUsedAt: 0,
       inUse: true,
+      ...LIFETIME,
     });
     mount(activity);
     expect(cacheStatus()).toBe('In use');
@@ -94,7 +130,7 @@ describe('ContextPopup prompt cache', () => {
 });
 
 describe('ContextPopup keep warm', () => {
-  const warmActivity = () => ({ lastUsedAt: 1_000_000, inUse: false });
+  const warmActivity = () => ({ lastUsedAt: 1_000_000, inUse: false, ...LIFETIME });
   const warmingStatus = () =>
     [
       container.querySelector('.context-popup-warming-status')?.textContent,
@@ -111,12 +147,12 @@ describe('ContextPopup keep warm', () => {
         kind: 'chosen',
         enabled: false,
         session: null,
-        intervalMs: 4 * 60_000,
+        ttlMs: 5 * 60_000,
         durationMs: 30 * 60_000,
       }),
       onToggle
     );
-    expect(warmingStatus()).toBe('Off · Re-reads ~1K cached tokens every 4 min while on');
+    expect(warmingStatus()).toBe('Off · Re-reads ~1K cached tokens every 4m while on');
     const checkbox = container.querySelector<HTMLInputElement>(
       '.context-popup-warming-toggle input'
     );
@@ -125,12 +161,28 @@ describe('ContextPopup keep warm', () => {
     expect(onToggle).toHaveBeenCalledWith(true);
   });
 
+  it('says no keep-alive is needed when the cache outlives the window', () => {
+    mount(warmActivity, () => ({
+      kind: 'chosen',
+      enabled: false,
+      session: null,
+      ttlMs: 60 * 60_000,
+      durationMs: 30 * 60_000,
+    }));
+    expect(warmingStatus()).toBe('Off · Not needed: the cache lasts 1h after each request');
+  });
+
   it('reports the remaining window and why warming stopped', () => {
     const [view, setView] = createSignal<PromptCacheWarmingView | null>({
       kind: 'chosen',
       enabled: true,
-      session: { warmUntil: 1_000_000 + 25 * 60_000, sentAt: 1_000_000, stopped: null },
-      intervalMs: 4 * 60_000,
+      session: {
+        warmUntil: 1_000_000 + 25 * 60_000,
+        sentAt: 1_000_000,
+        ttlMs: 5 * 60_000,
+        stopped: null,
+      },
+      ttlMs: 5 * 60_000,
       durationMs: 30 * 60_000,
     });
     mount(warmActivity, view);
@@ -139,8 +191,23 @@ describe('ContextPopup keep warm', () => {
     setView({
       kind: 'chosen',
       enabled: true,
-      session: { warmUntil: null, sentAt: null, stopped: 'cache-miss' },
-      intervalMs: 4 * 60_000,
+      session: {
+        warmUntil: 1_000_000 + 25 * 60_000,
+        sentAt: 1_000_000,
+        ttlMs: 30 * 60_000,
+        stopped: null,
+      },
+      ttlMs: 30 * 60_000,
+      durationMs: 30 * 60_000,
+    });
+    flushSolid();
+    expect(warmingStatus()).toBe('25m left · No keep-alive needed');
+
+    setView({
+      kind: 'chosen',
+      enabled: true,
+      session: { warmUntil: null, sentAt: null, ttlMs: null, stopped: 'cache-miss' },
+      ttlMs: 5 * 60_000,
       durationMs: 30 * 60_000,
     });
     flushSolid();

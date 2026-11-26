@@ -1,8 +1,9 @@
 import { createEffect, createSignal, Show } from 'solid-js';
 import { formatTokenCount } from '../../lib/message-metrics';
+import { formatDuration } from '../../lib/time-format';
 import { xmarkIcon } from '../../lib/ui-icons';
 import { UiIcon } from '../UiIcon';
-import { PROMPT_CACHE_TTL_ESTIMATE_MS, type PromptCacheActivity } from './ContextPopup';
+import type { PromptCacheActivity } from './ContextPopup';
 
 // Dismissals last for the webview's lifetime and cover one cache expiry per session. A newer
 // cached response is a new expiry and may warn again.
@@ -25,11 +26,14 @@ export function PromptCacheWarning(props: {
 }) {
   const [expired, setExpired] = createSignal(false);
   createEffect(
-    () => (props.activity && !props.activity.inUse ? props.activity.lastUsedAt : null),
-    (lastUsedAt) => {
+    () =>
+      props.activity && !props.activity.inUse
+        ? props.activity.lastUsedAt + props.activity.likelyMs
+        : null,
+    (expiresAt) => {
       setExpired(false);
-      if (lastUsedAt === null) return;
-      const remaining = lastUsedAt + PROMPT_CACHE_TTL_ESTIMATE_MS - Date.now();
+      if (expiresAt === null) return;
+      const remaining = expiresAt - Date.now();
       if (remaining <= 0) {
         setExpired(true);
         return;
@@ -65,7 +69,7 @@ export function PromptCacheWarning(props: {
         <div class="chat-quota-warning-copy" role="status" aria-live="polite">
           <div
             class="chat-quota-warning-row"
-            title="No cached response for over 5 minutes, so the provider has likely dropped its prompt cache. The next message re-sends the whole context at the uncached rate. This is an estimate."
+            title={`No request has used the prompt cache for over ${formatDuration(props.activity?.likelyMs)}, so the provider has likely dropped it. The next message re-sends the whole context at the uncached rate. This is an estimate: ${props.activity?.description ?? ''}`}
           >
             <span>Prompt cache likely expired</span>
             <span class="chat-quota-warning-reset">

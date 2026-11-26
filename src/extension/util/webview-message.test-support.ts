@@ -220,5 +220,14 @@ export const VALID_WEBVIEW_MESSAGES = {
   'ralph/sync': { type: 'ralph/sync', payload: {} },
   'warming/sync': { type: 'warming/sync' },
   'warming/set': { type: 'warming/set', payload: { sessionId: 'session-1', enabled: true } },
+  'warming/samples': {
+    type: 'warming/samples',
+    payload: {
+      sessionId: 'session-1',
+      samples: [
+        { providerID: 'claude-agent', modelID: 'opus', at: 1_000, gapMs: 600_000, hit: true },
+      ],
+    },
+  },
   log: { type: 'log', payload: { msg: 'hello', level: 'warn' } },
 } as const satisfies Record<WebviewMessage['type'], WebviewMessage>;

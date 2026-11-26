@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.37.0",
+  "version": "0.37.1",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -675,7 +675,7 @@
         "varro.chat.promptCacheWarningTokens": {
           "type": "number",
           "minimum": 0,
-          "default": 250000,
+          "default": 300000,
           "markdownDescription": "Warn above the composer when an idle session's prompt cache has likely expired and its context holds at least this many tokens. The next message then re-sends the whole context at the uncached rate. Set to `0` to turn the warning off."
         },
         "varro.chat.promptCacheWarming": {

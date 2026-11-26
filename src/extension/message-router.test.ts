@@ -714,6 +714,9 @@ const DISPATCH_EXPECTATIONS = {
   'warming/set': [
     { callback: 'handleWarmingMessage', args: [VALID_WEBVIEW_MESSAGES['warming/set']] },
   ],
+  'warming/samples': [
+    { callback: 'handleWarmingMessage', args: [VALID_WEBVIEW_MESSAGES['warming/samples']] },
+  ],
   log: [{ callback: 'log', args: [{ msg: 'hello', level: 'warn' }] }],
 } as const satisfies Record<WebviewMessage['type'], readonly DispatchExpectation[]>;
 

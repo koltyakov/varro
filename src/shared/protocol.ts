@@ -3,6 +3,7 @@ import type { DroppedContentDirectory } from './dropped-content-policy';
 import type { ExtensionContext } from './extension-context';
 import type { ContextBreakdownSegment } from './context-breakdown';
 import type { NativePdfAttachment } from './native-pdf';
+import type { LearnedPromptCacheLifetimes } from './prompt-cache-lifetime';
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { ExtensionConfigSnapshot, WebviewConfigUpdatePayload } from './provider-limit-config';
 import type { RemoteImageMode } from './remote-images';
@@ -1188,8 +1189,10 @@ export type PromptCacheWarmingMode = 'off' | 'chosen' | 'all';
 export type PromptCacheWarmingSession = {
   /** End of the current warming window, or `null` until the next reply finishes. */
   warmUntil: number | null;
-  /** When the latest reply or keep-alive sent the context; the cache lifetime counts from here. */
+  /** When the latest request or keep-alive sent the context; the cache lifetime counts from here. */
   sentAt: number | null;
+  /** The model's expected cache lifetime, or `null` until it is resolved. */
+  ttlMs: number | null;
   /** Why warming stopped before the next reply: the window ended, the cache was gone, or a ping failed. */
   stopped: 'expired' | 'cache-miss' | 'failed' | null;
 };
@@ -1199,11 +1202,21 @@ export type PromptCacheWarmingState = {
   available: boolean;
   mode: PromptCacheWarmingMode;
   durationMs: number;
-  intervalMs: number;
   /** OpenCode's own `warming` config is on, so it warms every session itself. */
   openCodeWarming: boolean;
   /** Chosen sessions, keyed by session ID. */
   sessions: Record<string, PromptCacheWarmingSession>;
+  /** How long caches have actually lasted for this user, per model and per provider. */
+  learned: LearnedPromptCacheLifetimes;
+};
+
+/** A request after an idle gap in a loaded session's history, sent at `at`. */
+export type PromptCacheHistorySample = {
+  providerID: string;
+  modelID: string;
+  at: number;
+  gapMs: number;
+  hit: boolean;
 };
 
 export type WebviewMessage =
@@ -1418,6 +1431,10 @@ export type WebviewMessage =
     }
   | { type: 'warming/sync' }
   | { type: 'warming/set'; payload: { sessionId: string; enabled: boolean } }
+  | {
+      type: 'warming/samples';
+      payload: { sessionId: string; samples: PromptCacheHistorySample[] };
+    }
   | {
       type: 'log';
       payload: { msg: string; data?: string; error?: string; level?: 'info' | 'warn' | 'error' };

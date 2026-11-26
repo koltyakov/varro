@@ -10,7 +10,12 @@ import {
   readSessionModelMetadata,
 } from '../shared/session-selection-metadata';
 import type { SessionSelectionMetadata } from '../shared/session-selection-metadata';
-import type { OpenCodeModelRouting, PermissionRule, Session } from '../shared/opencode-types';
+import type {
+  OpenCodeModelRouting,
+  PermissionRule,
+  Provider,
+  Session,
+} from '../shared/opencode-types';
 import {
   getSafeDefaultPermissionRules,
   getSessionPermissionRulesForMode,
@@ -134,6 +139,7 @@ import { ProviderLimitStatusBar } from './provider-limit-status-bar';
 import { PinnedSessionManager } from './pinned-session-manager';
 import { TodoSessionManager } from './todo-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
+import { PromptCacheLearner } from './prompt-cache-learning';
 import { PromptCacheWarming } from './prompt-cache-warming';
 import { WalkthroughService } from './walkthrough-service';
 import { RalphHost } from './ralph-host';
@@ -744,6 +750,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           cacheWrite: typeof cache?.write === 'number' ? cache.write : 0,
         };
       },
+      readProviders: async (directory) => {
+        const catalog = asRecord(
+          await this.server.request('GET', '/config/providers', undefined, { directory })
+        );
+        if (!Array.isArray(catalog?.providers))
+          throw new Error('Invalid OpenCode provider catalog');
+        // SAFETY: The warming service reads only optional settings and IDs, each checked before use.
+        return catalog.providers as Provider[];
+      },
       readOpenCodeWarming: async () => {
         const config = asRecord(await this.server.request('GET', '/config'));
         const warming = config?.warming;
@@ -751,6 +766,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       },
       writeOpenCodeWarming: (value) => this.restProxy.updateGlobalWarming(value),
       persistence,
+      learner: new PromptCacheLearner(globalPersistence),
       post: (payload) => this.post({ type: 'warming/state', payload }),
       logWarning: (message) => logger.warn(message),
     });
@@ -1422,6 +1438,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         handleWarmingMessage: (msg) => {
           if (msg.type === 'warming/set') {
             this.promptCacheWarming.setSessionWarm(msg.payload.sessionId, msg.payload.enabled);
+          } else if (msg.type === 'warming/samples') {
+            this.promptCacheWarming.recordHistory(msg.payload.sessionId, msg.payload.samples);
           } else this.promptCacheWarming.sync();
         },
         updateQueuedMessages: ({ messages, mutationId }) =>

@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { WebviewMessage } from '../../shared/protocol';
 import {
+  MAX_PROMPT_CACHE_SAMPLES,
   WEBVIEW_MESSAGE_TYPES,
   isAllowedApiRequest,
   isAllowedExternalUrl,
@@ -2407,4 +2408,19 @@ describe('parseWebviewMessage rejection paths', () => {
       expect(parsed.payload.hiddenModels).toHaveLength(10_000);
     }
   });
+});
+
+it('accepts bounded prompt cache history samples and rejects malformed ones', () => {
+  const sample = { providerID: 'openai', modelID: 'gpt-6.2-sol', at: 1, gapMs: 600_000, hit: true };
+  const parse = (samples: unknown[], sessionId = 'ses_1') =>
+    parseWebviewMessage({ type: 'warming/samples', payload: { sessionId, samples } });
+  expect(parse([sample])).toEqual({
+    type: 'warming/samples',
+    payload: { sessionId: 'ses_1', samples: [sample] },
+  });
+  expect(parse([{ ...sample, gapMs: 0 }])).toBeNull();
+  expect(parse([{ ...sample, hit: 'yes' }])).toBeNull();
+  expect(parse([{ ...sample, providerID: '' }])).toBeNull();
+  expect(parse([sample], '../etc')).toBeNull();
+  expect(parse(Array.from({ length: MAX_PROMPT_CACHE_SAMPLES + 1 }, () => sample))).toBeNull();
 });

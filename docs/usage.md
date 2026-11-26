@@ -713,7 +713,7 @@ The composer can show model and session metadata:
 - Available OpenAI/Codex and Z.ai usage-limit resets and their expiration times. Varro displays these resets and links to the provider's usage page, but does not redeem them.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 - Reported session cost in the context popup, when OpenCode supplies cost data.
-- A prompt-cache estimate in the context popup, when the latest completed response read or wrote the provider's prompt cache. It counts down five minutes from that response, a common provider default, and then shows **Likely expired**. It is an estimate, not a provider timer. In sessions whose context reaches `varro.chat.promptCacheWarningTokens` (250,000 by default; `0` turns it off), a closable warning above the composer also appears once the estimate runs out while the session is idle, showing how many tokens the next message will re-send uncached. Closing it hides it until a later response uses the cache again. See [Keep the prompt cache warm](#keep-the-prompt-cache-warm) to avoid the expiry.
+- A prompt-cache estimate in the context popup, when the latest completed response read or wrote the provider's prompt cache. It counts down that model's cache lifetime from when the response's request was sent, since providers count from the request, not from the end of a long response, and then shows **Likely expired**. It is an estimate, not a provider timer. See [Prompt cache lifetimes](#prompt-cache-lifetimes). In sessions whose context reaches `varro.chat.promptCacheWarningTokens` (250,000 by default; `0` turns it off), a closable warning above the composer also appears once the estimate runs out while the session is idle, showing how many tokens the next message will re-send uncached. Closing it hides it until a later response uses the cache again. See [Keep the prompt cache warm](#keep-the-prompt-cache-warm) to avoid the expiry.
 
 When an applicable provider quota has 25% or less remaining, a warning above the composer shows the percentage left in each low window and its reset time. The warning becomes critical at 10% remaining. A low weekly or monthly allowance appears even when the 5-hour allowance is healthy. **View usage** opens the provider's usage page in your browser and is hidden when its URL is unknown.
 
@@ -732,10 +732,32 @@ If a provider or model hits a usage limit, Varro shows a usage-limit banner abov
 
 Providers drop an idle session's prompt cache after a few minutes, so the next message re-sends the whole context at the uncached rate. On OpenCode v2, `varro.chat.promptCacheWarming` sends short keep-alive requests after each reply instead. Each keep-alive re-reads the whole context from the cache, which costs money or subscription quota: with typical cache pricing, about twelve keep-alives cost as much as re-sending the context once. Warming is off by default, and only user settings can turn it on.
 
-- `chosen` - turn **Keep warm** on per root session in the context popup's Prompt cache section. Varro sends OpenCode's transient `/generate` keep-alive every four minutes while VS Code runs, for `varro.chat.promptCacheWarmingMinutes` (30 by default) after each reply. It skips running sessions, never warms subagent or helper sessions, and stops early when a keep-alive finds the cache already gone or fails. The popup shows the time left and why warming stopped. Choices are kept per workspace.
+- `chosen` - turn **Keep warm** on per root session in the context popup's Prompt cache section. Varro sends OpenCode's transient `/generate` keep-alive shortly before the model's cache would expire (a minute early for 5-minute caches, 10% early for longer ones) while VS Code runs, for `varro.chat.promptCacheWarmingMinutes` (30 by default) after each reply. When the cache already lasts the whole window, such as GPT-5.6 and later with the default 30-minute window, it sends none. It skips running sessions, never warms subagent or helper sessions, and stops early when the last response outlasted the cache, when a keep-alive would arrive after the cache expired (for example after the computer slept), when a keep-alive finds the cache already gone, or when one fails. The popup shows the time left and why warming stopped. Choices are kept per workspace.
 - `all` - writes `warming` to the global OpenCode config, so OpenCode keeps every root session warm, including sessions from the TUI. Switching away from `all` removes the key from every global config file. This needs file-based configuration and is unavailable in attach-only mode.
 
 When OpenCode's own `warming` setting is already on, Varro sends no keep-alives of its own and the popup shows **Kept warm by OpenCode**.
+
+#### Prompt cache lifetimes
+
+The estimate and the keep-alive schedule follow each provider's documented behavior for the model that last used the cache. A request that reads the cache renews it, and the lifetime counts from when that request was sent. The model's effective `cache.ttl` setting (model settings over provider settings) applies where the provider accepts it.
+
+- Claude on any host (Anthropic, Bedrock, Vertex, OpenRouter, OpenCode Zen): 5 minutes, or 1 hour with `cache.ttl: "1h"`. Older Bedrock releases that only cache for 5 minutes stay at 5.
+- Claude Agent (Claude Code): 1 hour on a Claude subscription and 5 minutes on API billing, told apart by whether Claude Agent prices the model. Claude Code ignores `cache.ttl` and drops to 5 minutes while a subscription runs on extra usage. The lifetime counts from the end of each response, because one OpenCode step runs Claude Code's own request loop.
+- OpenAI GPT-5.6 and later (OpenAI, Azure, OpenRouter, OpenCode Zen): at least 30 minutes, or 12 hours with `cache.ttl: "12h"`. Entries often last longer, so after 30 minutes the popup shows **May be warm**, and it only reports **Likely expired** and shows the warning after about 3 hours. Keep-alives still follow the 30-minute minimum.
+- OpenAI GPT-5.5 and earlier models with 24-hour retention, such as GPT-5.1 and GPT-4.1: about 30 minutes. Organizations with Zero Data Retention keep the in-memory default of about 5 to 10 minutes on the earlier models.
+- Other OpenAI models: about 5 minutes (in-memory retention).
+- Other providers: the configured `cache.ttl`, or 5 minutes. GPT-named models on hosts that manage their own caching, such as GitHub Copilot, use this estimate too.
+
+Accounts differ by plan, data retention, and extra usage, so Varro also learns how long your caches actually last. Every request after 5 or more idle minutes on the same model shows whether the cache survived that gap. Varro collects these from live turns and from the history of sessions you open, per model and per provider, and keeps them in VS Code's global state. Once a model has enough evidence:
+
+- The likely lifetime becomes the longest idle gap that still found the cache at least half the time, before the gaps where most requests missed.
+- Gaps the cache survived with no misses beyond them only lengthen the estimate.
+- Misses can also shorten the lifetime keep-alives follow. Survived gaps never lengthen it, because a late keep-alive pays to rebuild the cache.
+- Recent evidence outweighs old, so a plan change is picked up.
+- Gaps after a compaction or a model switch are skipped.
+- Learning pauses while OpenCode's own `warming` is on. Sessions chosen for **Keep warm** don't contribute history, since their keep-alives leave no messages.
+
+The popup tooltip says when an estimate comes from your sessions.
 
 Provider and configuration changes are revalidated without interrupting running agents. When applying a refresh must wait, the Models view shows a queued configuration update and applies it after active work finishes. Embedded reauthentication can refresh an authentication-only change immediately.
 
