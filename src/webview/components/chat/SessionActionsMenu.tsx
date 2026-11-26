@@ -327,7 +327,7 @@ export function SessionActionsMenu(props: {
                   }
                   onClick={() => void toggleTodo()}
                 >
-                  {isTodo() ? 'Remove todo mark' : 'Mark as todo'}
+                  {isTodo() ? 'Remove ToDo mark' : 'Mark as ToDo'}
                 </button>
               </Show>
               <Show

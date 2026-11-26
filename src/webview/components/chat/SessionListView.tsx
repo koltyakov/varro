@@ -2814,8 +2814,8 @@ function SessionListItem(props: {
             <Show when={isTodo()}>
               <span
                 class="session-item-indicator session-status-indicator is-todo"
-                title="Todo: the next prompt clears this mark"
-                aria-label="Todo"
+                title="ToDo: the next prompt clears this mark"
+                aria-label="ToDo"
               >
                 <UiIcon source={squareIcon} width={12} height={12} />
               </span>

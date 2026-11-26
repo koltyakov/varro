@@ -42,6 +42,7 @@ import {
   xmarkIcon,
 } from '../../lib/ui-icons';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
+import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
 import { getSmoothBottomFollowTop } from '../message-list/scrolling';
 import { modalFocus } from '../../lib/modal-focus';
 import {
@@ -1097,6 +1098,15 @@ export function AssistantMessageContent(props: {
               : undefined,
         });
       return undefined;
+    });
+    onCleanup(() => {
+      const element = partElement;
+      if (!element?.isConnected) return;
+      const partId = untrack(item).part.id;
+      const mergedKey = untrack(partRenderKeys).get(partId);
+      // A painted edit whose file is identified later can merge into an earlier
+      // same-file card. Reserve its row before the shorter flow clamps the scroll range.
+      if (mergedKey !== undefined && mergedKey !== partId) prepareForMessageBlockRemoval(element);
     });
     return (
       <div

@@ -2194,7 +2194,7 @@ describe('SessionListView pins', () => {
       );
     expect(row().querySelector('.session-item-indicator.is-todo')).toBeNull();
     openSessionActions(row());
-    clickMenuItem('Mark as todo');
+    clickMenuItem('Mark as ToDo');
 
     await vi.waitFor(() =>
       expect(setTodo).toHaveBeenCalledWith('older', true, { directory: '/repo' })
@@ -2202,7 +2202,7 @@ describe('SessionListView pins', () => {
     flushSolid();
     await vi.waitFor(() => {
       const marker = row().querySelector<HTMLElement>('.session-item-indicator.is-todo');
-      expect(marker?.getAttribute('aria-label')).toBe('Todo');
+      expect(marker?.getAttribute('aria-label')).toBe('ToDo');
       expect(
         marker?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
       ).toBe(toCssUrl(squareIcon));
@@ -2215,7 +2215,7 @@ describe('SessionListView pins', () => {
 
     applyState(storePath('todoSessionIds', ['older']));
     openSessionActions(row());
-    clickMenuItem('Remove todo mark');
+    clickMenuItem('Remove ToDo mark');
     await vi.waitFor(() =>
       expect(setTodo).toHaveBeenLastCalledWith('older', false, { directory: '/repo' })
     );

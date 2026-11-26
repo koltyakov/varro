@@ -276,6 +276,9 @@ export function getAssistantDialogSummaryMap(
   return result;
 }
 
+const MIN_GENERATION_INTERVAL_MS = 100;
+const MAX_PLAUSIBLE_TOKENS_PER_SECOND = 5_000;
+
 /**
  * Estimate generation speed only for primary responses with matching token counts and
  * explicit timing for every generated text/reasoning part. Missing or invalid timing
@@ -289,6 +292,11 @@ export function getAssistantDialogSummaryMap(
  * V2 text snapshots omit timing. The adapter restores matching durable text/reasoning
  * boundaries, including on reload. These are server-observed block intervals, not
  * exact provider token timings; missing boundaries and tool-call responses stay excluded.
+ *
+ * Providers can deliver a whole block at once, for example a non-streamed complete
+ * message or a buffered stream flush. The block interval then measures delivery, not
+ * generation, and only delta events (which are live-only) could prove otherwise. Reject
+ * intervals that are too short to be a streamed generation or imply impossible speed.
  */
 function getAssistantDialogTokensPerSecond(
   messages: readonly AssistantMessage[],
@@ -331,7 +339,9 @@ function getAssistantDialogTokensPerSecond(
     // Response duration includes latency and is not a substitute for generation timing.
     if (!hasGenerationTiming) continue;
     const elapsed = end - start;
-    if (!Number.isFinite(elapsed) || elapsed <= 0) continue;
+    if (!Number.isFinite(elapsed) || elapsed < MIN_GENERATION_INTERVAL_MS) continue;
+    // Burst-delivered blocks measure transport, not generation.
+    if ((count * 1000) / elapsed > MAX_PLAUSIBLE_TOKENS_PER_SECOND) continue;
     tokens += count;
     durationMs += elapsed;
   }

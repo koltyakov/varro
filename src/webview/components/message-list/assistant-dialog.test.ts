@@ -210,6 +210,44 @@ describe('getAssistantDialogSummaryMap', () => {
     ).toBeUndefined();
   });
 
+  it.each([
+    { output: 344, time: { start: 4_051, end: 4_064 } },
+    { output: 5, time: { start: 4_000, end: 4_050 } },
+    { output: 1_000, time: { start: 4_000, end: 4_150 } },
+  ])('omits TPS for burst-delivered generation timing: $output tokens', ({ output, time }) => {
+    const message = assistantMessage('assistant-1', 'session-1', 'user-1', 1_000, 5_000);
+    message.info.tokens.output = output;
+    message.parts = [
+      {
+        id: 'text',
+        messageID: 'assistant-1',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'Hello',
+        time,
+      },
+    ];
+    expect(
+      getAssistantDialogSummaryMap([message]).get('assistant-1')?.tokensPerSecond
+    ).toBeUndefined();
+  });
+
+  it('keeps fast but plausible streamed generation TPS', () => {
+    const message = assistantMessage('assistant-1', 'session-1', 'user-1', 1_000, 5_000);
+    message.info.tokens.output = 400;
+    message.parts = [
+      {
+        id: 'text',
+        messageID: 'assistant-1',
+        sessionID: 'session-1',
+        type: 'text',
+        text: 'Hello',
+        time: { start: 4_000, end: 4_200 },
+      },
+    ];
+    expect(getAssistantDialogSummaryMap([message]).get('assistant-1')?.tokensPerSecond).toBe(2_000);
+  });
+
   it('does not include untimed responses in timed generation TPS', () => {
     const untimed = assistantMessage('untimed', 'session-1', 'user-1', 1_000, 100_000);
     untimed.info.tokens.output = 10_000;

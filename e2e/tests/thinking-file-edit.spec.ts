@@ -234,6 +234,216 @@ for (const measured of [false, true]) {
   });
 }
 
+const ABSORBED_EDIT_CASES = [
+  { name: 'a matching path arrives while running', path: 'src/app.ts', runningPath: true },
+  { name: 'it completes on the same path', path: 'src/app.ts', runningPath: false },
+  { name: 'it completes on a different path', path: 'src/other.ts', runningPath: false },
+] as const;
+
+for (const editCase of ABSORBED_EDIT_CASES) {
+  test(`does not slide back when a painted Editing row resolves as ${editCase.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 490, height: 427 });
+    const sessionID = 'absorbed-running-edit';
+    const created = 1_780_000_000_000;
+    const assistantInfo: AssistantMessage = {
+      id: 'absorbed-edit-context',
+      sessionID,
+      role: 'assistant',
+      parentID: 'absorbed-edit-user',
+      time: { created },
+      providerID: 'anthropic',
+      modelID: 'claude',
+      mode: 'build',
+      agent: 'build',
+      path: { cwd: '/workspace', root: '/workspace' },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    };
+    const messages: MessageEntry[] = Array.from({ length: 60 }, (_, index) => {
+      const id = `absorbed-edit-context-${index}`;
+      return {
+        info: { ...assistantInfo, id, time: { created, completed: created + 1 } },
+        parts: [
+          {
+            id: `${id}-text`,
+            messageID: id,
+            sessionID,
+            type: 'text',
+            text: 'The build passed. The next edits update the same source file in several steps.',
+          },
+        ],
+      };
+    });
+    messages.unshift({
+      info: {
+        id: 'absorbed-edit-user',
+        sessionID,
+        role: 'user',
+        time: { created: created - 1 },
+        agent: 'build',
+        model: { providerID: 'anthropic', modelID: 'claude' },
+      },
+      parts: [
+        {
+          id: 'absorbed-edit-prompt',
+          messageID: 'absorbed-edit-user',
+          sessionID,
+          type: 'text',
+          text: 'Update the source file.',
+        },
+      ],
+    });
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'project-test',
+        directory: '/workspace',
+        title: 'Same-file edits',
+        version: '1.0.0',
+        time: { created, updated: created },
+      },
+      initialMessages: messages,
+    });
+    await page.goto('/e2e/harness/index.html?scenario=session-playback');
+    await expect(page.locator(`[data-msg-id="${messages.at(-1)!.info.id}"]`)).toBeVisible();
+
+    const messageID = 'absorbed-edit-message';
+    const editPart = (
+      id: string,
+      status: 'running' | 'completed',
+      filePath: string | null,
+      counts: { additions: number; deletions: number }
+    ): ToolPart => ({
+      id,
+      messageID,
+      sessionID,
+      type: 'tool',
+      tool: 'edit',
+      callID: `${id}-call`,
+      state:
+        status === 'running'
+          ? {
+              status: 'running',
+              input: filePath ? { filePath } : {},
+              title: 'Editing',
+              time: { start: Date.now() },
+            }
+          : {
+              status: 'completed',
+              input: { filePath: filePath! },
+              output: 'Edit applied successfully.',
+              title: filePath!,
+              metadata: { filediff: { file: filePath!, ...counts } },
+              time: { start: Date.now() - 1000, end: Date.now() },
+            },
+    });
+    const replay = (events: ServerEvent[]) =>
+      page.evaluate((serverEvents) => {
+        // SAFETY: The isolated E2E page installs this fixture-only transport.
+        const harness = (
+          window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+        ).__varroE2E!;
+        for (const event of serverEvents) harness.replayServerEvent(event);
+      }, events);
+
+    await replay([
+      { type: 'session.status', properties: { sessionID, status: { type: 'busy' } } },
+      {
+        type: 'message.updated',
+        properties: { info: { ...assistantInfo, id: messageID, time: { created: Date.now() } } },
+      },
+      {
+        type: 'message.part.updated',
+        properties: {
+          part: editPart('absorbed-edit-a', 'completed', 'src/app.ts', {
+            additions: 4,
+            deletions: 1,
+          }),
+        },
+      },
+    ]);
+    const row = page.locator(`[data-msg-id="${messageID}"]`);
+    await expect(
+      row.locator('[data-assistant-render-key="file-edit-stack:absorbed-edit-a"]')
+    ).toBeVisible();
+    await waitForAnimationFrames(page, 30);
+
+    await replay([
+      {
+        type: 'message.part.updated',
+        properties: {
+          part: editPart('absorbed-edit-b', 'running', null, { additions: 0, deletions: 0 }),
+        },
+      },
+    ]);
+    const standalone = row.locator('[data-assistant-render-key="part:absorbed-edit-b"]');
+    await expect(standalone).toContainText('Editing');
+    await waitForAnimationFrames(page, 60);
+    // The regression needs a painted standalone row while bottom-follow owns the viewport.
+    expect(
+      await standalone.evaluate((element) => element.getBoundingClientRect().height)
+    ).toBeGreaterThan(20);
+    const distance = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('.interactive-list')!;
+      return list.scrollHeight - list.clientHeight - list.scrollTop;
+    });
+    expect(distance).toBeLessThanOrEqual(1);
+
+    const transitions: ToolPart[] = editCase.runningPath
+      ? [
+          editPart('absorbed-edit-b', 'running', editCase.path, { additions: 0, deletions: 0 }),
+          editPart('absorbed-edit-b', 'completed', editCase.path, { additions: 5, deletions: 2 }),
+        ]
+      : [editPart('absorbed-edit-b', 'completed', editCase.path, { additions: 5, deletions: 2 })];
+    const samples = await page.evaluate(
+      async ({ parts, rowId }) => {
+        // SAFETY: The isolated E2E page installs this fixture-only transport.
+        const harness = (
+          window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+        ).__varroE2E!;
+        const card = document.querySelector<HTMLElement>(
+          `[data-msg-id="${rowId}"] [data-assistant-render-key="file-edit-stack:absorbed-edit-a"] .file-change-card`
+        )!;
+        const sample = () => ({
+          top: card.getBoundingClientRect().top,
+          connected: card.isConnected,
+        });
+        const result = [sample()];
+        for (const part of parts) {
+          harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+          result.push(sample());
+          for (let frame = 0; frame < 60; frame++) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => setTimeout(resolve, 0))
+            );
+            result.push(sample());
+          }
+        }
+        return result;
+      },
+      { parts: transitions, rowId: messageID }
+    );
+
+    expect(samples.every((sample) => sample.connected)).toBe(true);
+    expect(
+      Math.max(...samples.slice(1).map((sample, index) => sample.top - samples[index]!.top)),
+      JSON.stringify(samples)
+    ).toBeLessThanOrEqual(0.5);
+    await expect(standalone).toHaveCount(0);
+    const cards = row.locator('.assistant-file-edit-stack .file-change-card');
+    if (editCase.path === 'src/app.ts') {
+      await expect(cards).toHaveCount(1);
+      await expect(cards.first()).toContainText('+5');
+      await expect(cards.first()).toContainText('-2');
+    } else {
+      await expect(cards).toHaveCount(2);
+      await expect(cards.nth(1)).toContainText('other.ts');
+    }
+  });
+}
+
 test('keeps Thinking aligned as an inline edit appears in a measured transcript', async ({
   page,
 }) => {
