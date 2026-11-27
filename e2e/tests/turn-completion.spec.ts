@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { ServerEvent } from '../../src/shared/protocol';
+import type { ExtensionMessage, ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry, SessionStatus } from '../../src/webview/types';
 
 type CompletionHarness = Window & {
@@ -46,10 +46,28 @@ for (const scenario of ['rapid-streaming-jitter', 'large-transcript']) {
           // SAFETY: The isolated E2E page installs the production-event replay transport.
           const harness = (window as CompletionHarness).__varroE2E;
           if (!harness) throw new Error('Missing completion replay transport');
+          // The replay transport posts a message task, and a frame callback can
+          // run before that task. Wait for delivery so samples cover only paints
+          // after the runtime's (earlier-registered) bridge listener applied it.
+          const delivered = new Promise<void>((resolve) => {
+            const onDelivered = (event: MessageEvent<ExtensionMessage>) => {
+              const message = event.data;
+              if (
+                message?.type !== 'server/event' ||
+                message.payload.type !== 'session.status' ||
+                message.payload.properties?.sessionID !== sessionID
+              )
+                return;
+              window.removeEventListener('message', onDelivered);
+              resolve();
+            };
+            window.addEventListener('message', onDelivered);
+          });
           harness.replayServerEvent({
             type: 'session.status',
             properties: { sessionID, status },
           });
+          await delivered;
           const sample = () => ({
             worked: !!document.querySelector('.trailing-assistant-summary-row'),
             rowSummary: !!document.querySelector(
@@ -61,8 +79,6 @@ for (const scenario of ['rapid-streaming-jitter', 'large-transcript']) {
             slotHeight: document.querySelector('.interactive-loading-row')?.getBoundingClientRect()
               .height,
           });
-          // The replay transport posts a message asynchronously. Sample paints,
-          // not the old DOM before that message reaches the runtime.
           const samples: ReturnType<typeof sample>[] = [];
           const deadline = performance.now() + 800;
           while (performance.now() < deadline) {
