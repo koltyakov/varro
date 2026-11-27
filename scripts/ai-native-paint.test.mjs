@@ -227,6 +227,91 @@ test('several retained markers in one compositor frame do not establish continui
   assert.equal(result.retained.verdict, 'BLOCKED');
 });
 
+test('a late held compositor frame is registered to the old layout without masking glyph loss', async () => {
+  const width = 240;
+  const height = 350;
+  const viewport = { x: 0, y: 0, width, height };
+  const markers = [160, 190].map((y, index) => ({
+    node: index + 1,
+    row: `retained-${index}`,
+    text: `Painted paragraph ${index}`,
+    rect: { x: 20, y, width: 90, height: 10 },
+    styles: [{ opacity: '1', visibility: 'visible', display: 'block' }],
+  }));
+  const moved = markers.map((marker) => ({
+    ...marker,
+    rect: { ...marker.rect, y: marker.rect.y + 70 },
+  }));
+  const paint = (paragraphs) => {
+    const data = new Uint8Array(width * height * 3).fill(20);
+    for (const { rect } of paragraphs)
+      for (let dy = 0; dy < rect.height; dy++)
+        for (let dx = 0; dx < rect.width; dx++)
+          if ((dx + dy) % 3 === 0) {
+            const offset = ((rect.y + dy) * width + rect.x + dx) * 3;
+            data.fill(200, offset, offset + 3);
+          }
+    return { data, width, height };
+  };
+  const samples = [0, 6, 12, 20, 28, 36, 44, 52, 60].map((epoch) => ({
+    epoch,
+    label: 'first-top',
+    top: 0,
+    held: true,
+    firstLoadedMessageId: epoch < 20 ? 'current' : 'older',
+    viewport,
+    stickyOccluders: [],
+    markers: epoch < 20 ? markers : moved,
+  }));
+  const oldImage = paint(markers);
+  const newImage = paint(moved);
+  const missingGlyph = paint(moved.slice(1));
+  const analyze = (images) =>
+    analyzeNativePaint(
+      Object.keys(images).map((file) => ({
+        file,
+        metadata: { timestamp: Number(file) / 1000, deviceWidth: width, deviceHeight: height },
+      })),
+      samples,
+      { x: 0, y: 0 },
+      async (file) => images[file],
+      20,
+      { decode: async (value) => value, firstMoveEpoch: 15, referenceDeadline: 12 }
+    );
+  const images = { 4: oldImage, 24: oldImage, 32: newImage, 40: newImage, 48: newImage };
+  const matched = await analyze(images);
+  assert.equal(matched.retained.verdict, 'PASS');
+  assert.equal(matched.retained.prependChecks, 3);
+  assert.equal(matched.retained.prependMarkers, 6);
+  assert.equal(matched.inspected.find(({ file }) => file === '24').layout, 'pre-prepend');
+  assert.deepEqual(
+    matched.retained.oldLayoutFrames.map(({ file }) => file),
+    ['24']
+  );
+
+  // An exact old frame cannot advance coverage, and absence at both layouts cannot pass.
+  assert.equal(
+    (await analyze({ 4: oldImage, 24: oldImage, 32: newImage, 40: newImage })).retained.verdict,
+    'BLOCKED'
+  );
+  const lost = await analyze({ ...images, 24: paint([]), 40: missingGlyph });
+  assert.equal(lost.retained.verdict, 'FAIL');
+  assert.deepEqual(
+    lost.retained.failures.map(({ file }) => file),
+    ['24', '24', '40']
+  );
+  const reverted = await analyze({ ...images, 48: oldImage });
+  assert.equal(reverted.retained.verdict, 'FAIL');
+  assert.deepEqual(
+    reverted.retained.oldLayoutFrames.map(({ file }) => file),
+    ['24']
+  );
+  assert.deepEqual(
+    reverted.retained.failures.map(({ file }) => file),
+    ['48', '48']
+  );
+});
+
 test('text eligibility uses the actual opaque sticky footprint, not hit testing or a fixed inset', () => {
   const marker = {
     rect: { x: 20, y: 120, width: 100, height: 16 },

@@ -8,6 +8,8 @@ import {
   verdict,
 } from './ai-native-paint-oracles.mjs';
 
+const GLYPH_MATCH_THRESHOLD = 0.65;
+
 let initialized;
 export async function decodeNativeImage(bytes) {
   initialized ??= initializeImageMagick(
@@ -21,6 +23,48 @@ export async function decodeNativeImage(bytes) {
       (pixels) => new Uint8Array(pixels.toByteArray(0, 0, image.width, image.height, 'RGB'))
     ),
   }));
+}
+
+function markerCrop(marker, host) {
+  const { x, y, width, height } = marker.rect;
+  return {
+    x: Math.floor(host.x + x),
+    y: Math.floor(host.y + y),
+    width: Math.ceil(width),
+    height: Math.ceil(height),
+  };
+}
+
+function sameCropSize(left, right) {
+  return left.width === right.width && left.height === right.height;
+}
+
+function uniqueMarker(sample, marker) {
+  const matches = sample.markers.filter(
+    (item) => item.row === marker.row && item.text === marker.text
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function oldHeldCrop(marker, before, after, host) {
+  const old = uniqueMarker(after, marker);
+  if (
+    !old ||
+    markerPaintEligibility(old, after) ||
+    (old.hits?.length && !old.hits[0].containsParagraph)
+  )
+    return;
+  const previous = uniqueMarker(before, marker);
+  if (
+    !previous ||
+    previous.node !== old.node ||
+    markerPaintEligibility(previous, before) ||
+    (previous.hits?.length && !previous.hits[0].containsParagraph)
+  )
+    return;
+  const crop = markerCrop(old, host);
+  const prior = markerCrop(previous, host);
+  if (sameCropSize(crop, prior) && crop.x === prior.x && crop.y === prior.y) return crop;
 }
 
 export async function analyzeNativePaint(
@@ -43,6 +87,26 @@ export async function analyzeNativePaint(
   const excludedMarkers = [];
   const continuityFrames = new Set();
   const prependFrames = new Set();
+  const oldLayoutFrames = [];
+  const oldIndex = samples.findLastIndex(
+    (sample) => sample.epoch <= referenceDeadline && sample.epoch < prependEpoch
+  );
+  const oldBefore = samples[oldIndex - 1];
+  const oldAfter = samples[oldIndex];
+  const prependSample = samples.find((sample) => sample.epoch === prependEpoch);
+  const heldPrepend =
+    oldBefore?.held &&
+    oldAfter?.held &&
+    prependSample?.held &&
+    oldAfter.firstLoadedMessageId &&
+    prependSample.firstLoadedMessageId &&
+    oldAfter.firstLoadedMessageId !== prependSample.firstLoadedMessageId &&
+    oldBefore.firstLoadedMessageId === oldAfter.firstLoadedMessageId &&
+    oldBefore.label === oldAfter.label &&
+    oldAfter.label === prependSample.label &&
+    oldBefore.top === oldAfter.top &&
+    oldAfter.top === prependSample.top;
+  let presentedNewLayout = false;
   let continuityMarkers = 0;
   let prependMarkers = 0;
   let coldChecks = 0;
@@ -83,6 +147,7 @@ export async function analyzeNativePaint(
       if (bright < 10 || body.width * body.height - bright < 10)
         coldFailures.push({ file: frame.file, epoch, bright });
     }
+    const comparisons = [];
     for (const marker of before.markers) {
       const next = after.markers.find((m) => m.node === marker.node);
       const r = marker.rect;
@@ -103,74 +168,109 @@ export async function analyzeNativePaint(
         (next.hits?.length && !next.hits[0].containsParagraph)
       )
         continue;
-      const crop = {
-        x: Math.floor(host.x + r.x),
-        y: Math.floor(host.y + r.y),
-        width: Math.ceil(r.width),
-        height: Math.ceil(r.height),
-      };
+      const crop = markerCrop(marker, host);
       const key = JSON.stringify([marker.row, marker.text]);
-      if (before.markers.filter((m) => m.row === marker.row && m.text === marker.text).length !== 1)
-        continue;
+      if (!uniqueMarker(before, marker)) continue;
       const reference = references.get(key);
-      const pixels = brightPixels(image, crop);
       // A reference must actually be painted before the older page is applied.
-      if (
-        !reference &&
-        epoch < referenceDeadline &&
-        pixels.length >= 35 &&
-        pixels.length < crop.width * crop.height * 0.6
-      ) {
-        references.set(key, {
-          node: marker.node,
-          text: marker.text,
-          points: pixels,
-          crop,
-          file: frame.file,
-          row: marker.row,
-        });
-      } else if (
-        reference &&
-        crop.width === reference.crop.width &&
-        crop.height === reference.crop.height
-      ) {
-        const score = glyphContinuity(image, crop, reference.points);
-        if (reference.node !== marker.node)
-          nodeChanges.set(key, {
+      if (!reference && epoch < referenceDeadline) {
+        const pixels = brightPixels(image, crop);
+        if (pixels.length >= 35 && pixels.length < crop.width * crop.height * 0.6) {
+          references.set(key, {
+            node: marker.node,
+            text: marker.text,
+            points: pixels,
+            crop,
+            file: frame.file,
             row: marker.row,
-            from: reference.node,
-            to: marker.node,
-            reference: reference.file,
           });
-        continuityFrames.add(epoch);
-        continuityMarkers++;
-        const afterPrepend = epoch >= prependEpoch;
-        if (afterPrepend) {
-          prependFrames.add(epoch);
-          prependMarkers++;
         }
-        const check = {
-          node: marker.node,
-          row: marker.row,
+      } else if (reference && sameCropSize(crop, reference.crop)) {
+        comparisons.push({
+          key,
+          marker,
+          reference,
           crop,
-          score,
+          score: glyphContinuity(image, crop, reference.points),
+        });
+      }
+    }
+    const afterPrepend = epoch >= prependEpoch;
+    if (
+      afterPrepend &&
+      !presentedNewLayout &&
+      heldPrepend &&
+      before.held &&
+      after.held &&
+      before.label === oldAfter.label &&
+      before.top === oldAfter.top &&
+      after.top === before.top &&
+      before.firstLoadedMessageId === prependSample.firstLoadedMessageId &&
+      after.firstLoadedMessageId === before.firstLoadedMessageId
+    ) {
+      // A screencast can still carry the old layout after the new one has reached the DOM.
+      // Register the whole frame to the old layout only with positive, exact evidence:
+      // every displaced witness must match there, and none may match its new crop.
+      const displaced = comparisons.flatMap((entry) => {
+        const oldCrop = oldHeldCrop(entry.marker, oldBefore, oldAfter, host);
+        return oldCrop &&
+          sameCropSize(oldCrop, entry.crop) &&
+          (Math.abs(oldCrop.x - entry.crop.x) > 4 || Math.abs(oldCrop.y - entry.crop.y) > 4)
+          ? [{ ...entry, oldCrop }]
+          : [];
+      });
+      presentedNewLayout = displaced.some(({ score }) => score >= GLYPH_MATCH_THRESHOLD);
+      if (
+        !presentedNewLayout &&
+        displaced.length &&
+        displaced.every(
+          ({ oldCrop, reference }) => glyphContinuity(image, oldCrop, reference.points, 0) === 1
+        )
+      ) {
+        oldLayoutFrames.push({
+          file: frame.file,
+          epoch,
+          rows: displaced.map(({ marker }) => marker.row),
+        });
+        inspected.push({ ...row, layout: 'pre-prepend' });
+        continue;
+      }
+    }
+    for (const { key, marker, reference, crop, score } of comparisons) {
+      if (reference.node !== marker.node)
+        nodeChanges.set(key, {
+          row: marker.row,
+          from: reference.node,
+          to: marker.node,
           reference: reference.file,
-          afterPrepend,
-        };
-        row.markers.push(check);
-        if (score < 0.65) {
-          if (!afterPrepend) {
-            prePrependMismatchKeys.add(key);
-            prePrependMismatches.push({ file: frame.file, epoch, ...check });
-          } else {
-            textFailures.push({
-              file: frame.file,
-              epoch,
-              ...check,
-              // Not a pass condition: flags a reference that may itself be misregistered.
-              referenceMismatchedBeforePrepend: prePrependMismatchKeys.has(key),
-            });
-          }
+        });
+      continuityFrames.add(epoch);
+      continuityMarkers++;
+      if (afterPrepend) {
+        prependFrames.add(epoch);
+        prependMarkers++;
+      }
+      const check = {
+        node: marker.node,
+        row: marker.row,
+        crop,
+        score,
+        reference: reference.file,
+        afterPrepend,
+      };
+      row.markers.push(check);
+      if (score < GLYPH_MATCH_THRESHOLD) {
+        if (!afterPrepend) {
+          prePrependMismatchKeys.add(key);
+          prePrependMismatches.push({ file: frame.file, epoch, ...check });
+        } else {
+          textFailures.push({
+            file: frame.file,
+            epoch,
+            ...check,
+            // Not a pass condition: flags a reference that may itself be misregistered.
+            referenceMismatchedBeforePrepend: prePrependMismatchKeys.has(key),
+          });
         }
       }
     }
@@ -193,10 +293,11 @@ export async function analyzeNativePaint(
       prependMarkers,
       failures: textFailures,
       prePrependMismatches,
+      oldLayoutFrames,
       excludedMarkers,
     },
     inspected,
     limits:
-      'Dark theme, 1:1 native frames; stable bracketing text bounds and measured sticky coverage; 2 CSS px search. Retained text is judged only after verified prepend; earlier mismatches are diagnostics. DOM/compositor disagreement requires visual review. Missing gates stay BLOCKED.',
+      'Dark theme, 1:1 native frames; stable bracketing text bounds and measured sticky coverage; 2 CSS px search. A held frame with exact evidence of the old layout does not count toward post-prepend coverage. Earlier mismatches are diagnostics. Missing gates stay BLOCKED.',
   };
 }

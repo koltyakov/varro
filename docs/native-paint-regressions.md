@@ -36,8 +36,9 @@ contain private text; do not commit these artifacts.
   sticky top chrome, and composer. Both solid bright and solid dark frames count as blank.
   Every blank frame stays in the result.
 - **Retained text:** learn a glyph mask only from a painted paragraph before prepend.
-  Compare the same message and exact paragraph text at stable, fully visible bounds, with at most
-  2 CSS px displacement. Correct DOM text does not clear missing painted glyphs.
+  Compare the same message and exact paragraph text at fully visible bounds that are stable
+  within each layout's DOM samples. The glyph search allows at most 2 CSS px of displacement
+  around the matched bounds. Correct DOM text does not clear missing painted glyphs.
   The mask comparison penalizes extra bright pixels as well as missing glyphs.
   Both bracketing samples must record the actual opaque sticky top, shell and solid-gap
   rectangles. Text overlapping either footprint, including its 2 px comparison margin,
@@ -49,6 +50,12 @@ contain private text; do not commit these artifacts.
   Mark prepend when the oldest loaded message first changes to an ID from a completed page,
   even if that page was fetched before recording or the banner stays visible.
   Learn references only before the last sample that still showed the old loaded boundary.
+  While the thumb is held at the same scroll offset, the DOM can report the new boundary before
+  the screencast shows it. An exact match at the exposed old positions of every displaced
+  witness, with no match at their new positions, identifies a whole old-layout frame. Record
+  it separately and do not count it toward post-prepend coverage. After new positions are
+  presented, later frames cannot fall back to the old layout. Missing pixels without that
+  positive old-layout evidence still fail an eligible comparison.
   Missing pre-prepend references or no qualifying post-prepend frames cannot establish a pass.
   A glyph mismatch before prepend is retained in `prePrependMismatches` for diagnosis. Only
   comparisons after verified prepend decide the retained-text verdict.
