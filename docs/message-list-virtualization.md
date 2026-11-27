@@ -1244,6 +1244,8 @@ Direct input acquires ownership only when it can affect the transcript:
   the native menu bar. Ctrl alone must not reveal counters; modifier combinations remain uncanceled.
 - Absolute prompt numbers are ready only when the prompt cursor is exhausted for the current message
   window version.
+- Until then, the turn rail uses prompt previews without numbering. Once ready, rail labels and
+  prompt badges use the same absolute numbers, and rail selection stays keyed by prompt ID.
 - A failed or invalidated prompt page leaves counters hidden. A later modifier hold retries the load.
 - Resetting the active session's message window invalidates prior readiness even when the session ID
   does not change.

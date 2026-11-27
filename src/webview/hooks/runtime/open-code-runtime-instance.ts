@@ -929,13 +929,13 @@ function loadOlderSessionPrompts(
         return false;
       }
       cacheSessionHistoryPage(sessionId, cursor, page);
-      const nextCursor = advanceSessionHistoryPromptCursor(sessionId, cursor, page.nextCursor);
       const prompts = page.filter((entry) => entry.info.role === 'user');
       const mergedPrompts = mergeOlderHistory(
         getSessionHistoryPromptEntries(sessionId),
         page.map((entry) => (entry.info.role === 'user' ? entry : { info: entry.info, parts: [] }))
       );
       setSessionHistoryPrompts(sessionId, mergedPrompts);
+      const nextCursor = advanceSessionHistoryPromptCursor(sessionId, cursor, page.nextCursor);
       if (prompts.length > 0) {
         // Steering, follow-up actions, and automatic notices cannot own the sticky header. Keep walking
         // older pages until the original prompt is available, even for multi-page turns.

@@ -676,6 +676,13 @@ describe('MessageListChrome', () => {
       () => (
         <TurnNavigationRail
           turns={turns}
+          numbering={{
+            numbers: new Map([
+              ['msg-1', 7],
+              ['msg-2', 9],
+            ]),
+            total: 9,
+          }}
           activeTurnId="msg-2"
           visibleTurnIds={new Set(['msg-1', 'msg-2'])}
           onSelect={onSelect}
@@ -694,7 +701,8 @@ describe('MessageListChrome', () => {
         ?.style.getPropertyValue('--turn-count')
     ).toBe('2');
     expect(markers?.[1]?.getAttribute('aria-current')).toBe('step');
-    expect(markers?.[0]?.getAttribute('aria-label')).toBe('Go to turn 1: First prompt');
+    expect(markers?.[0]?.getAttribute('aria-label')).toBe('Go to turn 7: First prompt');
+    expect(markers?.[1]?.getAttribute('aria-label')).toBe('Go to turn 9: Second prompt');
 
     markers?.[0]?.click();
     flushSolid();
@@ -711,6 +719,7 @@ describe('MessageListChrome', () => {
           turns={[
             { id: 'msg-1', index: 0, text: 'Prompt', sentAt, attachmentCount: 0, imageCount: 0 },
           ]}
+          numbering={{ numbers: new Map([['msg-1', 8]]), total: 9 }}
           activeTurnId="msg-1"
           hoveredTurnId="msg-1"
           onTurnHoverChange={onTurnHoverChange}
@@ -727,7 +736,7 @@ describe('MessageListChrome', () => {
     await vi.advanceTimersByTimeAsync(150);
     flushSolid();
     const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]')!;
-    expect(tooltip.firstElementChild?.textContent).toBe('Turn 1 of 1');
+    expect(tooltip.firstElementChild?.textContent).toBe('Turn 8 of 9');
     const prompt = tooltip.querySelector('.turn-navigation-tooltip-prompt');
     expect(prompt?.textContent).toBe('Prompt');
     expect(tooltip.firstElementChild?.nextElementSibling).toBe(prompt);
@@ -765,6 +774,7 @@ describe('MessageListChrome', () => {
     flushSolid();
     const tooltip = document.body.querySelector<HTMLElement>('[role="tooltip"]')!;
     const prompt = tooltip.querySelector('.turn-navigation-tooltip-prompt')!;
+    expect(tooltip.firstElementChild).toBe(prompt);
     const normalized = text.replaceAll(/\s+/g, ' ').trim();
     flushSolid();
     expect(prompt.textContent).toBe(`${normalized.slice(0, 77)}...`);
@@ -810,7 +820,7 @@ describe('MessageListChrome', () => {
     setTurns([{ ...turns()[0]!, text: 'Updated prompt', index: 3 }]);
     flushSolid();
     expect(container!.querySelector('.turn-navigation-marker')).toBe(dot);
-    expect(dot.getAttribute('aria-label')).toBe('Go to turn 1: Updated prompt');
+    expect(dot.getAttribute('aria-label')).toBe('Go to prompt: Updated prompt');
     expect(onTurnHoverChange).toHaveBeenCalledTimes(1);
     dot.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
     flushSolid();
@@ -833,7 +843,17 @@ describe('MessageListChrome', () => {
     }));
     const onSelect = vi.fn();
     cleanup = render(
-      () => <TurnNavigationRail turns={turns} activeTurnId="msg-120" onSelect={onSelect} />,
+      () => (
+        <TurnNavigationRail
+          turns={turns}
+          numbering={{
+            numbers: new Map(turns.map((turn) => [turn.id, turn.index + 1])),
+            total: turns.length,
+          }}
+          activeTurnId="msg-120"
+          onSelect={onSelect}
+        />
+      ),
       container!
     );
     flushSolid();
@@ -872,7 +892,17 @@ describe('MessageListChrome', () => {
     }));
     const onSelect = vi.fn();
     cleanup = render(
-      () => <TurnNavigationRail turns={turns} activeTurnId="msg-1" onSelect={onSelect} />,
+      () => (
+        <TurnNavigationRail
+          turns={turns}
+          numbering={{
+            numbers: new Map(turns.map((turn) => [turn.id, turn.index + 1])),
+            total: turns.length,
+          }}
+          activeTurnId="msg-1"
+          onSelect={onSelect}
+        />
+      ),
       container!
     );
     flushSolid();
@@ -934,6 +964,10 @@ describe('MessageListChrome', () => {
       () => (
         <TurnNavigationRail
           turns={turns()}
+          numbering={{
+            numbers: new Map(turns().map((turn) => [turn.id, turn.index + 1])),
+            total: turns().length,
+          }}
           activeTurnId={activeId()}
           visibleTurnIds={visibleIds()}
           onSelect={onSelect}

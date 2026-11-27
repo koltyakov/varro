@@ -33,6 +33,10 @@ export async function analyzeNativePaint(
 ) {
   const coldFailures = [];
   const textFailures = [];
+  // The contract is retention through prepend. Earlier comparisons stay as diagnostics:
+  // during movement a frame can be misregistered against its bracketing DOM samples.
+  const prePrependMismatches = [];
+  const prePrependMismatchKeys = new Set();
   const references = new Map();
   const nodeChanges = new Map();
   const inspected = [];
@@ -137,16 +141,31 @@ export async function analyzeNativePaint(
             reference: reference.file,
           });
         continuityChecks++;
-        if (epoch >= prependEpoch) prependChecks++;
+        const afterPrepend = epoch >= prependEpoch;
+        if (afterPrepend) prependChecks++;
         const check = {
           node: marker.node,
           row: marker.row,
           crop,
           score,
           reference: reference.file,
+          afterPrepend,
         };
         row.markers.push(check);
-        if (score < 0.65) textFailures.push({ file: frame.file, epoch, ...check });
+        if (score < 0.65) {
+          if (!afterPrepend) {
+            prePrependMismatchKeys.add(key);
+            prePrependMismatches.push({ file: frame.file, epoch, ...check });
+          } else {
+            textFailures.push({
+              file: frame.file,
+              epoch,
+              ...check,
+              // Not a pass condition: flags a reference that may itself be misregistered.
+              referenceMismatchedBeforePrepend: prePrependMismatchKeys.has(key),
+            });
+          }
+        }
       }
     }
     inspected.push(row);
@@ -165,10 +184,11 @@ export async function analyzeNativePaint(
       checkedFrames: continuityChecks,
       prependChecks,
       failures: textFailures,
+      prePrependMismatches,
       excludedMarkers,
     },
     inspected,
     limits:
-      'Dark theme, 1:1 native frames; stable bracketing text bounds and measured sticky coverage; 2 CSS px search. DOM/compositor disagreement requires visual review. Missing gates stay BLOCKED.',
+      'Dark theme, 1:1 native frames; stable bracketing text bounds and measured sticky coverage; 2 CSS px search. Retained text is judged only after verified prepend; earlier mismatches are diagnostics. DOM/compositor disagreement requires visual review. Missing gates stay BLOCKED.',
   };
 }

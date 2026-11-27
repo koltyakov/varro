@@ -608,7 +608,8 @@ export function MessageList() {
     return (
       promptNumberReadySessionIds().has(sessionId) &&
       promptNumberReadyWindowVersions.get(sessionId) ===
-        getSessionMessageWindowStateVersion(sessionId)
+        getSessionMessageWindowStateVersion(sessionId) &&
+      !getSessionHistoryPromptCursor(sessionId)
     );
   }
 
@@ -623,7 +624,7 @@ export function MessageList() {
     promptNumberHoldGeneration += 1;
     setShowPromptNumbers(true);
     const sessionId = state.activeSessionId;
-    if (sessionId) void ensurePromptNumbersReady(sessionId);
+    if (sessionId && !state.messagesLoading) void ensurePromptNumbersReady(sessionId);
   }
 
   function hidePromptNumbersForAlt() {
@@ -678,7 +679,12 @@ export function MessageList() {
       return {
         sessionId,
         windowVersion,
-        needsNumbers: showPromptNumbers() && !!sessionId && !promptNumbersReady(sessionId),
+        needsNumbers:
+          showPromptNumbers() &&
+          !!sessionId &&
+          !state.messagesLoading &&
+          !isSessionMessageWindowResetPending(sessionId) &&
+          !promptNumbersReady(sessionId),
       };
     },
     ({ sessionId, windowVersion, needsNumbers }) => {
@@ -707,9 +713,23 @@ export function MessageList() {
       void ensurePromptNumbersReady(sessionId);
     }
   );
+  const absolutePromptNumbersReady = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    return (
+      !!sessionId &&
+      !state.messagesLoading &&
+      !isSessionMessageWindowResetPending(sessionId) &&
+      !getSessionHistoryPromptCursor(sessionId)
+    );
+  });
   const promptNumbersVisible = createMemo(() => {
     const sessionId = state.activeSessionId;
-    return !!sessionId && showPromptNumbers() && promptNumbersReady(sessionId);
+    return (
+      !!sessionId &&
+      showPromptNumbers() &&
+      absolutePromptNumbersReady() &&
+      promptNumbersReady(sessionId)
+    );
   });
   const handleWorkedSummaryHoverChange = (promptMessageId: string, hovering: boolean) => {
     setWorkedSummaryPromptMessageId((current) => {
@@ -1394,6 +1414,7 @@ export function MessageList() {
       ? [numberPrompts(mergeOlderHistory(messageSnapshots(), olderPromptSnapshots()))]
       : [...history, numberPrompts(tailMessages(), history.at(-1))];
     return {
+      total: segments.at(-1)?.lastNumber ?? 0,
       numbers: segments.reduce(
         (merged, segment) => mergeSegmentMaps(merged, segment.numbers),
         new Map<string, number>()
@@ -11960,6 +11981,7 @@ export function MessageList() {
       >
         <TurnNavigationRail
           turns={turnNavigationPreviews()}
+          numbering={absolutePromptNumbersReady() ? promptNumbers() : undefined}
           activeTurnId={activeTurnState().primary}
           visibleTurnIds={activeTurnState().visibleIds}
           hoveredTurnId={hoveredNavigationTurnId()}

@@ -28,6 +28,7 @@ import { calculateVirtualRange } from './message-list/virtualization';
 import {
   clearSessionMessageWindowState,
   resetSessionMessageWindowForRefetch,
+  setSessionHistoryCursor,
   setSessionHistoryPromptCursor,
   setSessionHistoryPrompts,
 } from '../lib/message-window';
@@ -795,6 +796,91 @@ describe('MessageList prompt numbers', () => {
       limit: 200,
       before: 'cursor-6',
     });
+  });
+
+  it('keeps prompt labels and targets correct while older prompt pages are pending', async () => {
+    const messages = Array.from({ length: 6 }, (_, index) => {
+      const number = index + 1;
+      return [
+        {
+          info: userMessage(`user-${number}`),
+          parts: [textPart(`text-${number}`, `Prompt ${number}`)],
+        },
+        { info: assistantMessage(`assistant-${number}`), parts: [] },
+      ];
+    }).flat();
+    const middle = Object.assign(messages.slice(4, 8), { nextCursor: 'oldest' });
+    const oldest = Object.assign(messages.slice(0, 4), { nextCursor: undefined });
+    type PromptPage = Awaited<ReturnType<typeof client.session.messages>>;
+    let resolveMiddle!: (page: PromptPage) => void;
+    let resolveOldest!: (page: PromptPage) => void;
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveMiddle = resolve;
+        })
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOldest = resolve;
+        })
+      );
+    setState(storePath('activeSessionId', 'session-1'));
+    setSessionHistoryCursor('session-1', 'middle');
+    setSessionHistoryPromptCursor('session-1', 'middle');
+    replaceMessages(messages.slice(8));
+    flushSolid();
+    mountList();
+
+    const dot = (label: string) =>
+      container!.querySelector<HTMLButtonElement>(`.turn-navigation-marker[aria-label="${label}"]`);
+    const target = (id: string) =>
+      container!.querySelector(`[data-msg-id="${id}"] .turn-navigation-destination`);
+    const assertUnnumbered = () => {
+      expect(
+        container!.querySelector('.turn-navigation-marker[aria-label^="Go to turn "]')
+      ).toBeNull();
+      expect(container!.querySelector('.prompt-number-badge')).toBeNull();
+    };
+    assertUnnumbered();
+    dot('Go to prompt: Prompt 5')!.click();
+    flushSolid();
+    expect(target('user-5')).not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
+    resolveMiddle(middle);
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
+    flushSolid();
+    expect(dot('Go to prompt: Prompt 3')).not.toBeNull();
+    assertUnnumbered();
+
+    resolveOldest(oldest);
+    await vi.waitFor(() => {
+      flushSolid();
+      expect(dot('Go to turn 5: Prompt 5')).not.toBeNull();
+      expect(dot('Go to turn 1: Prompt 1')).not.toBeNull();
+      expect(
+        container!.querySelector('[data-msg-id="user-6"] .prompt-number-badge')?.textContent
+      ).toBe('6');
+    });
+    dot('Go to turn 6: Prompt 6')!.click();
+    flushSolid();
+    expect(target('user-6')).not.toBeNull();
+    expect(container!.querySelector('[aria-label="Go to turn 1: Prompt 5"]')).toBeNull();
+
+    expect(container!.querySelector('[data-msg-id="user-1"]')).toBeNull();
+    dot('Go to turn 1: Prompt 1')!.click();
+    await vi.waitFor(() => {
+      flushSolid();
+      expect(target('user-1')).not.toBeNull();
+    });
+
+    resetSessionMessageWindowForRefetch('session-1');
+    flushSolid();
+    assertUnnumbered();
+    expect(dot('Go to prompt: Prompt 6')).not.toBeNull();
   });
 
   it('stops loading older prompt pages when Alt is released', async () => {

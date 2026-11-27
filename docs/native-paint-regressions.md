@@ -50,6 +50,8 @@ contain private text; do not commit these artifacts.
   even if that page was fetched before recording or the banner stays visible.
   Learn references only before the last sample that still showed the old loaded boundary.
   Missing pre-prepend references or no qualifying post-prepend frames cannot establish a pass.
+  A glyph mismatch before prepend is retained in `prePrependMismatches` for diagnosis. Only
+  comparisons after verified prepend decide the retained-text verdict.
 - **Top targeting:** distinguish reaching the currently loaded top from complete history.
   Use actual replay-server pagination response headers, cursor exhaustion, and the first
   message's viewport position. Numeric history compensation is valid. Allow at most one

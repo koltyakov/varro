@@ -276,6 +276,7 @@ export function StickyUserMessagePreviewCard(props: {
 
 export function TurnNavigationRail(props: {
   turns: readonly StickyUserMessagePreview[];
+  numbering?: { numbers: ReadonlyMap<string, number>; total: number };
   activeTurnId: string | null;
   visibleTurnIds?: ReadonlySet<string>;
   hoveredTurnId?: string | null;
@@ -389,10 +390,11 @@ export function TurnNavigationRail(props: {
         </button>
       </Show>
       <For each={windowTurns().map((turn) => turn.id)}>
-        {(id, index) => {
+        {(id) => {
           // Fallback only while a removed turn's row is still leaving the window.
           const initialTurn = untrack(() => turnsById().get(id)!);
           const turn = () => turnsById().get(id) ?? initialTurn;
+          const turnNumber = () => props.numbering?.numbers.get(id);
           const sentTimestamp = createMemo(() => {
             const sentAt = turn().sentAt;
             return sentAt === undefined ? null : formatMessageSentTime(sentAt);
@@ -425,7 +427,9 @@ export function TurnNavigationRail(props: {
               delay={150}
               content={
                 <>
-                  <div>{`Turn ${windowStart() + index() + 1} of ${props.turns.length}`}</div>
+                  <Show when={turnNumber()}>
+                    {(number) => <div>{`Turn ${number()} of ${props.numbering?.total}`}</div>}
+                  </Show>
                   <div class="turn-navigation-tooltip-prompt">{label()}</div>
                   <Show when={sentTimestamp()}>
                     {(timestamp) => <div class="turn-navigation-tooltip-time">{timestamp()}</div>}
@@ -438,7 +442,11 @@ export function TurnNavigationRail(props: {
                 class={`turn-navigation-marker${highlighted() ? ' is-active' : ''}${props.hoveredTurnId === id ? ' is-hovered' : ''}${
                   loading() ? ' is-loading' : ''
                 }`}
-                aria-label={`Go to turn ${windowStart() + index() + 1}: ${label()}`}
+                aria-label={
+                  turnNumber() === undefined
+                    ? `Go to prompt: ${label()}`
+                    : `Go to turn ${turnNumber()}: ${label()}`
+                }
                 aria-current={active() ? 'step' : undefined}
                 onMouseEnter={() => {
                   pointerOver = true;

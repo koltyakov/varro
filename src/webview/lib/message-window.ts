@@ -17,6 +17,7 @@ const [historyLoadFailedSessionIds, setHistoryLoadFailedSessionIds] = createSign
 >(new Set<string>());
 const historyCursors = new Map<string, string>();
 const historyPromptCursors = new Map<string, string>();
+const [historyPromptCursorVersion, setHistoryPromptCursorVersion] = createSignal(0);
 const consumedHistoryCursors = new Map<string, Set<string>>();
 const consumedHistoryPromptCursors = new Map<string, Set<string>>();
 // Latest, page, and prompt reads capture this revision before crossing the API boundary.
@@ -62,6 +63,8 @@ export function setSessionHistoryPrompts(sessionId: string, prompts: MessageEntr
 }
 
 export function getSessionHistoryPromptCursor(sessionId: string): string | undefined {
+  historyPromptCursorVersion();
+  getSessionMessageWindowStateVersion(sessionId);
   touchExistingHistorySession(sessionId);
   return historyPromptCursors.get(sessionId);
 }
@@ -86,10 +89,12 @@ export function advanceSessionHistoryPromptCursor(
 }
 
 function updateSessionHistoryPromptCursor(sessionId: string, cursor?: string) {
+  const previous = historyPromptCursors.get(sessionId);
   if (cursor) {
     historyPromptCursors.set(sessionId, cursor);
     touchHistorySession(sessionId);
   } else historyPromptCursors.delete(sessionId);
+  if (previous !== cursor) setHistoryPromptCursorVersion((version) => version + 1);
 }
 
 export function cacheSessionHistoryPage(
@@ -239,11 +244,11 @@ export function clearSessionMessageWindowState(sessionId: string) {
 }
 
 export function resetSessionMessageWindowForRefetch(sessionId: string) {
-  clearSessionMessageWindowStateInternal(sessionId);
-  pendingMessageWindowResets.add(sessionId);
+  clearSessionMessageWindowStateInternal(sessionId, true);
 }
 
 export function isSessionMessageWindowResetPending(sessionId: string): boolean {
+  getSessionMessageWindowStateVersion(sessionId);
   return pendingMessageWindowResets.has(sessionId);
 }
 
@@ -337,16 +342,16 @@ function pruneHistoryPageCache() {
   }
 }
 
-function clearSessionMessageWindowStateInternal(sessionId: string) {
+function clearSessionMessageWindowStateInternal(sessionId: string, resetPending = false) {
   invalidateSessionMessageWindowRequests(sessionId);
   messageSnapshotMutationRevisions.delete(sessionId);
   messageWindowStateVersions.set(sessionId, ++nextMessageWindowStateVersion);
-  setMessageWindowStateVersion((version) => version + 1);
   historyCursors.delete(sessionId);
   historyPromptCursors.delete(sessionId);
   consumedHistoryCursors.delete(sessionId);
   consumedHistoryPromptCursors.delete(sessionId);
-  pendingMessageWindowResets.delete(sessionId);
+  if (resetPending) pendingMessageWindowResets.add(sessionId);
+  else pendingMessageWindowResets.delete(sessionId);
   historySessionRecency.delete(sessionId);
   const removedPages = prefetchedHistoryPages.delete(sessionId);
   loadedMessagesBySession.delete(sessionId);
@@ -372,6 +377,7 @@ function clearSessionMessageWindowStateInternal(sessionId: string) {
     return next;
   });
   if (removedPages) setPrefetchedHistoryVersion((version) => version + 1);
+  setMessageWindowStateVersion((version) => version + 1);
 }
 
 function clearHistoryPageRecency(sessionId: string) {

@@ -108,6 +108,84 @@ test('frame analysis retains early blanks and missing glyphs after later correct
   assert.equal(result.retained.nodeChanges[0].from, 1);
   assert.equal(result.retained.nodeChanges[0].to, 2);
 });
+test('retained text verdict needs post-prepend comparisons; earlier mismatches stay diagnostic', async () => {
+  const width = 600,
+    height = 700;
+  const good = { width, height, data: new Uint8Array(width * height * 3).fill(20) };
+  for (const [left, top] of [
+    [20, 120],
+    [20, 300],
+  ]) {
+    for (let y = top; y < top + 10; y++)
+      for (let x = left; x < left + 100; x++) {
+        if ((x + y) % 3 === 0) good.data.fill(200, (y * width + x) * 3, (y * width + x) * 3 + 3);
+      }
+  }
+  const blank = { ...good, data: new Uint8Array(good.data.length).fill(20) };
+  const samples = Array.from({ length: 12 }, (_, i) => ({
+    epoch: i * 100,
+    label: 'first-top',
+    top: 1000,
+    viewport: { x: 0, y: 0, width, height },
+    stickyOccluders: [],
+    markers: [
+      {
+        node: 1,
+        row: 'retained',
+        text: 'painted marker',
+        rect: { x: 20, y: 120, width: 100, height: 10 },
+        styles: [{ opacity: '1', visibility: 'visible', display: 'block' }],
+      },
+    ],
+  }));
+  const frames = samples.slice(0, -1).map((_, i) => ({
+    file: String(i),
+    metadata: { timestamp: (i * 100 + 50) / 1000, deviceWidth: width, deviceHeight: height },
+  }));
+  const analyze = (prependEpoch, blanks) =>
+    analyzeNativePaint(
+      frames,
+      samples,
+      { x: 0, y: 0 },
+      async (file) => (blanks.includes(file) ? blank : good),
+      prependEpoch,
+      { decode: async (value) => value, firstMoveEpoch: 250, referenceDeadline: 250 }
+    );
+
+  // No verified prepend coverage: pre-prepend mismatches cannot decide the verdict.
+  const uncovered = await analyze(Infinity, ['3', '4']);
+  assert.equal(uncovered.cold.verdict, 'FAIL');
+  assert.deepEqual(
+    uncovered.cold.failures.map((f) => f.file),
+    ['3', '4']
+  );
+  assert.equal(uncovered.retained.prependChecks, 0);
+  assert.equal(uncovered.retained.verdict, 'BLOCKED');
+  assert.deepEqual(uncovered.retained.failures, []);
+  assert.deepEqual(
+    uncovered.retained.prePrependMismatches.map((f) => f.file),
+    ['3', '4']
+  );
+  assert.ok(uncovered.retained.prePrependMismatches.every((f) => !f.afterPrepend));
+
+  // Verified post-prepend retention passes; the earlier diagnostics are kept.
+  const retained = await analyze(650, ['3', '4']);
+  assert.equal(retained.cold.verdict, 'FAIL');
+  assert.ok(retained.retained.prependChecks > 2);
+  assert.equal(retained.retained.verdict, 'PASS');
+  assert.deepEqual(
+    retained.retained.prePrependMismatches.map((f) => f.file),
+    ['3', '4']
+  );
+
+  // A post-prepend miss still fails, flagged when its reference already mismatched.
+  const lost = await analyze(650, ['3', '4', '8']);
+  assert.equal(lost.retained.verdict, 'FAIL');
+  assert.deepEqual(
+    lost.retained.failures.map((f) => [f.file, f.afterPrepend, f.referenceMismatchedBeforePrepend]),
+    [['8', true, true]]
+  );
+});
 test('text eligibility uses the actual opaque sticky footprint, not hit testing or a fixed inset', () => {
   const marker = {
     rect: { x: 20, y: 120, width: 100, height: 16 },
