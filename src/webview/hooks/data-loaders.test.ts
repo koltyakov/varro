@@ -1914,6 +1914,99 @@ describe('data loaders', () => {
     expect(clearQueuedMessagesForSession).not.toHaveBeenCalled();
   });
 
+  it('keeps in-use subagents of a listed moved conversation that the catalog never lists', async () => {
+    const worktree = '/repo/.worktrees/chat';
+    const transfer = { originDirectory: '/repo', available: true };
+    const moved = { ...session('moved'), directory: worktree, transfer };
+    const child = { ...session('child'), directory: worktree, parentID: 'moved' };
+    const grandchild = { ...session('grandchild'), directory: worktree, parentID: 'child' };
+    const movedAway = { ...session('moved-away'), directory: '/elsewhere', parentID: 'moved' };
+    const otherWorktree = '/repo/.worktrees/other';
+    const inactive = { ...session('inactive'), directory: otherWorktree, transfer };
+    const asking = { ...session('asking'), directory: otherWorktree, parentID: 'inactive' };
+    const idle = { ...session('idle'), directory: otherWorktree, parentID: 'inactive' };
+    const ordinaryParent = { ...session('ordinary'), directory: '/repo' };
+    const staleChild = { ...session('stale-child'), directory: '/repo', parentID: 'ordinary' };
+    let currentSessions = [
+      moved,
+      child,
+      grandchild,
+      movedAway,
+      inactive,
+      asking,
+      idle,
+      ordinaryParent,
+      staleChild,
+    ];
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => ({ items: [moved, inactive, ordinaryParent], hasMore: false }),
+        getSessions: () => currentSessions,
+        getActiveSessionId: () => 'grandchild',
+        getQuestions: () => [{ id: 'question-1', sessionID: 'asking', questions: [] }],
+        applySessions: (sessions) => {
+          currentSessions = sessions;
+        },
+      })
+    );
+
+    await operations.loadSessions();
+    flushSolid();
+
+    // The active conversation's subagents and a subagent with a pending question stay; one that
+    // left the conversation's location, an idle subagent elsewhere, and an ordinary listed
+    // session's stale child are pruned when the complete catalog omits them.
+    expect(currentSessions.map((item) => item.id)).toEqual([
+      'moved',
+      'inactive',
+      'ordinary',
+      'child',
+      'grandchild',
+      'asking',
+    ]);
+  });
+
+  it('keeps the same-folder chain to pending prompts of an inactive moved conversation', async () => {
+    const worktree = '/repo/.worktrees/a';
+    const movedA = {
+      ...session('moved-a'),
+      directory: worktree,
+      transfer: { originDirectory: '/repo', available: true },
+    };
+    // `parent-a` has no prompt of its own but links the questioning grandchild to its tree.
+    const parentA = { ...session('parent-a'), directory: worktree, parentID: 'moved-a' };
+    const asking = { ...session('asking'), directory: worktree, parentID: 'parent-a' };
+    const approving = { ...session('approving'), directory: worktree, parentID: 'moved-a' };
+    const idle = { ...session('idle'), directory: worktree, parentID: 'moved-a' };
+    const strayOwner = { ...session('stray-owner'), directory: '/elsewhere', parentID: 'moved-a' };
+    const conversationB = { ...session('conversation-b'), directory: '/repo' };
+    let currentSessions = [movedA, parentA, asking, approving, idle, strayOwner, conversationB];
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => ({ items: [movedA, conversationB], hasMore: false }),
+        getSessions: () => currentSessions,
+        getActiveSessionId: () => 'conversation-b',
+        getQuestions: () => [{ id: 'question-1', sessionID: 'asking', questions: [] }],
+        getPendingPermissionSessionIds: () => ['approving', 'stray-owner'],
+        applySessions: (sessions) => {
+          currentSessions = sessions;
+        },
+      })
+    );
+
+    await operations.loadSessions();
+    flushSolid();
+
+    // A pending owner outside the conversation's location is not kept through it.
+    expect(currentSessions.map((item) => item.id)).toEqual([
+      'moved-a',
+      'conversation-b',
+      'parent-a',
+      'asking',
+      'approving',
+    ]);
+  });
+
   it('does not prune any cached project history or queues when every folder is missing', async () => {
     const worktree = { ...session('worktree'), directory: '/other-worktree' };
     let currentSessions = [worktree];

@@ -135,6 +135,8 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       getSessionWorkspaceMatch: vi.fn(() => true),
       isSessionInWorkspace: vi.fn(() => true),
       workspaceScopeFor: vi.fn(() => 'folder' as const),
+      sessionLineageFor: vi.fn((sessionID: string) => [sessionID]),
+      pending: new Map(),
       markSessionBusy: vi.fn((sessionID: string) => ({ sessionID, id: 1 })),
       beginPendingAttentionReconciliation: vi.fn((kind: 'permission' | 'question') => ({
         kind,
@@ -1091,6 +1093,54 @@ describe('transferred session authorization', () => {
       proxy.dispose();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it('lets a subagent inherit only its verified conversation grant in the same directory', async () => {
+    const { proxy, callbacks, state, moved } = createWorktreeProxy();
+    // `unplaced` has a known parent but no recorded location of its own.
+    const directories = new Map<string, string | undefined>([
+      ['child', moved.directory],
+      ['grandchild', moved.directory],
+      ['stray', '/worktrees/other'],
+      ['unplaced', undefined],
+    ]);
+    vi.mocked(callbacks.sessionState.sessionLineageFor).mockImplementation((sessionID) =>
+      sessionID === 'grandchild'
+        ? ['grandchild', 'child', moved.id]
+        : directories.has(sessionID)
+          ? [sessionID, moved.id]
+          : [sessionID]
+    );
+    vi.mocked(callbacks.sessionState.getSessionWorkspaceMatch).mockImplementation(
+      (sessionID, workspacePath) => {
+        if (!directories.has(sessionID)) return true;
+        const directory = directories.get(sessionID);
+        return directory === undefined ? undefined : directory === workspacePath;
+      }
+    );
+    expect(proxy.isSessionCatalogEventAuthorized('child', moved.directory)).toBe(false);
+
+    await proxy.authorizeSessionDirectory(moved.id, moved.directory);
+    expect(proxy.isSessionCatalogInventoryAuthorized('child', moved.directory)).toBe(true);
+    expect(proxy.isSessionCatalogInventoryAuthorized('grandchild', moved.directory)).toBe(true);
+    expect(proxy.getAuthorizedSessionOwningRoot('child')).toBe('/repo');
+    expect(proxy.isSessionCatalogInventoryAuthorized('stray', '/worktrees/other')).toBe(false);
+    expect(proxy.isSessionCatalogInventoryAuthorized('child', '/worktrees/other')).toBe(false);
+    expect(proxy.isSessionCatalogInventoryAuthorized('unplaced')).toBe(false);
+
+    // Closing the conversation's origin folder revokes its subagents' inherited grant.
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'repo', path: '/repo' },
+      { name: 'other', path: '/other' },
+    ];
+    state.roots = ['/other'];
+    expect(proxy.isSessionCatalogInventoryAuthorized('child', moved.directory)).toBe(false);
+    state.roots = ['/repo'];
+    expect(proxy.isSessionCatalogInventoryAuthorized('child', moved.directory)).toBe(true);
+
+    // Revoking the conversation revokes its subagents with it.
+    proxy.invalidateSessionCatalog();
+    expect(proxy.isSessionCatalogInventoryAuthorized('child', moved.directory)).toBe(false);
   });
 
   it.each([

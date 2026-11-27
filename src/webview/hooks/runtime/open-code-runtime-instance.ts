@@ -1,5 +1,5 @@
 import { storePath } from '@solidjs/signals';
-import { createEffect, createSignal, onSettled, untrack } from 'solid-js';
+import { createEffect, createSignal, flush, onSettled, untrack } from 'solid-js';
 import type {
   QuestionAnswer,
   AutoApproveJudgeReference,
@@ -496,6 +496,21 @@ function isPermissionSessionKnown(sessionId: string): boolean {
     if (Object.hasOwn(appStore.state.sessionPermissionModes, currentSessionId)) return true;
     visited.add(currentSessionId);
 
+    const session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+    if (!session) return false;
+    currentSessionId = session.parentID;
+  }
+
+  return true;
+}
+
+/** Whether every session row from this session through its root is loaded. */
+function isQuestionSessionPlaced(sessionId: string): boolean {
+  const visited = new Set<string>();
+  let currentSessionId: string | undefined = sessionId;
+
+  while (currentSessionId && !visited.has(currentSessionId)) {
+    visited.add(currentSessionId);
     const session = appStore.state.sessions.find((item) => item.id === currentSessionId);
     if (!session) return false;
     currentSessionId = session.parentID;
@@ -1240,7 +1255,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let permissionSynchronization: { ready: Promise<void>; complete: Promise<void> } | null = null;
   let initializationOperation: Promise<void> | null = null;
   let startupStatusSnapshot: { workspace: number; snapshot: SessionStatusSnapshot } | null = null;
-  const permissionSessionSyncs = new Map<string, Promise<void>>();
+  const permissionSessionSyncs = new Map<string, Promise<Session>>();
+  const questionSessionSyncs = new Set<string>();
   const hiddenRestoredPermissions = new Map<
     string,
     { permission: Permission; workspacePath: string | null }
@@ -1331,8 +1347,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     publishSessionModel,
   });
 
-  const { applySessions, clearDeletedSessionState, hideDeletedSessionTree, upsertSession } =
-    sessionLifecycleOperations;
+  const {
+    applySessions,
+    clearDeletedSessionState,
+    hideDeletedSessionTree,
+    upsertSession,
+    upsertSessionChain,
+  } = sessionLifecycleOperations;
 
   async function deleteSessionImmediately(id: string, options?: { directory?: string }) {
     await client.varro.session.deleteImmediately(id, {
@@ -1429,6 +1450,27 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   function useOpenCode() {
     onSettled(() => untrack(hideAutomaticallyHandledRestoredPermissions));
+    // A question from a subagent this view has not loaded, such as a moved conversation's child
+    // after a reload, renders only once that session joins its conversation tree.
+    createEffect(
+      () => [
+        ...new Set(
+          appStore.state.questions
+            .map((question) => question.sessionID)
+            .filter((sessionId) => !isQuestionSessionPlaced(sessionId))
+        ),
+      ],
+      (sessionIds) => {
+        for (const sessionId of sessionIds) {
+          if (questionSessionSyncs.has(sessionId)) continue;
+          questionSessionSyncs.add(sessionId);
+          void untrack(() => ensureQuestionSessionPlaced(sessionId))
+            // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Session reads may reject with arbitrary thrown values.
+            .catch((error: unknown) => logError('question.session', error))
+            .finally(() => questionSessionSyncs.delete(sessionId));
+        }
+      }
+    );
     createEffect(
       getEffectiveComposerSessionId,
       (sessionId) => {
@@ -1989,13 +2031,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
-  function syncPermissionSession(sessionId: string): Promise<void> {
+  /** Reads one session for ancestry resolution; concurrent callers share the request. */
+  function readAncestrySession(sessionId: string): Promise<Session> {
     const existing = permissionSessionSyncs.get(sessionId);
     if (existing) return existing;
 
-    const generation = workspaceGeneration;
-    const sessionSync = sessionSyncOperations.syncSession(sessionId, {
-      shouldApply: () => generation === workspaceGeneration,
+    const sessionSync = client.session.get(sessionId, {
+      directory: getSessionDirectory(sessionId),
     });
     permissionSessionSyncs.set(sessionId, sessionSync);
     void sessionSync.then(
@@ -2013,22 +2055,55 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     return sessionSync;
   }
 
-  async function ensurePermissionSessionKnown(sessionId: string): Promise<void> {
+  function ensurePermissionSessionKnown(sessionId: string): Promise<void> {
+    // A saved mode is enough to choose how a permission is handled.
+    return loadSessionAncestry(
+      sessionId,
+      (currentSessionId) => Object.hasOwn(appStore.state.sessionPermissionModes, currentSessionId),
+      'permission'
+    );
+  }
+
+  /** Placing a question in its conversation tree needs every session row through the root. */
+  function ensureQuestionSessionPlaced(sessionId: string): Promise<void> {
+    return loadSessionAncestry(sessionId, () => false, 'question');
+  }
+
+  async function loadSessionAncestry(
+    sessionId: string,
+    isResolvedAt: (sessionId: string) => boolean,
+    kind: 'permission' | 'question'
+  ): Promise<void> {
     const ancestryResolution = (async () => {
+      const generation = workspaceGeneration;
       const visited = new Set<string>();
+      const fetched: Session[] = [];
       let currentSessionId: string | undefined = sessionId;
 
       while (currentSessionId && !visited.has(currentSessionId)) {
-        if (Object.hasOwn(appStore.state.sessionPermissionModes, currentSessionId)) return;
         visited.add(currentSessionId);
 
-        let session = appStore.state.sessions.find((item) => item.id === currentSessionId);
-        if (!session) {
-          await syncPermissionSession(currentSessionId);
-          session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+        const loaded = appStore.state.sessions.find((item) => item.id === currentSessionId);
+        if (loaded) {
+          if (isResolvedAt(currentSessionId)) break;
+          currentSessionId = loaded.parentID;
+          continue;
         }
-        currentSessionId = session?.parentID;
+        // Follow the fetched record: the store admits a subagent outside an open folder only
+        // after its parent is loaded, so an unloaded grandchild's chain must come from the reads.
+        // Keep reading past a session whose mode is already saved: until the chain reaches a
+        // loaded row, its subagents cannot be admitted, and mode resolution could not find that
+        // saved mode through them.
+        const session = await readAncestrySession(currentSessionId);
+        if (generation !== workspaceGeneration) return;
+        fetched.push(session);
+        currentSessionId = session.parentID;
       }
+      // Another walk may have admitted sessions in this batch; commit those before reading the
+      // store, and commit this chain before the next walk reads it.
+      flush();
+      upsertSessionChain(fetched.toReversed());
+      flush();
     })();
     let timeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -2037,7 +2112,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         ancestryResolution,
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => {
-            reject(new Error(`Timed out resolving permission session ancestry for ${sessionId}`));
+            reject(new Error(`Timed out resolving ${kind} session ancestry for ${sessionId}`));
           }, AUTO_APPROVE_JUDGE_TIMEOUT_MS);
         }),
       ]);

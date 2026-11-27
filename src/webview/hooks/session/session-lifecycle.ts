@@ -148,6 +148,9 @@ export class SessionLifecycleOperations {
     removeDeletedSessionTree(this.lifecycleDeps, id, sessions);
 
   readonly upsertSession = (session: Session) => upsertSession(this.lifecycleDeps, session);
+
+  readonly upsertSessionChain = (chain: readonly Session[]) =>
+    upsertSessionChain(this.lifecycleDeps, chain);
 }
 
 export function normalizeProjectPath(path: string | null | undefined): string | null {
@@ -319,16 +322,50 @@ export function upsertSession(deps: LifecycleDependencies, session: Session) {
     }
     return;
   }
-  if (
-    !existing &&
-    !isSessionInOpenWorkspace(session, deps.getOpenWorkspacePaths(), deps.getCurrentWorkspacePath())
-  ) {
-    return;
-  }
+  if (!existing && !isNewSessionAdmitted(deps, session, sessions)) return;
 
   applySessions(deps, [session, ...sessions.filter((item) => item.id !== session.id)]);
 
   if (session.id === activeSessionId && !showSessionPicker) {
     deps.markSessionSeen(session.id, session.time.updated);
   }
+}
+
+/**
+ * A new session belongs in this view when it is in an open folder, or when it is a subagent of
+ * a conversation the view already lists. A subagent may run in that conversation's worktree or
+ * moved location rather than an open folder, but it starts in its parent's location, so one
+ * elsewhere is not admitted through its parent.
+ */
+function isNewSessionAdmitted(
+  deps: LifecycleDependencies,
+  session: Session,
+  sessions: readonly Session[]
+) {
+  const parent = session.parentID
+    ? sessions.find((item) => item.id === session.parentID)
+    : undefined;
+  return (
+    Boolean(parent && isSameWorkspacePath(parent.directory, session.directory)) ||
+    isSessionInOpenWorkspace(session, deps.getOpenWorkspacePaths(), deps.getCurrentWorkspacePath())
+  );
+}
+
+/**
+ * Upserts an ancestor-first chain of fetched sessions in one store update, so each subagent is
+ * admitted against the parent added just before it. Archived sessions are not added.
+ */
+export function upsertSessionChain(deps: LifecycleDependencies, chain: readonly Session[]) {
+  const { sessions } = deps.getState();
+  const known = [...sessions];
+  const admitted = new Map<string, Session>();
+  for (const session of chain) {
+    if (isNumber(session.time.archived)) continue;
+    const existing = known.some((item) => item.id === session.id);
+    if (!existing && !isNewSessionAdmitted(deps, session, known)) continue;
+    admitted.set(session.id, session);
+    if (!existing) known.push(session);
+  }
+  if (admitted.size === 0) return;
+  applySessions(deps, [...admitted.values(), ...sessions.filter((item) => !admitted.has(item.id))]);
 }

@@ -18,7 +18,7 @@ import type {
   ProviderLimitStatus,
   RecycleBinEntry,
 } from '../../shared/protocol';
-import { getRelativePathWithinWorkspace } from '../../shared/workspace-path';
+import { getRelativePathWithinWorkspace, isSameWorkspacePath } from '../../shared/workspace-path';
 import { formatStartupAddonFailures, withStartupDeadline } from '../../shared/startup';
 import type { StartupAddonFailure } from '../../shared/startup';
 import type {
@@ -106,6 +106,10 @@ export function createStateBoundDataLoaderOperations(deps: {
     listQuestions: () => client.question.list(),
     setQuestions: permissionsStore.setQuestions,
     getQuestions: () => appStore.state.questions,
+    getPendingPermissionSessionIds: () =>
+      appStore.state.permissions.flatMap((permission) =>
+        permissionsStore.getPermissionGroupMembers(permission).map((member) => member.sessionID)
+      ),
     listAgents: () => client.agent.list(),
     getSelectedAgent: () => appStore.state.selectedAgent,
     getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
@@ -168,6 +172,8 @@ export function createDataLoaderOperations(deps: {
   listQuestions(): Promise<QuestionRequest[]>;
   setQuestions(questions: QuestionRequest[]): void;
   getQuestions(): QuestionRequest[];
+  /** Sessions owning visible permission prompts, including grouped members. */
+  getPendingPermissionSessionIds?(): string[];
   listAgents(): Promise<Agent[]>;
   getSelectedAgent(): string | null;
   getSelectedAgentForSession(sessionId: string): string | null;
@@ -617,18 +623,62 @@ export function createDataLoaderOperations(deps: {
                     getRelativePathWithinWorkspace(session.directory, directory) !== null
                 )
               : incomplete);
-          const nextSessions =
-            hasMore || incomplete
-              ? [
-                  ...reconciled,
-                  ...deps
-                    .getSessions()
-                    .filter(
-                      (session) =>
-                        !retainedIds.has(session.id) && shouldRetainPreviousSession(session)
-                    ),
-                ]
-              : reconciled;
+          // The catalog lists a moved conversation through its retained link, but never the
+          // subagents running in its destination. Keep loaded ones only while they still share
+          // the conversation's current location and are in use: the active conversation, or the
+          // chain to a session with a pending question or permission. A pruned owner would let
+          // its permission read as unknown and show in whichever conversation is open, and a
+          // pruned intermediate parent would detach a pending prompt from its tree. Others are
+          // pruned and loaded again on demand, so a missed deletion or move does not survive
+          // every reload.
+          const listedById = new Map(reconciled.map((session) => [session.id, session]));
+          const previousById = new Map(deps.getSessions().map((session) => [session.id, session]));
+          /** Omitted loaded sessions from this one up to its listed moved conversation. */
+          const movedConversationChainFor = (sessionId: string) => {
+            const chain: Session[] = [];
+            const visited = new Set<string>();
+            let current = previousById.get(sessionId);
+            while (current?.parentID && !visited.has(current.id)) {
+              visited.add(current.id);
+              chain.push(current);
+              const listed = listedById.get(current.parentID);
+              if (listed) {
+                return listed.transfer &&
+                  chain.every((item) => isSameWorkspacePath(item.directory, listed.directory))
+                  ? { rootId: listed.id, chain }
+                  : undefined;
+              }
+              current = previousById.get(current.parentID);
+            }
+            return undefined;
+          };
+          const activeSessionId = deps.getActiveSessionId();
+          const activeRootId =
+            (activeSessionId && movedConversationChainFor(activeSessionId)?.rootId) ??
+            activeSessionId;
+          const pendingChainIds = new Set(
+            [
+              ...deps.getQuestions().map((question) => question.sessionID),
+              ...(deps.getPendingPermissionSessionIds?.() ?? []),
+            ].flatMap(
+              (sessionId) =>
+                movedConversationChainFor(sessionId)?.chain.map((session) => session.id) ?? []
+            )
+          );
+          const isMovedConversationSubagent = (session: Session) =>
+            pendingChainIds.has(session.id) ||
+            Boolean(activeRootId && movedConversationChainFor(session.id)?.rootId === activeRootId);
+          const nextSessions = [
+            ...reconciled,
+            ...deps
+              .getSessions()
+              .filter(
+                (session) =>
+                  !retainedIds.has(session.id) &&
+                  (((hasMore || incomplete) && shouldRetainPreviousSession(session)) ||
+                    isMovedConversationSubagent(session))
+              ),
+          ];
           if (!hasMore) {
             const nextSessionIds = new Set(nextSessions.map((session) => session.id));
             for (const current of deps.getSessions()) {

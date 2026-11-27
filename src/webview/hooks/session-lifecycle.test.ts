@@ -82,6 +82,7 @@ import {
   SessionLifecycleOperations,
   sortSessions,
   upsertSession,
+  upsertSessionChain,
 } from './session/session-lifecycle';
 import { fixture } from '../test-fixtures';
 
@@ -570,6 +571,41 @@ describe('session-lifecycle helpers', () => {
     upsertSession(setup.deps, session('session-new', '/other', 3));
 
     expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);
+  });
+
+  it('upsertSession adds a new subagent of a listed conversation outside the workspace root', () => {
+    const setup = createDeps({
+      activeSessionId: 'moved',
+      sessions: [session('moved', '/repo/.worktrees/chat', 1)],
+      workspace: '/repo',
+    });
+
+    upsertSession(setup.deps, session('child', '/repo/.worktrees/chat', 2, 'moved'));
+    upsertSession(setup.deps, session('orphan', '/repo/.worktrees/chat', 3, 'unknown-parent'));
+    // Subagents start in their parent's location; one elsewhere is not admitted through it.
+    upsertSession(setup.deps, session('stray', '/elsewhere', 4, 'moved'));
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['child', 'moved']);
+  });
+
+  it('upsertSessionChain admits a cold subagent chain ancestor-first in one update', () => {
+    const worktree = '/repo/.worktrees/chat';
+    const setup = createDeps({
+      activeSessionId: 'moved',
+      sessions: [session('moved', worktree, 1)],
+      workspace: '/repo',
+    });
+
+    upsertSessionChain(setup.deps, [
+      session('child', worktree, 2, 'moved'),
+      session('grandchild', worktree, 3, 'child'),
+    ]);
+    upsertSessionChain(setup.deps, [
+      session('stray', '/elsewhere', 4, 'moved'),
+      session('stray-child', '/elsewhere', 5, 'stray'),
+    ]);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['grandchild', 'child', 'moved']);
   });
 
   it('removeDeletedSessionTree removes tree and clears state', () => {

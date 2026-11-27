@@ -17,11 +17,7 @@ import type {
 import { normalizeSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
 import { parseNativeForm } from '../shared/native-form';
-import {
-  getRelativePathWithinWorkspace,
-  isSameWorkspacePath,
-  normalizeWorkspaceIdentity,
-} from '../shared/workspace-path';
+import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 
 export type PendingAttentionKind = 'permission' | 'question';
@@ -471,37 +467,16 @@ export class SessionStateManager {
     workspaceDirectory: string | null | undefined,
     workspaceDirectoryIsOpenRoot: boolean
   ): boolean {
-    if (
+    return (
       this.isSessionVisibleInWorkspace(
         sessionID,
         workspacePath,
         workspaceDirectory,
         workspaceDirectoryIsOpenRoot
+      ) ||
+      Boolean(
+        workspacePath && this.listener.isCatalogSessionInWorkspace?.(sessionID, workspacePath)
       )
-    ) {
-      return true;
-    }
-    // Sessions in git worktrees/subfolders of a workspace folder never match a
-    // workspace folder exactly, and the session catalog may not list them
-    // either when the server scopes locations strictly to the exact
-    // directory. Without a containment fallback, boot states and reconnect
-    // replays drop their pending questions and permission asks, and the
-    // gated tool calls hang forever.
-    const directory = this.getSessionMetadata(this.sessionDirectories, sessionID);
-    if (directory) {
-      if (workspacePath && getRelativePathWithinWorkspace(directory, workspacePath) !== null) {
-        return true;
-      }
-      if (
-        workspaceDirectory &&
-        getRelativePathWithinWorkspace(directory, workspaceDirectory) !== null &&
-        (!workspaceDirectoryIsOpenRoot || this.workspaceScopeFor(sessionID) === 'workspace')
-      ) {
-        return true;
-      }
-    }
-    return Boolean(
-      workspacePath && this.listener.isCatalogSessionInWorkspace?.(sessionID, workspacePath)
     );
   }
 

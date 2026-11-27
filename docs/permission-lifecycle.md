@@ -141,7 +141,15 @@ snapshots, and host attention (notifications, badge, status bar) must all use th
 root. A path-containment check alone is not enough, because it misses worktrees outside the folder
 and ignores the configured history scope. An exact open root wins over a catalog root that also
 contains the session, as with nested roots. Moving one conversation must not revoke another moved
-conversation's verified transfer. A transfer is verified through the open folder it moved out of,
+conversation's verified transfer. A subagent child inherits its nearest authorized ancestor's catalog
+root only while its own recorded location is that ancestor's exact directory and the root is open,
+so a moved conversation's subagent prompts reach the same view as the conversation's own. A pending
+snapshot that cannot conclusively resolve such a child's ancestry is rejected rather than read as
+resolution. A view that receives a question for a session it has not loaded loads every session row
+through the root, even when a saved permission mode already settles that session's permission
+handling, so the prompt joins the conversation tree. Transcript events
+for a non-exact session follow the same catalog root as its attention; a moved root's own events
+keep the retained-transfer route to every view that lists the link. A transfer is verified through the open folder it moved out of,
 never another open root; concurrent verifications share one canonical lookup, and a confirmed
 mismatch is not retried for a minute. After a full catalog invalidation or reload, an attention
 event for a visible retained link re-verifies it before routing, and the pending snapshot

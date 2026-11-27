@@ -125,6 +125,16 @@ async function createProjectAttentionHarness() {
           },
         ];
       }
+      if (method === 'GET' && url.pathname === '/session/project-session') {
+        const directory = (options as { directory?: string } | undefined)?.directory;
+        if (directory !== PROJECT_SESSION_DIRECTORY) throw new Error('404 Session not found');
+        return {
+          id: 'project-session',
+          projectID: 'project-1',
+          directory: PROJECT_SESSION_DIRECTORY,
+          title: 'Project session',
+        };
+      }
       if (
         method === 'POST' &&
         (path === '/permission/project-permission/reply' ||
@@ -153,17 +163,36 @@ async function createProjectAttentionHarness() {
   return { eventHandler, posted, provider, server };
 }
 
-/** Opens `/repo` and moves `moved-session` (plus `laterMoves`) into worktrees under it. */
+/**
+ * Opens `/repo` and moves `moved-session` (plus `laterMoves`) into worktrees under it.
+ * `children` are subagent sessions the server reports under their parent, in the moved
+ * conversation's worktree unless a directory is given.
+ */
 async function createMovedConversationHarness(
   options: {
     laterMoves?: readonly string[];
     roots?: readonly string[];
     workspacePath?: string;
+    children?: Readonly<
+      Record<
+        string,
+        {
+          parentID: string;
+          directory?: string;
+          metadata?: Record<string, unknown>;
+          /** Answers canonical reads with another session's record. */
+          malformed?: boolean;
+          /** Holds canonical reads until it settles. */
+          gate?: Promise<void>;
+        }
+      >
+    >;
   } = {}
 ) {
   let canonicalLookupError: Error | undefined;
   const worktreeFor = (sessionID: string) => `/repo/.worktrees/${sessionID}`;
   const worktree = worktreeFor('moved-session');
+  let pendingQuestions: unknown[] = [];
   const permission = {
     id: 'moved-permission',
     sessionID: 'moved-session',
@@ -183,21 +212,28 @@ async function createMovedConversationHarness(
     request: vi.fn(
       async (method: string, path: string, _body?: unknown, requestOptions?: unknown) => {
         const directory = (requestOptions as { directory?: string } | undefined)?.directory;
-        const sessionMatch = path.match(/^\/session\/([^/?]+)$/);
+        const sessionMatch = path.match(/^\/session\/([^/?]+)(?:\?.*)?$/);
         if (method === 'GET' && sessionMatch) {
           if (canonicalLookupError) throw canonicalLookupError;
           const sessionID = decodeURIComponent(sessionMatch[1]!);
-          return {
-            id: sessionID,
-            directory: worktreeFor(sessionID),
+          const child = options.children?.[sessionID];
+          await child?.gate;
+          const session = {
+            id: child?.malformed ? 'unrelated-session' : sessionID,
+            directory: child ? (child.directory ?? worktree) : worktreeFor(sessionID),
             projectID: 'project-1',
-            title: 'Moved chat',
+            title: child ? 'Subagent' : 'Moved chat',
             version: '2',
             time: { created: 1, updated: 2 },
           };
+          return child
+            ? { ...session, parentID: child.parentID, metadata: child.metadata ?? {} }
+            : session;
         }
         if (method === 'GET' && path === '/permission')
           return directory === worktree ? pending : [];
+        if (method === 'GET' && path === '/question')
+          return directory === worktree ? pendingQuestions : [];
         return [];
       }
     ),
@@ -244,6 +280,9 @@ async function createMovedConversationHarness(
     worktree,
     setPending: (requests: unknown[]) => {
       pending = requests;
+    },
+    setPendingQuestions: (requests: unknown[]) => {
+      pendingQuestions = requests;
     },
     failCanonicalLookups: (error: Error | undefined) => {
       canonicalLookupError = error;
@@ -458,22 +497,6 @@ describe('SidebarProvider permission replay', () => {
       directory: worktree,
       payload: { type: 'permission.asked', properties: permission },
     });
-    // With containment-based delivery the ask renders immediately, before any
-    // reply can arrive — no late catalog re-authorization is needed.
-    await vi.waitFor(() =>
-      expect(posted).toContainEqual(
-        expect.objectContaining({
-          type: 'server/event',
-          payload: expect.objectContaining({ type: 'permission.asked' }),
-        })
-      )
-    );
-    const askDeliveries = () =>
-      posted.filter((message) => {
-        const record = message as { type?: string; payload?: { type?: string } };
-        return record.type === 'server/event' && record.payload?.type === 'permission.asked';
-      }).length;
-
     eventHandler({
       directory: worktree,
       payload: {
@@ -490,9 +513,12 @@ describe('SidebarProvider permission replay', () => {
         })
       )
     );
-    // The ask must not be resurrected after its reply: still exactly one ask
-    // delivery, the one that preceded the reply.
-    expect(askDeliveries()).toBe(1);
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'server/event',
+        payload: expect.objectContaining({ type: 'permission.asked' }),
+      })
+    );
   });
 
   it('rejects a cold snapshot only while a moved conversation cannot be verified', async () => {
@@ -578,6 +604,441 @@ describe('SidebarProvider permission replay', () => {
       })
     );
     expect(posted).toContainEqual({ type: 'api/response', payload: { id: 308, data: [] } });
+  });
+
+  it.each([
+    ['after its creation event', true],
+    ['before the host knows its ancestry', false],
+  ])('keeps a moved conversation subagent question actionable %s', async (_label, created) => {
+    const harness = await createMovedConversationHarness({
+      children: { 'child-session': { parentID: 'moved-session' } },
+    });
+    const { eventHandler, posted, provider, server, worktree } = harness;
+    if (created) {
+      eventHandler({
+        directory: worktree,
+        payload: {
+          type: 'session.created',
+          properties: {
+            info: {
+              id: 'child-session',
+              parentID: 'moved-session',
+              directory: worktree,
+              projectID: 'project-1',
+              title: 'Subagent',
+              time: { created: 3, updated: 3 },
+            },
+          },
+        },
+      });
+    }
+    posted.length = 0;
+    const question = { id: 'child-question', sessionID: 'child-session', questions: [] };
+
+    eventHandler({
+      directory: worktree,
+      payload: { type: 'question.asked', properties: question },
+    });
+    await vi.waitFor(() =>
+      expect(posted).toContainEqual({
+        type: 'server/event',
+        payload: { type: 'question.asked', properties: question, workspaceDirectory: worktree },
+      })
+    );
+
+    // A cold view has not loaded the subagent, so it reads it without a directory to place it
+    // in the conversation tree before the prompt can render.
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 309, method: 'GET', path: '/session/child-session' },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 309,
+        data: expect.objectContaining({ id: 'child-session', parentID: 'moved-session' }),
+      },
+    });
+
+    // The snapshot must keep it too, or the webview would read the omission as resolution.
+    harness.setPendingQuestions([question]);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 310, method: 'GET', path: '/question' },
+    });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 310, data: [expect.objectContaining({ id: 'child-question' })] },
+    });
+
+    server.request.mockClear();
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 311,
+        method: 'POST',
+        path: '/question/child-question/reply',
+        body: { answers: [['Yes']] },
+      },
+    });
+    expect(server.request).toHaveBeenCalledWith(
+      'POST',
+      '/question/child-question/reply',
+      { answers: [['Yes']] },
+      expect.objectContaining({ directory: worktree })
+    );
+  });
+
+  it('streams and loads a moved conversation subagent transcript in its origin view', async () => {
+    const harness = await createMovedConversationHarness();
+    const { eventHandler, posted, provider, worktree } = harness;
+    eventHandler({
+      directory: worktree,
+      payload: {
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-session', parentID: 'moved-session', directory: worktree },
+        },
+      },
+    });
+    posted.length = 0;
+    const message = {
+      type: 'message.updated',
+      properties: {
+        info: { id: 'child-message', sessionID: 'child-session', role: 'assistant' },
+      },
+    };
+
+    eventHandler({ directory: worktree, payload: message });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 312,
+        method: 'GET',
+        path: `/session/child-session/message?directory=${encodeURIComponent(worktree)}`,
+      },
+    });
+
+    expect(posted).toContainEqual({
+      type: 'server/event',
+      payload: { ...message, workspaceDirectory: worktree },
+    });
+    expect(posted).toContainEqual({ type: 'api/response', payload: { id: 312, data: [] } });
+  });
+
+  it('does not extend a moved conversation grant to a child in another directory', async () => {
+    const harness = await createMovedConversationHarness({
+      children: { 'stray-session': { parentID: 'moved-session', directory: '/elsewhere' } },
+    });
+    const { eventHandler, posted, provider } = harness;
+    eventHandler({
+      directory: '/elsewhere',
+      payload: {
+        type: 'session.created',
+        properties: {
+          info: { id: 'stray-session', parentID: 'moved-session', directory: '/elsewhere' },
+        },
+      },
+    });
+    posted.length = 0;
+
+    eventHandler({
+      directory: '/elsewhere',
+      payload: {
+        type: 'permission.asked',
+        properties: { id: 'stray-permission', sessionID: 'stray-session', permission: 'bash' },
+      },
+    });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 313,
+        method: 'GET',
+        path: `/session/stray-session/message?directory=${encodeURIComponent('/elsewhere')}`,
+      },
+    });
+
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'server/event',
+        payload: expect.objectContaining({ type: 'permission.asked' }),
+      })
+    );
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 313, error: expect.any(String) },
+    });
+  });
+
+  it('drops a cold subagent ask once its ancestry reveals an internal helper session', async () => {
+    const harness = await createMovedConversationHarness({
+      children: {
+        'judge-session': {
+          parentID: 'moved-session',
+          metadata: { varroInternal: 'permission-judge' },
+        },
+      },
+    });
+    const { eventHandler, posted, server, worktree } = harness;
+    posted.length = 0;
+
+    eventHandler({
+      directory: worktree,
+      payload: {
+        type: 'question.asked',
+        properties: { id: 'judge-question', sessionID: 'judge-session', questions: [] },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(server.request).toHaveBeenCalledWith(
+        'GET',
+        '/session/judge-session',
+        undefined,
+        expect.objectContaining({ directory: '/repo' })
+      )
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'server/event',
+        payload: expect.objectContaining({ type: 'question.asked' }),
+      })
+    );
+  });
+
+  it('rejects a snapshot whose subagent ancestry cannot be confirmed', async () => {
+    const harness = await createMovedConversationHarness({
+      children: { 'child-session': { parentID: 'moved-session', malformed: true } },
+    });
+    const { eventHandler, posted, provider, worktree } = harness;
+    const question = { id: 'child-question', sessionID: 'child-session', questions: [] };
+    // The host has seen the child in the conversation's directory but not its parent.
+    eventHandler({
+      directory: worktree,
+      payload: { type: 'question.asked', properties: question },
+    });
+    harness.setPendingQuestions([question]);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 314, method: 'GET', path: '/question' },
+    });
+
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 314, error: expect.stringContaining('ancestry') },
+    });
+  });
+
+  it('rejects a snapshot-only subagent request whose first lookup returns another session', async () => {
+    const harness = await createMovedConversationHarness({
+      children: { 'child-session': { parentID: 'moved-session', malformed: true } },
+    });
+    const { posted, provider } = harness;
+    harness.setPendingQuestions([
+      { id: 'child-question', sessionID: 'child-session', questions: [] },
+    ]);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 315, method: 'GET', path: '/question' },
+    });
+
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 315, error: expect.stringContaining('child-session') },
+    });
+  });
+
+  it('reads an unloaded project worktree session without a directory from its owning view', async () => {
+    const { posted, provider, server } = await createProjectAttentionHarness();
+    posted.length = 0;
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 316, method: 'GET', path: '/session/project-session' },
+    });
+
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: { id: 316, data: expect.objectContaining({ id: 'project-session' }) },
+    });
+    expect(server.request).toHaveBeenCalledWith(
+      'GET',
+      expect.stringContaining('/session/project-session'),
+      undefined,
+      expect.objectContaining({ directory: PROJECT_SESSION_DIRECTORY })
+    );
+  });
+
+  it.each([
+    ['', false],
+    [' when the chain above it cannot be read', true],
+  ])(
+    're-verifies a separately moved parent before routing its subagent question%s',
+    async (_label, unreadableTop) => {
+      const parentWorktree = '/repo/.worktrees/parent-session';
+      const children = {
+        'parent-session': { parentID: 'top-session', directory: parentWorktree },
+        'child-session': { parentID: 'parent-session', directory: parentWorktree },
+      };
+      const harness = await createMovedConversationHarness({
+        laterMoves: ['parent-session'],
+        children: unreadableTop
+          ? { ...children, 'top-session': { parentID: 'unknown-session', malformed: true } }
+          : children,
+      });
+      const { eventHandler, posted } = harness;
+      // A reload drops transfer verification but keeps the retained link.
+      harness.invalidateCatalogs();
+      posted.length = 0;
+      const question = { id: 'child-question', sessionID: 'child-session', questions: [] };
+
+      eventHandler({
+        directory: parentWorktree,
+        payload: { type: 'question.asked', properties: question },
+      });
+
+      await vi.waitFor(() =>
+        expect(posted).toContainEqual({
+          type: 'server/event',
+          payload: {
+            type: 'question.asked',
+            properties: question,
+            workspaceDirectory: parentWorktree,
+          },
+        })
+      );
+    }
+  );
+
+  it('discards a subagent ancestry read that lands after its origin folder closes', async () => {
+    const roots = ['/repo', '/other'];
+    let openGate = () => {};
+    const gate = { promise: new Promise<void>((resolve) => (openGate = resolve)) };
+    const harness = await createMovedConversationHarness({
+      roots,
+      children: { 'child-session': { parentID: 'moved-session', gate: gate.promise } },
+    });
+    const { eventHandler, provider, server, worktree } = harness;
+    eventHandler({
+      directory: worktree,
+      payload: {
+        type: 'question.asked',
+        properties: { id: 'child-question', sessionID: 'child-session', questions: [] },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(server.request).toHaveBeenCalledWith(
+        'GET',
+        '/session/child-session',
+        undefined,
+        expect.objectContaining({ directory: '/repo' })
+      )
+    );
+
+    roots.splice(roots.indexOf('/repo'), 1);
+    openGate();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const { sessionState } = provider as unknown as {
+      sessionState: { sessionLineageFor(id: string): string[] };
+    };
+    expect(sessionState.sessionLineageFor('child-session')).toEqual(['child-session']);
+  });
+
+  it('streams a moved conversation subagent transcript only into its origin view', async () => {
+    const harness = await createMovedConversationHarness({
+      roots: ['/repo', '/other'],
+      workspacePath: '/other',
+    });
+    const { eventHandler, posted, worktree } = harness;
+    eventHandler({
+      directory: worktree,
+      payload: {
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-session', parentID: 'moved-session', directory: worktree },
+        },
+      },
+    });
+    posted.length = 0;
+
+    eventHandler({
+      directory: worktree,
+      payload: {
+        type: 'session.next.agent.switched',
+        properties: { sessionID: 'child-session', agent: 'build' },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The `/other` view does not own the conversation, unlike the moved root's own events.
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'server/event',
+        payload: expect.objectContaining({ type: 'session.next.agent.switched' }),
+      })
+    );
+  });
+
+  it('streams a subagent agent switch into the view that owns the moved conversation', async () => {
+    const harness = await createMovedConversationHarness();
+    const { eventHandler, posted, worktree } = harness;
+    eventHandler({
+      directory: worktree,
+      payload: {
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-session', parentID: 'moved-session', directory: worktree },
+        },
+      },
+    });
+    posted.length = 0;
+    const switched = {
+      type: 'session.next.agent.switched',
+      properties: { sessionID: 'child-session', agent: 'build' },
+    };
+
+    eventHandler({ directory: worktree, payload: switched });
+
+    expect(posted).toContainEqual({
+      type: 'server/event',
+      payload: { ...switched, workspaceDirectory: worktree },
+    });
+  });
+
+  it('streams a project worktree transcript only into the view whose catalog lists it', async () => {
+    const { eventHandler, posted } = await createProjectAttentionHarness();
+    posted.length = 0;
+    const listed = {
+      type: 'message.part.updated',
+      properties: {
+        part: { id: 'part-1', sessionID: 'project-session', messageID: 'msg-1', type: 'text' },
+      },
+    };
+    const unlisted = {
+      type: 'message.part.updated',
+      properties: {
+        part: { id: 'part-2', sessionID: 'unlisted-session', messageID: 'msg-2', type: 'text' },
+      },
+    };
+
+    eventHandler({ directory: PROJECT_SESSION_DIRECTORY, payload: listed });
+    eventHandler({ directory: '/repo/packages/unlisted', payload: unlisted });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(posted).toContainEqual({
+      type: 'server/event',
+      payload: { ...listed, workspaceDirectory: PROJECT_SESSION_DIRECTORY },
+    });
+    expect(posted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'server/event',
+        payload: expect.objectContaining({ properties: unlisted.properties }),
+      })
+    );
   });
 
   it('replays pending permission requests after the webview becomes ready', async () => {

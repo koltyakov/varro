@@ -15,9 +15,38 @@ explanation.
 - A known transferred conversation can also follow a closed folder, including a non-Git folder or a
   saved worktree, without opening another VS Code window or widening history scope. Its retained,
   server-scoped link must belong to an open origin. Through that origin the host verifies the canonical
-  session ID, project and exact destination. The resulting grant applies only to that conversation,
-  not other sessions, the destination's catalog, or general filesystem access. A missing link or failed
-  canonical verification leaves the conversation read-only. Verification never loads destination config.
+  session ID, project and exact destination. The resulting grant applies only to that conversation
+  and its subagent sessions in that exact destination, not other sessions, the destination's catalog,
+  or general filesystem access. A missing link or failed canonical verification leaves the
+  conversation read-only. Verification never loads destination config.
+- OpenCode starts a subagent in its parent's location, so a child inherits its nearest verified
+  ancestor's grant only while its own recorded location is that same directory and the
+  conversation's catalog root is still open. A child with an unknown location inherits nothing. The
+  grant is derived on each read, so revoking the conversation revokes its children. Its transcript,
+  prompts, pending snapshots, and replies follow the conversation's origin view. A view that owns a
+  session through its catalog root, by its own grant or an inherited one, may read that session's
+  metadata without a directory, so a prompt that arrives before the session is loaded can join its
+  conversation tree. The webview accepts a new session whose parent it already lists in the same
+  directory, even outside an open folder. To place a prompt from an unloaded subagent, it reads the
+  whole missing parent chain until it reaches a loaded session, even past a session whose
+  permission mode is already saved, and adds that chain ancestor-first in one update, so a cold
+  grandchild is not rejected before its parent arrives and still inherits the saved mode. Store
+  writes are committed before and after each chain, so concurrent lookups for sibling prompts do
+  not overwrite each other. The catalog lists a moved conversation through its link but never its
+  subagents, so a complete session-list reload keeps loaded subagents of the active conversation,
+  and the whole chain from the conversation to any session with a pending question or permission,
+  while every hop still shares the conversation's current directory. Dropping a pending
+  permission's owner would let the prompt read as unknown and appear in whichever conversation is
+  open. Other subagents are pruned and loaded again on demand.
+- When the host has not seen a child's ancestry, as after a reload, it reads canonical sessions by ID
+  through the open origin, only for a directory an existing grant or visible retained link already
+  owns. A record for a different session ID is never recorded. Responses that arrive after a catalog
+  invalidation or after the origin folder closes are discarded. A malformed response, a cycle, or the
+  read bound leaves the ancestry unresolved, which rejects a pending snapshot instead of omitting the
+  child's requests. Live recovery re-verifies the nearest ancestor whose own move left a visible link
+  to the child's directory, which need not be the top-level conversation; the walk stops there, so the
+  chain above that ancestor need not load. An ask whose verification
+  identifies an internal helper or recycled session is dropped before routing.
 - V2 project and worktree inventories are native bare arrays, not session-style `data` envelopes.
   When a fresh session snapshot confirms availability, the webview clears an older read-only marker
   for that same destination. A marker for a different, newer move remains blocked.

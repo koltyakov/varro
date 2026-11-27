@@ -848,6 +848,300 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it.each([
+    ['without', false],
+    ['with', true],
+  ])(
+    'places an unknown subagent question under its parent %s a saved mode',
+    async (_label, saved) => {
+      const serverEventHandlers = captureServerEventHandlers();
+      configureReconciliationMocks();
+      clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+      clientMocks.questionList.mockResolvedValue([
+        {
+          id: 'question-child',
+          sessionID: 'child-1',
+          questions: [{ header: 'Pick', question: 'Which one?', options: [] }],
+        },
+      ]);
+      clientMocks.sessionGet.mockResolvedValue({ ...session('child-1'), parentID: 'session-1' });
+
+      const { stateModule, hookModule } = await loadModules();
+      // Prompt placement must read the same fresh store instance.
+      const { getStandaloneQuestionPrompts } =
+        await import('../components/message-list/pending-prompts');
+      flushSolid();
+      stateModule.setState(storePath('sessions', [session('session-1')]));
+      flushSolid();
+      // A saved mode settles permission handling but does not place the session in a tree.
+      if (saved) stateModule.setPermissionModeForSession('child-1', 'auto');
+      flushSolid();
+      const dispose = mountUseOpenCode(hookModule);
+      flushSolid();
+
+      try {
+        serverEventHandlers.get('server.connected')?.({});
+        flushSolid();
+        await vi.waitFor(() => {
+          flushSolid();
+          expect(stateModule.state.sessions).toContainEqual(
+            expect.objectContaining({ id: 'child-1', parentID: 'session-1' })
+          );
+        });
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', expect.anything());
+        flushSolid();
+        expect(getStandaloneQuestionPrompts([], stateModule.state.questions, 'session-1')).toEqual([
+          expect.objectContaining({ id: 'question-child', sessionID: 'child-1' }),
+        ]);
+      } finally {
+        dispose();
+        flushSolid();
+      }
+    }
+  );
+
+  it('places a cold grandchild question under a moved conversation outside the open folder', async () => {
+    const worktree = '/repo/.worktrees/chat';
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const moved = {
+      ...session('session-1'),
+      directory: worktree,
+      transfer: { originDirectory: '/repo', available: true },
+    };
+    clientMocks.sessionList.mockResolvedValue([moved]);
+    clientMocks.questionList.mockResolvedValue([
+      {
+        id: 'question-grandchild',
+        sessionID: 'grandchild-1',
+        questions: [{ header: 'Pick', question: 'Which one?', options: [] }],
+      },
+    ]);
+    clientMocks.sessionGet.mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'grandchild-1') {
+        return { ...session('grandchild-1'), directory: worktree, parentID: 'child-1' };
+      }
+      if (sessionId === 'child-1') {
+        return { ...session('child-1'), directory: worktree, parentID: 'session-1' };
+      }
+      throw new Error(`Unexpected session: ${sessionId}`);
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    const { getStandaloneQuestionPrompts } =
+      await import('../components/message-list/pending-prompts');
+    flushSolid();
+    stateModule.setState(storePath('sessions', [moved]));
+    flushSolid();
+    const dispose = mountUseOpenCode(hookModule);
+    flushSolid();
+    // The real admission guard: only `/repo` is open, so a subagent is admitted through its parent.
+    stateModule.setState((draft) => {
+      draft.editorContext = {
+        ...draft.editorContext,
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
+      };
+    });
+    flushSolid();
+
+    try {
+      serverEventHandlers.get('server.connected')?.({});
+      flushSolid();
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(stateModule.state.sessions.map((item) => item.id)).toEqual(
+          expect.arrayContaining(['session-1', 'child-1', 'grandchild-1'])
+        );
+      });
+      flushSolid();
+      expect(getStandaloneQuestionPrompts([], stateModule.state.questions, 'session-1')).toEqual([
+        expect.objectContaining({ id: 'question-grandchild', sessionID: 'grandchild-1' }),
+      ]);
+    } finally {
+      dispose();
+      flushSolid();
+    }
+  });
+
+  it('keeps a moved conversation permission out of another conversation after a reload', async () => {
+    const worktree = '/repo/.worktrees/a';
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const movedA = {
+      ...session('moved-a'),
+      directory: worktree,
+      transfer: { originDirectory: '/repo', available: true },
+    };
+    const childA = { ...session('child-a'), directory: worktree, parentID: 'moved-a' };
+    const conversationB = { ...session('conversation-b'), directory: '/repo' };
+    // Omitted from the catalog, so its removal shows that the complete reload applied.
+    const stale = { ...session('stale'), directory: '/repo' };
+    clientMocks.sessionList.mockResolvedValue([movedA, conversationB]);
+    clientMocks.permissionList.mockResolvedValue([
+      { ...permissionListItem('perm-a'), sessionID: 'child-a' },
+    ]);
+    // A pruned owner must not be restored by a re-read before the assertion.
+    clientMocks.sessionGet.mockReturnValue(new Promise(() => {}));
+
+    const { stateModule, hookModule } = await loadModules();
+    const { getStandalonePermissionPrompts } =
+      await import('../components/message-list/pending-prompts');
+    flushSolid();
+    stateModule.setState(storePath('sessions', [movedA, childA, conversationB, stale]));
+    stateModule.setState(storePath('activeSessionId', 'conversation-b'));
+    stateModule.addPermission({ ...permission('perm-a'), sessionID: 'child-a' });
+    flushSolid();
+    const dispose = mountUseOpenCode(hookModule);
+    flushSolid();
+
+    try {
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(stateModule.state.sessions.map((item) => item.id)).not.toContain('stale');
+      });
+      flushSolid();
+      expect(stateModule.state.sessions.map((item) => item.id)).toContain('child-a');
+      expect(
+        getStandalonePermissionPrompts([], stateModule.state.permissions, 'conversation-b')
+      ).toEqual([]);
+      expect(getStandalonePermissionPrompts([], stateModule.state.permissions, 'moved-a')).toEqual([
+        expect.objectContaining({ id: 'perm-a', sessionID: 'child-a' }),
+      ]);
+    } finally {
+      dispose();
+      flushSolid();
+    }
+  });
+
+  it('attaches an unloaded parent with a saved mode so its subagent inherits that mode', async () => {
+    const worktree = '/repo/.worktrees/chat';
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const judge = deferred<{ decision: 'ask'; reason: string }>();
+    const moved = {
+      ...session('session-1'),
+      directory: worktree,
+      transfer: { originDirectory: '/repo', available: true },
+    };
+    clientMocks.sessionList.mockResolvedValue([moved]);
+    clientMocks.sessionGet.mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'grandchild-1') {
+        return { ...session('grandchild-1'), directory: worktree, parentID: 'child-1' };
+      }
+      if (sessionId === 'child-1') {
+        return { ...session('child-1'), directory: worktree, parentID: 'session-1' };
+      }
+      throw new Error(`Unexpected session: ${sessionId}`);
+    });
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    flushSolid();
+    stateModule.setState(storePath('sessions', [moved]));
+    flushSolid();
+    // Only the unloaded intermediate parent has a saved mode; the conversation root has none.
+    stateModule.setPermissionModeForSession('child-1', 'auto');
+    flushSolid();
+    const dispose = mountUseOpenCode(hookModule);
+    flushSolid();
+    stateModule.setState((draft) => {
+      draft.editorContext = {
+        ...draft.editorContext,
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
+      };
+    });
+    flushSolid();
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: { ...permissionListItem('perm-grandchild'), sessionID: 'grandchild-1' },
+      });
+      flushSolid();
+
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
+      });
+      expect(stateModule.state.sessions.map((item) => item.id)).toEqual(
+        expect.arrayContaining(['session-1', 'child-1', 'grandchild-1'])
+      );
+      expect(stateModule.getPermissionModeForSession('grandchild-1')).toBe('auto');
+    } finally {
+      judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      dispose();
+      flushSolid();
+    }
+  });
+
+  it('places sibling subagent questions whose session reads resolve together', async () => {
+    const worktree = '/repo/.worktrees/chat';
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const moved = {
+      ...session('session-1'),
+      directory: worktree,
+      transfer: { originDirectory: '/repo', available: true },
+    };
+    clientMocks.sessionList.mockResolvedValue([moved]);
+    clientMocks.questionList.mockResolvedValue(
+      ['child-1', 'child-2'].map((sessionID) => ({
+        id: `question-${sessionID}`,
+        sessionID,
+        questions: [{ header: 'Pick', question: 'Which one?', options: [] }],
+      }))
+    );
+    const reads = deferred<void>();
+    clientMocks.sessionGet.mockImplementation(async (sessionId: string) => {
+      await reads.promise;
+      return { ...session(sessionId), directory: worktree, parentID: 'session-1' };
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    const { getStandaloneQuestionPrompts } =
+      await import('../components/message-list/pending-prompts');
+    flushSolid();
+    stateModule.setState(storePath('sessions', [moved]));
+    flushSolid();
+    const dispose = mountUseOpenCode(hookModule);
+    flushSolid();
+    stateModule.setState((draft) => {
+      draft.editorContext = {
+        ...draft.editorContext,
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
+      };
+    });
+    flushSolid();
+
+    try {
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1', expect.anything());
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-2', expect.anything());
+      });
+      // Both walks finish in the same turn, before the store commits either write.
+      reads.resolve();
+      await vi.waitFor(() => {
+        flushSolid();
+        expect(stateModule.state.sessions.map((item) => item.id)).toEqual(
+          expect.arrayContaining(['session-1', 'child-1', 'child-2'])
+        );
+      });
+      expect(
+        getStandaloneQuestionPrompts([], stateModule.state.questions, 'session-1').map(
+          (question) => question.id
+        )
+      ).toEqual(expect.arrayContaining(['question-child-1', 'question-child-2']));
+    } finally {
+      dispose();
+      flushSolid();
+    }
+  });
+
   it('ignores a late judge result after the permission is no longer pending', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();

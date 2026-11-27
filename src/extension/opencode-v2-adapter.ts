@@ -805,19 +805,6 @@ export class OpenCodeV2Adapter {
         this.permissions.delete(id);
       } else {
         if (!this.forms.has(id)) await this.request('GET', '/question', undefined, options);
-        if (!this.forms.has(id) && isString(input.sessionID)) {
-          // The server scopes pending forms to the exact location directory, so
-          // the directory-scoped list above can miss sessions in git
-          // worktrees/subfolders even though their prompt is still live. Fall
-          // back to the session-scoped form route before giving up.
-          const sessionForms = await data<FormInfo[]>(
-            'GET',
-            `/api/session/${encodeURIComponent(input.sessionID)}/form`
-          );
-          for (const form of sessionForms) {
-            if (form.sessionID !== 'global') this.forms.set(form.id, form);
-          }
-        }
         const form = this.forms.get(id);
         if (!form) throw new Error('OpenCode question is no longer pending');
         if (this.formResponses.has(id))

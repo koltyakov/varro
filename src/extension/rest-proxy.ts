@@ -121,6 +121,9 @@ const SESSION_SUMMARY_CACHE_LIMIT = 200;
 const CURRENT_PROJECT_CACHE_TTL_MS = 2_000;
 const SESSION_EVENT_CATALOG_REFRESH_MS = 1_000;
 const TRANSFER_VERIFICATION_MISS_TTL_MS = 60_000;
+const MAX_SESSION_ANCESTRY_LOOKUPS = 8;
+const SESSION_READ_PATH =
+  /^(?:\/session\/[^/]+(?:\/(?:message(?:\/[^/]+(?:\/part\/[^/]+)?)?|diff|todo))?|\/varro\/session\/[^/]+\/(?:diff-summary|location))$/;
 const SESSION_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_MESSAGE_FALLBACK_MAX_BYTES = 256 * 1024 * 1024;
 const PERMANENT_DELETION_TOMBSTONE_LIMIT = 256;
@@ -349,6 +352,8 @@ export interface RestProxyCallbacks {
     | 'getSessionWorkspaceMatch'
     | 'isSessionInWorkspace'
     | 'workspaceScopeFor'
+    | 'sessionLineageFor'
+    | 'pending'
     | 'markSessionBusy'
     | 'beginPendingAttentionReconciliation'
     | 'finishPendingAttentionReconciliation'
@@ -494,6 +499,7 @@ export class RestProxy {
   private authorizedSessionDirectories = new Map<string, AuthorizedSessionDirectory>();
   private readonly authorizedTransferredSessions = new Map<string, AuthorizedSessionDirectory>();
   private readonly transferVerifications = new Map<string, Promise<boolean>>();
+  private readonly sessionAncestryLookups = new Map<string, Promise<boolean>>();
   /** Catalog sessions whose directories each workspace pending snapshot queried. */
   private readonly pendingAttentionCoverage = new WeakMap<
     readonly unknown[],
@@ -656,7 +662,7 @@ export class RestProxy {
   }
 
   isSessionCatalogEventAuthorized(sessionID: string, directory?: string): boolean {
-    const authorized = this.authorizedSessionDirectories.get(sessionID);
+    const authorized = this.getAuthorizedSession(sessionID);
     if (authorized) {
       return !directory || isSameWorkspacePath(authorized.directory, directory);
     }
@@ -674,7 +680,7 @@ export class RestProxy {
   }
 
   isSessionCatalogInventoryAuthorized(sessionID: string, directory?: string): boolean {
-    const authorized = this.authorizedSessionDirectories.get(sessionID);
+    const authorized = this.getAuthorizedSession(sessionID);
     return Boolean(
       authorized && (!directory || isSameWorkspacePath(authorized.directory, directory))
     );
@@ -869,8 +875,193 @@ export class RestProxy {
   ): Promise<boolean> {
     return (
       (await this.refreshCatalogEventAuthorization(sessionIDs, directory)) ||
-      this.restoreTransferredEventAuthorization(sessionIDs, directory)
+      (await this.restoreTransferredEventAuthorization(sessionIDs, directory)) ||
+      this.restoreInheritedEventAuthorization(sessionIDs, directory)
     );
+  }
+
+  /**
+   * A subagent child inherits its conversation's grant (see `getAuthorizedSession`). When the
+   * host has not seen the child's ancestry, as after a reload, learn it from canonical sessions
+   * read through the open origin, then re-verify a moved conversation before routing.
+   */
+  private async restoreInheritedEventAuthorization(
+    sessionIDs: readonly string[],
+    directory?: string
+  ): Promise<boolean> {
+    const origin = directory ? this.getGrantedDirectoryOrigin(directory) : undefined;
+    if (!directory || !origin || sessionIDs.length === 0) return false;
+    try {
+      for (const sessionID of sessionIDs) {
+        if (this.isSessionCatalogInventoryAuthorized(sessionID, directory)) continue;
+        if (!(await this.learnSessionAncestry(sessionID, origin))) return false;
+        // The nearest authorized ancestor may already suffice.
+        if (this.isSessionCatalogInventoryAuthorized(sessionID, directory)) continue;
+        // Otherwise re-verify the nearest ancestor whose own move left a visible link here; it
+        // need not be the top-level conversation.
+        const linkedAncestorID = this.callbacks.sessionState
+          .sessionLineageFor(sessionID)
+          .slice(1)
+          .find((ancestorID) => this.hasVisibleTransferLink(ancestorID, directory));
+        if (
+          !linkedAncestorID ||
+          !(await this.restoreTransferredEventAuthorization([linkedAncestorID], directory))
+        ) {
+          return false;
+        }
+        if (!this.isSessionCatalogInventoryAuthorized(sessionID, directory)) return false;
+      }
+      return true;
+    } catch (error) {
+      logger.warn(
+        `Could not resolve subagent session ancestry: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return false;
+    }
+  }
+
+  /**
+   * The open root through which an existing grant or a visible retained transfer link owns this
+   * exact directory. Ancestry is learned only for such directories, so unrelated server traffic
+   * never triggers canonical reads.
+   */
+  private getGrantedDirectoryOrigin(
+    directory: string
+  ): { directory: string; root: string } | undefined {
+    const roots = this.getOpenWorkspaceRoots();
+    const isOpen = (root: string) =>
+      roots.some((candidate) => isSameWorkspacePath(candidate, root));
+    for (const authorized of this.authorizedSessionDirectories.values()) {
+      if (isSameWorkspacePath(authorized.directory, directory) && isOpen(authorized.catalogRoot)) {
+        return { directory: authorized.directory, root: authorized.catalogRoot };
+      }
+    }
+    for (const root of roots) {
+      const link = this.callbacks
+        .getTransferredSessions?.([root])
+        .find((transfer) => isSameWorkspacePath(transfer.directory, directory));
+      if (link) return { directory: link.directory, root };
+    }
+    return undefined;
+  }
+
+  /** Whether an open root still shows this session's retained transfer link to `directory`. */
+  private hasVisibleTransferLink(sessionID: string, directory: string) {
+    return this.getOpenWorkspaceRoots().some((root) =>
+      this.callbacks
+        .getTransferredSessions?.([root])
+        .some((link) => link.id === sessionID && isSameWorkspacePath(link.directory, directory))
+    );
+  }
+
+  /** The granted directory origin that this session's own known location matches, if any. */
+  private getSessionGrantedDirectoryOrigin(sessionID: string) {
+    const candidates = [
+      ...[...this.authorizedSessionDirectories.values()].map((authorized) => authorized.directory),
+      ...(this.callbacks.getTransferredSessions?.(this.getOpenWorkspaceRoots()) ?? []).map(
+        (transfer) => transfer.directory
+      ),
+    ];
+    const directory = candidates.find(
+      (candidate) =>
+        this.callbacks.sessionState.getSessionWorkspaceMatch(sessionID, candidate) === true
+    );
+    return directory ? this.getGrantedDirectoryOrigin(directory) : undefined;
+  }
+
+  /**
+   * Reads canonical sessions through the open origin until the child's own location and its
+   * chain up to an authorized ancestor or a confirmed root are known. Resolves `false` when the
+   * walk is inconclusive, such as a malformed response, a cycle, the read bound, or a catalog
+   * invalidation, so callers never treat an unknown ancestry as unrelated. Concurrent callers
+   * share one walk.
+   */
+  private learnSessionAncestry(
+    sessionID: string,
+    origin: { directory: string; root: string }
+  ): Promise<boolean> {
+    const generation = this.sessionCatalogGeneration;
+    const key = [
+      generation,
+      sessionID,
+      normalizeWorkspaceIdentity(origin.directory) ?? origin.directory,
+      normalizeWorkspaceIdentity(origin.root) ?? origin.root,
+    ].join('\0');
+    let walk = this.sessionAncestryLookups.get(key);
+    if (!walk) {
+      const started = this.walkSessionAncestry(sessionID, origin, generation);
+      walk = started;
+      this.sessionAncestryLookups.set(key, started);
+      const forget = () => {
+        if (this.sessionAncestryLookups.get(key) === started)
+          this.sessionAncestryLookups.delete(key);
+      };
+      void started.then(forget, forget);
+    }
+    return walk;
+  }
+
+  private async walkSessionAncestry(
+    sessionID: string,
+    origin: { directory: string; root: string },
+    generation: number
+  ): Promise<boolean> {
+    const confirmed = new Set<string>();
+    const read = async (id: string) => {
+      this.requireOpenWorkspaceRoot(origin.root);
+      const record = asRecord(
+        await this.requestServer('GET', `/session/${encodeURIComponent(id)}`, undefined, {
+          directory: origin.root,
+          signal: AbortSignal.timeout(5_000),
+        })
+      );
+      if (
+        record?.id !== id ||
+        typeof record.directory !== 'string' ||
+        !normalizeWorkspaceIdentity(record.directory) ||
+        (record.parentID !== undefined && typeof record.parentID !== 'string')
+      ) {
+        return false;
+      }
+      // A response that lands after an invalidation, or after its origin folder closed, must not
+      // restore pruned or older session state.
+      if (
+        this.disposed ||
+        generation !== this.sessionCatalogGeneration ||
+        !this.getOpenWorkspaceRoots().some((root) => isSameWorkspacePath(root, origin.root))
+      ) {
+        return false;
+      }
+      this.rememberSessionPage([record], false, true);
+      confirmed.add(id);
+      return true;
+    };
+    const visited = new Set<string>();
+    let current = sessionID;
+    while (!visited.has(current) && visited.size < MAX_SESSION_ANCESTRY_LOOKUPS) {
+      // A visible retained link here is verified by the caller, so the chain above it need not load.
+      if (
+        current !== sessionID &&
+        (this.authorizedSessionDirectories.has(current) ||
+          this.hasVisibleTransferLink(current, origin.directory))
+      ) {
+        return true;
+      }
+      const ownLocationKnown =
+        current !== sessionID ||
+        this.callbacks.sessionState.getSessionWorkspaceMatch(current, origin.directory) !==
+          undefined;
+      const parentID = this.callbacks.sessionState.sessionLineageFor(current)[1];
+      // A missing parent is unknown until a canonical read confirms a root.
+      if (!confirmed.has(current) && (!ownLocationKnown || !parentID)) {
+        if (confirmed.size >= MAX_SESSION_ANCESTRY_LOOKUPS || !(await read(current))) return false;
+        continue;
+      }
+      visited.add(current);
+      if (!parentID) return true;
+      current = parentID;
+    }
+    return false;
   }
 
   // Catalog invalidation and reloads drop transfer verification. A retained transfer
@@ -1180,13 +1371,10 @@ export class RestProxy {
             .getTransferredSessions?.(this.getOpenWorkspaceRoots(), { includeHidden: true })
             .find((session) => session.id === directSessionID)
         : undefined;
-      const transferRead = Boolean(
-        transfer &&
+      const sessionRead =
         method === 'GET' &&
-        /^(?:\/session\/[^/]+(?:\/(?:message(?:\/[^/]+(?:\/part\/[^/]+)?)?|diff|todo))?|\/varro\/session\/[^/]+\/(?:diff-summary|location))$/.test(
-          new URL(payload.path, 'http://localhost').pathname
-        )
-      );
+        SESSION_READ_PATH.test(new URL(payload.path, 'http://localhost').pathname);
+      const transferRead = Boolean(transfer && sessionRead);
       if (
         transferRead &&
         transfer &&
@@ -1208,9 +1396,17 @@ export class RestProxy {
           'Could not verify the current location of this conversation. Refresh and try again.'
         );
       }
+      // A session the webview has not loaded yet, such as a subagent whose prompt arrived first,
+      // has no known directory there. A read from the view that owns it is scoped to its grant.
+      const authorizedRead =
+        directSessionID && sessionRead && !transfer && !requestedWorkspaceDirectory
+          ? this.getOwnedSessionReadGrant(directSessionID)
+          : undefined;
       let explicitWorkspaceDirectory: string | null = null;
       if (transferRead && transfer) {
         explicitWorkspaceDirectory = transfer.directory;
+      } else if (authorizedRead) {
+        explicitWorkspaceDirectory = authorizedRead.directory;
       } else if (requestedWorkspaceDirectory) {
         if (directSessionID) {
           explicitWorkspaceDirectory = this.requireAuthorizedSessionDirectory(
@@ -2035,8 +2231,7 @@ export class RestProxy {
         const sessionID = decodeURIComponent(locationMatch[1]!);
         if (this.isHiddenSession(sessionID)) throw new Error('404 Session not found');
         const root =
-          this.authorizedSessionDirectories.get(sessionID)?.catalogRoot ??
-          this.getOpenWorkspaceRoots()[0];
+          this.getAuthorizedSession(sessionID)?.catalogRoot ?? this.getOpenWorkspaceRoots()[0];
         const session = asRecord(
           await this.requestServer('GET', `/session/${encodeURIComponent(sessionID)}`, undefined, {
             directory: root,
@@ -2701,9 +2896,7 @@ export class RestProxy {
     }
     if (replyMatch?.[1]) request.permissionID = decodeURIComponent(replyMatch[1]);
     if (request.sessionID) {
-      request.workspaceDirectory = this.authorizedSessionDirectories.get(
-        request.sessionID
-      )?.catalogRoot;
+      request.workspaceDirectory = this.getAuthorizedSession(request.sessionID)?.catalogRoot;
     }
     if (!this.callbacks.isPermissionAutomationLeaseCurrent(lease, request)) {
       // An ownership handoff is expected; the webview hides this error from chat.
@@ -3335,7 +3528,14 @@ export class RestProxy {
     // whose current directory this snapshot queries.
     const workspacePath = this.getCurrentWorkspacePath();
     const coveredSessionIDs = new Set<string>();
-    for (const [sessionID, authorized] of this.authorizedSessionDirectories) {
+    // Pending child sessions inherit their parent's grant without an entry of their own.
+    const candidateSessionIDs = new Set([
+      ...this.authorizedSessionDirectories.keys(),
+      ...[...this.callbacks.sessionState.pending.values()].map((request) => request.sessionID),
+    ]);
+    for (const sessionID of candidateSessionIDs) {
+      const authorized = this.getAuthorizedSession(sessionID);
+      if (!authorized) continue;
       const identity = normalizeWorkspaceIdentity(authorized.directory);
       if (
         identity &&
@@ -4547,6 +4747,30 @@ export class RestProxy {
       normalizedWorkspacePath,
       true
     );
+    // A subagent child of a moved conversation inherits its grant once its ancestry is known.
+    // Its events route through that grant, so the snapshot must not omit it either; a failed or
+    // inconclusive ancestry walk rejects the snapshot rather than reading as resolution.
+    const unresolvedSessionIDs = new Set(
+      requests
+        .map((request) => request.sessionID)
+        .filter(
+          (sessionID) => !catalogSessionIDs.has(sessionID) && !visibleSessionIDs.has(sessionID)
+        )
+    );
+    await mapWithConcurrency(
+      [...unresolvedSessionIDs],
+      SESSION_VISIBILITY_LOOKUP_CONCURRENCY,
+      async (sessionID) => {
+        const origin = this.getSessionGrantedDirectoryOrigin(sessionID);
+        if (!origin) return;
+        if (!(await this.learnSessionAncestry(sessionID, origin))) {
+          throw new Error(`Could not resolve pending request session ancestry for ${sessionID}`);
+        }
+        if (this.isCatalogSessionInWorkspace(sessionID, normalizedWorkspacePath)) {
+          catalogSessionIDs.add(sessionID);
+        }
+      }
+    );
     return requests.filter(
       (request) =>
         catalogSessionIDs.has(request.sessionID) || visibleSessionIDs.has(request.sessionID)
@@ -4564,7 +4788,7 @@ export class RestProxy {
    * otherwise the root whose session catalog or verified transfer authorizes it.
    */
   getAuthorizedSessionOwningRoot(sessionID: string): string | undefined {
-    const authorized = this.authorizedSessionDirectories.get(sessionID);
+    const authorized = this.getAuthorizedSession(sessionID);
     if (!authorized) return undefined;
     return (
       this.callbacks.contextProvider.getOpenWorkspaceRoot(authorized.directory) ??
@@ -4779,7 +5003,7 @@ export class RestProxy {
   private resolvePendingAttentionReplyDirectory(requestID: string): string | null {
     const request = this.callbacks.resolvePendingAttentionRequest?.(requestID);
     if (!request) return null;
-    const authorized = this.authorizedSessionDirectories.get(request.sessionID);
+    const authorized = this.getAuthorizedSession(request.sessionID);
     if (
       authorized &&
       (!request.directory || isSameWorkspacePath(authorized.directory, request.directory))
@@ -4801,18 +5025,57 @@ export class RestProxy {
     sessionID: string,
     directory: string
   ): AuthorizedSessionDirectory {
-    const authorized = this.authorizedSessionDirectories.get(sessionID);
+    const authorized = this.getAuthorizedSession(sessionID);
     if (authorized && isSameWorkspacePath(authorized.directory, directory)) return authorized;
     const root = this.requireOpenWorkspaceRoot(directory);
     return { directory: root, catalogRoot: root };
   }
 
+  /**
+   * The grant for a directory-less session read: the session's own or inherited grant outside
+   * an open root, only when the requesting view owns the session through its catalog root.
+   */
+  private getOwnedSessionReadGrant(sessionID: string): AuthorizedSessionDirectory | undefined {
+    const grant = this.getAuthorizedSession(sessionID);
+    if (!grant || this.callbacks.contextProvider.getOpenWorkspaceRoot(grant.directory)) return;
+    return isSameWorkspacePath(
+      this.getAuthorizedSessionOwningRoot(sessionID),
+      this.getCurrentWorkspacePath()
+    )
+      ? grant
+      : undefined;
+  }
+
   private isAuthorizedSessionDirectory(sessionID: string, directory?: string) {
-    const authorizedDirectory = this.authorizedSessionDirectories.get(sessionID);
+    const authorizedDirectory = this.getAuthorizedSession(sessionID);
     return Boolean(
       authorizedDirectory &&
       (!directory || isSameWorkspacePath(authorizedDirectory.directory, directory))
     );
+  }
+
+  /**
+   * A session's own authorization, or else the grant of its nearest authorized ancestor. A
+   * subagent child of a catalog-authorized or moved conversation has no catalog row or transfer
+   * link of its own, but it runs in its parent's location, so it inherits that exact directory and
+   * catalog root. The child's own recorded location must match; a child with an unknown location
+   * or one known in another directory inherits nothing, and neither does any child once the
+   * conversation's catalog root closes. The grant is derived on every read, so revoking the
+   * ancestor also revokes its children.
+   */
+  private getAuthorizedSession(sessionID: string): AuthorizedSessionDirectory | undefined {
+    const authorized = this.authorizedSessionDirectories.get(sessionID);
+    if (authorized) return authorized;
+    for (const ancestorID of this.callbacks.sessionState.sessionLineageFor(sessionID).slice(1)) {
+      const ancestor = this.authorizedSessionDirectories.get(ancestorID);
+      if (!ancestor) continue;
+      return this.callbacks.sessionState.getSessionWorkspaceMatch(sessionID, ancestor.directory) ===
+        true &&
+        this.getOpenWorkspaceRoots().some((root) => isSameWorkspacePath(root, ancestor.catalogRoot))
+        ? ancestor
+        : undefined;
+    }
+    return undefined;
   }
 
   private withSessionWorkspaceScope<T extends Record<string, unknown>>(
@@ -5086,8 +5349,7 @@ export class RestProxy {
 
   private async moveSessionToRecycleBin(sessionID: string) {
     const directory =
-      this.authorizedSessionDirectories.get(sessionID)?.directory ??
-      this.requestWorkspaceDirectory.getStore();
+      this.getAuthorizedSession(sessionID)?.directory ?? this.requestWorkspaceDirectory.getStore();
     const sessions = (
       (await this.requestServer(
         'GET',
@@ -5193,8 +5455,12 @@ export class RestProxy {
     const path = this.buildScopedSessionPath(sessionID, workspaceDirectory);
     const session = await this.requestServer('GET', path);
     const record = asRecord(session);
-    if (record) this.rememberSessionPage([record], false);
-    return typeof record?.directory === 'string' ? record.directory : undefined;
+    // Another session's record says nothing about this one; leave its location unknown.
+    if (record?.id !== sessionID) return undefined;
+    this.rememberSessionPage([record], false);
+    return typeof record.directory === 'string' && normalizeWorkspaceIdentity(record.directory)
+      ? record.directory
+      : undefined;
   }
 
   private async resolveJudgeWorkspacePath(sessionID: string) {
