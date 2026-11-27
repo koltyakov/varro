@@ -1714,15 +1714,18 @@ export function MessageList() {
     }
 
     if (!correctBottom) return;
+    const canCorrectBottom = () =>
+      epoch === widthResizeEpoch &&
+      autoScroll() &&
+      !stickyNavigationOwnsScroll() &&
+      !editingMessage();
+    // The settled publication can mount rows from this timer task. Re-pin after their mount
+    // measurement so no task observes the followed transcript above its new bottom.
+    queueMicrotask(() => {
+      if (!disposed && canCorrectBottom()) performScroll({ immediate: true });
+    });
     requestAnimationFrame(() => {
-      if (
-        epoch !== widthResizeEpoch ||
-        !autoScroll() ||
-        stickyNavigationOwnsScroll() ||
-        editingMessage()
-      ) {
-        return;
-      }
+      if (!canCorrectBottom()) return;
       performScroll({ immediate: true });
       const sessionId = state.activeSessionId;
       if (sessionId) startFollowLoop(sessionId);

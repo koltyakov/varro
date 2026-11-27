@@ -112,7 +112,12 @@ test('keeps inline edit controls clear of the preceding sticky prompt', async ({
   await list.hover();
   await page.mouse.wheel(0, -1500);
   const sticky = page.locator('[data-sticky-msg-id]');
-  await expect(sticky).toBeVisible();
+  // A fixed delta can stop with the next prompt inside the sticky collision zone, which
+  // correctly hides the preview. Nudge upward until a prompt is pinned.
+  await expect(async () => {
+    if (!(await sticky.isVisible())) await page.mouse.wheel(0, -120);
+    await expect(sticky).toBeVisible({ timeout: 500 });
+  }).toPass({ timeout: 10_000 });
   const messageId = await sticky.getAttribute('data-sticky-msg-id');
   await sticky.click();
   const card = page.locator(`[data-msg-id="${messageId}"] .user-message-card`);
