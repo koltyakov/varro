@@ -622,6 +622,12 @@ Direct input acquires ownership only when it can affect the transcript:
 - Composer growth from wrapped text, new lines, or attachments immediately reconciles bottom-follow
   before paint, without easing. Detached readers retain their position. Later transcript growth keeps
   normal follow motion.
+- Unannounced composer shrinkage, such as an active-editor chip leaving when its tab closes, is
+  handled by the container observer. Layout has already clamped the bottom-followed viewport by then.
+  Commit the lost-space reserve spacer before restoring the previous bottom; a scroll write against
+  the uncommitted range keeps the clamp for a painted frame. This runs only on container delivery,
+  so the spacer's track resize is still delivered in the same frame. `scroll-auto-scroll.spec.ts`
+  samples the closing and reopening transitions from a later observer, before each paint.
 - Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
   reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
   height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.

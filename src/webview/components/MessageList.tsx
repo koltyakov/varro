@@ -6294,6 +6294,9 @@ export function MessageList() {
 
     appendBottomReserveTarget = previousBottomTarget;
     setAppendBottomReserve((reserve) => reserve + previousBottomTarget - currentBottomTarget);
+    // Layout already clamped scrollTop when the scrollport grew. Commit the spacer before
+    // restoring it; writing against the uncommitted range keeps the clamp for a painted frame.
+    flush();
     setPreservedScrollTop(previousBottomTarget);
   }
 

@@ -380,6 +380,125 @@ test.describe('auto-scroll', () => {
     });
   }
 
+  for (const detached of [false, true]) {
+    test(`keeps the transcript fixed when closing the active editor shrinks the composer, detached=${detached}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 504, height: 900 });
+      await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+      await expect(page.getByRole('textbox', { name: 'Message composer' })).toBeVisible();
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+      const context = (activeFile?: { path: string; relativePath: string; language: string }) => ({
+        type: 'context/update',
+        payload: {
+          workspacePath: '/workspace/varro',
+          activeFile: activeFile ?? null,
+          selection: null,
+          diagnostics: [],
+        },
+      });
+      const chip = page.locator('.chat-attachments-container .chat-attachment-chip');
+      const openEditor = async () => {
+        await postWebviewMessage(
+          page,
+          context({
+            path: '/workspace/varro/comment-pr70.md',
+            relativePath: 'comment-pr70.md',
+            language: 'markdown',
+          })
+        );
+        await expect(chip).toBeVisible();
+        await waitForAnimationFrames(page, 8);
+      };
+      const closeEditor = async () => {
+        await postWebviewMessage(page, context());
+        await expect(chip).toHaveCount(0);
+        await waitForAnimationFrames(page, 8);
+      };
+      await openEditor();
+      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+      if (detached) {
+        // Read from just above the bottom, closer than the chip's height.
+        const bounds = (await page.locator('.interactive-list').boundingBox())!;
+        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        await page.mouse.wheel(0, -10);
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(5);
+        await waitForAnimationFrames(page, 8);
+        const distance = await getListDistanceFromBottom(page);
+        expect(distance).toBeGreaterThan(5);
+        expect(distance).toBeLessThan(20);
+      }
+
+      await page.evaluate(() => {
+        const list = document.querySelector<HTMLElement>('.interactive-list')!;
+        const bounds = list.getBoundingClientRect();
+        const row = [...list.querySelectorAll<HTMLElement>('[data-msg-id]')].find((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.height > 0 && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+        });
+        if (!row) throw new Error('No nonempty message row is fully visible in the transcript');
+        const samples: Array<{ top: number; clientHeight: number; observed: boolean }> = [];
+        const errors: string[] = [];
+        const onError = (event: ErrorEvent) => errors.push(event.message);
+        window.addEventListener('error', onError);
+        const state = window as typeof window & {
+          composerShrinkResult?: { samples: typeof samples; errors: string[] };
+          stopComposerShrinkSampling?: () => void;
+        };
+        state.composerShrinkResult = { samples, errors };
+        const sample = (observed: boolean) =>
+          samples.push({
+            top: row.getBoundingClientRect().top,
+            clientHeight: list.clientHeight,
+            observed,
+          });
+        sample(false);
+        // Created after the list's observer, so each callback sees that frame's corrections
+        // before paint. Animation-frame callbacks run before layout and miss them.
+        const observer = new ResizeObserver(() => sample(true));
+        observer.observe(list);
+        observer.observe(list.querySelector('.interactive-list-track')!);
+        state.stopComposerShrinkSampling = () => {
+          observer.disconnect();
+          window.removeEventListener('error', onError);
+          sample(false);
+        };
+      });
+      // Reopening consumes the reserve; repeated round trips must not accumulate blank space.
+      await closeEditor();
+      await openEditor();
+      await closeEditor();
+      const { samples, errors } = await page.evaluate(() => {
+        const state = window as typeof window & {
+          composerShrinkResult?: {
+            samples: Array<{ top: number; clientHeight: number; observed: boolean }>;
+            errors: string[];
+          };
+          stopComposerShrinkSampling?: () => void;
+        };
+        state.stopComposerShrinkSampling?.();
+        return state.composerShrinkResult ?? { samples: [], errors: [] };
+      });
+      expect(errors).toEqual([]);
+      expect(
+        samples.some((sample) => sample.observed && sample.clientHeight > samples[0]!.clientHeight),
+        JSON.stringify(samples)
+      ).toBe(true);
+      expect(
+        samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
+        JSON.stringify(samples)
+      ).toBe(true);
+      const reserve = await page
+        .locator('.append-scroll-bottom-reserve')
+        .evaluateAll((elements) =>
+          elements.map((element) => element.getBoundingClientRect().height)
+        );
+      expect(reserve.reduce((total, height) => total + height, 0)).toBeLessThanOrEqual(
+        samples.at(-1)!.clientHeight - samples[0]!.clientHeight + 1
+      );
+    });
+  }
+
   test('starts at the bottom of the conversation', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
