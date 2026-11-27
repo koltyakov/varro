@@ -5668,13 +5668,25 @@ export function MessageList() {
     );
   }
 
+  function hasUserCardAfterSummary(summary: HTMLElement) {
+    // Steering admission can group the running tool after its card has already mounted below the
+    // summary. That card is the new bottom content; holding the summary would keep it below the
+    // fold until an unrelated mutation, because its text is already part of the held signature.
+    const cards = containerRef?.querySelectorAll<HTMLElement>('.user-message-card');
+    const card = cards?.[cards.length - 1];
+    return (
+      !!card && (summary.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    );
+  }
+
   function captureActivityExitSummaryAnchor() {
     const sessionId = state.activeSessionId;
     if (!containerRef || !sessionId) return;
     if (activityExitSummaryAnchor?.sessionId === sessionId) return;
     const summaries = containerRef.querySelectorAll<HTMLElement>('.assistant-activity-summary');
     const summary = summaries[summaries.length - 1];
-    if (!summary || hasActivityTrayBeforeSummary(summary)) return;
+    if (!summary || hasActivityTrayBeforeSummary(summary) || hasUserCardAfterSummary(summary))
+      return;
     activityExitSummaryAnchor = {
       sessionId,
       element: summary,
@@ -8291,17 +8303,27 @@ export function MessageList() {
     ) {
       pendingExpansionScrollAnchor = null;
       const group = control.closest<HTMLElement>('.assistant-activity-group');
-      const disappearingHeight = group
-        ? Math.max(0, group.getBoundingClientRect().bottom - control.getBoundingClientRect().bottom)
-        : 0;
-      const shortfall =
-        containerRef.scrollTop -
-        (containerRef.scrollHeight - containerRef.clientHeight - disappearingHeight);
-      if (containerRef.scrollTop > 0.5 && shortfall > 0.5) {
-        appendBottomReserveTarget = containerRef.scrollTop;
-        setAppendBottomReserve((reserve) => reserve + shortfall);
-      }
+      reserveDisclosureCollapse(
+        group
+          ? Math.max(
+              0,
+              group.getBoundingClientRect().bottom - control.getBoundingClientRect().bottom
+            )
+          : 0
+      );
       return;
+    }
+    // Tool details likewise disappear below their header. Reserve the range first; the expansion
+    // anchor captured below then keeps the header fixed instead of letting the clamp move it.
+    if (
+      control.matches('.tool-invocation-header') &&
+      control.getAttribute('aria-expanded') === 'true'
+    ) {
+      const detailId = control.getAttribute('aria-controls');
+      const detail = detailId ? document.getElementById(detailId) : null;
+      if (detail && containerRef.contains(detail)) {
+        reserveDisclosureCollapse(detail.getBoundingClientRect().height);
+      }
     }
     const isDiffToggle = control.matches('.diff-view-toggle, .diff-view-item-expandable');
     const anchor = isDiffToggle
@@ -8324,6 +8346,25 @@ export function MessageList() {
     const resumeBottomFollow =
       (expandsCompactActivity || expandsActiveActivity || expandsToolDetails) &&
       (autoScroll() || pinnedToBottom || followModeLocked);
+    // A running tool at the followed bottom grows its details below the fold. Keep following so
+    // expanding it reveals that output, instead of anchoring the header above hidden content.
+    if (
+      activityKey &&
+      expandsActiveActivity &&
+      expandsToolDetails &&
+      resumeBottomFollow &&
+      !stickyNavigationOwnsScroll() &&
+      !editingMessage() &&
+      !diffFocusPauseActive
+    ) {
+      pendingExpansionScrollAnchor = null;
+      pinnedToBottom = true;
+      setAutoScroll(true);
+      const sessionId = state.activeSessionId;
+      if (sessionId) startFollowLoop(sessionId);
+      presentation.inspectActivity(activityKey, true);
+      return;
+    }
     const expansionAnchor = captureExpansionScrollAnchor({
       anchor,
       container: containerRef,
@@ -8348,6 +8389,17 @@ export function MessageList() {
       resumeBottomFollow,
     };
     if (activityKey) presentation.inspectActivity(activityKey, expandsActiveActivity);
+  }
+
+  function reserveDisclosureCollapse(disappearingHeight: number) {
+    if (!containerRef) return;
+    const shortfall =
+      containerRef.scrollTop -
+      (containerRef.scrollHeight - containerRef.clientHeight - disappearingHeight);
+    if (containerRef.scrollTop > 0.5 && shortfall > 0.5) {
+      appendBottomReserveTarget = containerRef.scrollTop;
+      setAppendBottomReserve((reserve) => reserve + shortfall);
+    }
   }
 
   function reserveExternalBottomCollapse(collapseHeight: number) {

@@ -1076,15 +1076,16 @@ describe('ToolCall', () => {
 
       const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
       expect(header?.querySelector('.tool-invocation-title')?.textContent).toBe('git status');
-      expect(header?.disabled).toBe(true);
-      expect(header?.hasAttribute('aria-expanded')).toBe(false);
-      expect(container?.querySelector('.tool-invocation-chevron')).toBeNull();
+      expect(header?.disabled).toBe(false);
+      expect(header?.getAttribute('aria-expanded')).toBe('false');
+      expect(container?.querySelector('.tool-invocation-chevron')).not.toBeNull();
       expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
       const copy = container?.querySelector<HTMLButtonElement>(
         '.tool-invocation-header-shell > .tool-copy-button'
       );
       expect(copy).not.toBeNull();
-      expect(container?.querySelector('.tool-invocation-header-shell')?.classList).toContain(
+      // The chevron is present, so the header actions keep their chevron offset.
+      expect(container?.querySelector('.tool-invocation-header-shell')?.classList).not.toContain(
         'has-command-only-copy'
       );
 
@@ -1097,6 +1098,109 @@ describe('ToolCall', () => {
       vi.unstubAllGlobals();
     }
   );
+
+  it('expands a running command before output arrives and shows a waiting message', () => {
+    const part = toolPart('bash', {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      metadata: {},
+      time: { start: 0 },
+    });
+
+    renderToolCall(part);
+    toggleHeader();
+
+    const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
+    expect(header?.getAttribute('aria-expanded')).toBe('true');
+    const waiting = container?.querySelector('.terminal-command-output-waiting');
+    expect(waiting?.textContent).toBe('Waiting for output…');
+    expect(waiting?.getAttribute('role')).toBe('status');
+    // The header already shows the command, so the body does not repeat it.
+    expect(container?.querySelector('.terminal-command-row-input')).toBeNull();
+    expect(container?.querySelector('.terminal-command-output-viewport')).toBeNull();
+    expect(
+      container?.querySelector('.tool-invocation-header-shell > .tool-copy-button')
+    ).not.toBeNull();
+  });
+
+  it('keeps the $ row above the waiting message when the title is not the command', () => {
+    const part = toolPart('bash', {
+      status: 'running',
+      input: { command: 'git status' },
+      title: 'Check the repo',
+      metadata: {},
+      time: { start: 0 },
+    });
+
+    renderToolCall(part);
+    toggleHeader();
+
+    const rows = Array.from(
+      container?.querySelectorAll('.terminal-command-card > .terminal-command-row') || []
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.classList).toContain('terminal-command-row-input');
+    expect(rows[1]?.textContent).toBe('Waiting for output…');
+  });
+
+  it('replaces the waiting message with live output once it streams', () => {
+    const part = toolPart('bash', {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      metadata: { output: '   ' },
+      time: { start: 0 },
+    });
+
+    renderToolCall(part);
+    toggleHeader();
+    // Whitespace-only output is still waiting.
+    expect(container?.querySelector('.terminal-command-output-waiting')).not.toBeNull();
+
+    cleanup?.();
+    flushSolid();
+    cleanup = undefined;
+    renderToolCall({
+      ...part,
+      state: {
+        status: 'running',
+        input: { command: 'npm test' },
+        title: 'npm test',
+        metadata: { output: 'test 1' },
+        time: { start: 0 },
+      },
+    });
+
+    expect(container?.querySelector('.tool-invocation-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+    expect(container?.querySelector('.terminal-command-output-waiting')).toBeNull();
+    expect(container?.querySelector('.terminal-command-output-viewport')?.textContent).toContain(
+      'test 1'
+    );
+  });
+
+  it('keeps a pending command collapsed without a waiting message', () => {
+    renderToolCall(
+      toolPart('bash', { status: 'pending', input: { command: 'npm test' }, raw: '' })
+    );
+
+    const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
+    expect(header?.disabled).toBe(true);
+    expect(container?.querySelector('.tool-invocation-chevron')).toBeNull();
+    expect(container?.querySelector('.terminal-command-output-waiting')).toBeNull();
+  });
+
+  it('shows the empty-output row instead of the waiting message once finished', () => {
+    renderToolCall(toolPart('bash', completedState({ command: 'true' }, 'true', '')));
+    toggleHeader();
+
+    expect(container?.querySelector('.terminal-command-output-waiting')).toBeNull();
+    expect(container?.querySelector('.terminal-command-output-empty')?.textContent).toBe(
+      '(no output)'
+    );
+  });
 
   it('keeps expanded running command output scrolled to its latest line', async () => {
     const part = toolPart('bash', {

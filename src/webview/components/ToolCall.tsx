@@ -2185,16 +2185,21 @@ function GenericToolCall(props: {
     taskActivityAgeDuration() ? null : runningDurationLabel();
   const commandMatchesTitle = () =>
     normalizedComparableText(bashCommand()) === normalizedComparableText(props.title);
+  // A running command always has a result row: live output once it streams,
+  // and a waiting placeholder before then.
+  const isAwaitingBashOutput = () =>
+    isBash() && !!bashCommand() && props.state.status === 'running' && isBlank(props.runningOutput);
   const hasBashResultRow = () =>
     props.state.status === 'completed' ||
     props.state.status === 'error' ||
-    (props.state.status === 'running' && !isBlank(props.runningOutput));
+    (props.state.status === 'running' && (isAwaitingBashOutput() || !isBlank(props.runningOutput)));
   const hasOnlyHeaderCommand = () => isBash() && commandMatchesTitle() && !hasBashResultRow();
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
     if (props.tool.deferred) return true;
     if (isFailed() || codeModeCalls().length > 0) return true;
     if (taskSessionId()) return true;
+    if (isAwaitingBashOutput()) return true;
     if (hasOnlyHeaderCommand()) return false;
     if (detailInputEntries().length > 0) return true;
     // Whitespace-only output is not expandable content: offering a chevron that
@@ -2203,15 +2208,17 @@ function GenericToolCall(props: {
   };
   const isExpanded = () => hasExpandableContent() && props.expanded;
 
-  // Never hide the command while it is the card's only content. Completed and
-  // failed calls have a result row; running calls only do once output arrives.
+  // Never hide the command while it is the card's only content. Completed,
+  // failed, and running calls have a result row; pending calls do not.
   const showBashCommandRow = () => !hasBashResultRow() || !commandMatchesTitle();
+  // Keep the header command actions while the collapsed row has nothing else
+  // to reveal yet, so the full command stays reachable before output arrives.
   const showHeaderCommandCopy = () =>
     isBash() &&
     !props.tool.deferred &&
     !props.lightweight &&
     commandMatchesTitle() &&
-    (isExpanded() || !hasBashResultRow());
+    (isExpanded() || !hasBashResultRow() || isAwaitingBashOutput());
 
   const bodyId = createUniqueId();
   let taskHeader: HTMLButtonElement | undefined;
@@ -2439,6 +2446,16 @@ function GenericToolCall(props: {
                 <Show when={props.state.status === 'running' && !isBlank(props.runningOutput)}>
                   <div class="terminal-command-row terminal-command-row-output">
                     <LiveTerminalOutput content={props.runningOutput} />
+                  </div>
+                </Show>
+                <Show when={isAwaitingBashOutput()}>
+                  <div class="terminal-command-row terminal-command-row-output">
+                    <pre
+                      class="terminal-command-text terminal-command-output terminal-command-output-empty terminal-command-output-waiting"
+                      role="status"
+                    >
+                      Waiting for output…
+                    </pre>
                   </div>
                 </Show>
                 <Show when={props.state.status === 'error'}>

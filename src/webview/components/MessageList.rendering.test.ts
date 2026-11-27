@@ -2943,6 +2943,46 @@ describe('MessageList compact activity', () => {
     );
   });
 
+  it('expands a running command in the active tray before output arrives', async () => {
+    const command = toolPart('command-waiting', 'assistant-1', 'call-command-waiting');
+    command.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      metadata: {},
+      time: { start: 1 },
+    };
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    setStateRecord('sessionStatus', { 'session-1': { type: 'busy' } });
+    flushSolid();
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1', time: { created: 1 } }),
+        parts: [command],
+      },
+    ]);
+    flushSolid();
+
+    mountList();
+    await Promise.resolve();
+    flushSolid();
+    await vi.advanceTimersByTimeAsync(500);
+    flushSolid();
+
+    const item = container?.querySelector<HTMLElement>('[data-activity-part-id="command-waiting"]');
+    item?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    flushSolid();
+    await vi.advanceTimersByTimeAsync(50);
+    flushSolid();
+
+    expect(item?.querySelector('.tool-invocation-chevron.expanded')).not.toBeNull();
+    expect(item?.querySelector('.terminal-command-output-waiting')?.textContent).toBe(
+      'Waiting for output…'
+    );
+  });
+
   it('reserves an inert Exploring row before the first tool can be summarized', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
     command.state = {

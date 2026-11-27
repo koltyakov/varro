@@ -395,9 +395,14 @@ the shared invariants below remain true.
 - Inline editing may keep its panel visible, but edit visibility corrections must not reactivate
   sticky navigation or bottom-follow.
 - Expanding a compact activity disclosure takes ownership from bottom-follow so the clicked summary
-  stays fixed while its details grow below it.
+  stays fixed while its details grow below it. Exception: expanding a tool header in the active tray
+  while bottom-follow owns the viewport keeps following, so the running tool's details and later
+  output scroll into view instead of opening below the fold.
 - Collapsing that disclosure reserves any scroll-range shortfall before removing details below the
-  summary. A later correction cannot undo a frame already clamped by the browser.
+  summary. A later correction cannot undo a frame already clamped by the browser. Tool headers,
+  including running commands in the active tray, reserve their `aria-controls` detail height the same
+  way and keep the expansion anchor so the header stays fixed. `running-command-expand.spec.ts`
+  covers a bottom-pinned collapse.
 - Capture disclosure geometry before releasing bottom-follow. Transfer any active exit reserve to the
   append reserve at the current viewport target, and keep departing activity out of reserve-consumption
   calculations until its exit ends. Clearing that space during the handoff clamps the viewport before
@@ -613,7 +618,11 @@ Direct input acquires ownership only when it can affect the transcript:
   viewport-only transition so provisional row reconciliation cannot create a large jump.
 - Steering, including a queued message sent as a steer, preserves the current follow owner rather
   than issuing a send-time jump. An admitted steering card releases a retained activity-summary
-  anchor so bottom-follow can reveal it. A reader detached before steering or while admission is
+  anchor so bottom-follow can reveal it. Admission can also group a running tool after the card
+  has mounted; never capture a summary anchor with a user card below it. Its complete optimistic
+  text, image, or terminal attachment leaves nothing to change the held signature, so the card stays
+  below the fold until an unrelated mutation. `steering-large-scroll.spec.ts` covers these sends.
+  A reader detached before steering or while admission is
   pending stays detached; neither admission nor queue removal may reattach them.
 - A first turn that already fits at scroll position zero keeps that position without an alignment
   reserve. Track `min-height` can hide a small unreachable target, and repeated reconciliation then
