@@ -340,6 +340,7 @@ export function VirtualizedContent(
         permissionMatchForTool={props.permissionMatchForTool}
         onAssistantDiffSettledEmpty={props.onAssistantDiffSettledEmpty}
         onAssistantDiffLoadStart={props.onAssistantDiffLoadStart}
+        onAssistantDiffSummaryRetire={props.onAssistantDiffSummaryRetire}
         onWorkedSummaryHoverChange={props.onWorkedSummaryHoverChange}
         onUserMessageHoverChange={props.onUserMessageHoverChange}
       />

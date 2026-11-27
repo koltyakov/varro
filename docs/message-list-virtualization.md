@@ -811,7 +811,11 @@ Direct input acquires ownership only when it can affect the transcript:
   history holds the same cover until that request settles, at most two seconds, so the summary is
   part of the first revealed bottom instead of growing below it and easing the viewport. Once only
   this hold remains, the settle loop parks instead of polling frames; the last release restarts it.
-  Requests that start after reveal take no hold.
+  Requests that start after reveal take no hold. When a newer reply takes over the summary, the
+  previous reply keeps it for one microtask; the list then holds that row at its painted height,
+  removes the summary, and publishes the shortfall as bottom reserve before releasing the hold. A
+  bottom-followed reader therefore keeps its position instead of painting a clamp and easing back.
+  `diff-summary-retire.spec.ts` samples every frame of a follow-up send through the new reply.
   Dismissal reserves disappearing space through the existing block removal handler. Clicking an action
   sends its prompt immediately without a confirmation dialog,
   using the normal session-targeted send path while preserving the main draft and attachments.

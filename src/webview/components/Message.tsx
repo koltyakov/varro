@@ -133,6 +133,8 @@ export function Message(props: {
   onAssistantDiffSettledEmpty?: (messageId: string) => void;
   // Returns a release callback when the list holds its reveal until this diff request settles.
   onAssistantDiffLoadStart?: () => (() => void) | undefined;
+  // Runs `retire` when the list has reserved the summary's space for a bottom-anchored reader.
+  onAssistantDiffSummaryRetire?: (messageId: string, retire: () => void) => void;
   isLastAssistant?: boolean;
   hideErrorAction?: boolean;
   retryState?: AssistantRetryState;
@@ -497,9 +499,27 @@ export function Message(props: {
     },
     ({ sessionID, messageID, directory }) => {
       if (!sessionID || !messageID) {
-        setDiffs(undefined);
-        setDiffsLoading(false);
-        return;
+        const retire = () => {
+          setDiffs(undefined);
+          setDiffsLoading(false);
+        };
+        const { messageId, retireSummary } = untrack(() => ({
+          messageId: props.info.id,
+          retireSummary: props.onAssistantDiffSummaryRetire,
+        }));
+        if (!retireSummary || !untrack(diffs)?.length) {
+          retire();
+          return;
+        }
+        // A newer reply takes over the summary. Keep this one painted for a microtask so the
+        // list can reserve its space before the removal, instead of clamping the viewport.
+        let current = true;
+        queueMicrotask(() => {
+          if (current) retireSummary(messageId, retire);
+        });
+        return () => {
+          current = false;
+        };
       }
       let cancelled = false;
       setDiffsLoading(true);
@@ -519,7 +539,8 @@ export function Message(props: {
       };
     }
   );
-  const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
+  // Settled diffs stay until the request effect retires them, including after the request ends.
+  const visibleDiffs = createMemo(() => diffs() || []);
   let emptyDiffSettlementEpoch = 0;
   const compactionDivider = createMemo<CompactionPart | null>(() => {
     const parts = normalizedParts();

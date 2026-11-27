@@ -2300,6 +2300,24 @@ export function MessageList() {
       };
     }, onInlineDiffMount)
   );
+  // A newer reply takes over the change summary. Removing it shortens the previous reply, which
+  // layout would clamp at the bottom for a painted frame before the reserve catches up. Hold the
+  // row at its painted height, retire the summary, then publish the lost space as reserve before
+  // releasing the hold, the same order as an inline diff height release.
+  function retireAssistantDiffSummary(messageId: string, retire: () => void) {
+    const row = mountedMessageRows.get(messageId);
+    // An inline diff hold already owns this row's min-height and its release.
+    if (!containerRef || !row || inlineDiffHeightHolds.has(messageId) || row.style.minHeight) {
+      retire();
+      return;
+    }
+    row.style.minHeight = `${row.getBoundingClientRect().height}px`;
+    retire();
+    flush();
+    reserveInlineDiffHeightRelease(row);
+    row.style.removeProperty('min-height');
+  }
+
   function reserveInlineDiffHeightRelease(row: HTMLElement) {
     if (
       !containerRef ||
@@ -11834,6 +11852,7 @@ export function MessageList() {
               permissionMatchForTool={getPermissionMatchForTool}
               onAssistantDiffSettledEmpty={handleAssistantDiffSettledEmpty}
               onAssistantDiffLoadStart={holdInitialRevealForAssistantDiff}
+              onAssistantDiffSummaryRetire={retireAssistantDiffSummary}
               onWorkedSummaryHoverChange={handleWorkedSummaryHoverChange}
               onUserMessageHoverChange={handleWorkedSummaryHoverChange}
             />
