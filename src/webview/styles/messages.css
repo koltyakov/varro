@@ -1320,10 +1320,19 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   margin-top: var(--assistant-summary-after-bordered-gap);
 }
 
+/* A response directly under the user's bubble gets a little more air than the
+   canonical 12px row gap so the turn boundary reads clearly. */
+.interactive-item-container.interactive-response.interactive-response-follows-request:not(
+    .interactive-item-render-empty,
+    :empty
+  ) {
+  padding-top: 10px;
+}
+
 .interactive-item-container.interactive-response-follows-request:has(
     .assistant-message-flow > .assistant-flow-block-starts-bordered:first-child
   ):not(.interactive-item-render-empty) {
-  padding-top: 10px;
+  padding-top: 12px;
 }
 
 /* Pending activity can render no DOM before its semantic empty flag catches up.

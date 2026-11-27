@@ -1473,7 +1473,8 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
       summaryToUser: nextUser.getBoundingClientRect().top - element.getBoundingClientRect().bottom,
     };
   });
-  expect(gaps.userToSummary).toBeCloseTo(12, 0);
+  // A response directly under a user bubble gets 4px more than the canonical 12px row gap.
+  expect(gaps.userToSummary).toBeCloseTo(16, 0);
   expect(gaps.summaryToUser).toBeCloseTo(12, 0);
 
   await page.keyboard.down('Alt');
@@ -1503,9 +1504,9 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
     };
   });
   await page.keyboard.up('Alt');
-  expect(revealedGeometry.userToSummary).toBeCloseTo(12, 0);
+  expect(revealedGeometry.userToSummary).toBeCloseTo(16, 0);
   expect(revealedGeometry.timestampGap).toBeCloseTo(2, 0);
-  expect(revealedGeometry.timestampOverlap).toBeCloseTo(2, 0);
+  expect(revealedGeometry.timestampOverlap).toBeCloseTo(-2, 0);
   expect(revealedGeometry.timestampZIndex).toBeGreaterThan(revealedGeometry.activityGroupZIndex);
 });
 
