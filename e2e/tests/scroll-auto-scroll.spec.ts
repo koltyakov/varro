@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Playwright serializes these browser callbacks, which deliberately inject partial harness and server-event payloads across the page boundary. */
 import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import {
   getListDistanceFromBottom,
   getScrollMetrics,
@@ -380,124 +381,177 @@ test.describe('auto-scroll', () => {
     });
   }
 
-  for (const detached of [false, true]) {
-    test(`keeps the transcript fixed when closing the active editor shrinks the composer, detached=${detached}`, async ({
-      page,
+  for (const variant of [
+    { name: 'pinned' },
+    { name: 'detached', detached: true },
+    { name: 'detached short transcript', detached: true, short: true },
+    { name: 'detached after a horizontal wheel', detached: true, horizontalWheel: true },
+    { name: 'detached at 125% scale', detached: true, scale: 1.25 },
+    { name: 'detached with layout forced while closing', detached: true, forceLayout: true },
+  ]) {
+    test(`keeps the transcript fixed when closing the active editor shrinks the composer, ${variant.name}`, async ({
+      page: defaultPage,
+      browser,
     }) => {
-      await page.setViewportSize({ width: 504, height: 900 });
-      await page.goto('/e2e/harness/index.html?scenario=large-transcript');
-      await expect(page.getByRole('textbox', { name: 'Message composer' })).toBeVisible();
-      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
-      const context = (activeFile?: { path: string; relativePath: string; language: string }) => ({
-        type: 'context/update',
-        payload: {
-          workspacePath: '/workspace/varro',
-          activeFile: activeFile ?? null,
-          selection: null,
-          diagnostics: [],
-        },
-      });
-      const chip = page.locator('.chat-attachments-container .chat-attachment-chip');
-      const openEditor = async () => {
-        await postWebviewMessage(
-          page,
-          context({
-            path: '/workspace/varro/comment-pr70.md',
-            relativePath: 'comment-pr70.md',
-            language: 'markdown',
-          })
+      const viewport = { width: 504, height: variant.short ? 400 : 900 };
+      const scaledPage = variant.scale
+        ? await browser.newPage({ viewport, deviceScaleFactor: variant.scale })
+        : null;
+      const page = scaledPage ?? defaultPage;
+      try {
+        await page.setViewportSize(viewport);
+        await page.goto(
+          `/e2e/harness/index.html?scenario=${variant.short ? 'plan-ready' : 'large-transcript'}`
         );
+        await expect(page.getByRole('textbox', { name: 'Message composer' })).toBeVisible();
+        expect(await page.evaluate(() => window.devicePixelRatio)).toBe(variant.scale ?? 1);
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+        const chip = page.locator('.chat-attachments-container .chat-attachment-chip');
+        await setActiveEditorChip(page, true);
         await expect(chip).toBeVisible();
         await waitForAnimationFrames(page, 8);
-      };
-      const closeEditor = async () => {
-        await postWebviewMessage(page, context());
-        await expect(chip).toHaveCount(0);
-        await waitForAnimationFrames(page, 8);
-      };
-      await openEditor();
-      await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
-      if (detached) {
-        // Read from just above the bottom, closer than the chip's height.
-        const bounds = (await page.locator('.interactive-list').boundingBox())!;
-        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-        await page.mouse.wheel(0, -10);
-        await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(5);
-        await waitForAnimationFrames(page, 8);
-        const distance = await getListDistanceFromBottom(page);
-        expect(distance).toBeGreaterThan(5);
-        expect(distance).toBeLessThan(20);
-      }
+        if (variant.short) {
+          // Leave less overflow than the chip's height, so closing it ends the overflow.
+          const overflow = await page
+            .locator('.interactive-list')
+            .evaluate((list) => list.scrollHeight - list.clientHeight);
+          expect(overflow).toBeGreaterThan(60);
+          await page.setViewportSize({ width: viewport.width, height: 400 + overflow - 20 });
+          await expect
+            .poll(() =>
+              page
+                .locator('.interactive-list')
+                .evaluate((list) => list.scrollHeight - list.clientHeight)
+            )
+            .toBe(20);
+          await waitForAnimationFrames(page, 8);
+        }
+        await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+        if (variant.detached) await detachNearBottom(page);
+        if (variant.horizontalWheel) {
+          // Input that moves nothing must not leave the detached position unprotected.
+          await page.mouse.wheel(5, 0);
+          await page.waitForTimeout(300);
+        }
 
-      await page.evaluate(() => {
-        const list = document.querySelector<HTMLElement>('.interactive-list')!;
-        const bounds = list.getBoundingClientRect();
-        const row = [...list.querySelectorAll<HTMLElement>('[data-msg-id]')].find((element) => {
-          const rect = element.getBoundingClientRect();
-          return rect.height > 0 && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
-        });
-        if (!row) throw new Error('No nonempty message row is fully visible in the transcript');
-        const samples: Array<{ top: number; clientHeight: number; observed: boolean }> = [];
-        const errors: string[] = [];
-        const onError = (event: ErrorEvent) => errors.push(event.message);
-        window.addEventListener('error', onError);
-        const state = window as typeof window & {
-          composerShrinkResult?: { samples: typeof samples; errors: string[] };
-          stopComposerShrinkSampling?: () => void;
-        };
-        state.composerShrinkResult = { samples, errors };
-        const sample = (observed: boolean) =>
-          samples.push({
-            top: row.getBoundingClientRect().top,
-            clientHeight: list.clientHeight,
-            observed,
-          });
-        sample(false);
-        // Created after the list's observer, so each callback sees that frame's corrections
-        // before paint. Animation-frame callbacks run before layout and miss them.
-        const observer = new ResizeObserver(() => sample(true));
-        observer.observe(list);
-        observer.observe(list.querySelector('.interactive-list-track')!);
-        state.stopComposerShrinkSampling = () => {
-          observer.disconnect();
-          window.removeEventListener('error', onError);
-          sample(false);
-        };
-      });
-      // Reopening consumes the reserve; repeated round trips must not accumulate blank space.
-      await closeEditor();
-      await openEditor();
-      await closeEditor();
-      const { samples, errors } = await page.evaluate(() => {
-        const state = window as typeof window & {
-          composerShrinkResult?: {
-            samples: Array<{ top: number; clientHeight: number; observed: boolean }>;
-            errors: string[];
-          };
-          stopComposerShrinkSampling?: () => void;
-        };
-        state.stopComposerShrinkSampling?.();
-        return state.composerShrinkResult ?? { samples: [], errors: [] };
-      });
-      expect(errors).toEqual([]);
-      expect(
-        samples.some((sample) => sample.observed && sample.clientHeight > samples[0]!.clientHeight),
-        JSON.stringify(samples)
-      ).toBe(true);
-      expect(
-        samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
-        JSON.stringify(samples)
-      ).toBe(true);
-      const reserve = await page
-        .locator('.append-scroll-bottom-reserve')
-        .evaluateAll((elements) =>
-          elements.map((element) => element.getBoundingClientRect().height)
+        await startComposerShrinkSampling(page);
+        // Reopening consumes the reserve; repeated round trips must not accumulate blank space.
+        for (const open of [false, true, false]) {
+          if (!open && variant.forceLayout) {
+            // A layout read in the same task clamps before the frame; its scroll event follows.
+            await page.evaluate((message) => {
+              window.dispatchEvent(
+                new MessageEvent('message', {
+                  data: message,
+                  origin: location.origin,
+                  source: window,
+                })
+              );
+              return document.querySelector<HTMLElement>('.interactive-list')!.scrollHeight;
+            }, activeEditorContext(false));
+          } else {
+            await setActiveEditorChip(page, open);
+          }
+          await expect(chip).toHaveCount(open ? 1 : 0);
+          await waitForAnimationFrames(page, 8);
+        }
+        const { samples, errors } = await stopComposerShrinkSampling(page);
+        expect(errors).toEqual([]);
+        expect(
+          samples.some(
+            (sample) => sample.observed && sample.clientHeight > samples[0]!.clientHeight
+          ),
+          JSON.stringify(samples)
+        ).toBe(true);
+        expect(
+          samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
+          JSON.stringify(samples)
+        ).toBe(true);
+        const reserveHeight = () =>
+          page
+            .locator('.append-scroll-bottom-reserve')
+            .evaluateAll((elements) =>
+              elements.reduce((total, element) => total + element.getBoundingClientRect().height, 0)
+            );
+        expect(await reserveHeight()).toBeLessThanOrEqual(
+          samples.at(-1)!.clientHeight - samples[0]!.clientHeight + 1
         );
-      expect(reserve.reduce((total, height) => total + height, 0)).toBeLessThanOrEqual(
-        samples.at(-1)!.clientHeight - samples[0]!.clientHeight + 1
-      );
+        if (variant.short) {
+          // Once the reader reaches the top of content that fits, the reserve is only blank range.
+          await page.mouse.wheel(0, -200);
+          await expect.poll(reserveHeight).toBe(0);
+          await expect
+            .poll(() =>
+              page
+                .locator('.interactive-list')
+                .evaluate((list) => list.scrollHeight - list.clientHeight)
+            )
+            .toBe(0);
+        }
+      } finally {
+        await scaledPage?.close();
+      }
     });
   }
+
+  test('does not undo unobserved reader movement when the composer shrinks in the same frame', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 504, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    await expect(page.getByRole('textbox', { name: 'Message composer' })).toBeVisible();
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+    await setActiveEditorChip(page, true);
+    await expect(page.locator('.chat-attachments-container .chat-attachment-chip')).toBeVisible();
+    await waitForAnimationFrames(page, 8);
+    await detachNearBottom(page);
+
+    const result = await page.evaluate(
+      (closeMessage) =>
+        new Promise<{
+          observed: number;
+          destination: number;
+          final: number;
+          errors: string[];
+        }>((resolve) => {
+          const list = document.querySelector<HTMLElement>('.interactive-list')!;
+          const errors: string[] = [];
+          const onError = (event: ErrorEvent) => errors.push(event.message);
+          window.addEventListener('error', onError);
+          requestAnimationFrame(() => {
+            const observed = list.scrollTop;
+            // Upward input moves the reader, then the chip leaves before any scroll event.
+            list.dispatchEvent(
+              new WheelEvent('wheel', { deltaY: -6, bubbles: true, cancelable: true })
+            );
+            list.scrollTop = observed - 6;
+            const destination = list.scrollTop;
+            window.dispatchEvent(
+              new MessageEvent('message', {
+                data: closeMessage,
+                origin: location.origin,
+                source: window,
+              })
+            );
+            let frames = 0;
+            const settle = () => {
+              if (++frames < 8) requestAnimationFrame(settle);
+              else {
+                window.removeEventListener('error', onError);
+                resolve({ observed, destination, final: list.scrollTop, errors });
+              }
+            };
+            requestAnimationFrame(settle);
+          });
+        }),
+      activeEditorContext(false)
+    );
+    await expect(page.locator('.chat-attachments-container .chat-attachment-chip')).toHaveCount(0);
+    expect(result.errors).toEqual([]);
+    // The browser may clamp further down, but must never restore the pre-movement position.
+    expect(result.destination).toBeLessThan(result.observed - 5);
+    expect(result.final, JSON.stringify(result)).toBeLessThanOrEqual(result.destination + 1);
+  });
 
   test('starts at the bottom of the conversation', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
@@ -4347,3 +4401,89 @@ test.describe('auto-scroll re-engage', () => {
     await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
   });
 });
+
+function activeEditorContext(open: boolean) {
+  return {
+    type: 'context/update',
+    payload: {
+      workspacePath: '/workspace/varro',
+      activeFile: open
+        ? {
+            path: '/workspace/varro/comment-pr70.md',
+            relativePath: 'comment-pr70.md',
+            language: 'markdown',
+          }
+        : null,
+      selection: null,
+      diagnostics: [],
+    },
+  };
+}
+
+async function setActiveEditorChip(page: Page, open: boolean) {
+  await postWebviewMessage(page, activeEditorContext(open));
+}
+
+/** Scrolls up with a native wheel to read just above the bottom, closer than a chip's height. */
+async function detachNearBottom(page: Page) {
+  const bounds = (await page.locator('.interactive-list').boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.wheel(0, -10);
+  await expect.poll(() => getListDistanceFromBottom(page)).toBeGreaterThan(5);
+  await waitForAnimationFrames(page, 8);
+  const distance = await getListDistanceFromBottom(page);
+  expect(distance).toBeGreaterThan(5);
+  expect(distance).toBeLessThan(20);
+}
+
+type ComposerShrinkSample = { top: number; clientHeight: number; observed: boolean };
+
+/** Samples a visible row from a late ResizeObserver, which sees each frame's corrections before paint. */
+async function startComposerShrinkSampling(page: Page) {
+  await page.evaluate(() => {
+    const list = document.querySelector<HTMLElement>('.interactive-list')!;
+    const bounds = list.getBoundingClientRect();
+    const row = [...list.querySelectorAll<HTMLElement>('[data-msg-id]')].find((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.height > 0 && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+    });
+    if (!row) throw new Error('No nonempty message row is fully visible in the transcript');
+    const samples: ComposerShrinkSample[] = [];
+    const errors: string[] = [];
+    const onError = (event: ErrorEvent) => errors.push(event.message);
+    window.addEventListener('error', onError);
+    const state = window as typeof window & {
+      composerShrinkResult?: { samples: ComposerShrinkSample[]; errors: string[] };
+      stopComposerShrinkSampling?: () => void;
+    };
+    state.composerShrinkResult = { samples, errors };
+    const sample = (observed: boolean) =>
+      samples.push({
+        top: row.getBoundingClientRect().top,
+        clientHeight: list.clientHeight,
+        observed,
+      });
+    sample(false);
+    // Created after the list's observer, so each callback sees that frame's corrections
+    // before paint. Animation-frame callbacks run before layout and miss them.
+    const observer = new ResizeObserver(() => sample(true));
+    observer.observe(list);
+    observer.observe(list.querySelector('.interactive-list-track')!);
+    state.stopComposerShrinkSampling = () => {
+      observer.disconnect();
+      window.removeEventListener('error', onError);
+      sample(false);
+    };
+  });
+}
+
+async function stopComposerShrinkSampling(page: Page) {
+  return page.evaluate(() => {
+    const state = window as typeof window & {
+      composerShrinkResult?: { samples: ComposerShrinkSample[]; errors: string[] };
+      stopComposerShrinkSampling?: () => void;
+    };
+    state.stopComposerShrinkSampling?.();
+    return state.composerShrinkResult ?? { samples: [], errors: [] };
+  });
+}

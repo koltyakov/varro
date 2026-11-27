@@ -626,8 +626,26 @@ Direct input acquires ownership only when it can affect the transcript:
   handled by the container observer. Layout has already clamped the bottom-followed viewport by then.
   Commit the lost-space reserve spacer before restoring the previous bottom; a scroll write against
   the uncommitted range keeps the clamp for a painted frame. This runs only on container delivery,
-  so the spacer's track resize is still delivered in the same frame. `scroll-auto-scroll.spec.ts`
-  samples the closing and reopening transitions from a later observer, before each paint.
+  so the spacer's track resize is still delivered in the same frame. A detached reader closer to
+  the bottom than the growth is clamped too: when its last observed position became unreachable and
+  the clamped position is the new maximum, reserve only that shortfall at the reader's own position,
+  then restore it without arming bottom-follow. Size that reserve from in-flow content when the
+  transcript stops overflowing; track `min-height` otherwise hides the missing room. Release it once
+  user movement reaches the top of content that fits without it. Keep an existing reserve target if
+  it is larger. Yield to direct input from the last idle window that no scroll event has observed
+  yet, so a pre-movement position never undoes it; older input that moved nothing must not disable
+  the protection. Also yield to width reflow, the scrollbar thumb, sticky navigation, editing, diff
+  focus, expansion, structural, and history owners. `scroll-auto-scroll.spec.ts` samples closing and
+  reopening from a later observer, before each paint. It covers pinned, detached, barely overflowing,
+  horizontally wheeled, 125%-scale, and same-task layout-forced readers, plus movement in the same
+  frame as the shrink. A layout read in the closing task does not dispatch the clamp's scroll event
+  before the observer.
+- The fixed-target branch of activity-summary restoration has not been observed across a paint.
+  Exit completion is queued as a microtask in the task that publishes `is-exiting`, which is
+  `display: none`, so exiting keys and the held target are cleared before the next paint. Geometry
+  reads earlier in that chain can still force layout. A November 26 investigation shrank the
+  composer inside that task and found no clamped frame. Recheck this branch's reserve-then-write
+  ordering if exits ever span frames again.
 - Send-time composer collapse eases its held minimum height over 220 ms. Before each shrinking frame,
   reserve only the scroll-range shortfall at the current painted scroll position. Reserving the whole
   height delta makes bottom-follow chase temporary space and leaves an unnecessary trailing reserve.

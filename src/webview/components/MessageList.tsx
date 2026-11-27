@@ -720,6 +720,8 @@ export function MessageList() {
   let expectedScrollTop = -1;
   let ignoreScrollUntil = 0;
   let lastObservedScrollTop = 0;
+  // Direct-input epoch when lastObservedScrollTop last matched the live position.
+  let lastObservedScrollInputEpoch = 0;
   let pendingInitialScrollSessionId: string | null = null;
   let pendingInitialHistoryFillSessionId: string | null = null;
   const [initialPositioningSessionId, setInitialPositioningSessionId] = createSignal<string | null>(
@@ -5298,6 +5300,7 @@ export function MessageList() {
       directMovementAnchor.scrollTop = containerRef.scrollTop;
     }
     lastObservedScrollTop = containerRef.scrollTop;
+    lastObservedScrollInputEpoch = directScrollInputEpoch;
     (() => {
       setScrollTop(containerRef!.scrollTop);
       setViewportHeight(containerRef!.clientHeight);
@@ -6300,6 +6303,67 @@ export function MessageList() {
     setPreservedScrollTop(previousBottomTarget);
   }
 
+  // A detached reader within the growth of the bottom is clamped by layout too. Keep only that
+  // shortfall reachable at the reader's own position, without arming bottom-follow. Returns
+  // whether it took ownership of this resize.
+  function reserveClampedDetachedSpace(growth: number) {
+    const sessionId = state.activeSessionId;
+    if (
+      !containerRef ||
+      !trackRef ||
+      (autoScroll() && pinnedToBottom) ||
+      // Recent direct input may already have moved past the last observed position. Older input
+      // without a scroll event, such as a horizontal or at-limit wheel, moved nothing.
+      (lastObservedScrollInputEpoch !== directScrollInputEpoch &&
+        performance.now() - Math.max(lastWheelAt, lastScrollInputAt) <= USER_SCROLL_IDLE_MS) ||
+      pointerScrollOwnershipActive ||
+      stickyNavigationOwnsScroll() ||
+      widthResizeActive ||
+      !!editingMessage() ||
+      diffFocusPauseActive ||
+      !!pendingExpansionScrollAnchor ||
+      !!pendingStructuralScrollAnchor ||
+      !!(sessionId && getCurrentPendingHistoryAnchor(sessionId))
+    ) {
+      return false;
+    }
+    const target = lastObservedScrollTop;
+    const lost = target - containerRef.scrollTop;
+    const clientHeight = containerRef.clientHeight;
+    // scrollHeight and clientHeight round separately at fractional zoom; scrollTop does not.
+    if (
+      lost <= 0.5 ||
+      lost > growth + 1 ||
+      containerRef.scrollTop < containerRef.scrollHeight - clientHeight - 1
+    ) {
+      return false;
+    }
+    const reserve = untrack(appendBottomReserve);
+    // Track min-height hides unused room once content no longer overflows. Measure the
+    // in-flow content instead, so the reserve makes the reader's position reachable again.
+    const unreservedScrollHeight =
+      containerRef.scrollHeight > clientHeight + 0.5
+        ? containerRef.scrollHeight - reserve
+        : trackRef.getBoundingClientRect().top -
+          containerRef.getBoundingClientRect().top -
+          containerRef.clientTop +
+          containerRef.scrollTop +
+          heldTrackContentHeight() -
+          reserve;
+    // Keep another owner's reachable target; a target without any reserve is stale.
+    appendBottomReserveTarget =
+      reserve > 0.5 ? Math.max(appendBottomReserveTarget, target) : target;
+    const nextReserve = Math.ceil(
+      appendBottomReserveTarget - (unreservedScrollHeight - clientHeight)
+    );
+    if (nextReserve > reserve + 0.5) {
+      setAppendBottomReserve(nextReserve);
+      flush();
+    }
+    setPreservedScrollTop(target);
+    return true;
+  }
+
   function releaseBottomReserveForViewportReset() {
     if (!containerRef) return;
 
@@ -6393,7 +6457,14 @@ export function MessageList() {
       return;
     const reserveElement = trackRef?.querySelector<HTMLElement>('.append-scroll-bottom-reserve');
     if (!reserveElement) return;
-    if (reserveElement.getBoundingClientRect().top < containerRef.getBoundingClientRect().bottom) {
+    // At the top of content that fits without it, the reserve is only blank scroll range.
+    const unneededAtTop =
+      containerRef.scrollTop <= 0.5 &&
+      containerRef.scrollHeight - untrack(appendBottomReserve) <= containerRef.clientHeight + 0.5;
+    if (
+      !unneededAtTop &&
+      reserveElement.getBoundingClientRect().top < containerRef.getBoundingClientRect().bottom
+    ) {
       return;
     }
 
@@ -7271,6 +7342,7 @@ export function MessageList() {
       pinnedToBottom = true;
     }
     lastObservedScrollTop = decision.nextLastObservedScrollTop;
+    lastObservedScrollInputEpoch = directScrollInputEpoch;
     expectedScrollTop = decision.nextExpectedScrollTop;
     ignoreScrollUntil = decision.nextIgnoreScrollUntil;
     followModeLocked = decision.nextFollowModeLocked;
@@ -8564,6 +8636,7 @@ export function MessageList() {
     }
 
     lastObservedScrollTop = containerRef.scrollTop ?? 0;
+    lastObservedScrollInputEpoch = directScrollInputEpoch;
     if (!trackRef)
       return () => {
         for (const cleanup of cleanups.toReversed()) cleanup();
@@ -8589,16 +8662,32 @@ export function MessageList() {
       const containerHeightDelta = currentContainerClientHeight - lastContainerClientHeight;
       const containerHeightChanged = currentContainerClientHeight !== lastContainerClientHeight;
       lastContainerClientHeight = currentContainerClientHeight;
+      const currentContainerFontSignature = containerChanged
+        ? getFontLayoutSignature(containerRef)
+        : lastContainerFontSignature;
+      const fontChanged =
+        containerChanged && currentContainerFontSignature !== lastContainerFontSignature;
+      const trackEntry = entries.find((entry) => entry.target === trackRef);
+      const currentTrackInlineSize =
+        trackEntry?.borderBoxSize?.[0]?.inlineSize ?? trackRef?.getBoundingClientRect().width ?? 0;
+      const trackInlineSizeChanged = Math.abs(currentTrackInlineSize - lastTrackInlineSize) > 0.5;
+      const widthChanged =
+        trackInlineSizeChanged ||
+        fontChanged ||
+        ((containerChanged || trackChanged) && widthResizeActive && widthResizeIncludesFontChange);
       if (hostViewportResizing) {
         clearActivityExitReserve();
         releaseBottomReserveForViewportReset();
       } else if (containerHeightDelta > 0.5) {
-        const reserve = untrack(appendBottomReserve);
-        if (containerRef.scrollHeight - reserve <= currentContainerClientHeight + 0.5) {
-          appendBottomReserveTarget = 0;
-          if (reserve > 0.5) setAppendBottomReserve(0);
-        } else {
-          reserveLostBottomSpace();
+        // Width reflow owns a combined resize through its painted anchor.
+        if (widthChanged || !reserveClampedDetachedSpace(containerHeightDelta)) {
+          const reserve = untrack(appendBottomReserve);
+          if (containerRef.scrollHeight - reserve <= currentContainerClientHeight + 0.5) {
+            appendBottomReserveTarget = 0;
+            if (reserve > 0.5) setAppendBottomReserve(0);
+          } else {
+            reserveLostBottomSpace();
+          }
         }
       } else if (containerHeightDelta < -0.5) {
         consumeBottomReserve(-containerHeightDelta);
@@ -8626,19 +8715,6 @@ export function MessageList() {
       if (trackChanged && shouldMeasureRows() && !autoScroll()) {
         setTrackLayoutVersion((version) => version + 1);
       }
-      const currentContainerFontSignature = containerChanged
-        ? getFontLayoutSignature(containerRef)
-        : lastContainerFontSignature;
-      const fontChanged =
-        containerChanged && currentContainerFontSignature !== lastContainerFontSignature;
-      const trackEntry = entries.find((entry) => entry.target === trackRef);
-      const currentTrackInlineSize =
-        trackEntry?.borderBoxSize?.[0]?.inlineSize ?? trackRef?.getBoundingClientRect().width ?? 0;
-      const trackInlineSizeChanged = Math.abs(currentTrackInlineSize - lastTrackInlineSize) > 0.5;
-      const widthChanged =
-        trackInlineSizeChanged ||
-        fontChanged ||
-        ((containerChanged || trackChanged) && widthResizeActive && widthResizeIncludesFontChange);
       if (widthChanged) {
         lastTrackInlineSize = currentTrackInlineSize;
         lastContainerFontSignature = currentContainerFontSignature;
