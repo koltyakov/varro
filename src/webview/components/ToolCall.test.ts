@@ -15,6 +15,8 @@ import {
   resetToolCallExpansionState,
 } from './ToolCall';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
+import { publishFileEditTotals } from '../lib/file-edit-totals';
+import { getToolFileChanges } from '../lib/tool-file-change';
 import { client } from '../lib/client';
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../lib/session-navigation';
 import { fixture } from '../test-fixtures';
@@ -75,6 +77,7 @@ afterEach(() => {
   flushSolid();
   container = null;
   setShowFileDiffs(false);
+  publishFileEditTotals(null);
   flushSolid();
   applyState(storePath('permissions', []));
   applyState(storePath('questions', []));
@@ -3800,6 +3803,114 @@ describe('FileChangeCard', () => {
     expect(sendSpy).toHaveBeenNthCalledWith(2, {
       type: 'vscode/open',
       payload: { path: '/repo/src/new.ts', kind: 'file', view: 'diff' },
+    });
+  });
+
+  describe('combined counts for merged edits', () => {
+    const claudeEdit = (): ToolPart =>
+      toolPart('edit', {
+        status: 'completed',
+        input: { path: 'src/app.ts', oldString: 'a', newString: 'b\nc' },
+        output: 'ok',
+        title: 'edit',
+        metadata: {
+          files: [
+            {
+              file: 'src/app.ts',
+              status: 'modified',
+              additions: 2,
+              deletions: 1,
+              patch: '@@ -1 +1,2 @@\n-a\n+b\n+c',
+            },
+          ],
+        },
+        time: { start: 0, end: 1 },
+      });
+    const totalsFor = (part: ToolPart, edits: number, additions: number, deletions: number) =>
+      new Map([
+        [
+          part.id,
+          {
+            edits,
+            files: new Map(
+              getToolFileChanges(part.tool, part.state).map((change) => [
+                change.dedupeKey,
+                { additions, deletions },
+              ])
+            ),
+          },
+        ],
+      ]);
+
+    it('shows combined counts in the header and updates them in place', () => {
+      const part = claudeEdit();
+      publishFileEditTotals(totalsFor(part, 3, 6, 5));
+      renderToolCall(part);
+
+      const stats = container?.querySelector<HTMLElement>('.file-edit-diff-stats');
+      expect(stats?.textContent).toBe('+6-5');
+      expect(stats?.title).toBe('Combined from 3 edits');
+
+      publishFileEditTotals(totalsFor(part, 4, 8, 5));
+      flushSolid();
+      // A count change rewrites text only; the card and its stats node stay mounted.
+      expect(container?.querySelector('.file-edit-diff-stats')).toBe(stats);
+      expect(stats?.textContent).toBe('+8-5');
+
+      publishFileEditTotals(null);
+      flushSolid();
+      expect(container?.querySelector('.file-edit-diff-stats')?.textContent).toBe('+2-1');
+      expect(container?.querySelector<HTMLElement>('.file-edit-diff-stats')?.title).toBe('');
+    });
+
+    it('keeps inline previews on the edit’s own counts', () => {
+      setShowFileDiffs(true);
+      flushSolid();
+      const part = claudeEdit();
+      publishFileEditTotals(totalsFor(part, 3, 6, 5));
+      renderToolCall(part);
+
+      const preview = container?.querySelector('.file-change-inline-diffs');
+      expect(preview?.querySelector('.diff-lines-added')?.textContent).toBe('+2');
+      expect(container?.textContent).not.toContain('+6');
+    });
+
+    it('applies each file’s combined counts to split multi-file cards', () => {
+      const part = toolPart('apply_patch', {
+        status: 'completed',
+        input: {},
+        output: '',
+        title: 'apply_patch',
+        metadata: {
+          files: [
+            { type: 'update', relativePath: 'src/app.ts', additions: 1, deletions: 0 },
+            { type: 'update', relativePath: 'src/util.ts', additions: 2, deletions: 2 },
+          ],
+        },
+        time: { start: 0, end: 1 },
+      });
+      const [app, util] = getToolFileChanges(part.tool, part.state);
+      publishFileEditTotals(
+        new Map([
+          [
+            part.id,
+            {
+              edits: 2,
+              files: new Map([
+                [app!.dedupeKey, { additions: 4, deletions: 1 }],
+                [util!.dedupeKey, { additions: 2, deletions: 7 }],
+              ]),
+            },
+          ],
+        ])
+      );
+      renderToolCall(part);
+
+      const rows = Array.from(container?.querySelectorAll<HTMLElement>('.file-change-card') || []);
+      expect(rows.map((row) => row.querySelector('.file-edit-diff-stats')?.textContent)).toEqual([
+        '+4-1',
+        '+2-7',
+      ]);
     });
   });
 

@@ -435,8 +435,8 @@ for (const editCase of ABSORBED_EDIT_CASES) {
     const cards = row.locator('.assistant-file-edit-stack .file-change-card');
     if (editCase.path === 'src/app.ts') {
       await expect(cards).toHaveCount(1);
-      await expect(cards.first()).toContainText('+5');
-      await expect(cards.first()).toContainText('-2');
+      // The merged card combines both completed edits: +4/-1 and +5/-2.
+      await expect(cards.first().locator('.file-edit-diff-stats')).toHaveText('+9-3');
     } else {
       await expect(cards).toHaveCount(2);
       await expect(cards.nth(1)).toContainText('other.ts');

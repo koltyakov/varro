@@ -120,6 +120,12 @@ import {
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
 import {
+  collectFileEditTotals,
+  publishFileEditTotals,
+  sameFileEditTotalsMap,
+  type FileEditTotals,
+} from '../lib/file-edit-totals';
+import {
   buildPermissionRequestLookup,
   buildQuestionRequestLookup,
   samePermissionMatch,
@@ -9751,6 +9757,33 @@ export function MessageList() {
       );
     });
   });
+  // Combined counts for edit cards. Settled history keeps its results while the tail updates, and a
+  // tail edit that collapses into a history card overrides that card's entry.
+  const historyFileEditTotals = chainHistorySegments<ReturnType<typeof collectFileEditTotals>>(
+    (segment, previous) =>
+      createMemo((prior?: ReturnType<typeof collectFileEditTotals>) =>
+        collectFileEditTotals(segment.entries(), previous?.().chain ?? null, prior?.totals)
+      )
+  );
+  const fileEditTotals = createMemo(
+    (previous?: ReadonlyMap<string, FileEditTotals>) => {
+      messageStructureVersion();
+      const history = historyFileEditTotals.map((segment) => segment());
+      const tail = tailMessages();
+      return untrack(() =>
+        mergeSegmentMaps(
+          history.reduce<ReadonlyMap<string, FileEditTotals>>(
+            (merged, segment) => mergeSegmentMaps(merged, segment.totals),
+            new Map()
+          ),
+          collectFileEditTotals(tail, history.at(-1)?.chain ?? null, previous).totals
+        )
+      );
+    },
+    { equals: sameFileEditTotalsMap }
+  );
+  createEffect(fileEditTotals, (totals) => publishFileEditTotals(totals));
+  onCleanup(() => publishFileEditTotals(null));
   const trailingTurnInlineEditRetention = createMemo<{
     sessionId: string | null;
     userMessageId: string | null;

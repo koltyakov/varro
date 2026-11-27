@@ -48,11 +48,10 @@ import { modalFocus } from '../../lib/modal-focus';
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
-  isPendingEditAwaitingMerge,
   shouldShowAssistantPartInHighlightedCard,
   shouldShowAssistantPartInline,
 } from '../../lib/part-utils';
-import { getToolFileChangeSignature } from '../../lib/tool-file-change';
+import { getFileEditRuns } from '../../lib/file-edit-totals';
 import { getToolKind } from '../../lib/tool-normalization';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import {
@@ -206,37 +205,7 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
 }
 
 function getDeduplicatedPartEntries(parts: Part[]): Array<{ key: string; part: Part }> {
-  const result: Array<{ key: string; part: Part }> = [];
-  for (let index = 0; index < parts.length; index += 1) {
-    if (isPendingEditAwaitingMerge(parts, index)) continue;
-    if (!isFileEditPart(parts[index]!)) {
-      result.push({ key: parts[index]!.id, part: parts[index]! });
-      continue;
-    }
-    const currentChangeSignature = getToolFileChangeSignature(
-      // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
-      (parts[index]! as ToolPart).tool,
-      // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
-      (parts[index]! as ToolPart).state
-    );
-    let last = index;
-    while (
-      last + 1 < parts.length &&
-      isFileEditPart(parts[last + 1]!) &&
-      getToolFileChangeSignature(
-        // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
-        (parts[last + 1]! as ToolPart).tool,
-        // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
-        (parts[last + 1]! as ToolPart).state
-      ) === currentChangeSignature
-    ) {
-      last += 1;
-    }
-    // Keep the latest tool payload, but retain the first edit's preview identity.
-    result.push({ key: parts[index]!.id, part: parts[last]! });
-    index = last;
-  }
-  return result;
+  return getFileEditRuns(parts);
 }
 
 function samePartList(previous: readonly Part[], next: readonly Part[]) {

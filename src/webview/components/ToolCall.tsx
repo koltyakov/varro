@@ -39,6 +39,11 @@ import { formatCommandDisplay } from '../lib/command-display';
 import { formatCost, formatDuration, formatNumber, formatTokenCount } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import {
+  getFileEditTotals,
+  sameFileEditTotals,
+  type FileEditTotals,
+} from '../lib/file-edit-totals';
+import {
   notifyInlineDiffMount,
   prepareForMessageBlockRemoval,
   trackInlineDiffLoad,
@@ -631,6 +636,10 @@ export function ToolCall(props: {
     };
   });
   const fileChanges = () => fileChangePreview().changes;
+  // Per-ID lookup behind structural equality: other cards' totals never notify this one.
+  const fileEditTotals = createMemo(() => getFileEditTotals(tool().id), {
+    equals: sameFileEditTotals,
+  });
   const isReadTool = () => isToolFileRead(tool().tool);
 
   const statusClass = () => {
@@ -738,6 +747,7 @@ export function ToolCall(props: {
           messageID={props.part.messageID}
           toolState={state()}
           changes={fileChanges()}
+          totals={fileEditTotals()}
           animatePending={isApplyPatchTool(tool().tool)}
           waitingForPermission={isWaitingForPermission()}
           previewStateKey={props.diffPreviewStateKey ?? expansionKey()}
@@ -985,6 +995,8 @@ function FileChangeCard(props: {
   messageID: string;
   toolState: ToolPart['state'];
   changes: FileChange[];
+  /** Combined counts for consecutive edits merged into this card; header only. */
+  totals?: FileEditTotals | undefined;
   animatePending: boolean;
   waitingForPermission: boolean;
   previewStateKey: string;
@@ -1156,9 +1168,18 @@ function FileChangeCard(props: {
     return 'Completed';
   };
 
+  // Combined counts replace only the header's numbers; inline previews keep each edit's own.
+  const headerChanges = () => {
+    const totals = props.totals;
+    if (!totals) return changes();
+    return changes().map((item) => {
+      const combined = totals.files.get(item.dedupeKey);
+      return combined ? { ...item, ...combined } : item;
+    });
+  };
   const diffStats = () => {
     if (!isCompleted()) return null;
-    const fromChanges = changes().reduce(
+    const fromChanges = headerChanges().reduce(
       (acc, item) => {
         acc.additions += item.additions || 0;
         acc.deletions += item.deletions || 0;
@@ -1442,7 +1463,10 @@ function FileChangeCard(props: {
             </Show>
             <Show when={!props.compact && !isFailed()}>{statusContent(!isCompleted())}</Show>
             <Show when={isCompleted() && diffStats()}>
-              <span class="file-edit-diff-stats">
+              <span
+                class="file-edit-diff-stats"
+                title={props.totals ? `Combined from ${props.totals.edits} edits` : undefined}
+              >
                 <span class="diff-lines-added">+{diffStats()!.additions}</span>
                 <span class="diff-lines-removed">-{diffStats()!.deletions}</span>
               </span>
@@ -1503,6 +1527,7 @@ function FileChangeCard(props: {
                 messageID={props.messageID}
                 toolState={props.toolState}
                 changes={[item]}
+                totals={props.totals}
                 animatePending={props.animatePending}
                 waitingForPermission={props.waitingForPermission}
                 previewStateKey={props.previewStateKey}
