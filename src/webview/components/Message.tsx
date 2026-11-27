@@ -14,6 +14,7 @@ import {
   isAssistantActiveInlineToolPart,
   isAssistantActivityPart,
   isAssistantActivityPartRunning,
+  isAssistantEditActivityPart,
   type AssistantActivityGroupInfo,
 } from '../lib/assistant-activity';
 import { client } from '../lib/client';
@@ -449,6 +450,11 @@ export function Message(props: {
       ) || []
     );
   });
+  // Matches AssistantMessageContent's keepEditInline for this message.
+  const keepsEditsInline = () => {
+    const info = assistant();
+    return !!info && info.time.completed === undefined && !info.error;
+  };
   const hasVisibleAssistantOutput = () => {
     const visibleParts = visibleAssistantParts().filter((part) => {
       if (
@@ -456,6 +462,8 @@ export function Message(props: {
         !isAssistantActivityPart(part) ||
         !isAssistantActivityPartRunning(part) ||
         isAssistantActiveInlineToolPart(part) ||
+        // A live message keeps edits inline; they never enter the activity preview lifecycle.
+        (isAssistantEditActivityPart(part) && keepsEditsInline()) ||
         (part.type === 'tool' &&
           (props.questionRequestForTool?.(part) || props.permissionMatchForTool?.(part)))
       ) {

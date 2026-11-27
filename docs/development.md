@@ -103,7 +103,7 @@ its assignment JSON and exact test list alongside its timing report; merging rep
 that appear in multiple shards. These files stay in `tmp/e2e-sharding/`, outside Playwright's cleaned
 output directory.
 
-For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. Standard and raster E2E runs use port 4174 when available and automatically select a free port when it is occupied. To require a specific port, set `VARRO_E2E_PORT`, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells. Playback keeps its existing-server behavior.
+For shorter feedback loops, select a spec as above, filter test names with `npm run test:e2e -- --grep "composer"`, or rerun failures with `npm run test:e2e -- --last-failed`. Standard and raster E2E runs use port 4174 when available and automatically select a free port when it is occupied. Runs on a port other than 4174 write artifacts to `tmp/playwright-<port>/` so concurrent runs do not delete each other's traces. To require a specific port, set `VARRO_E2E_PORT`, for example `VARRO_E2E_PORT=4184 npm run test:e2e` in macOS/Linux shells. Playback keeps its existing-server behavior.
 
 The normal E2E suite excludes `e2e/tests/diagnostics/`. Run those investigations explicitly with
 `npm run test:e2e:diagnostics`; their evidence stays in `tmp/playwright-diagnostics/`. For the local

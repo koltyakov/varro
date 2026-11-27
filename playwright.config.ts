@@ -6,6 +6,8 @@ const raster = process.env.VARRO_E2E_MODE === 'raster';
 const diagnostics = process.env.VARRO_E2E_MODE === 'diagnostics';
 const port = process.env.VARRO_E2E_PORT ?? '4174';
 const baseURL = `http://127.0.0.1:${port}`;
+// Playwright empties outputDir at startup, so concurrent runs on other ports need their own.
+const portSuffix = port === '4174' ? '' : `-${port}`;
 
 export default defineConfig({
   testDir: playback ? './e2e/local' : diagnostics ? './e2e/tests/diagnostics' : './e2e/tests',
@@ -28,10 +30,10 @@ export default defineConfig({
   outputDir: playback
     ? './tmp/playwright-playback'
     : raster
-      ? './tmp/viewport-raster-diagnostic'
+      ? `./tmp/viewport-raster-diagnostic${portSuffix}`
       : diagnostics
         ? './tmp/playwright-diagnostics'
-        : './tmp/playwright',
+        : `./tmp/playwright${portSuffix}`,
   retries: !playback && !raster && !diagnostics && process.env.CI ? 2 : 0,
   reporter: 'list',
   expect: {

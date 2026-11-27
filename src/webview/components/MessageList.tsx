@@ -116,6 +116,7 @@ import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
 import {
   collapseLeadingDuplicateFileEvents,
+  collapseLeadingFileEventsInOrder,
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
 import {
@@ -1336,29 +1337,46 @@ export function MessageList() {
     const tail = liveTailMessages();
     return untrack(() => historyRunning.some(Boolean) || hasVisibleRunningToolPart(tail));
   });
-  const hasVisibleRunningInlineFileEdit = (entries: readonly MessageEntry[]) =>
-    entries.some((message) =>
-      message.parts.some(
-        (part, index, parts) =>
-          part.type === 'tool' &&
-          (part.state.status === 'pending' || part.state.status === 'running') &&
-          shouldShowAssistantPartInline(part) &&
-          !isPendingEditAwaitingMerge(parts, index) &&
-          isAssistantEditActivityPart(part) &&
-          !shouldCompactAssistantActivityPart(part, {
-            keepEditInline: true,
-            keepReasoningInline: false,
-          })
-      )
-    );
-  const historyVisibleRunningInlineFileEdit = mapHistorySegments((segment) =>
-    createMemo(() => hasVisibleRunningInlineFileEdit(segment.entries()))
+  // Thinking hands off only to an edit the transcript renders, so scan the same collapsed parts.
+  const scanVisibleRunningInlineFileEdit = (
+    entries: readonly MessageEntry[],
+    initialSignature: string | null
+  ) => {
+    const collapsed = collapseLeadingFileEventsInOrder(entries, initialSignature);
+    return {
+      running: collapsed.parts.some((parts) =>
+        parts.some(
+          (part, index) =>
+            part.type === 'tool' &&
+            (part.state.status === 'pending' || part.state.status === 'running') &&
+            shouldShowAssistantPartInline(part) &&
+            !isPendingEditAwaitingMerge(parts, index) &&
+            isAssistantEditActivityPart(part) &&
+            !shouldCompactAssistantActivityPart(part, {
+              keepEditInline: true,
+              keepReasoningInline: false,
+            })
+        )
+      ),
+      trailingSignature: collapsed.trailingSignature,
+    };
+  };
+  const historyVisibleRunningInlineFileEdit = chainHistorySegments<
+    ReturnType<typeof scanVisibleRunningInlineFileEdit>
+  >((segment, previous) =>
+    createMemo(() =>
+      scanVisibleRunningInlineFileEdit(segment.entries(), previous?.().trailingSignature ?? null)
+    )
   );
   const visibleRunningInlineFileEdit = createMemo(() => {
     messageStructureVersion();
-    const historyRunning = historyVisibleRunningInlineFileEdit.map((running) => running());
+    const history = historyVisibleRunningInlineFileEdit.map((scan) => scan());
     const tail = liveTailMessages();
-    return untrack(() => historyRunning.some(Boolean) || hasVisibleRunningInlineFileEdit(tail));
+    return untrack(
+      () =>
+        history.some((scan) => scan.running) ||
+        scanVisibleRunningInlineFileEdit(tail, history.at(-1)?.trailingSignature ?? null).running
+    );
   });
   const committedTextBlockKey = createMemo(() => {
     messageStructureVersion();
@@ -3027,10 +3045,19 @@ export function MessageList() {
     const indexes = messageIndexById();
     return [...turn.assistantMessageIds].some((messageId) => {
       const index = indexes.get(messageId);
-      const message = index === undefined ? undefined : entries[index];
+      if (index === undefined) return false;
+      const message = entries[index];
       if (!message || message.info.role !== 'assistant' || message.info.error) return false;
-      return message.parts.some(
-        (part, partIndex, parts) =>
+      // Match the rendered projection: a leading call may collapse into the previous message.
+      const previous = entries[index - 1];
+      const parts = collapseLeadingDuplicateFileEvents(
+        message.parts,
+        previous && isAssistantMessage(previous.info)
+          ? getTrailingFileEventSignature(previous.parts)
+          : null
+      );
+      return parts.some(
+        (part, partIndex) =>
           part.type === 'tool' &&
           (part.state.status === 'pending' || part.state.status === 'running') &&
           shouldShowAssistantPartInline(part) &&

@@ -43,7 +43,8 @@ export function isFileEditPart(part: Part): boolean {
   return getToolFileChange((part as ToolPart).tool, (part as ToolPart).state) !== null;
 }
 
-function isUnresolvedPendingEditPart(part: Part) {
+/** A pending edit call whose input has not identified its file yet. */
+export function isUnresolvedPendingEditPart(part: Part) {
   return (
     part.type === 'tool' &&
     part.state.status === 'pending' &&

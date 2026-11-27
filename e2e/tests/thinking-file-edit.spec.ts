@@ -605,6 +605,275 @@ for (const nextPath of ['src/app.ts', 'src/other.ts']) {
   });
 }
 
+for (const nextPath of ['src/app.ts', 'src/other.ts']) {
+  test(`paints an empty Claude edit step to ${nextPath} after a file edit without a placeholder or blank`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 490, height: 427 });
+    const sessionID = 'claude-cross-edit';
+    const created = 1_780_000_000_000;
+    const assistantInfo: AssistantMessage = {
+      id: 'claude-cross-context',
+      sessionID,
+      role: 'assistant',
+      parentID: 'claude-cross-user',
+      time: { created },
+      providerID: 'claude-agent',
+      modelID: 'opus',
+      mode: 'build',
+      agent: 'build',
+      path: { cwd: '/workspace', root: '/workspace' },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    };
+    const messages: MessageEntry[] = Array.from({ length: 60 }, (_, index) => {
+      const id = `claude-cross-context-${index}`;
+      return {
+        info: { ...assistantInfo, id, time: { created, completed: created + 1 } },
+        parts: [
+          {
+            id: `${id}-text`,
+            messageID: id,
+            sessionID,
+            type: 'text',
+            text: 'The build passed. Each following step edits one source file.',
+          },
+        ],
+      };
+    });
+    messages.unshift({
+      info: {
+        id: 'claude-cross-user',
+        sessionID,
+        role: 'user',
+        time: { created: created - 1 },
+        agent: 'build',
+        model: { providerID: 'claude-agent', modelID: 'opus' },
+      },
+      parts: [
+        {
+          id: 'claude-cross-prompt',
+          messageID: 'claude-cross-user',
+          sessionID,
+          type: 'text',
+          text: 'Update the source files.',
+        },
+      ],
+    });
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'project-test',
+        directory: '/workspace',
+        title: 'Claude edit steps',
+        version: '1.0.0',
+        time: { created, updated: created },
+      },
+      initialMessages: messages,
+    });
+    await page.goto('/e2e/harness/index.html?scenario=session-playback');
+    await expect(page.locator(`[data-msg-id="${messages.at(-1)!.info.id}"]`)).toBeVisible();
+
+    // Each Claude tool step is its own assistant message.
+    const firstStep = 'claude-cross-step-1';
+    const nextStep = 'claude-cross-step-2';
+    const input = (filePath: string) => ({
+      path: `/workspace/${filePath}`,
+      oldString: 'a',
+      newString: 'b',
+    });
+    const editPart = (
+      id: string,
+      messageID: string,
+      filePath: string,
+      status: 'empty' | 'pending' | 'running' | 'completed'
+    ): ToolPart => ({
+      id,
+      messageID,
+      sessionID,
+      type: 'tool',
+      tool: 'edit',
+      callID: `${id}-call`,
+      state:
+        status === 'empty'
+          ? { status: 'pending', input: {}, raw: '' }
+          : status === 'pending'
+            ? {
+                status: 'pending',
+                input: input(filePath),
+                raw: JSON.stringify(input(filePath)),
+              }
+            : status === 'running'
+              ? { status: 'running', input: input(filePath), title: 'edit', time: { start: 1 } }
+              : {
+                  status: 'completed',
+                  input: input(filePath),
+                  output: 'Edit applied successfully.',
+                  title: 'edit',
+                  // Claude edits report counts per file, as stored by OpenCode v2.
+                  metadata: {
+                    files: [
+                      {
+                        file: `/workspace/${filePath}`,
+                        status: 'modified',
+                        additions: 2,
+                        deletions: 1,
+                      },
+                    ],
+                  },
+                  time: { start: 1, end: 2 },
+                },
+    });
+    const replay = (events: ServerEvent[]) =>
+      page.evaluate((serverEvents) => {
+        // SAFETY: The isolated E2E page installs this fixture-only transport.
+        const harness = (
+          window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+        ).__varroE2E!;
+        for (const event of serverEvents) harness.replayServerEvent(event);
+      }, events);
+
+    await replay([
+      { type: 'session.status', properties: { sessionID, status: { type: 'busy' } } },
+      {
+        type: 'message.updated',
+        properties: { info: { ...assistantInfo, id: firstStep, time: { created: Date.now() } } },
+      },
+      {
+        type: 'message.part.updated',
+        properties: { part: editPart('claude-cross-a', firstStep, 'src/app.ts', 'completed') },
+      },
+      {
+        type: 'message.updated',
+        properties: {
+          info: {
+            ...assistantInfo,
+            id: firstStep,
+            time: { created: Date.now() - 1000, completed: Date.now() },
+            finish: 'tool-calls',
+          },
+        },
+      },
+      {
+        type: 'message.updated',
+        properties: { info: { ...assistantInfo, id: nextStep, time: { created: Date.now() } } },
+      },
+    ]);
+    const firstRow = page.locator(`[data-msg-id="${firstStep}"]`);
+    const nextRow = page.locator(`[data-msg-id="${nextStep}"]`);
+    await expect(firstRow.locator('.file-change-card')).toHaveCount(1);
+    await expect(
+      page.locator('.interactive-loading-row:not(.is-reserved) .loading-indicator')
+    ).toBeVisible();
+    await waitForAnimationFrames(page, 30);
+
+    // The empty call stays long enough to paint before its input arrives in a later batch.
+    const samples = await page.evaluate(
+      async ({ steps, firstId, nextId, callId }) => {
+        // SAFETY: The isolated E2E page installs this fixture-only transport.
+        const harness = (
+          window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+        ).__varroE2E!;
+        const card = document.querySelector<HTMLElement>(
+          `[data-msg-id="${firstId}"] .file-change-card`
+        )!;
+        const sample = (step: string) => {
+          const next = document.querySelector<HTMLElement>(`[data-msg-id="${nextId}"]`);
+          return {
+            step,
+            cardTop: card.getBoundingClientRect().top,
+            nextHeight: next?.getBoundingClientRect().height ?? 0,
+            nextCards: next?.querySelectorAll('.file-change-card').length ?? 0,
+            placeholder: !!document.querySelector(`[data-assistant-render-key="part:${callId}"]`),
+            thinking: !!document.querySelector(
+              '.interactive-loading-row:not(.is-reserved) .loading-indicator'
+            ),
+          };
+        };
+        const result = [sample('before')];
+        for (const step of steps) {
+          harness.replayServerEvent({
+            type: 'message.part.updated',
+            properties: { part: step.part },
+          });
+          for (let frame = 0; frame < step.frames; frame++) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => setTimeout(resolve, 0))
+            );
+            result.push(sample(step.name));
+          }
+        }
+        return result;
+      },
+      {
+        steps: [
+          {
+            name: 'empty',
+            frames: 30,
+            part: editPart('claude-cross-b', nextStep, nextPath, 'empty'),
+          },
+          {
+            name: 'pending',
+            frames: 1,
+            part: editPart('claude-cross-b', nextStep, nextPath, 'pending'),
+          },
+          {
+            name: 'running',
+            frames: 30,
+            part: editPart('claude-cross-b', nextStep, nextPath, 'running'),
+          },
+        ],
+        firstId: firstStep,
+        nextId: nextStep,
+        callId: 'claude-cross-b',
+      }
+    );
+    const evidence = JSON.stringify(samples);
+    expect(
+      samples.some((sample) => sample.placeholder),
+      evidence
+    ).toBe(false);
+    // Nothing above the new step slides back toward the bottom.
+    expect(
+      Math.max(
+        ...samples.slice(1).map((sample, index) => sample.cardTop - samples[index]!.cardTop)
+      ),
+      evidence
+    ).toBeLessThanOrEqual(0.5);
+    const emptySamples = samples.filter((sample) => sample.step === 'empty');
+    expect(
+      emptySamples.every((sample) => sample.thinking && sample.nextHeight === 0),
+      evidence
+    ).toBe(true);
+    const runningSamples = samples.filter((sample) => sample.step === 'running');
+    if (nextPath === 'src/app.ts') {
+      // The call collapses into the earlier card, so Thinking keeps the activity slot.
+      expect(
+        runningSamples.every((sample) => sample.thinking && sample.nextHeight === 0),
+        evidence
+      ).toBe(true);
+    } else {
+      // A different file renders while it runs instead of leaving a blank Thinking slot.
+      expect(runningSamples.at(-1)!.nextCards, evidence).toBe(1);
+      expect(
+        runningSamples.every((sample) => sample.thinking || sample.nextCards === 1),
+        evidence
+      ).toBe(true);
+    }
+
+    await replay([
+      {
+        type: 'message.part.updated',
+        properties: { part: editPart('claude-cross-b', nextStep, nextPath, 'completed') },
+      },
+    ]);
+    await expect(nextRow.locator('.file-change-card')).toHaveCount(
+      nextPath === 'src/app.ts' ? 0 : 1
+    );
+    await expect(firstRow.locator('.file-change-card')).toHaveCount(1);
+  });
+}
+
 test('keeps Thinking aligned as an inline edit appears in a measured transcript', async ({
   page,
 }) => {
