@@ -59,6 +59,9 @@ export function WindowedSessionItems(props: {
       viewportHeight: 1,
       overscan: 0,
     }).coreStart;
+    // At the end, the browser already clamped scrollTop when mounted rows shrank below their
+    // estimates. Compensating again would push the trailing rows below the viewport.
+    const atEnd = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 1;
     let changed = false;
     for (const [id, element] of mounted) {
       if (!element.isConnected) continue;
@@ -68,8 +71,8 @@ export function WindowedSessionItems(props: {
         changed = true;
       }
     }
-    if (changed) {
-      setRevision((value) => value + 1);
+    if (changed) setRevision((value) => value + 1);
+    if (changed && !atEnd) {
       // Keep the same visible row when measurements above it replace estimates.
       let nextAnchorTop = 0;
       const orderedIds = ids();

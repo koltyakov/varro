@@ -48,6 +48,7 @@ import { modalFocus } from '../../lib/modal-focus';
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
+  isPendingEditAwaitingMerge,
   shouldShowAssistantPartInHighlightedCard,
   shouldShowAssistantPartInline,
 } from '../../lib/part-utils';
@@ -207,6 +208,7 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
 function getDeduplicatedPartEntries(parts: Part[]): Array<{ key: string; part: Part }> {
   const result: Array<{ key: string; part: Part }> = [];
   for (let index = 0; index < parts.length; index += 1) {
+    if (isPendingEditAwaitingMerge(parts, index)) continue;
     if (!isFileEditPart(parts[index]!)) {
       result.push({ key: parts[index]!.id, part: parts[index]! });
       continue;

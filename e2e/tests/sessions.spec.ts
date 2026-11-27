@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { ServerEvent } from '../../src/shared/protocol';
 import type { MessageEntry } from '../../src/webview/types';
+import { waitForAnimationFrames } from './helpers';
 
 for (const source of ['metadata', 'events'] as const) {
   test(`shows idle session compaction as running with a static compress icon via ${source}`, async ({
@@ -332,11 +333,29 @@ test('windows a large session list while preserving keyboard wrap and visible co
   await page.goto('/e2e/harness/index.html?scenario=session-list-load');
   const search = page.getByRole('textbox', { name: 'Search sessions' });
   await expect(search).toBeVisible();
-  await search.press('ArrowUp');
-  const focused = page.locator('.session-item.keyboard-focus');
-  await expect(focused).toBeInViewport();
-  await expect.poll(() => page.locator('.session-item').count()).toBeLessThan(50);
   const scroll = page.locator('.session-list-scroll:visible').first();
+  const focused = page.locator('.session-item.keyboard-focus');
+  // Row measurement replaces height estimates over several frames after a wrap. Check the
+  // settled position: a sliver at the scrollport edge is not a visible keyboard focus.
+  const expectFocusedRowFullyVisible = async (sessionId: string) => {
+    await expect(focused).toHaveAttribute('data-session-id', sessionId);
+    await waitForAnimationFrames(page, 30);
+    const bounds = await focused.evaluate((row) => {
+      const container = row.closest<HTMLElement>('.session-list-scroll')!;
+      const viewport = container.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      return {
+        top: rect.top - viewport.top,
+        bottom: rect.bottom - viewport.top,
+        height: container.clientHeight,
+      };
+    });
+    expect(bounds.top, JSON.stringify(bounds)).toBeGreaterThanOrEqual(-1);
+    expect(bounds.bottom, JSON.stringify(bounds)).toBeLessThanOrEqual(bounds.height + 1);
+  };
+  await search.press('ArrowUp');
+  await expectFocusedRowFullyVisible('load-249');
+  await expect.poll(() => page.locator('.session-item').count()).toBeLessThan(50);
   await scroll.evaluate((element) => {
     element.scrollTop = element.scrollHeight / 2;
   });
@@ -354,7 +373,7 @@ test('windows a large session list while preserving keyboard wrap and visible co
     .toBe(true);
   await expect.poll(() => page.locator('.session-item').count()).toBeLessThan(50);
   await search.press('ArrowDown');
-  await expect(focused).toBeInViewport();
+  await expectFocusedRowFullyVisible('load-0');
 });
 
 test('keeps session row geometry unchanged with empty and hover-only metadata', async ({

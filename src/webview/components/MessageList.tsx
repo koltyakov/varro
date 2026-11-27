@@ -73,6 +73,7 @@ import {
 } from '../lib/message-list-layout';
 import {
   getFinalAssistantTextPartId,
+  isPendingEditAwaitingMerge,
   isWorkspaceDirectoryText,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
@@ -1338,10 +1339,11 @@ export function MessageList() {
   const hasVisibleRunningInlineFileEdit = (entries: readonly MessageEntry[]) =>
     entries.some((message) =>
       message.parts.some(
-        (part) =>
+        (part, index, parts) =>
           part.type === 'tool' &&
           (part.state.status === 'pending' || part.state.status === 'running') &&
           shouldShowAssistantPartInline(part) &&
+          !isPendingEditAwaitingMerge(parts, index) &&
           isAssistantEditActivityPart(part) &&
           !shouldCompactAssistantActivityPart(part, {
             keepEditInline: true,
@@ -3028,10 +3030,11 @@ export function MessageList() {
       const message = index === undefined ? undefined : entries[index];
       if (!message || message.info.role !== 'assistant' || message.info.error) return false;
       return message.parts.some(
-        (part) =>
+        (part, partIndex, parts) =>
           part.type === 'tool' &&
           (part.state.status === 'pending' || part.state.status === 'running') &&
-          shouldShowAssistantPartInline(part)
+          shouldShowAssistantPartInline(part) &&
+          !isPendingEditAwaitingMerge(parts, partIndex)
       );
     });
   });

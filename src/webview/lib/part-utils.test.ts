@@ -5,6 +5,7 @@ import {
   getFinalAssistantTextPartId,
   isFileEditPart,
   isFileReadPart,
+  isPendingEditAwaitingMerge,
   isWorkspaceDirectoryText,
   isTodoToolPart,
   shouldShowAssistantPartInHighlightedCard,
@@ -54,6 +55,35 @@ describe('part utils', () => {
         type: 'text',
         text: 'hello',
       })
+    ).toBe(false);
+  });
+
+  it('holds back an unresolved pending edit only while it can merge into a preceding file edit', () => {
+    const edited = toolPart('edit', completedState({ path: 'src/app.ts' }));
+    const pending = (tool: string, input: UnknownRecord = {}): ToolPart => ({
+      ...toolPart(tool, { status: 'pending', input, raw: '' }),
+      id: `${tool}-pending-${Object.keys(input).length}`,
+    });
+    const read = toolPart('read', completedState({ path: 'src/app.ts' }));
+
+    expect(isPendingEditAwaitingMerge([edited, pending('edit')], 1)).toBe(true);
+    expect(isPendingEditAwaitingMerge([edited, pending('edit'), pending('write')], 2)).toBe(true);
+    // Once its target is known, the edit renders or merges through normal deduplication.
+    expect(isPendingEditAwaitingMerge([edited, pending('edit', { path: 'src/app.ts' })], 1)).toBe(
+      false
+    );
+    // Without a preceding card there is nothing to merge into, so the placeholder shows.
+    expect(isPendingEditAwaitingMerge([pending('apply_patch')], 0)).toBe(false);
+    expect(isPendingEditAwaitingMerge([read, pending('edit')], 1)).toBe(false);
+    expect(isPendingEditAwaitingMerge([edited, pending('bash')], 1)).toBe(false);
+    expect(
+      isPendingEditAwaitingMerge(
+        [
+          edited,
+          { ...pending('edit'), state: { status: 'running', input: {}, time: { start: 0 } } },
+        ],
+        1
+      )
     ).toBe(false);
   });
 

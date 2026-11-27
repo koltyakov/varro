@@ -2,7 +2,12 @@ import { isAbortedToolError } from '../../shared/error-classification';
 import type { Part, ToolPart } from '../types';
 import { getToolFileChange, getToolReadPath } from './tool-file-change';
 import { showThinking } from './state';
-import { isApplyPatchTool, isTodoToolName, isTodoToolTitle } from './tool-normalization';
+import {
+  getToolKind,
+  isApplyPatchTool,
+  isTodoToolName,
+  isTodoToolTitle,
+} from './tool-normalization';
 
 export function isWorkspaceDirectoryText(text: string) {
   return text.startsWith('[Working directory:');
@@ -36,6 +41,27 @@ export function isFileEditPart(part: Part): boolean {
   if (part.type !== 'tool') return false;
   // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
   return getToolFileChange((part as ToolPart).tool, (part as ToolPart).state) !== null;
+}
+
+function isUnresolvedPendingEditPart(part: Part) {
+  return (
+    part.type === 'tool' &&
+    part.state.status === 'pending' &&
+    getToolKind(part.tool) === 'edit' &&
+    !isFileEditPart(part)
+  );
+}
+
+/**
+ * Providers that do not stream tool input (such as the Claude agent) still publish an empty
+ * pending call before its input. Directly after a file edit, that call usually resolves into
+ * the same card, so a standalone placeholder would paint and collapse a frame later.
+ */
+export function isPendingEditAwaitingMerge(parts: readonly Part[], index: number): boolean {
+  if (!isUnresolvedPendingEditPart(parts[index]!)) return false;
+  let previous = index - 1;
+  while (previous >= 0 && isUnresolvedPendingEditPart(parts[previous]!)) previous -= 1;
+  return previous >= 0 && isFileEditPart(parts[previous]!);
 }
 
 export function isFileReadPart(part: Part): boolean {

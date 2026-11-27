@@ -444,6 +444,167 @@ for (const editCase of ABSORBED_EDIT_CASES) {
   });
 }
 
+for (const nextPath of ['src/app.ts', 'src/other.ts']) {
+  test(`keeps Thinking in place while a Claude edit to ${nextPath} has no input yet`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 490, height: 427 });
+    const sessionID = 'claude-pending-edit';
+    const created = 1_780_000_000_000;
+    const assistantInfo: AssistantMessage = {
+      id: 'claude-edit-context',
+      sessionID,
+      role: 'assistant',
+      parentID: 'claude-edit-user',
+      time: { created },
+      providerID: 'claude-agent',
+      modelID: 'opus',
+      mode: 'build',
+      agent: 'build',
+      path: { cwd: '/workspace', root: '/workspace' },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    };
+    const messages: MessageEntry[] = Array.from({ length: 60 }, (_, index) => {
+      const id = `claude-edit-context-${index}`;
+      return {
+        info: { ...assistantInfo, id, time: { created, completed: created + 1 } },
+        parts: [
+          {
+            id: `${id}-text`,
+            messageID: id,
+            sessionID,
+            type: 'text',
+            text: 'The build passed. The next edits update the source files.',
+          },
+        ],
+      };
+    });
+    messages.unshift({
+      info: {
+        id: 'claude-edit-user',
+        sessionID,
+        role: 'user',
+        time: { created: created - 1 },
+        agent: 'build',
+        model: { providerID: 'claude-agent', modelID: 'opus' },
+      },
+      parts: [
+        {
+          id: 'claude-edit-prompt',
+          messageID: 'claude-edit-user',
+          sessionID,
+          type: 'text',
+          text: 'Update the source files.',
+        },
+      ],
+    });
+    await installPlaybackCapture(page, {
+      session: {
+        id: sessionID,
+        projectID: 'project-test',
+        directory: '/workspace',
+        title: 'Claude edits',
+        version: '1.0.0',
+        time: { created, updated: created },
+      },
+      initialMessages: messages,
+    });
+    await page.goto('/e2e/harness/index.html?scenario=session-playback');
+    await expect(page.locator(`[data-msg-id="${messages.at(-1)!.info.id}"]`)).toBeVisible();
+
+    const messageID = 'claude-edit-message';
+    const editPart = (id: string, filePath: string, status: 'pending' | 'completed'): ToolPart => ({
+      id,
+      messageID,
+      sessionID,
+      type: 'tool',
+      tool: 'edit',
+      callID: `${id}-call`,
+      state:
+        status === 'pending'
+          ? { status: 'pending', input: {}, raw: '' }
+          : {
+              status: 'completed',
+              input: { path: `/workspace/${filePath}`, oldString: 'a', newString: 'b' },
+              output: 'Edit applied successfully.',
+              title: 'edit',
+              metadata: {
+                filediff: { file: `/workspace/${filePath}`, additions: 4, deletions: 1 },
+              },
+              time: { start: Date.now() - 1000, end: Date.now() },
+            },
+    });
+    const replay = (events: ServerEvent[]) =>
+      page.evaluate((serverEvents) => {
+        // SAFETY: The isolated E2E page installs this fixture-only transport.
+        const harness = (
+          window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+        ).__varroE2E!;
+        for (const event of serverEvents) harness.replayServerEvent(event);
+      }, events);
+
+    await replay([
+      { type: 'session.status', properties: { sessionID, status: { type: 'busy' } } },
+      {
+        type: 'message.updated',
+        properties: { info: { ...assistantInfo, id: messageID, time: { created: Date.now() } } },
+      },
+      {
+        type: 'message.part.updated',
+        properties: { part: editPart('claude-edit-a', 'src/app.ts', 'completed') },
+      },
+    ]);
+    const row = page.locator(`[data-msg-id="${messageID}"]`);
+    const thinking = page.locator('.interactive-loading-row:not(.is-reserved) .loading-indicator');
+    await expect(row.locator('.assistant-file-edit-stack .file-change-card')).toHaveCount(1);
+    await expect(thinking).toBeVisible();
+    await waitForAnimationFrames(page, 30);
+
+    // The provider publishes the call before its input; the input follows in a later batch.
+    const samples = await page.evaluate(
+      async ({ part, rowId }) => {
+        // SAFETY: The isolated E2E page installs this fixture-only transport.
+        const harness = (
+          window as Window & { __varroE2E?: { replayServerEvent(event: ServerEvent): void } }
+        ).__varroE2E!;
+        const rowElement = document.querySelector<HTMLElement>(`[data-msg-id="${rowId}"]`)!;
+        const sample = () => ({
+          height: rowElement.getBoundingClientRect().height,
+          standalone: !!rowElement.querySelector(`[data-assistant-render-key="part:${part.id}"]`),
+          thinking: !!document.querySelector(
+            '.interactive-loading-row:not(.is-reserved) .loading-indicator'
+          ),
+        });
+        const result = [sample()];
+        harness.replayServerEvent({ type: 'message.part.updated', properties: { part } });
+        for (let frame = 0; frame < 30; frame++) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          result.push(sample());
+        }
+        return result;
+      },
+      { part: editPart('claude-edit-b', nextPath, 'pending'), rowId: messageID }
+    );
+    expect(
+      samples.every(
+        (sample) => !sample.standalone && sample.thinking && sample.height === samples[0]!.height
+      ),
+      JSON.stringify(samples)
+    ).toBe(true);
+
+    await replay([
+      {
+        type: 'message.part.updated',
+        properties: { part: editPart('claude-edit-b', nextPath, 'completed') },
+      },
+    ]);
+    await expect(row.locator('.assistant-file-edit-stack .file-change-card')).toHaveCount(
+      nextPath === 'src/app.ts' ? 1 : 2
+    );
+  });
+}
+
 test('keeps Thinking aligned as an inline edit appears in a measured transcript', async ({
   page,
 }) => {
