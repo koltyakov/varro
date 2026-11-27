@@ -264,6 +264,8 @@ const NEW_TURN_ALIGNMENT_FRAME_LIMIT = 64;
 const NEW_TURN_ALIGNMENT_MAX_STEP_PX = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
 const BOTTOM_FOLLOW_RESUME_GAP_MS = 1000;
+// Matches the follow-up cache probe bound that also holds the opening reveal.
+const INITIAL_DIFF_REVEAL_TIMEOUT_MS = 2_000;
 // Paced text may trail the viewport by at most this much before the follower catches up.
 const STREAMING_FOLLOW_MAX_LAG_PX = 64;
 const WIDTH_RESIZE_SETTLE_MS = 100;
@@ -733,6 +735,10 @@ export function MessageList() {
   const [initialFollowupRestore, setInitialFollowupRestore] = createSignal<{
     sessionId: string;
   } | null>(null);
+  // Change-summary requests that keep the opening transcript hidden. The settle loop parks on
+  // them, and the last release restarts it.
+  const initialDiffRevealHolds = new Set<{ sessionId: string }>();
+  let followLoopParkedForDiffSessionId: string | null = null;
   let initialScrollRafId = 0;
   let appendScrollRafId = 0;
   let appendScrollSessionId: string | null = null;
@@ -3726,6 +3732,40 @@ export function MessageList() {
       .join('|');
     return `${infoProjection}|${partProjection}`;
   }
+  // A completed reply's change summary loads after mount. Keep the hydration cover until it
+  // settles, bounded so a slow diff route cannot hold the transcript hidden.
+  function holdInitialRevealForAssistantDiff() {
+    const sessionId = untrack(() => state.activeSessionId);
+    if (!sessionId || untrack(initialPositioningSessionId) !== sessionId || !untrack(autoScroll)) {
+      return undefined;
+    }
+    const hold = { sessionId };
+    initialDiffRevealHolds.add(hold);
+    // Runs from the row's effect cleanup too, so read list state untracked.
+    const release = () => {
+      clearTimeout(timer);
+      if (!initialDiffRevealHolds.delete(hold) || hasInitialDiffRevealHold(sessionId)) return;
+      if (followLoopParkedForDiffSessionId !== sessionId) return;
+      followLoopParkedForDiffSessionId = null;
+      untrack(() => {
+        if (
+          state.activeSessionId === sessionId &&
+          initialPositioningSessionId() === sessionId &&
+          autoScroll()
+        ) {
+          startFollowLoop(sessionId);
+        }
+      });
+    };
+    const timer = setTimeout(release, INITIAL_DIFF_REVEAL_TIMEOUT_MS);
+    return release;
+  }
+
+  function hasInitialDiffRevealHold(sessionId: string) {
+    for (const hold of initialDiffRevealHolds) if (hold.sessionId === sessionId) return true;
+    return false;
+  }
+
   function handleAssistantDiffSettledEmpty(messageId: string) {
     if (
       !forcedVirtualContentMessageIds.has(messageId) ||
@@ -6911,6 +6951,18 @@ export function MessageList() {
           : 1;
       if (
         bottomFollowSettleFrames >= settleFrameCount &&
+        initialFollowupRestore()?.sessionId !== sessionId &&
+        hasInitialDiffRevealHold(sessionId)
+      ) {
+        // The layout is settled except for a pending change summary. Stop polling; releasing
+        // the hold restarts this loop, which positions the grown tail before revealing it.
+        followLoopParkedForDiffSessionId = sessionId;
+        activeFollowLoopSessionId = null;
+        if (!activityExitSummarySettleRafId) lastBottomScrollFrameAt = null;
+        return;
+      }
+      if (
+        bottomFollowSettleFrames >= settleFrameCount &&
         initialFollowupRestore()?.sessionId !== sessionId
       ) {
         // The final cold-range rounding can add one pixel inside the normal follow tolerance.
@@ -9071,6 +9123,8 @@ export function MessageList() {
       pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
       pendingInitialHistoryFillSessionId = editingAtSessionStart ? null : sessionId;
       setInitialFollowupRestore(null);
+      initialDiffRevealHolds.clear();
+      followLoopParkedForDiffSessionId = null;
       setInitialPositioningSessionId(
         !editingAtSessionStart && untrack(() => state.messagesLoading || messages().length > 0)
           ? sessionId
@@ -11779,6 +11833,7 @@ export function MessageList() {
               questionRequestForTool={getQuestionRequestForTool}
               permissionMatchForTool={getPermissionMatchForTool}
               onAssistantDiffSettledEmpty={handleAssistantDiffSettledEmpty}
+              onAssistantDiffLoadStart={holdInitialRevealForAssistantDiff}
               onWorkedSummaryHoverChange={handleWorkedSummaryHoverChange}
               onUserMessageHoverChange={handleWorkedSummaryHoverChange}
             />

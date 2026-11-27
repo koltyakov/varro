@@ -22,6 +22,7 @@ import { isAbsolutePath, normalizePath } from '../../src/shared/path-display';
 import type {
   Agent,
   AssistantMessage,
+  FileDiff,
   Message,
   NormalizedTodo,
   Part,
@@ -199,6 +200,7 @@ type ScenarioState = {
     generated?: FollowupSuggestionSet;
     generationDelayMs?: number;
   };
+  messageDiffs?: { delayMs: number; files: FileDiff[] };
 };
 
 export type HarnessComposerState = {
@@ -223,6 +225,7 @@ type HarnessWindow = Window & {
     session: Session;
     initialMessages: MessageEntry[];
     followups?: ScenarioState['followups'];
+    messageDiffs?: ScenarioState['messageDiffs'];
     goal?: SessionGoal | null;
   };
   __varroE2E?: {
@@ -887,6 +890,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     if (capture.followups) {
       state.followups = capture.followups;
     }
+    if (capture.messageDiffs) state.messageDiffs = capture.messageDiffs;
     if (capture.followups || capture.goal !== undefined) {
       state.readyStatus = { state: 'running', url: 'mock://opencode', apiVersion: 2 };
     }
@@ -6411,7 +6415,10 @@ async function handleApiRequest(
 
   const diffMatch = path.match(/^\/session\/([^/]+)\/diff$/);
   if (diffMatch && method === 'GET') {
-    return [];
+    const fixture = state.messageDiffs;
+    if (!fixture || !url.searchParams.has('messageID')) return [];
+    if (fixture.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, fixture.delayMs));
+    return fixture.files;
   }
 
   const v2PromptMatch = path.match(/^\/api\/session\/([^/]+)\/prompt$/);

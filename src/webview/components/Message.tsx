@@ -131,6 +131,8 @@ export function Message(props: {
   onTurnHoverChange?: (messageId: string, hovering: boolean) => void;
   onResponseHoverChange?: (messageId: string, hovering: boolean) => void;
   onAssistantDiffSettledEmpty?: (messageId: string) => void;
+  // Returns a release callback when the list holds its reveal until this diff request settles.
+  onAssistantDiffLoadStart?: () => (() => void) | undefined;
   isLastAssistant?: boolean;
   hideErrorAction?: boolean;
   retryState?: AssistantRetryState;
@@ -501,16 +503,19 @@ export function Message(props: {
       }
       let cancelled = false;
       setDiffsLoading(true);
-      void client.session
-        .diff(sessionID, messageID, { directory })
-        .catch((): FileDiff[] => [])
-        .then((value) => {
-          if (cancelled) return;
-          setDiffs(value);
-          setDiffsLoading(false);
-        });
+      // Opening a completed chat keeps the transcript hidden until this summary row is known,
+      // so the row does not land below the revealed bottom and ease the viewport after paint.
+      const releaseReveal = untrack(() => props.onAssistantDiffLoadStart?.());
+      const settle = (value: FileDiff[]) => {
+        if (cancelled) return;
+        setDiffs(value);
+        setDiffsLoading(false);
+        releaseReveal?.();
+      };
+      void client.session.diff(sessionID, messageID, { directory }).then(settle, () => settle([]));
       return () => {
         cancelled = true;
+        releaseReveal?.();
       };
     }
   );

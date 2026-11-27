@@ -807,6 +807,11 @@ Direct input acquires ownership only when it can affect the transcript:
   live-turn suggestions use normal smooth bottom-follow. Never re-hide an already-open transcript,
   snap to a late card, or reattach detached readers. `followups.spec.ts` samples from before startup to
   catch an answer-only frame followed by a layout shift, not just the card's arrival frames.
+  The last completed reply's "files changed" summary is fetched after its row mounts. Opening existing
+  history holds the same cover until that request settles, at most two seconds, so the summary is
+  part of the first revealed bottom instead of growing below it and easing the viewport. Once only
+  this hold remains, the settle loop parks instead of polling frames; the last release restarts it.
+  Requests that start after reveal take no hold.
   Dismissal reserves disappearing space through the existing block removal handler. Clicking an action
   sends its prompt immediately without a confirmation dialog,
   using the normal session-targeted send path while preserving the main draft and attachments.

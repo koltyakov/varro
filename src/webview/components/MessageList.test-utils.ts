@@ -25,6 +25,7 @@ import { resetMessageWindowState } from '../lib/message-window';
 import { resetMessageEditState } from '../lib/message-edit-state';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
+import { client } from '../lib/client';
 
 const testDiffOverlayOwner = Symbol();
 
@@ -68,6 +69,9 @@ export function installMessageListTestEnvironment(
       return 1;
     });
     globalThis.cancelAnimationFrame = vi.fn();
+    // A completed reply holds the opening reveal until its change summary settles. Without a
+    // host bridge the request never answers, so settle it empty unless a test overrides it.
+    vi.spyOn(client.session, 'diff').mockResolvedValue([]);
     vi.useFakeTimers();
   });
 

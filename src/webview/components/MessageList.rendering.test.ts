@@ -21,7 +21,16 @@ import {
   upsertMessage,
   upsertMessageInfo,
 } from '../lib/state';
-import type { MessageEntry, Part, Permission, QuestionRequest, TextPart, ToolPart } from '../types';
+import type {
+  FileDiff,
+  MessageEntry,
+  Part,
+  Permission,
+  QuestionRequest,
+  TextPart,
+  ToolPart,
+} from '../types';
+import { client } from '../lib/client';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
 import { MessageList, getNewlyAppendedMessageIds, getPromptNumberMap } from './MessageList';
 import { getRenderEmptyMessageIds } from './message-list/row-layout';
@@ -1506,6 +1515,82 @@ describe('MessageList loading states', () => {
     expect(list?.classList).not.toContain('is-session-hydrating');
     expect(scrollTopValue).toBe(800);
     expect(scrollWrites).toBeGreaterThan(0);
+    animationFrames.restore();
+    flushSolid();
+  });
+
+  function mountCompletedChatWithPendingDiff() {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    flushSolid();
+    let resolveDiff!: (diffs: FileDiff[]) => void;
+    vi.spyOn(client.session, 'diff').mockReturnValue(
+      new Promise<FileDiff[]>((resolve) => {
+        resolveDiff = resolve;
+      })
+    );
+    setSessions([session('session-1')]);
+    flushSolid();
+    setState(storePath('activeSessionId', 'session-1'));
+    flushSolid();
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt', 'Change it')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [textPart('answer', 'Done')],
+      },
+    ]);
+    flushSolid();
+
+    const list = mountList();
+    const scrollTop = { value: 0 };
+    // The change summary row adds 40px below the reply once its request settles.
+    defineLayoutMetrics(
+      list,
+      { clientHeight: 400 },
+      { scrollHeight: () => (list.querySelector('.diff-summary') ? 1240 : 1200) }
+    );
+    backScrollTop(list, scrollTop);
+    return {
+      animationFrames,
+      list,
+      scrollTop,
+      resolveDiff: (diffs: FileDiff[]) => resolveDiff(diffs),
+    };
+  }
+
+  it('keeps an opening completed chat hidden until its change summary settles', async () => {
+    const { animationFrames, list, scrollTop, resolveDiff } = mountCompletedChatWithPendingDiff();
+
+    await Promise.resolve();
+    for (let frame = 0; frame < 5; frame += 1) flushFrame(animationFrames);
+    expect(list.classList).toContain('is-session-hydrating');
+    expect(scrollTop.value).toBe(800);
+
+    resolveDiff([{ file: 'src/app.ts', additions: 3, deletions: 1 }]);
+    await Promise.resolve();
+    flushSolid();
+    expect(list.querySelector('.diff-summary')?.textContent).toContain('1 file changed');
+    expect(list.classList).toContain('is-session-hydrating');
+
+    for (let frame = 0; frame < 5; frame += 1) flushFrame(animationFrames);
+    expect(list.classList).not.toContain('is-session-hydrating');
+    // Revealed at the bottom that already includes the summary, with no later follow motion.
+    expect(scrollTop.value).toBe(840);
+    animationFrames.restore();
+    flushSolid();
+  });
+
+  it('reveals an opening completed chat when its change summary request stalls', async () => {
+    const { animationFrames, list, scrollTop } = mountCompletedChatWithPendingDiff();
+
+    await Promise.resolve();
+    for (let frame = 0; frame < 5; frame += 1) flushFrame(animationFrames);
+    expect(list.classList).toContain('is-session-hydrating');
+
+    vi.advanceTimersByTime(2_000);
+    for (let frame = 0; frame < 5; frame += 1) flushFrame(animationFrames);
+    expect(list.classList).not.toContain('is-session-hydrating');
+    expect(scrollTop.value).toBe(800);
     animationFrames.restore();
     flushSolid();
   });
