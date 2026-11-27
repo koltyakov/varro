@@ -638,8 +638,11 @@ Direct input acquires ownership only when it can affect the transcript:
   focus, expansion, structural, and history owners. `scroll-auto-scroll.spec.ts` samples closing and
   reopening from a later observer, before each paint. It covers pinned, detached, barely overflowing,
   horizontally wheeled, 125%-scale, and same-task layout-forced readers, plus movement in the same
-  frame as the shrink. A layout read in the closing task does not dispatch the clamp's scroll event
-  before the observer.
+  frame as the shrink. A layout read after the shrink commits, such as the composer measuring a
+  cleared draft, clamps before the frame, so the clamp's scroll event arrives before the observer.
+  The scroll handler records upward movement without new input that lands on the maximum, outside a
+  held thumb, and the observer pass restores that pre-clamp position. Clearing a multi-line draft
+  covers this order.
 - The fixed-target branch of activity-summary restoration has not been observed across a paint.
   Exit completion is queued as a microtask in the task that publishes `is-exiting`, which is
   `display: none`, so exiting keys and the held target are cleared before the next paint. Geometry

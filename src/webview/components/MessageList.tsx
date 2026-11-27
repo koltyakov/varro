@@ -722,6 +722,9 @@ export function MessageList() {
   let lastObservedScrollTop = 0;
   // Direct-input epoch when lastObservedScrollTop last matched the live position.
   let lastObservedScrollInputEpoch = 0;
+  // A layout clamp observed as a scroll event before the resize observer saw the growth.
+  let layoutClampedScroll: { from: number; to: number; at: number; inputEpoch: number } | null =
+    null;
   let pendingInitialScrollSessionId: string | null = null;
   let pendingInitialHistoryFillSessionId: string | null = null;
   const [initialPositioningSessionId, setInitialPositioningSessionId] = createSignal<string | null>(
@@ -6308,6 +6311,8 @@ export function MessageList() {
   // whether it took ownership of this resize.
   function reserveClampedDetachedSpace(growth: number) {
     const sessionId = state.activeSessionId;
+    const clamp = layoutClampedScroll;
+    layoutClampedScroll = null;
     if (
       !containerRef ||
       !trackRef ||
@@ -6327,7 +6332,14 @@ export function MessageList() {
     ) {
       return false;
     }
-    const target = lastObservedScrollTop;
+    // If the clamp's scroll event already arrived, the last observed position is the clamped one.
+    const target =
+      clamp &&
+      clamp.inputEpoch === directScrollInputEpoch &&
+      Math.abs(clamp.to - lastObservedScrollTop) <= 0.5 &&
+      performance.now() - clamp.at <= USER_SCROLL_IDLE_MS
+        ? clamp.from
+        : lastObservedScrollTop;
     const lost = target - containerRef.scrollTop;
     const clientHeight = containerRef.clientHeight;
     // scrollHeight and clientHeight round separately at fractional zoom; scrollTop does not.
@@ -7341,6 +7353,17 @@ export function MessageList() {
     ) {
       pinnedToBottom = true;
     }
+    // A forced layout before the frame can clamp the reader and dispatch this event before the
+    // resize observer sees the growth. Upward movement without new input that lands exactly on
+    // the maximum is that clamp; remember the reader's position for the observer pass.
+    layoutClampedScroll =
+      !suppressSyncScrollTop &&
+      scrollDelta < -0.5 &&
+      lastObservedScrollInputEpoch === directScrollInputEpoch &&
+      !pointerScrollOwnershipActive &&
+      top >= containerRef.scrollHeight - containerRef.clientHeight - 1
+        ? { from: lastObservedScrollTop, to: top, at: now, inputEpoch: directScrollInputEpoch }
+        : null;
     lastObservedScrollTop = decision.nextLastObservedScrollTop;
     lastObservedScrollInputEpoch = directScrollInputEpoch;
     expectedScrollTop = decision.nextExpectedScrollTop;

@@ -553,6 +553,136 @@ test.describe('auto-scroll', () => {
     expect(result.final, JSON.stringify(result)).toBeLessThanOrEqual(result.destination + 1);
   });
 
+  test('keeps the transcript fixed when closing the active editor with bottom space already reserved', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 504, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    await expect(page.getByRole('textbox', { name: 'Message composer' })).toBeVisible();
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+    const clientHeight = () =>
+      page.locator('.interactive-list').evaluate((list) => list.clientHeight);
+    const contexts = [
+      'first-extension-context.ts',
+      'second-extension-context.ts',
+      'third-extension-context.ts',
+    ];
+    await postWebviewMessage(page, activeEditorContext(true));
+    await waitForAnimationFrames(page, 8);
+    const oneRowHeight = await clientHeight();
+    // At this width the active-editor chip and three contexts wrap onto a second strip row.
+    await postWebviewMessage(page, activeEditorContext(true, contexts));
+    await expect.poll(clientHeight).toBeLessThan(oneRowHeight);
+    await waitForAnimationFrames(page, 8);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+    await detachNearBottom(page);
+
+    await startComposerShrinkSampling(page);
+    // Dropping the wrapped contexts collapses a strip row and reserves space at the reader.
+    // Let the shrink reach its resize observer pass before reading geometry.
+    await postWebviewMessage(page, activeEditorContext(true));
+    await waitForAnimationFrames(page, 8);
+    expect(await clientHeight()).toBe(oneRowHeight);
+    const reservedFirst = await getAppendReserveHeight(page);
+    expect(reservedFirst).toBeGreaterThan(0);
+    // Closing the editor removes the last strip row while that reserve is still in place.
+    await setActiveEditorChip(page, false);
+    await expect(page.locator('.chat-attachments-container .chat-attachment-chip')).toHaveCount(0);
+    await waitForAnimationFrames(page, 8);
+    const { samples, errors } = await stopComposerShrinkSampling(page);
+    expect(errors).toEqual([]);
+    expect(
+      samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
+      JSON.stringify(samples)
+    ).toBe(true);
+    const reserved = await getAppendReserveHeight(page);
+    expect(reserved).toBeGreaterThan(reservedFirst);
+    // Only the shortfall is kept: total growth minus the reader's original distance.
+    expect(reserved).toBeLessThanOrEqual(
+      samples.at(-1)!.clientHeight - samples[0]!.clientHeight + 1
+    );
+  });
+
+  test('keeps a detached reader fixed when clearing a multi-line draft', async ({ page }) => {
+    await page.setViewportSize({ width: 504, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    const composer = page.getByRole('textbox', { name: 'Message composer' });
+    await expect(composer).toBeVisible();
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+    await composer.fill(Array.from({ length: 5 }, (_, index) => `Draft line ${index}`).join('\n'));
+    await waitForAnimationFrames(page, 8);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+    await detachNearBottom(page);
+
+    await startComposerShrinkSampling(page);
+    // Clearing measures the composer in the same task, so layout clamps the reader and its
+    // scroll event arrives before the resize observer.
+    await composer.fill('');
+    await waitForAnimationFrames(page, 8);
+    const { samples, errors } = await stopComposerShrinkSampling(page);
+    expect(errors).toEqual([]);
+    expect(
+      samples.some((sample) => sample.observed && sample.clientHeight > samples[0]!.clientHeight),
+      JSON.stringify(samples)
+    ).toBe(true);
+    expect(
+      samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
+      JSON.stringify(samples)
+    ).toBe(true);
+    const reserved = await getAppendReserveHeight(page);
+    expect(reserved).toBeGreaterThan(0);
+    expect(reserved).toBeLessThanOrEqual(
+      samples.at(-1)!.clientHeight - samples[0]!.clientHeight + 1
+    );
+    await expect(composer).toHaveText('');
+  });
+
+  test('resumes following new content after returning to the bottom from a detached close', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 504, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    await expect(page.getByRole('textbox', { name: 'Message composer' })).toBeVisible();
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+    const chip = page.locator('.chat-attachments-container .chat-attachment-chip');
+    await setActiveEditorChip(page, true);
+    await expect(chip).toBeVisible();
+    await waitForAnimationFrames(page, 8);
+    await detachNearBottom(page);
+    await setActiveEditorChip(page, false);
+    await expect(chip).toHaveCount(0);
+    await waitForAnimationFrames(page, 8);
+    expect(await getAppendReserveHeight(page)).toBeGreaterThan(0);
+
+    // A downward wheel at the bottom resumes follow.
+    await page.mouse.wheel(0, 200);
+    await waitForAnimationFrames(page, 8);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+
+    // The first delta starts the turn, which shifts trailing chrome independently of the reserve.
+    await appendDeltaToLastLargeAssistant(page, ' ');
+    await waitForAnimationFrames(page, 30);
+    const reserveBeforeStreaming = await getAppendReserveHeight(page);
+    expect(reserveBeforeStreaming).toBeGreaterThan(0);
+
+    await startComposerShrinkSampling(page);
+    await appendDeltaToLastLargeAssistant(
+      page,
+      `\n\nResumed streaming chunk: ${'follow the new content '.repeat(40)}`
+    );
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);
+    await expect.poll(() => getAppendReserveHeight(page)).toBe(0);
+    await waitForAnimationFrames(page, 8);
+    const { samples, errors } = await stopComposerShrinkSampling(page);
+    expect(errors).toEqual([]);
+    // Following moves earlier content up; it must never move back down while the reserve is used.
+    expect(
+      samples.slice(1).filter((sample, index) => sample.top > samples[index]!.top + 1),
+      JSON.stringify(samples)
+    ).toEqual([]);
+    expect(samples.at(-1)!.top).toBeLessThan(samples[0]!.top - 20);
+  });
+
   test('starts at the bottom of the conversation', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
@@ -4402,10 +4532,17 @@ test.describe('auto-scroll re-engage', () => {
   });
 });
 
-function activeEditorContext(open: boolean) {
+function activeEditorContext(open: boolean, extensionContexts: string[] = []) {
   return {
     type: 'context/update',
     payload: {
+      extensionContexts: extensionContexts.map((label) => ({
+        provider: 'varro.e2e',
+        version: 1,
+        label,
+        placement: 'alongside-document',
+        data: null,
+      })),
       workspacePath: '/workspace/varro',
       activeFile: open
         ? {
@@ -4486,4 +4623,12 @@ async function stopComposerShrinkSampling(page: Page) {
     state.stopComposerShrinkSampling?.();
     return state.composerShrinkResult ?? { samples: [], errors: [] };
   });
+}
+
+async function getAppendReserveHeight(page: Page) {
+  return page
+    .locator('.append-scroll-bottom-reserve')
+    .evaluateAll((elements) =>
+      elements.reduce((total, element) => total + element.getBoundingClientRect().height, 0)
+    );
 }

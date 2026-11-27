@@ -49,6 +49,10 @@ import { fixture } from '../test-fixtures';
 import { navArrowDownIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
 import { client } from '../lib/client';
+import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
+import { installOpenCodeRuntime } from '../hooks/runtime/useOpenCode.runtime';
+import type { OpenCodeRuntime } from '../hooks/runtime/useOpenCode.runtime';
+import type { MessageEntry } from '../types';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -5080,4 +5084,272 @@ describe('MessageList auto-scroll', () => {
       flushSolid();
     }
   );
+});
+
+/**
+ * Mounts a 1200 px transcript in a 400 px scrollport and detaches 10 px above its bottom with
+ * an upward wheel. Unlike `backScrollTop`, assignments and resizes clamp eagerly to the current
+ * range, as browser layout does. `growScrollport` grows the scrollport like a shrinking composer.
+ */
+async function mountDetachedNearBottom(
+  options: {
+    messages?: MessageEntry[];
+    contentHeight?: number;
+    beforeMount?: () => void;
+  } = {}
+) {
+  const animationFrames = installQueuedAnimationFrameMocks();
+  flushSolid();
+  const observers = installTrackedResizeObservers();
+  const layout = {
+    viewportHeight: 400,
+    contentHeight: options.contentHeight ?? 1200,
+    trackWidth: 485,
+  };
+  const reserveHeight = () =>
+    Number.parseFloat(
+      container?.querySelector<HTMLElement>('.append-scroll-bottom-reserve')?.style.height ?? '0'
+    );
+  const scrollHeight = () =>
+    Math.max(layout.viewportHeight, layout.contentHeight + reserveHeight());
+  mockElementRects((element) =>
+    element.classList.contains('interactive-list-track')
+      ? new DOMRect(0, 0, layout.trackWidth, layout.contentHeight + reserveHeight())
+      : new DOMRect(0, 0, 500, layout.viewportHeight)
+  );
+  setState(storePath('activeSessionId', 'session-1'));
+  options.beforeMount?.();
+  replaceMessages(options.messages ?? promptAndResponse('Prompt', 'Response'));
+  flushSolid();
+  const list = mountList();
+  const track = list.querySelector<HTMLElement>('.interactive-list-track')!;
+  const assignedScrollTops: number[] = [];
+  let scrollTop = 0;
+  const clamp = () => {
+    scrollTop = Math.min(scrollTop, Math.max(0, scrollHeight() - layout.viewportHeight));
+  };
+  defineLayoutMetrics(
+    list,
+    { clientWidth: 485, offsetWidth: 500 },
+    { clientHeight: () => layout.viewportHeight, scrollHeight }
+  );
+  Object.defineProperty(list, 'scrollTop', {
+    configurable: true,
+    get: () => scrollTop,
+    set: (next: number) => {
+      scrollTop = Math.max(0, next);
+      clamp();
+      assignedScrollTops.push(scrollTop);
+    },
+  });
+  const notify = (targets: Element[]) => {
+    for (const observer of observers) {
+      const observed = targets.filter((target) => observer.targets.has(target));
+      if (observed.length === 0) continue;
+      observer.callback(
+        observed.map((target) => fixture<ResizeObserverEntry>({ target })),
+        fixture<ResizeObserver>({})
+      );
+    }
+  };
+  for (let frame = 0; frame < 4; frame += 1) {
+    await Promise.resolve();
+    flushFrame(animationFrames);
+  }
+  notify([list, track]);
+  settleBottomFollow(animationFrames, list);
+  flushSolid();
+  const bottom = layout.contentHeight - layout.viewportHeight;
+  expect(list.scrollTop).toBe(bottom);
+
+  list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -10 }));
+  flushSolid();
+  if (scrollTop > bottom - 10) scrollTop = bottom - 10;
+  list.dispatchEvent(new Event('scroll'));
+  flushSolid();
+  for (let frame = 0; frame < 4; frame += 1) flushFrame(animationFrames);
+  expect(list.scrollTop).toBe(bottom - 10);
+  assignedScrollTops.length = 0;
+
+  return {
+    animationFrames,
+    list,
+    track,
+    layout,
+    reserveHeight,
+    assignedScrollTops,
+    notify,
+    /** Grows the scrollport like a shrinking composer; layout clamps before the observer runs. */
+    growScrollport(growth: number, targets: Element[] = [list]) {
+      layout.viewportHeight += growth;
+      clamp();
+      notify(targets);
+      flushSolid();
+    },
+  };
+}
+
+describe('MessageList detached composer shrink', () => {
+  /** Grows the scrollport by 28 px and asserts the detached helper left the browser clamp alone. */
+  function expectClampKept(harness: Awaited<ReturnType<typeof mountDetachedNearBottom>>) {
+    const before = harness.list.scrollTop;
+    const reserveBefore = harness.reserveHeight();
+    harness.growScrollport(28);
+    const clamped = harness.list.scrollTop;
+    expect(clamped).toBeLessThan(before);
+    expect(harness.assignedScrollTops).not.toContain(before);
+    expect(harness.reserveHeight()).toBeLessThanOrEqual(reserveBefore);
+  }
+
+  it('restores a detached reader clamped by scrollport growth', async () => {
+    const harness = await mountDetachedNearBottom();
+    harness.growScrollport(28);
+    expect(harness.reserveHeight()).toBe(18);
+    expect(harness.list.scrollTop).toBe(790);
+    harness.animationFrames.restore();
+  });
+
+  it('yields a combined width and height resize to width reflow', async () => {
+    const harness = await mountDetachedNearBottom();
+    harness.layout.trackWidth = 465;
+    const before = harness.list.scrollTop;
+    harness.growScrollport(28, [harness.list, harness.track]);
+    expect(harness.assignedScrollTops).not.toContain(before);
+    expect(harness.reserveHeight()).toBe(0);
+    harness.animationFrames.restore();
+  });
+
+  it('yields to a held scrollbar thumb', async () => {
+    const harness = await mountDetachedNearBottom();
+    harness.list.dispatchEvent(
+      new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
+    );
+    flushSolid();
+    expect(harness.list.hasAttribute('data-pointer-scroll-owned')).toBe(true);
+    // A small drag is observed, so the held thumb rather than unresolved input owns the range.
+    harness.list.scrollTop -= 2;
+    harness.list.dispatchEvent(new Event('scroll'));
+    flushSolid();
+    harness.assignedScrollTops.length = 0;
+    const before = harness.list.scrollTop;
+    harness.growScrollport(28);
+    // The held range may be preserved, but the old position is not written back under the thumb.
+    expect(harness.assignedScrollTops).not.toContain(before);
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    flushSolid();
+    harness.animationFrames.restore();
+  });
+
+  it('yields to inline editing', async () => {
+    const harness = await mountDetachedNearBottom();
+    startEditingMessage('user-1', 'session-1', 'Prompt');
+    flushSolid();
+    onTestFinished(() => {
+      resetMessageEditState();
+      flushSolid();
+    });
+    expectClampKept(harness);
+    harness.animationFrames.restore();
+  });
+
+  it('yields to focused diff content', async () => {
+    const harness = await mountDetachedNearBottom();
+    const diff = document.createElement('div');
+    diff.className = 'diff-view-lines';
+    diff.tabIndex = 0;
+    harness.track.append(diff);
+    onTestFinished(() => diff.remove());
+    diff.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    flushSolid();
+    expectClampKept(harness);
+    harness.animationFrames.restore();
+  });
+
+  it('yields to a disclosure expansion anchor', async () => {
+    const harness = await mountDetachedNearBottom({
+      messages: [
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        {
+          info: assistantMessage('assistant-1'),
+          parts: [
+            {
+              ...toolPart('tool-1', 'assistant-1'),
+              state: {
+                status: 'completed',
+                input: { command: 'pwd' },
+                output: '/workspace',
+                title: 'pwd',
+                metadata: {},
+                time: { start: 1, end: 2 },
+              },
+            },
+            { ...textPart('text-2', 'Response'), messageID: 'assistant-1' },
+          ],
+        },
+      ],
+    });
+    const summary = harness.list.querySelector<HTMLElement>(
+      '.assistant-activity-summary[aria-expanded="false"]'
+    );
+    expect(summary).toBeInstanceOf(HTMLElement);
+    // A keyboard activation (detail 0) records the expansion anchor.
+    summary!.click();
+    flushSolid();
+    expectClampKept(harness);
+    harness.animationFrames.restore();
+  });
+
+  it('yields to sticky navigation from session search', async () => {
+    const harness = await mountDetachedNearBottom();
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'f', metaKey: true, bubbles: true, cancelable: true })
+    );
+    flushSolid();
+    const input = container!.querySelector<HTMLInputElement>('.session-search input')!;
+    input.value = 'Prompt';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(130);
+    flushSolid();
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    flushSolid();
+    await Promise.resolve();
+    await Promise.resolve();
+    flushSolid();
+    harness.assignedScrollTops.length = 0;
+    expectClampKept(harness);
+    harness.animationFrames.restore();
+  });
+
+  it('yields to a pending older-history anchor', async () => {
+    let restoreRuntime: (() => void) | undefined;
+    const harness = await mountDetachedNearBottom({
+      // A barely overflowing transcript puts the detached reader at the history threshold.
+      contentHeight: 420,
+      beforeMount: () => {
+        setSessionHistoryCursor('session-1', 'cursor-older');
+        restoreRuntime = installOpenCodeRuntime(
+          fixture<OpenCodeRuntime>({ loadOlderSessionHistoryPage: () => new Promise(() => {}) })
+        );
+      },
+    });
+    onTestFinished(() => restoreRuntime?.());
+    // The detaching wheel near the top starts the page request after its own scroll event.
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+    flushSolid();
+    harness.assignedScrollTops.length = 0;
+    expectClampKept(harness);
+    harness.animationFrames.restore();
+  });
+
+  it('yields to structural reconciliation in the same frame', async () => {
+    const harness = await mountDetachedNearBottom({ messages: conversationTurns(2) });
+    replaceMessages(conversationTurns(2).filter((entry) => entry.info.id !== 'assistant-1'));
+    flushSolid();
+    harness.assignedScrollTops.length = 0;
+    expectClampKept(harness);
+    harness.animationFrames.restore();
+  });
 });
