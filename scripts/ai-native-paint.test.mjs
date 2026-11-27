@@ -186,6 +186,47 @@ test('retained text verdict needs post-prepend comparisons; earlier mismatches s
     [['8', true, true]]
   );
 });
+test('several retained markers in one compositor frame do not establish continuity', async () => {
+  const width = 600;
+  const height = 700;
+  const good = { width, height, data: new Uint8Array(width * height * 3).fill(20) };
+  const markers = [120, 160, 200].map((top, index) => {
+    for (let y = top; y < top + 10; y++) {
+      for (let x = 20; x < 120; x++) {
+        if ((x + y) % 3 === 0) good.data.fill(200, (y * width + x) * 3, (y * width + x) * 3 + 3);
+      }
+    }
+    return {
+      node: index + 1,
+      row: `row-${index}`,
+      text: `Marker ${index}`,
+      rect: { x: 20, y: top, width: 100, height: 10 },
+      styles: [{ opacity: '1', visibility: 'visible', display: 'block' }],
+    };
+  });
+  const samples = [0, 100, 200, 300].map((epoch) => ({
+    epoch,
+    label: 'first-top',
+    top: 1000,
+    viewport: { x: 0, y: 0, width, height },
+    stickyOccluders: [],
+    markers,
+  }));
+  const frames = [50, 250].map((epoch) => ({
+    file: String(epoch),
+    metadata: { timestamp: epoch / 1000, deviceWidth: width, deviceHeight: height },
+  }));
+  const result = await analyzeNativePaint(frames, samples, { x: 0, y: 0 }, async () => good, 200, {
+    decode: async (value) => value,
+    referenceDeadline: 100,
+  });
+  assert.equal(result.retained.references.length, 3);
+  assert.equal(result.retained.prependMarkers, 3);
+  assert.equal(result.retained.prependChecks, 1);
+  assert.equal(result.retained.checkedFrames, 1);
+  assert.equal(result.retained.verdict, 'BLOCKED');
+});
+
 test('text eligibility uses the actual opaque sticky footprint, not hit testing or a fixed inset', () => {
   const marker = {
     rect: { x: 20, y: 120, width: 100, height: 16 },

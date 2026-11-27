@@ -52,6 +52,8 @@ contain private text; do not commit these artifacts.
   Missing pre-prepend references or no qualifying post-prepend frames cannot establish a pass.
   A glyph mismatch before prepend is retained in `prePrependMismatches` for diagnosis. Only
   comparisons after verified prepend decide the retained-text verdict.
+  A pass requires comparisons in at least three distinct post-prepend compositor frames.
+  Paragraph counts describe coverage within those frames and do not advance that threshold.
 - **Top targeting:** distinguish reaching the currently loaded top from complete history.
   Use actual replay-server pagination response headers, cursor exhaustion, and the first
   message's viewport position. Numeric history compensation is valid. Allow at most one

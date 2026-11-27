@@ -1595,6 +1595,33 @@ describe('MessageList loading states', () => {
     flushSolid();
   });
 
+  it.each([false, true])(
+    'keeps the original change-summary reveal deadline when the catalog changes (moved: %s)',
+    async (moved) => {
+      const { animationFrames, list } = mountCompletedChatWithPendingDiff();
+      try {
+        await Promise.resolve();
+        for (let frame = 0; frame < 5; frame += 1) flushFrame(animationFrames);
+        expect(list.classList).toContain('is-session-hydrating');
+
+        vi.advanceTimersByTime(1_500);
+        setSessions([
+          session('another-session'),
+          moved ? session('session-1', { directory: '/moved' }) : session('session-1'),
+        ]);
+        flushSolid();
+        for (let frame = 0; frame < 5; frame += 1) flushFrame(animationFrames);
+        expect(client.session.diff).toHaveBeenCalledTimes(moved ? 2 : 1);
+
+        vi.advanceTimersByTime(600);
+        for (let frame = 0; frame < 5; frame += 1) flushFrame(animationFrames);
+        expect(list.classList).not.toContain('is-session-hydrating');
+      } finally {
+        animationFrames.restore();
+      }
+    }
+  );
+
   it('reveals a retained permission when message loading ends without content', async () => {
     loadSessionWithLinkedPermission();
     replaceMessages([]);

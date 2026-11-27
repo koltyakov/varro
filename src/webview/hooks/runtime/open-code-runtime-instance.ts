@@ -891,6 +891,15 @@ function hasPreviewablePromptContent(entry: MessageEntry, steeringIds: ReadonlyS
   );
 }
 
+function mergeSessionHistoryPromptPage(sessionId: string, page: MessageEntry[]) {
+  const merged = mergeOlderHistory(
+    getSessionHistoryPromptEntries(sessionId),
+    page.map((entry) => (entry.info.role === 'user' ? entry : { info: entry.info, parts: [] }))
+  );
+  setSessionHistoryPrompts(sessionId, merged);
+  return merged;
+}
+
 function loadOlderSessionPrompts(
   sessionId: string,
   initialCursor?: string,
@@ -930,12 +939,12 @@ function loadOlderSessionPrompts(
       }
       cacheSessionHistoryPage(sessionId, cursor, page);
       const prompts = page.filter((entry) => entry.info.role === 'user');
-      const mergedPrompts = mergeOlderHistory(
-        getSessionHistoryPromptEntries(sessionId),
-        page.map((entry) => (entry.info.role === 'user' ? entry : { info: entry.info, parts: [] }))
-      );
-      setSessionHistoryPrompts(sessionId, mergedPrompts);
-      const nextCursor = advanceSessionHistoryPromptCursor(sessionId, cursor, page.nextCursor);
+      const mergedPrompts = mergeSessionHistoryPromptPage(sessionId, page);
+      const promptCursor = getSessionHistoryPromptCursor(sessionId);
+      const nextCursor =
+        promptCursor === cursor
+          ? advanceSessionHistoryPromptCursor(sessionId, cursor, page.nextCursor)
+          : promptCursor;
       if (prompts.length > 0) {
         // Steering, follow-up actions, and automatic notices cannot own the sticky header. Keep walking
         // older pages until the original prompt is available, even for multi-page turns.
@@ -979,6 +988,8 @@ function loadSessionBoundaryPrompts(
   isCurrent: () => boolean = () => true,
   knownLoadedMessageIds: ReadonlySet<string> = new Set()
 ): Promise<void> {
+  // Transcript pagination can trail prompt discovery by several pages.
+  if (getSessionHistoryPromptCursor(sessionId) !== initialCursor) return Promise.resolve();
   const revision = getSessionMessageWindowRevision(sessionId);
   const existing = promptHistoryLoads.get(sessionId);
   if (!existing || existing.revision !== revision) {
@@ -3468,6 +3479,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           preserveSessionStreaming: true,
         });
         const nextCursor = advanceSessionHistoryCursor(sessionId, cursor, page.nextCursor);
+        if (getSessionHistoryPromptCursor(sessionId) === cursor) {
+          mergeSessionHistoryPromptPage(sessionId, page);
+          advanceSessionHistoryPromptCursor(sessionId, cursor, page.nextCursor);
+        }
         markSessionHistoryLoadFailed(sessionId, false);
         if (nextCursor && options?.prefetchBoundaryPrompts !== false) {
           void loadSessionBoundaryPrompts(sessionId, nextCursor, isCurrent);

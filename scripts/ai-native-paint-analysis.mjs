@@ -41,8 +41,10 @@ export async function analyzeNativePaint(
   const nodeChanges = new Map();
   const inspected = [];
   const excludedMarkers = [];
-  let continuityChecks = 0;
-  let prependChecks = 0;
+  const continuityFrames = new Set();
+  const prependFrames = new Set();
+  let continuityMarkers = 0;
+  let prependMarkers = 0;
   let coldChecks = 0;
   let baseline = false;
   // Fixed native dark-theme oracle. Fail closed if image scale or contrast differs.
@@ -140,9 +142,13 @@ export async function analyzeNativePaint(
             to: marker.node,
             reference: reference.file,
           });
-        continuityChecks++;
+        continuityFrames.add(epoch);
+        continuityMarkers++;
         const afterPrepend = epoch >= prependEpoch;
-        if (afterPrepend) prependChecks++;
+        if (afterPrepend) {
+          prependFrames.add(epoch);
+          prependMarkers++;
+        }
         const check = {
           node: marker.node,
           row: marker.row,
@@ -178,11 +184,13 @@ export async function analyzeNativePaint(
       failures: coldFailures,
     },
     retained: {
-      verdict: verdict(textFailures, baseline && prependChecks > 2),
+      verdict: verdict(textFailures, baseline && prependFrames.size > 2),
       references: [...references.values()].map((reference) => [reference.node, reference]),
       nodeChanges: [...nodeChanges.values()],
-      checkedFrames: continuityChecks,
-      prependChecks,
+      checkedFrames: continuityFrames.size,
+      prependChecks: prependFrames.size,
+      checkedMarkers: continuityMarkers,
+      prependMarkers,
       failures: textFailures,
       prePrependMismatches,
       excludedMarkers,

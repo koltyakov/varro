@@ -5209,6 +5209,23 @@ describe('MessageList detached composer shrink', () => {
     harness.animationFrames.restore();
   });
 
+  it('preserves the observed detached position after a content-only clamp', async () => {
+    const harness = await mountDetachedNearBottom();
+    try {
+      harness.layout.contentHeight = 1180;
+      harness.list.scrollTop = 790;
+      expect(harness.list.scrollTop).toBe(780);
+      harness.list.dispatchEvent(new Event('scroll'));
+      flushSolid();
+      harness.notify([harness.track]);
+      harness.growScrollport(40);
+      expect(harness.list.scrollTop).toBe(780);
+      expect(harness.reserveHeight()).toBe(40);
+    } finally {
+      harness.animationFrames.restore();
+    }
+  });
+
   it('yields a combined width and height resize to width reflow', async () => {
     const harness = await mountDetachedNearBottom();
     harness.layout.trackWidth = 465;

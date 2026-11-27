@@ -3333,6 +3333,54 @@ test.describe('auto-scroll', () => {
     }
   });
 
+  test('preserves the first wheel destination when cold row mounts shorten the range', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=cold-large-history&windowed=1&deferHistory=1&omitReopenedLatestCursor=1'
+    );
+    const list = page.locator('.interactive-list');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(15);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const harness = window as Window & {
+            __varroE2E?: { pendingHistoryRequestCount?: () => number };
+          };
+          return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+        })
+      )
+      .toBe(1);
+
+    const result = await list.evaluate(async (element) => {
+      const viewport = element.getBoundingClientRect();
+      const anchor = [...element.querySelectorAll('[data-msg-id]')].find((row) => {
+        const bounds = row.getBoundingClientRect();
+        return bounds.bottom > viewport.top && bounds.top < viewport.bottom;
+      });
+      if (!anchor) throw new Error('No visible row at the cold wheel destination');
+      const oldTop = anchor.getBoundingClientRect().top;
+      const oldHeight = element.scrollHeight;
+      const oldScrollTop = element.scrollTop;
+      const delta = -96;
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: delta, bubbles: true }));
+      element.scrollTop = oldScrollTop + delta;
+      element.dispatchEvent(new Event('scroll'));
+
+      const drift: number[] = [];
+      for (let frame = 0; frame < 4; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        if (!anchor.isConnected) throw new Error('Cold wheel anchor unmounted');
+        drift.push(anchor.getBoundingClientRect().top - oldTop + delta);
+      }
+      return { drift, heightLost: oldHeight - element.scrollHeight };
+    });
+    expect(result.heightLost).toBeGreaterThan(0);
+    expect(Math.max(...result.drift.map(Math.abs)), JSON.stringify(result)).toBeLessThanOrEqual(2);
+  });
+
   test('slowly scrolls a cold large session through every history page without jumps', async ({
     page,
   }) => {

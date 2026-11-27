@@ -487,6 +487,12 @@ export function Message(props: {
 
   const [diffs, setDiffs] = createSignal<FileDiff[]>();
   const [diffsLoading, setDiffsLoading] = createSignal(false);
+  const diffDirectory = createMemo(() => {
+    const sessionId = diffRequest()?.split('\u0000')[0];
+    return sessionId
+      ? state.sessions.find((session) => session.id === sessionId)?.directory
+      : undefined;
+  });
   createEffect(
     () => {
       const key = diffRequest();
@@ -494,7 +500,7 @@ export function Message(props: {
       return {
         sessionID,
         messageID,
-        directory: state.sessions.find((session) => session.id === sessionID)?.directory,
+        directory: diffDirectory(),
       };
     },
     ({ sessionID, messageID, directory }) => {

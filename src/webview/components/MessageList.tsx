@@ -99,7 +99,6 @@ import {
   getPrefetchedSessionHistory,
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
-  getSessionHistoryPrompts,
   getSessionHistoryPromptEntries,
   getSessionMessageWindowStateVersion,
   isSessionHistoryLoadFailed,
@@ -758,6 +757,7 @@ export function MessageList() {
   // Change-summary requests that keep the opening transcript hidden. The settle loop parks on
   // them, and the last release restarts it.
   const initialDiffRevealHolds = new Set<{ sessionId: string }>();
+  let initialDiffRevealDeadline: number | undefined;
   let followLoopParkedForDiffSessionId: string | null = null;
   let initialScrollRafId = 0;
   let appendScrollRafId = 0;
@@ -906,6 +906,7 @@ export function MessageList() {
   let detachedAnchorRefreshRafId = 0;
   let keydownDestinationRafId = 0;
   let pendingThinkingLayoutAnchor: VisibleScrollAnchor | null = null;
+  let thinkingReadingAnchor: { anchor: VisibleScrollAnchor; inputEpoch: number } | null = null;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
   const REATTACH_THRESHOLD_PX = 10;
   const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
@@ -1392,17 +1393,33 @@ export function MessageList() {
   );
   // Older prompt pages only change numbering and positions when they add prompts the loaded
   // transcript lacks; otherwise the transcript splits like the message list.
-  const olderPromptsOutsideTranscript = createMemo(() => {
-    const indexes = messageIndexById();
-    const visible = messages();
-    const olderPrompts = getSessionHistoryPromptEntries(state.activeSessionId);
-    return olderPrompts.some((prompt) => {
-      const index = indexes.get(prompt.info.id);
-      return index === undefined || visible[index]?.info.sessionID !== prompt.info.sessionID;
-    })
-      ? olderPrompts
-      : null;
-  });
+  const olderPromptsOutsideTranscript = createMemo(
+    () => {
+      const sessionId = state.activeSessionId;
+      const cachedPrompts = getSessionHistoryPromptEntries(sessionId);
+      if (!cachedPrompts.length) return null;
+      const olderPrompts = getVisibleThreadMessages(cachedPrompts, sessionId, state.sessions);
+      const indexes = messageIndexById();
+      const visible = messages();
+      if (
+        !olderPrompts.some((prompt) => {
+          const index = indexes.get(prompt.info.id);
+          return index === undefined || visible[index]?.info.sessionID !== prompt.info.sessionID;
+        })
+      ) {
+        return null;
+      }
+      return olderPrompts.length === cachedPrompts.length ? cachedPrompts : olderPrompts;
+    },
+    {
+      equals: (previous, next) =>
+        previous === next ||
+        (!!previous &&
+          !!next &&
+          previous.length === next.length &&
+          previous.every((entry, index) => entry === next[index])),
+    }
+  );
   const olderPromptSnapshots = createRecordSnapshots(() => olderPromptsOutsideTranscript() ?? []);
   const historyPromptNumbers = chainHistorySegments<ReturnType<typeof numberPrompts>>(
     (segment, previous) => createMemo(() => numberPrompts(segment.entries(), previous?.()))
@@ -1681,6 +1698,9 @@ export function MessageList() {
     if (settledAnchor && widthResizeCanOwnScroll()) {
       restoreVisibleScrollAnchor(settledAnchor);
       rememberDetachedVisibleAnchor(settledAnchor);
+      if (thinkingReadingAnchor?.inputEpoch !== directScrollInputEpoch) {
+        rememberThinkingReadingAnchor(captureThinkingResponseAnchor(settledAnchor));
+      }
     }
     widthResizeAnchor = null;
     queueMicrotask(() => {
@@ -3662,8 +3682,8 @@ export function MessageList() {
       visibleMessages[firstVisibleMessageIndex]
     ) {
       const loadedMessageIds = messageIndexById();
-      const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId)
-        .filter((entry) => !loadedMessageIds.has(entry.info.id))
+      const boundaryPrompts = (olderPromptsOutsideTranscript() ?? [])
+        .filter((entry) => entry.info.role === 'user' && !loadedMessageIds.has(entry.info.id))
         .toSorted((left, right) => left.info.time.created - right.info.time.created);
       if (boundaryPrompts.length > 0) {
         const boundaryPreview = getStickyUserMessagePreview(
@@ -3778,6 +3798,9 @@ export function MessageList() {
     if (!sessionId || untrack(initialPositioningSessionId) !== sessionId || !untrack(autoScroll)) {
       return undefined;
     }
+    const now = Date.now();
+    initialDiffRevealDeadline ??= now + INITIAL_DIFF_REVEAL_TIMEOUT_MS;
+    if (now >= initialDiffRevealDeadline) return undefined;
     const hold = { sessionId };
     initialDiffRevealHolds.add(hold);
     // Runs from the row's effect cleanup too, so read list state untracked.
@@ -3796,7 +3819,7 @@ export function MessageList() {
         }
       });
     };
-    const timer = setTimeout(release, INITIAL_DIFF_REVEAL_TIMEOUT_MS);
+    const timer = setTimeout(release, initialDiffRevealDeadline - now);
     return release;
   }
 
@@ -3884,7 +3907,8 @@ export function MessageList() {
 
   function measureMountedRows(
     rows: Array<{ element: HTMLDivElement; messageId: string }>,
-    publish = true
+    publish = true,
+    scrollDestination?: number
   ) {
     // Tests and no-layout environments may never deliver ResizeObserver entries, so virtualization
     // must not depend on observer callbacks alone.
@@ -3899,7 +3923,7 @@ export function MessageList() {
       if (!shouldAcceptRowHeight(element, messageId, height)) return [];
       return [{ messageId, height }];
     });
-    const result = applyRowHeightMeasurements(measurements);
+    const result = applyRowHeightMeasurements(measurements, { scrollDestination });
     if (!result.changed) return false;
     if (publish) scheduleMeasurementPublish('content', result.scrollAdjusted);
     return true;
@@ -3907,7 +3931,7 @@ export function MessageList() {
 
   function applyRowHeightMeasurements(
     measurements: Array<{ messageId: string; height: number }>,
-    options?: { widthReflow?: boolean }
+    options?: { widthReflow?: boolean; scrollDestination?: number }
   ) {
     // ResizeObserver reports after layout. Use the old prefix metrics to offset growth above the
     // viewport before paint, including while the user is actively scrolling.
@@ -3917,6 +3941,7 @@ export function MessageList() {
       activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId)?.anchor
     );
     let firstVisibleIndex: number | null = null;
+    let measurementScrollTop = 0;
     let mountedDetachedAnchorAlreadyPreserved = false;
     // Chromium keeps its own thumb destination until release. Prefix compensation writes
     // fight that destination and the next native move reverses them. Touch and wheel
@@ -3928,6 +3953,15 @@ export function MessageList() {
       !historyOwnsAnchor &&
       !nativeScrollbarActive
     ) {
+      const top = containerRef.scrollTop;
+      const destination = options?.scrollDestination;
+      // Mounting estimated rows can shorten the range before the spacer is reconciled.
+      // Use the pre-clamp destination for both the prefix lookup and the scroll correction.
+      const clamped =
+        destination !== undefined &&
+        destination > top + 0.5 &&
+        getDistanceFromBottom(containerRef) <= 1;
+      measurementScrollTop = clamped ? destination : top;
       const detachedAnchorElement = lastDetachedVisibleAnchor
         ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
         : null;
@@ -3940,7 +3974,7 @@ export function MessageList() {
         !options?.widthReflow &&
         lastDetachedVisibleAnchor &&
         detachedAnchorElement &&
-        Math.abs(containerRef.scrollTop - lastDetachedVisibleAnchorScrollTop) <= 1 &&
+        Math.abs(measurementScrollTop - lastDetachedVisibleAnchorScrollTop) <= 1 &&
         Math.abs(
           detachedAnchorElement.getBoundingClientRect().top -
             containerRef.getBoundingClientRect().top -
@@ -3950,11 +3984,11 @@ export function MessageList() {
       firstVisibleIndex =
         options?.widthReflow && widthResizeAnchor
           ? (messageIndexById().get(widthResizeAnchor.messageId) ?? null)
-          : lastDetachedVisibleAnchor && detachedAnchorElement
+          : !clamped && lastDetachedVisibleAnchor && detachedAnchorElement
             ? (messageIndexById().get(lastDetachedVisibleAnchor.messageId) ?? null)
             : getFirstVisibleMessageIndexFromVirtualMetrics({
                 metrics: metricsBefore,
-                scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+                scrollTop: getVirtualScrollTop(measurementScrollTop),
               });
     }
     let scrollAdjustment = 0;
@@ -3989,7 +4023,7 @@ export function MessageList() {
 
     const resolvedScrollAdjustment = mountedDetachedAnchorAlreadyPreserved ? 0 : scrollAdjustment;
     if (containerRef && Math.abs(resolvedScrollAdjustment) > 0.5) {
-      setPreservedScrollTop(containerRef.scrollTop + resolvedScrollAdjustment);
+      setPreservedScrollTop(measurementScrollTop + resolvedScrollAdjustment);
     }
     if (widthResizeActive && widthResizeAnchor && widthResizeCanOwnScroll()) {
       restoreVisibleScrollAnchor(widthResizeAnchor);
@@ -4187,9 +4221,11 @@ export function MessageList() {
   function captureExactPaintedVisibleScrollAnchor(
     predictedMovement = 0,
     skipThinking = false,
-    belowStickyPrompt = false
+    belowStickyPrompt = false,
+    scope?: HTMLElement
   ): VisibleScrollAnchor | null {
     if (!containerRef) return null;
+    const root = scope ?? containerRef;
     const containerRect = containerRef.getBoundingClientRect();
     // A paragraph behind the sticky prompt is not a painted destination. Pinning it
     // during deferred hydration lets its growing diff push the visible prose below it.
@@ -4219,14 +4255,12 @@ export function MessageList() {
       }
     };
     // Preserve assistant-before-user ordering for ties without sorting or rereading rectangles.
-    for (const renderItem of containerRef.querySelectorAll<HTMLElement>(
-      '[data-assistant-render-key]'
-    )) {
+    for (const renderItem of root.querySelectorAll<HTMLElement>('[data-assistant-render-key]')) {
       for (const element of renderItem.querySelectorAll<HTMLElement>(selector)) {
         if (!skipThinking || !element.closest('.chat-thinking-box')) consider(element, renderItem);
       }
     }
-    for (const element of containerRef.querySelectorAll<HTMLElement>('.user-message-card')) {
+    for (const element of root.querySelectorAll<HTMLElement>('.user-message-card')) {
       consider(element, null);
     }
     const selected = selection.candidate;
@@ -4253,8 +4287,65 @@ export function MessageList() {
     };
   }
 
+  function rememberThinkingReadingAnchor(anchor: VisibleScrollAnchor | null) {
+    thinkingReadingAnchor = anchor?.elementTag
+      ? { anchor: { ...anchor, element: undefined }, inputEpoch: directScrollInputEpoch }
+      : null;
+  }
+
   function captureThinkingVisibleScrollAnchor() {
-    return captureExactPaintedVisibleScrollAnchor(0, true);
+    const viewport = containerRef?.getBoundingClientRect();
+    const saved =
+      thinkingReadingAnchor?.inputEpoch === directScrollInputEpoch
+        ? thinkingReadingAnchor.anchor
+        : null;
+    if (saved && viewport) {
+      const element = getMountedScrollAnchorElement(saved);
+      const bounds = element?.getBoundingClientRect();
+      // Toggling can expose earlier content. Keep the same reading block on the
+      // inverse toggle if it still paints at the saved position.
+      if (
+        element &&
+        element.tagName === saved.elementTag &&
+        !element.closest('.chat-thinking-box') &&
+        bounds &&
+        bounds.top >= viewport.top + 8 &&
+        bounds.bottom <= viewport.bottom - 8 &&
+        Math.abs(bounds.top - viewport.top - saved.top) <= 1
+      ) {
+        return saved;
+      }
+    }
+    const painted = captureExactPaintedVisibleScrollAnchor(0, true);
+    return captureThinkingResponseAnchor(painted) ?? painted;
+  }
+
+  function captureThinkingResponseAnchor(prompt: VisibleScrollAnchor | null) {
+    if (
+      !prompt?.element?.classList.contains('user-message-card') ||
+      prompt.top <= getMessageJumpTopInset() + 1
+    ) {
+      return null;
+    }
+    // Keep a prompt aligned for reading at the top. Farther down, if a Thinking box can
+    // shift that prompt's visible answer, keep the answer rather than the prompt above it.
+    const promptIndex = messageIndexById().get(prompt.messageId);
+    if (promptIndex === undefined) return null;
+    const entries = messages();
+    for (let index = promptIndex + 1; index < entries.length; index += 1) {
+      const response = entries[index]!;
+      const row = mountedMessageRows.get(response.info.id);
+      if (!row || response.info.role === 'user') break;
+      if (
+        response.info.parentID !== prompt.messageId ||
+        getThinkingLayoutSignatures([response], true).size === 0
+      ) {
+        continue;
+      }
+      const readingAnchor = captureExactPaintedVisibleScrollAnchor(0, true, false, row);
+      if (readingAnchor) return readingAnchor;
+    }
+    return null;
   }
 
   function replaceClippedRequestWidthResizeAnchor(anchor: VisibleScrollAnchor | null) {
@@ -4900,7 +4991,7 @@ export function MessageList() {
     }
   }
 
-  function flushPendingMountedRowMeasurements() {
+  function flushPendingMountedRowMeasurements(scrollDestination?: number) {
     const checkStickyPreview = mountedStickyPreviewCheckPending;
     mountedStickyPreviewCheckPending = false;
     if (disposed || !shouldMeasureRows()) {
@@ -4924,7 +5015,7 @@ export function MessageList() {
       // rather than forcing another layout immediately after those writes.
       reconcileMountedStickyPreview();
     }
-    measureMountedRows(rows);
+    measureMountedRows(rows, true, scrollDestination);
     restorePendingHistoryAnchorIfMounted();
   }
 
@@ -7334,6 +7425,8 @@ export function MessageList() {
     if (!suppressSyncScrollTop) {
       // Mount the whole range before reading its geometry, but apply corrections
       // within this scroll event, before remembering the user's destination.
+      const scrollDestination =
+        actualScrollMovement && userScrollInputActive ? containerRef.scrollTop : undefined;
       batchingScrollMounts = true;
       try {
         setScrollTop(top);
@@ -7349,7 +7442,7 @@ export function MessageList() {
         mountedStickyPreviewCheckPending = false;
         reconcileMountedStickyPreview();
       }
-      flushPendingMountedRowMeasurements();
+      flushPendingMountedRowMeasurements(scrollDestination);
     }
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
     const pendingStickyHandoff = upwardStickyHandoff;
@@ -7452,6 +7545,7 @@ export function MessageList() {
       scrollDelta < -0.5 &&
       lastObservedScrollInputEpoch === directScrollInputEpoch &&
       !pointerScrollOwnershipActive &&
+      currentViewportHeight > lastContainerClientHeight &&
       top >= containerRef.scrollHeight - containerRef.clientHeight - 1
         ? { from: lastObservedScrollTop, to: top, at: now, inputEpoch: directScrollInputEpoch }
         : null;
@@ -7575,6 +7669,8 @@ export function MessageList() {
 
   function onWheel(event: WheelEvent) {
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    // A purely horizontal gesture cannot move the transcript's vertical scroll position.
+    if (event.deltaY === 0) return;
     if (nestedScrollerWillConsumeWheel(event)) return;
     if (widthResizeActive) {
       publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
@@ -8640,7 +8736,7 @@ export function MessageList() {
             detachedAnchorTargetTop
         ) <= 1
       );
-      const anchor = canPreserveAnchor
+      const anchor: VisibleScrollAnchor | null = canPreserveAnchor
         ? (captureThinkingVisibleScrollAnchor() ??
           (widthAnchorElement && !widthAnchorElement.closest('.chat-thinking-box')
             ? widthResizeAnchor
@@ -8655,6 +8751,7 @@ export function MessageList() {
           }))
         : null;
       pendingThinkingLayoutAnchor = anchor;
+      rememberThinkingReadingAnchor(anchor);
       if (widthResizeActive) {
         publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
         cancelWidthResize(anchor?.messageId ?? null);
@@ -9163,6 +9260,8 @@ export function MessageList() {
       pendingInitialHistoryFillSessionId = editingAtSessionStart ? null : sessionId;
       setInitialFollowupRestore(null);
       initialDiffRevealHolds.clear();
+      initialDiffRevealDeadline = undefined;
+      thinkingReadingAnchor = null;
       followLoopParkedForDiffSessionId = null;
       setInitialPositioningSessionId(
         !editingAtSessionStart && untrack(() => state.messagesLoading || messages().length > 0)

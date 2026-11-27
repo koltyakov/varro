@@ -33,6 +33,7 @@ import {
   setSessionHistoryPrompts,
 } from '../lib/message-window';
 import { client } from '../lib/client';
+import { deferred } from '../test-fixtures';
 import { SESSION_RESUME_PROMPT } from '../../shared/session-pauses';
 import {
   assistantMessage,
@@ -446,6 +447,47 @@ describe('MessageList prompt numbers', () => {
       document.removeEventListener('keyup', hostListener);
       flushSolid();
     }
+  });
+
+  it('excludes cached prompts behind a staged rewind from numbered navigation', () => {
+    const history: MessageEntry[] = Array.from({ length: 3 }, (_, index) => [
+      {
+        info: userMessage(`msg_0${index * 2 + 1}`),
+        parts: [textPart(`text-${index}`, `Prompt ${index + 1}`)],
+      },
+      {
+        info: assistantMessage(`msg_0${index * 2 + 2}`, {
+          parentID: `msg_0${index * 2 + 1}`,
+          time: { created: index * 3 + 2, completed: index * 3 + 3 },
+        }),
+        parts: [textPart(`answer-${index}`, `Answer ${index + 1}`)],
+      },
+    ]).flat();
+    const labels = () =>
+      [...container!.querySelectorAll('.turn-navigation-marker')].map((dot) =>
+        dot.getAttribute('aria-label')
+      );
+    const allLabels = [
+      'Go to turn 1: Prompt 1',
+      'Go to turn 2: Prompt 2',
+      'Go to turn 3: Prompt 3',
+    ];
+    setState(storePath('activeSessionId', 'session-1'));
+    setSessions([session('session-1')]);
+    replaceMessages(history);
+    setSessionHistoryPrompts('session-1', history);
+    flushSolid();
+    mountList();
+    expect(labels()).toEqual(allLabels);
+
+    setSessions([session('session-1', { revert: { messageID: 'msg_05' } })]);
+    flushSolid();
+    expect(container?.querySelector('[data-msg-id="msg_05"]')).toBeNull();
+    expect(labels()).toEqual(allLabels.slice(0, 2));
+
+    setSessions([session('session-1')]);
+    flushSolid();
+    expect(labels()).toEqual(allLabels);
   });
 
   it('shares numbers and one navigation target across consecutive user bubbles', async () => {
@@ -881,6 +923,45 @@ describe('MessageList prompt numbers', () => {
     flushSolid();
     assertUnnumbered();
     expect(dot('Go to prompt: Prompt 6')).not.toBeNull();
+  });
+
+  it('cancels a pending turn jump on horizontal wheel input', async () => {
+    const olderPrompt = {
+      info: userMessage('user-1'),
+      parts: [textPart('text-1', 'Older prompt')],
+    };
+    const olderReply = { info: assistantMessage('assistant-1'), parts: [] };
+    const page = deferred<Awaited<ReturnType<typeof client.session.messages>>>();
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockReturnValue(page.promise);
+    setState(storePath('activeSessionId', 'session-1'));
+    setSessionHistoryCursor('session-1', 'older');
+    setSessionHistoryPromptCursor('session-1', 'older');
+    setSessionHistoryPrompts('session-1', [olderPrompt, olderReply]);
+    replaceMessages([
+      { info: userMessage('user-2'), parts: [textPart('text-2', 'Current prompt')] },
+    ]);
+    flushSolid();
+    const list = mountList();
+    const dot = container!.querySelector<HTMLButtonElement>(
+      '.turn-navigation-marker[aria-label="Go to prompt: Older prompt"]'
+    );
+    expect(dot).not.toBeNull();
+    dot!.click();
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledOnce());
+    expect(container!.querySelector('[data-msg-id="user-1"]')).toBeNull();
+    expect(dot!.classList.contains('is-loading')).toBe(true);
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaX: 80, bubbles: true }));
+    flushSolid();
+    expect(dot!.classList.contains('is-loading')).toBe(false);
+    page.resolve([olderPrompt, olderReply]);
+    await vi.waitFor(() => {
+      flushSolid();
+      expect(container!.querySelector('[data-msg-id="user-1"]')).not.toBeNull();
+    });
+    expect(
+      container!.querySelector('[data-msg-id="user-1"] .turn-navigation-destination')
+    ).toBeNull();
   });
 
   it('stops loading older prompt pages when Alt is released', async () => {

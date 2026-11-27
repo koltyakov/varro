@@ -1529,6 +1529,105 @@ describe('useOpenCode session state flows', () => {
     flushSolid();
   });
 
+  it('preserves an outstanding prompt cursor ahead of transcript pagination', async () => {
+    const page = (entries: MessageEntry[], nextCursor?: string) =>
+      Object.assign(entries, { nextCursor });
+    const prompt: MessageEntry = {
+      info: userMessage('user-boundary'),
+      parts: [
+        {
+          id: 'boundary-text',
+          sessionID: 'session-1',
+          messageID: 'user-boundary',
+          type: 'text',
+          text: 'The first previewable older prompt',
+        },
+      ],
+    };
+    const pages = new Map([
+      ['latest', page([userEntry('user-current')], 'A')],
+      ['A', page([{ info: assistantMessage('reply-a', 'user-boundary'), parts: [] }], 'B')],
+      ['B', page([{ info: assistantMessage('reply-b', 'user-boundary'), parts: [] }], 'C')],
+      ['C', page([prompt], 'D')],
+    ]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      const result = pages.get(options?.before ?? 'latest');
+      if (!result) throw new Error(`Unexpected page ${options?.before}`);
+      return result;
+    });
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    flushSolid();
+    await hookModule.selectSession('session-1');
+    await vi.waitFor(() => {
+      expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBe('D');
+    });
+    await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('B');
+    expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBe('D');
+    expect(clientMocks.sessionMessages.mock.calls.map(([, options]) => options?.before)).toEqual([
+      undefined,
+      'A',
+      'B',
+      'C',
+    ]);
+  });
+
+  it('continues prompt discovery after transcript pagination consumes its current page', async () => {
+    const page = (entries: MessageEntry[], nextCursor?: string) =>
+      Object.assign(entries, { nextCursor });
+    const prompt = (id: string, text: string): MessageEntry => ({
+      info: userMessage(id),
+      parts: [{ id: `${id}-text`, sessionID: 'session-1', messageID: id, type: 'text', text }],
+    });
+    const pages = new Map([
+      ['latest', page([prompt('user-3', 'Current prompt')], 'A')],
+      ['A', page([prompt('user-2', 'First older prompt')], 'B')],
+      ['B', page([prompt('user-1', 'Second older prompt')], 'C')],
+      ['C', page([prompt('user-0', 'Oldest prompt')])],
+    ]);
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      const result = pages.get(options?.before ?? 'latest');
+      if (!result) throw new Error(`Unexpected page ${options?.before}`);
+      return result;
+    });
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    flushSolid();
+    await hookModule.selectSession('session-1');
+    await vi.waitFor(() => {
+      expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBe('B');
+    });
+
+    await expect(
+      hookModule.loadOlderSessionHistoryPage('session-1', { prefetchBoundaryPrompts: false })
+    ).resolves.toBe(true);
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('B');
+    expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBe('B');
+    await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
+    await vi.waitFor(() => {
+      expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBeUndefined();
+      expect(
+        messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
+      ).toEqual(['user-0', 'user-1', 'user-2']);
+    });
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('C');
+    expect(clientMocks.sessionMessages.mock.calls.map(([, options]) => options?.before)).toEqual([
+      undefined,
+      'A',
+      'B',
+      'C',
+    ]);
+  });
+
   it.each(['assistant', 'steer', 'inferred-steer', 'notice', 'followup'] as const)(
     'finds the original prompt beyond full %s history pages without loading transcript rows',
     async (kind) => {
