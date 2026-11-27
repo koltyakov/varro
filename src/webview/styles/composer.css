@@ -2057,8 +2057,129 @@
 }
 
 .interactive-input-part:is(.mcp-picker-open, .mention-completion-open)
-  > :is(.chat-queue-container, .todo-block) {
+  > :is(.chat-queue-container, .todo-block, .composer-block-group) {
   visibility: hidden;
+}
+
+/* Grouping of the blocks above the composer. One or two blocks render as they would ungrouped. */
+.composer-block-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-input-part-gap);
+  min-width: 0;
+}
+
+.composer-block-group[hidden],
+.composer-block-group .composer-block-slot[hidden] {
+  display: none;
+}
+
+.composer-block-panel,
+.composer-block-slot {
+  display: contents;
+}
+
+/* The panel is a real box so tab switches can measure the height they give back. */
+.composer-block-group.is-tabbed > .composer-block-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-input-part-gap);
+  min-width: 0;
+}
+
+/* A plain centered menu on one line, separate from the block card below it. Tabs that do not
+   fit move into the "…" dropdown. */
+.composer-block-menu {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+}
+
+.composer-block-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* An invisible copy of every tab, so tabs moved into the dropdown can still be measured. */
+.composer-block-tabs-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.composer-block-more {
+  letter-spacing: 0.08em;
+}
+
+.composer-block-overflow-menu {
+  min-width: 120px;
+}
+
+.composer-block-overflow-menu > .composer-block-overflow-item {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.composer-block-tab {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 2px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--color-vscode-muted);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.composer-block-tab:hover {
+  color: var(--color-vscode-fg-soft);
+}
+
+.composer-block-tab[aria-selected='true'] {
+  color: var(--color-vscode-fg);
+}
+
+.composer-block-tab:focus {
+  outline: none;
+}
+
+/* Keyboard focus only; pointer use shows no ring. */
+.composer-block-tab:focus-visible {
+  outline: 1px solid var(--color-vscode-focus-border);
+  outline-offset: 1px;
+}
+
+.composer-block-tab-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-vscode-muted);
+  opacity: 0.7;
+}
+
+.composer-block-tab-status {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--color-vscode-muted);
+  opacity: 0.7;
 }
 
 .todo-block-header {
@@ -2469,12 +2590,6 @@
   outline: 1px solid var(--color-vscode-accent);
   outline-offset: -1px;
 }
-.chat-background-service-status {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--color-vscode-muted);
-}
-
 .chat-goal-controls,
 .chat-session-row-controls {
   display: flex;
@@ -2535,17 +2650,8 @@
   color: var(--color-vscode-muted);
 }
 
-.chat-queue-item.is-paused:not(.is-editing):not(.is-drag-over) {
-  --chat-queue-row-surface: color-mix(
-    in srgb,
-    var(--color-vscode-muted) 8%,
-    var(--color-vscode-surface-soft)
-  );
-  border-radius: 0;
-  background: var(--chat-queue-row-surface);
-}
-
-.chat-queue-item:hover:not(.is-editing):not(.is-drag-over):not(.is-paused) {
+/* Paused rows keep the normal row surface; the muted text and the Paused chip carry the state. */
+.chat-queue-item:hover:not(.is-editing):not(.is-drag-over) {
   --chat-queue-row-surface: color-mix(
     in srgb,
     var(--color-vscode-fg) 5%,
@@ -2693,15 +2799,16 @@
   letter-spacing: 0.02em;
 }
 
-.chat-queue-paused-label {
+/* Matches the outlined status markers in the Models panel, such as Hidden and renamed. */
+.chat-queue-paused-label,
+.chat-background-service-status {
   flex-shrink: 0;
   padding: 1px 4px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-vscode-muted) 14%, transparent);
-  color: var(--color-vscode-fg-muted);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-muted) 42%, transparent);
+  border-radius: var(--radius-control);
+  color: var(--color-vscode-muted);
+  font-size: 9px;
+  line-height: 1.2;
 }
 
 .chat-queue-attachment-icon,

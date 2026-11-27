@@ -1,5 +1,5 @@
 import { ariaBoolean } from '../lib/aria';
-import { For, Show, createMemo, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { isActiveSessionWorking, showChangedFiles, state } from '../lib/state';
 import { createRecordSnapshots } from '../lib/record-snapshots';
 import { postMessage } from '../lib/bridge';
@@ -32,7 +32,12 @@ function getActiveSession() {
   return state.sessions.find((session) => session.id === state.activeSessionId);
 }
 
-export function ChangedFilesList() {
+export type ChangedFilesSummary = { files: number; truncated: boolean };
+
+export function ChangedFilesList(props: {
+  /** Reports the shown file count, or `null` while the list is hidden. */
+  onSummaryChange?: (summary: ChangedFilesSummary | null) => void;
+}) {
   let cachedSessionId: string | null = null;
   let cachedChanges: FileChange[] = [];
   let cachedSummaryStats: ReturnType<typeof getDiffSummaryStats> = null;
@@ -181,9 +186,23 @@ export function ChangedFilesList() {
   const hasLineCounts = () => !truncated() && (additions() > 0 || deletions() > 0);
   // The board always starts collapsed; the user opens it on demand.
   const [collapsed, setCollapsed] = createSignal(true);
+  const visible = () => showChangedFiles() && (total() > 0 || truncated());
+  createEffect(
+    () =>
+      props.onSummaryChange
+        ? {
+            notify: props.onSummaryChange,
+            summary: visible() ? { files: total(), truncated: truncated() } : null,
+          }
+        : null,
+    (result) => {
+      result?.notify(result.summary);
+    }
+  );
+  onCleanup(() => props.onSummaryChange?.(null));
 
   return (
-    <Show when={showChangedFiles() && (total() > 0 || truncated())}>
+    <Show when={visible()}>
       <div class="todo-block changed-files-block animate-fade-in">
         <button
           type="button"

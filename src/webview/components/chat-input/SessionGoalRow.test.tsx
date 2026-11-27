@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe('SessionGoalRow', () => {
-  it('shows a compact goal row with always-available pause and clear controls', async () => {
+  it('shows a compact goal row with queue-style pause and clear controls', async () => {
     cleanup = render(() => <SessionGoalRow sessionID="ses_one" directory="/repo" />, container);
     await settle();
     expect(container.querySelector('.chat-queue-label')?.textContent).toBe(goal.objective);
@@ -86,7 +86,8 @@ describe('SessionGoalRow', () => {
         ?.style.getPropertyValue('--ui-icon-mask')
     ).toBe(toCssUrl(trashIcon));
     expect(container.querySelector('[title]')).toBeNull();
-    expect(button('Pause goal')?.closest('.chat-queue-actions')).toBeNull();
+    // Like a queued message, the controls sit in the hover-revealed action strip.
+    expect(button('Pause goal')?.closest('.chat-queue-actions')).not.toBeNull();
     expect(client.session.goal).toHaveBeenCalledWith(
       'ses_one',
       expect.objectContaining({ directory: '/repo' })
@@ -139,6 +140,8 @@ describe('SessionGoalRow', () => {
     ).toBe(toCssUrl(pasteClipboardIcon));
     expect(button('Resume goal')).not.toBeNull();
     expect(container.querySelector('.chat-queue-paused-label')?.textContent).toBe('Paused');
+    // A paused goal reads like a paused queued message: muted text beside the Paused chip.
+    expect(container.querySelector('.chat-queue-item')?.classList.contains('is-paused')).toBe(true);
     expect(await hoverText(container.querySelector('.chat-queue-paused-label'))).toBe(
       'Not making progress'
     );

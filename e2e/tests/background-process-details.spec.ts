@@ -298,7 +298,7 @@ for (const width of [486, 1100]) {
     });
     await expect(serviceRow).toBeVisible();
     await expect(page.locator('.chat-header .chat-background-service')).toHaveCount(0);
-    const tray = page.locator('.interactive-input-part > .chat-background-services');
+    const tray = page.locator('.interactive-input-part .chat-background-services');
     await expect(tray).toBeVisible();
     await expect(serviceRow).toHaveCSS('height', '28px');
     await page.evaluate((sessionID) => {

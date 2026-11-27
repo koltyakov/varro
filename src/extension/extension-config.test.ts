@@ -43,6 +43,7 @@ describe('readExtensionConfigState', () => {
     expect(readExtensionConfigState()).toMatchObject({
       expandThinking: false,
       showTurnTimer: true,
+      groupComposerBlocks: true,
       showEmptyStateHistogram: false,
       followupsEnabled: true,
       debugShowQuotaWarning: false,
@@ -66,6 +67,12 @@ describe('readExtensionConfigState', () => {
     mocks.values.set('varro.chat.showTurnTimer', false);
 
     expect(readExtensionConfigState().showTurnTimer).toBe(false);
+  });
+
+  it('reads the grouped composer blocks opt-out', () => {
+    mocks.values.set('varro.chat.groupComposerBlocks', false);
+
+    expect(readExtensionConfigState().groupComposerBlocks).toBe(false);
   });
 
   it('reads the empty-state histogram opt-in', () => {

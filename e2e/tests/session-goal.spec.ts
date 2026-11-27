@@ -6,7 +6,7 @@ import { fixture } from '../../src/webview/test-fixtures';
 import { installPlaybackCapture, waitForHarnessStartup } from './helpers';
 
 for (const width of [360, 1100]) {
-  test(`shows the goal prompt and persistent composer controls at ${width}px`, async ({
+  test(`shows the goal prompt and queue-style composer controls at ${width}px`, async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width, height: 800 });
@@ -105,8 +105,12 @@ for (const width of [360, 1100]) {
     const clear = row.getByRole('button', { name: 'Clear goal' });
     await expect(pause).toBeVisible();
     await expect(clear).toBeVisible();
-    // Controls must remain visible without hover, even when the objective is truncated.
-    await expect(pause).toHaveCSS('opacity', '1');
+    // Like queued messages, the controls appear on hover or keyboard focus.
+    const actions = row.locator('.chat-queue-actions');
+    await page.mouse.move(0, 0);
+    await expect(actions).toHaveCSS('opacity', '0');
+    await row.hover();
+    await expect(actions).toHaveCSS('opacity', '1');
     const rowBox = (await row.boundingBox())!;
     const inputBox = (await page.locator('.chat-input-shell').boundingBox())!;
     const clearBox = (await clear.boundingBox())!;

@@ -705,6 +705,11 @@
           "default": 30,
           "markdownDescription": "How long a session stays warm after each reply when `#varro.chat.promptCacheWarming#` is on."
         },
+        "varro.chat.groupComposerBlocks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the queue, goal, todos, background services and changed files above the chat input one at a time, with a tab menu to switch between them. The menu appears only when at least three of these are shown; disable to always stack them."
+        },
         "varro.chat.showTurnTimer": {
           "type": "boolean",
           "default": true,

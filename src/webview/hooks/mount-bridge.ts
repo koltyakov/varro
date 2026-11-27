@@ -129,6 +129,9 @@ export function createMountBridgeOperations(deps: {
           if (payload.showTurnTimer !== undefined) {
             uiStore.setShowTurnTimer(payload.showTurnTimer);
           }
+          if (payload.groupComposerBlocks !== undefined) {
+            uiStore.setGroupComposerBlocks(payload.groupComposerBlocks);
+          }
           if (payload.showEmptyStateHistogram !== undefined) {
             uiStore.setShowEmptyStateHistogram(payload.showEmptyStateHistogram);
           }

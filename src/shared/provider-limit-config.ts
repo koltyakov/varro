@@ -11,6 +11,7 @@ export type ExtensionConfigState = {
   expandThinking?: boolean;
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
+  groupComposerBlocks?: boolean;
   showEmptyStateHistogram?: boolean;
   remoteImages?: RemoteImageMode;
   promptCompletionModel?: string;
@@ -35,6 +36,7 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'expandThinking'
   | 'showChangedFiles'
   | 'showTurnTimer'
+  | 'groupComposerBlocks'
   | 'showEmptyStateHistogram'
   | 'promptCompletionModel'
   | 'followupsEnabled'

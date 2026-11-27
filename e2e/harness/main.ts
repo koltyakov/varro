@@ -220,6 +220,8 @@ type HarnessWindow = Window & {
   };
   __initialTheme?: string;
   __initialWebviewState?: InitialWebviewState;
+  /** Spec-provided initial webview state, such as settings and queued messages. */
+  varroInitialStateOverrides?: Partial<InitialWebviewState>;
   __sendToExtension?: (message: WebviewMessage) => void | Promise<void>;
   varroPlaybackCapture?: {
     session: Session;
@@ -227,6 +229,9 @@ type HarnessWindow = Window & {
     followups?: ScenarioState['followups'];
     messageDiffs?: ScenarioState['messageDiffs'];
     goal?: SessionGoal | null;
+    status?: SessionStatus;
+    /** Child sessions, such as running subagents, with their statuses. */
+    childSessions?: { session: Session; status: SessionStatus }[];
   };
   __varroE2E?: {
     requests: RequestLog[];
@@ -885,7 +890,12 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.workspacePath = capture.session.directory;
     state.sessions = [structuredClone(capture.session)];
     state.messagesBySessionId[capture.session.id] = structuredClone(capture.initialMessages);
-    state.sessionStatuses[capture.session.id] = { type: 'idle' };
+    state.sessionStatuses[capture.session.id] = capture.status ?? { type: 'idle' };
+    for (const child of capture.childSessions ?? []) {
+      state.sessions.push(structuredClone(child.session));
+      state.messagesBySessionId[child.session.id] = [];
+      state.sessionStatuses[child.session.id] = child.status;
+    }
     state.persistedActiveSessionId = capture.session.id;
     if (capture.followups) {
       state.followups = capture.followups;
@@ -5446,6 +5456,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
     pendingQuestions: [],
     recycleBinEntries: state.recycleBinEntries,
+    ...(window as HarnessWindow).varroInitialStateOverrides,
   };
 }
 

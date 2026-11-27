@@ -424,7 +424,7 @@ function TodoItem(props: { todo: NormalizedTodo }) {
   );
 }
 
-function isResolvedTodoStatus(status: string) {
+export function isResolvedTodoStatus(status: string) {
   return status === 'completed' || status === 'cancelled' || status === 'canceled';
 }
 

@@ -24,6 +24,7 @@ const {
   setExpandThinking,
   setShowChangedFiles,
   setShowTurnTimer,
+  setGroupComposerBlocks,
   setShowEmptyStateHistogram,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
@@ -49,6 +50,7 @@ const {
   setExpandThinking: vi.fn(),
   setShowChangedFiles: vi.fn(),
   setShowTurnTimer: vi.fn(),
+  setGroupComposerBlocks: vi.fn(),
   setShowEmptyStateHistogram: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock(import('../lib/state'), async (importOriginal) => {
     setExpandThinking,
     setShowChangedFiles,
     setShowTurnTimer,
+    setGroupComposerBlocks,
     setShowEmptyStateHistogram,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
@@ -756,6 +759,7 @@ describe('mount bridge helpers', () => {
         expandThinking: true,
         showChangedFiles: true,
         showTurnTimer: true,
+        groupComposerBlocks: true,
         showEmptyStateHistogram: true,
         followupsEnabled: false,
         remoteImages: 'ask',
@@ -785,6 +789,7 @@ describe('mount bridge helpers', () => {
     expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
     expect(setShowTurnTimer).toHaveBeenCalledWith(true);
+    expect(setGroupComposerBlocks).toHaveBeenCalledWith(true);
     expect(setShowEmptyStateHistogram).toHaveBeenCalledWith(true);
     expect(state.followupsEnabled).toBe(false);
     expect(state.debugShowQuotaWarning).toBe(true);

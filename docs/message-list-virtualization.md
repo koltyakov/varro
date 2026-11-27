@@ -706,6 +706,9 @@ Direct input acquires ownership only when it can affect the transcript:
   before changing the layout. A later ResizeObserver correction is insufficient: the September 11
   editor replay briefly clamped the transcript backward by 139 px when its todo panel disappeared.
   `scroll-auto-scroll.spec.ts` checks automatic completion and clearing at removal and frame boundaries.
+  Grouped composer blocks sit in `display: contents` slots, so the parent gap comes from the nearest
+  ancestor that lays them out. A block hidden behind another composer tab has no box and reserves
+  nothing.
 - The trailing Thinking, loading, empty-reserve, and Worked states share one post-message slot. The
   slot stays invisibly reserved while inline edits replace its label, and takes no height while an
   active tool is visible so no space opens below the tool. Active tools appear and leave immediately,

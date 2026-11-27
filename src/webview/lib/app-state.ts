@@ -269,6 +269,8 @@ export interface AppStateInstance {
   setShowChangedFiles: Setter<boolean>;
   showTurnTimer: Accessor<boolean>;
   setShowTurnTimer: Setter<boolean>;
+  groupComposerBlocks: Accessor<boolean>;
+  setGroupComposerBlocks: Setter<boolean>;
   showEmptyStateHistogram: Accessor<boolean>;
   setShowEmptyStateHistogram: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
@@ -606,6 +608,9 @@ export function createAppState(): AppStateInstance {
   const [showTurnTimer, setShowTurnTimer] = createSignal(
     initialWebviewState.showTurnTimer ?? false
   );
+  const [groupComposerBlocks, setGroupComposerBlocks] = createSignal(
+    initialWebviewState.groupComposerBlocks ?? true
+  );
   const [showEmptyStateHistogram, setShowEmptyStateHistogram] = createSignal(
     initialWebviewState.showEmptyStateHistogram ?? false
   );
@@ -827,6 +832,8 @@ export function createAppState(): AppStateInstance {
     setShowChangedFiles,
     showTurnTimer,
     setShowTurnTimer,
+    groupComposerBlocks,
+    setGroupComposerBlocks,
     showEmptyStateHistogram,
     setShowEmptyStateHistogram,
     desktopSessionPaneSide,
@@ -970,6 +977,8 @@ export const showChangedFiles = defaultAppState.showChangedFiles;
 export const setShowChangedFiles = defaultAppState.setShowChangedFiles;
 export const showTurnTimer = defaultAppState.showTurnTimer;
 export const setShowTurnTimer = defaultAppState.setShowTurnTimer;
+export const groupComposerBlocks = defaultAppState.groupComposerBlocks;
+export const setGroupComposerBlocks = defaultAppState.setGroupComposerBlocks;
 export const showEmptyStateHistogram = defaultAppState.showEmptyStateHistogram;
 export const setShowEmptyStateHistogram = defaultAppState.setShowEmptyStateHistogram;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
@@ -1057,6 +1066,7 @@ export function resetDefaultAppState() {
   setExpandThinking(next.expandThinking());
   setShowChangedFiles(next.showChangedFiles());
   setShowTurnTimer(next.showTurnTimer());
+  setGroupComposerBlocks(next.groupComposerBlocks());
   setShowEmptyStateHistogram(next.showEmptyStateHistogram());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
   setNextPastedImageIndex(next.nextPastedImageIndex());

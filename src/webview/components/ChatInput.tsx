@@ -151,6 +151,7 @@ import {
   loadingLastActivityAt,
   loadingStartedAt,
   showTurnTimer,
+  groupComposerBlocks,
   getModelRouteNames,
   getReviewerModelNames,
   getMessageLookup,
@@ -196,6 +197,7 @@ import {
 import { ralphStore } from '../lib/stores/ralph-store';
 import { ralphRunner } from './ralph/ralph-runner';
 import type { RalphSelectedModel } from '../../shared/ralph';
+import type { SessionGoal } from '../../shared/session-goal';
 import {
   formatAgentInitial,
   formatAgentLabel,
@@ -259,8 +261,8 @@ import {
   getNewChatDraftGeneration,
 } from '../lib/new-chat-draft';
 import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
-import { TodoList } from './TodoList';
-import { ChangedFilesList } from './ChangedFilesList';
+import { isResolvedTodoStatus, TodoList } from './TodoList';
+import { ChangedFilesList, type ChangedFilesSummary } from './ChangedFilesList';
 import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
 import { preloadInlineImageDimensions } from './InlineMessageImage';
 import { UiIcon } from './UiIcon';
@@ -291,6 +293,7 @@ import {
 } from './chat-input/QueuedMessages';
 import { BackgroundServices } from './chat-input/BackgroundServices';
 import { SessionGoalRow } from './chat-input/SessionGoalRow';
+import { ComposerBlockGroup, type ComposerBlock } from './chat-input/ComposerBlockGroup';
 import { SessionRewindRow } from './chat-input/SessionRewindRow';
 import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 import { hasUserMessageContent, parseUserMessageContent } from './message/UserMessageContent';
@@ -7181,6 +7184,158 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     onStopAndSend: () => void handleStopAndSend(),
   } satisfies Partial<ToolbarSharedProps>;
 
+  const showComposerSessionRows = () =>
+    !props.newSession && !hasExpandedDiffOverlay() && !composerEditingMessage();
+  const [composerGoalStatus, setComposerGoalStatus] = createSignal<SessionGoal['status'] | null>(
+    null
+  );
+  const [changedFilesSummary, setChangedFilesSummary] = createSignal<ChangedFilesSummary | null>(
+    null
+  );
+  const visibleQueuedItems = createMemo(() =>
+    queuedForSession().filter((item) => !steeringQueuedMessageIds().has(item.id))
+  );
+  const showQueuedMessages = () =>
+    !hasExpandedDiffOverlay() &&
+    (queuedForSession().length > 0 || pendingSteersForSession().length > 0) &&
+    !composerEditingMessage();
+  const showTodoList = () =>
+    !hasExpandedDiffOverlay() &&
+    !props.newSession &&
+    state.todos.length > 0 &&
+    !composerEditingMessage();
+  const sessionGoalBlock = () => (
+    <Show
+      when={
+        showComposerSessionRows() &&
+        state.serverStatus.state === 'running' &&
+        state.serverStatus.apiVersion === 2
+      }
+    >
+      <SessionGoalRow
+        sessionID={composerSessionId()}
+        directory={composerBackgroundServiceDirectory()}
+        onStatusChange={setComposerGoalStatus}
+      />
+    </Show>
+  );
+  const backgroundServicesBlock = () => (
+    <Show when={showComposerSessionRows()}>
+      <BackgroundServices
+        sessionID={composerSessionId()}
+        directory={composerBackgroundServiceDirectory()}
+        count={composerBackgroundServices()}
+      />
+    </Show>
+  );
+  const showSubagentWaiting = () =>
+    showSubagentWaitingStatus() && !hasExpandedDiffOverlay() && !composerEditingMessage();
+  const subagentWaitingBlock = () => (
+    <Show when={showSubagentWaiting()}>
+      <div class="chat-subagent-waiting" role="status">
+        <span class="chat-subagent-waiting-label">
+          Waiting for {workingSubagentIds().length}{' '}
+          {workingSubagentIds().length === 1 ? 'subagent' : 'subagents'}
+        </span>
+        <span class="chat-subagent-waiting-titles" title={workingSubagentTitles()}>
+          {workingSubagentTitles()}
+        </span>
+      </div>
+    </Show>
+  );
+  const queuedMessagesBlock = () => (
+    <Show when={showQueuedMessages()}>
+      <QueuedMessages
+        items={visibleQueuedItems()}
+        pendingSteers={pendingSteersForSession()}
+        canResumeSteering={canResumeSteering()}
+        onResumeSteering={() => void resumePendingSteering()}
+        dispatchingItemId={dispatchingQueuedMessageId()}
+        failedDispatchItemIds={failedQueuedMessageIds()}
+        steeringItemIds={steeringQueuedMessageIds()}
+        failedSteerItemIds={failedSteerQueuedMessageIds()}
+        editingItemId={queuedMessageEdit()?.id}
+        canEdit={canEditQueuedMessage()}
+        canSendImmediately={!state.messagesLoading && !hasPendingApproval()}
+        canSteerItem={canSteerQueuedMessage}
+        onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
+        onSendAsSteer={(item) => {
+          if (!state.messagesLoading && !hasPendingApproval()) void sendQueuedAsSteer(item);
+        }}
+        onSetPaused={(item, paused, allRows) => setQueuedMessagePaused(item.id, paused, allRows)}
+        onReorder={reorderQueuedMessage}
+        onEdit={editQueuedMessage}
+        onCancelEdit={cancelQueuedMessageEdit}
+        onRemove={removeQueuedMessage}
+      />
+    </Show>
+  );
+  const todoListBlock = () => (
+    <Show when={showTodoList()}>
+      <TodoList />
+    </Show>
+  );
+  const changedFilesBlock = () => (
+    <Show when={showComposerSessionRows()}>
+      <ChangedFilesList onSummaryChange={setChangedFilesSummary} />
+    </Show>
+  );
+  const composerBlocks: ComposerBlock[] = [
+    {
+      kind: 'queue',
+      count: () =>
+        showQueuedMessages()
+          ? visibleQueuedItems().length + pendingSteersForSession().length || null
+          : null,
+      render: queuedMessagesBlock,
+    },
+    {
+      kind: 'goal',
+      count: () => (showComposerSessionRows() && composerGoalStatus() ? 1 : null),
+      // A session has at most one goal, so the tab shows its status instead of a counter.
+      countLabel: () => null,
+      status: () => {
+        const status = composerGoalStatus();
+        if (status === 'complete') return 'achieved';
+        return status === 'paused' ? 'paused' : status ? 'running' : null;
+      },
+      render: sessionGoalBlock,
+    },
+    {
+      kind: 'todos',
+      count: () => (showTodoList() ? state.todos.length : null),
+      countLabel: () =>
+        `${state.todos.filter((todo) => isResolvedTodoStatus(todo.status)).length}/${state.todos.length}`,
+      render: todoListBlock,
+    },
+    {
+      kind: 'background',
+      // Background services and subagents still running share one tab as separate blocks.
+      count: () => {
+        const services =
+          showComposerSessionRows() && composerSessionId() ? composerBackgroundServices() : 0;
+        const subagents = showSubagentWaiting() ? workingSubagentIds().length : 0;
+        return services + subagents || null;
+      },
+      render: () => (
+        <>
+          {backgroundServicesBlock()}
+          {subagentWaitingBlock()}
+        </>
+      ),
+    },
+    {
+      kind: 'files',
+      count: () => (showComposerSessionRows() ? (changedFilesSummary()?.files ?? null) : null),
+      countLabel: () => {
+        const summary = changedFilesSummary();
+        if (!summary?.truncated) return String(summary?.files ?? 0);
+        return summary.files > 0 ? `${summary.files}+` : '…';
+      },
+      render: changedFilesBlock,
+    },
+  ];
+
   return (
     <div
       class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''}${editReconciliationPending() ? ' is-edit-reconciling' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() || showLspPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
@@ -7209,81 +7364,26 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <DropOverlay />
       </Show>
 
-      <Show when={!props.newSession && !hasExpandedDiffOverlay() && !composerEditingMessage()}>
+      <Show when={showComposerSessionRows()}>
         <SessionRewindRow
           sessionID={composerSessionId()}
           directory={composerBackgroundServiceDirectory()}
         />
-        <Show when={state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 2}>
-          <SessionGoalRow
-            sessionID={composerSessionId()}
-            directory={composerBackgroundServiceDirectory()}
-          />
-        </Show>
-        <BackgroundServices
-          sessionID={composerSessionId()}
-          directory={composerBackgroundServiceDirectory()}
-          count={composerBackgroundServices()}
-        />
       </Show>
       <Show
-        when={showSubagentWaitingStatus() && !hasExpandedDiffOverlay() && !composerEditingMessage()}
-      >
-        <div class="chat-subagent-waiting" role="status">
-          <span class="chat-subagent-waiting-label">
-            Waiting for {workingSubagentIds().length}{' '}
-            {workingSubagentIds().length === 1 ? 'subagent' : 'subagents'}
-          </span>
-          <span class="chat-subagent-waiting-titles" title={workingSubagentTitles()}>
-            {workingSubagentTitles()}
-          </span>
-        </div>
-      </Show>
-      <Show
-        when={
-          !hasExpandedDiffOverlay() &&
-          (queuedForSession().length > 0 || pendingSteersForSession().length > 0) &&
-          !composerEditingMessage()
+        when={groupComposerBlocks()}
+        fallback={
+          <>
+            {sessionGoalBlock()}
+            {backgroundServicesBlock()}
+            {subagentWaitingBlock()}
+            {queuedMessagesBlock()}
+            {todoListBlock()}
+            {changedFilesBlock()}
+          </>
         }
       >
-        <QueuedMessages
-          items={queuedForSession().filter((item) => !steeringQueuedMessageIds().has(item.id))}
-          pendingSteers={pendingSteersForSession()}
-          canResumeSteering={canResumeSteering()}
-          onResumeSteering={() => void resumePendingSteering()}
-          dispatchingItemId={dispatchingQueuedMessageId()}
-          failedDispatchItemIds={failedQueuedMessageIds()}
-          steeringItemIds={steeringQueuedMessageIds()}
-          failedSteerItemIds={failedSteerQueuedMessageIds()}
-          editingItemId={queuedMessageEdit()?.id}
-          canEdit={canEditQueuedMessage()}
-          canSendImmediately={!state.messagesLoading && !hasPendingApproval()}
-          canSteerItem={canSteerQueuedMessage}
-          onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
-          onSendAsSteer={(item) => {
-            if (!state.messagesLoading && !hasPendingApproval()) void sendQueuedAsSteer(item);
-          }}
-          onSetPaused={(item, paused, allRows) => setQueuedMessagePaused(item.id, paused, allRows)}
-          onReorder={reorderQueuedMessage}
-          onEdit={editQueuedMessage}
-          onCancelEdit={cancelQueuedMessageEdit}
-          onRemove={removeQueuedMessage}
-        />
-      </Show>
-
-      <Show
-        when={
-          !hasExpandedDiffOverlay() &&
-          !props.newSession &&
-          state.todos.length > 0 &&
-          !composerEditingMessage()
-        }
-      >
-        <TodoList />
-      </Show>
-
-      <Show when={!hasExpandedDiffOverlay() && !props.newSession && !composerEditingMessage()}>
-        <ChangedFilesList />
+        <ComposerBlockGroup blocks={composerBlocks} />
       </Show>
 
       <Show when={!hasExpandedDiffOverlay() && composerEditingMessage()}>

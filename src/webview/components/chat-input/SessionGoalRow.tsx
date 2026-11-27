@@ -13,8 +13,23 @@ import {
 import { Tooltip } from '../Tooltip';
 import { UiIcon } from '../UiIcon';
 
-export function SessionGoalRow(props: { sessionID: string | null; directory?: string }) {
+export function SessionGoalRow(props: {
+  sessionID: string | null;
+  directory?: string;
+  /** Reports the shown goal's status, or `null` without a goal, for grouping composer blocks. */
+  onStatusChange?: (status: SessionGoal['status'] | null) => void;
+}) {
   const [goal, setGoal] = createSignal<SessionGoal | null>(null);
+  createEffect(
+    () =>
+      props.onStatusChange
+        ? { notify: props.onStatusChange, status: goal()?.status ?? null }
+        : null,
+    (result) => {
+      result?.notify(result.status);
+    }
+  );
+  onCleanup(() => props.onStatusChange?.(null));
   const [pending, setPending] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [objectiveClipped, setObjectiveClipped] = createSignal(false);
@@ -106,7 +121,7 @@ export function SessionGoalRow(props: { sessionID: string | null; directory?: st
           role="group"
           aria-label="Session goal"
         >
-          <div class="chat-queue-item">
+          <div class={`chat-queue-item${current().status === 'paused' ? ' is-paused' : ''}`}>
             <Tooltip
               variant="panel"
               anchor={() => goalRow}
@@ -144,7 +159,8 @@ export function SessionGoalRow(props: { sessionID: string | null; directory?: st
                 <span class="chat-queue-paused-label">Paused</span>
               </Tooltip>
             </Show>
-            <div class="chat-goal-controls">
+            {/* Revealed on hover or keyboard focus, like the controls of a queued message. */}
+            <div class="chat-goal-controls chat-queue-actions">
               <Show when={current().status !== 'complete'}>
                 <Tooltip content={current().status === 'paused' ? 'Resume goal' : 'Pause goal'}>
                   <button

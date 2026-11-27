@@ -446,6 +446,16 @@ export function getActiveTurnNavigationMessageId(
 
 const retainedRowHeights = new RetainedRowHeights();
 
+/**
+ * Row gap around a block above the composer. Grouped blocks sit in `display: contents` slots,
+ * so the gap belongs to the nearest ancestor that lays them out.
+ */
+function composerBlockRowGap(element: HTMLElement) {
+  let parent = element.parentElement;
+  while (parent && getComputedStyle(parent).display === 'contents') parent = parent.parentElement;
+  return parent ? Number.parseFloat(getComputedStyle(parent).rowGap) || 0 : 0;
+}
+
 export function MessageList() {
   const pasteModifier = /Macintosh|Mac OS X/.test(navigator.userAgent) ? 'Cmd' : 'Ctrl';
   const [hintsDismissed, setHintsDismissed] = createSignal(
@@ -8563,17 +8573,17 @@ export function MessageList() {
     );
     const queue = row?.closest<HTMLElement>('.chat-queue-container');
     const list = row?.closest<HTMLElement>('.chat-queue-list');
-    if (!row || !queue || !list) return;
+    // A queue behind another composer tab has no box, so its removal frees no space.
+    if (!row || !queue || !list || queue.getClientRects().length === 0) return;
 
     const rows = list.querySelectorAll('[data-queued-message-id]');
     if (rows.length === 1) {
       const styles = getComputedStyle(queue);
-      const parentStyles = queue.parentElement ? getComputedStyle(queue.parentElement) : null;
       reserveExternalBottomCollapse(
         queue.getBoundingClientRect().height +
           (parseFloat(styles.marginTop) || 0) +
           (parseFloat(styles.marginBottom) || 0) +
-          (parseFloat(parentStyles?.rowGap || '') || 0)
+          composerBlockRowGap(queue)
       );
       return;
     }
@@ -8779,15 +8789,14 @@ export function MessageList() {
             containerRef.closest('.chat-main-column-shell')
           )
             return;
+          // Todos behind another composer tab have no box, so their removal frees no space.
+          if (element.getClientRects().length === 0) return;
           const styles = getComputedStyle(element);
-          const parentStyles = element.parentElement
-            ? getComputedStyle(element.parentElement)
-            : null;
           reserveExternalBottomCollapse(
             element.getBoundingClientRect().height +
               (Number.parseFloat(styles.marginTop) || 0) +
               (Number.parseFloat(styles.marginBottom) || 0) +
-              (Number.parseFloat(parentStyles?.rowGap || '') || 0)
+              composerBlockRowGap(element)
           );
         })
       )
