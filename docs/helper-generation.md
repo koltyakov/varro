@@ -1,13 +1,19 @@
 # Stateless helper generation
 
 Title fallback and commit-message generation first check the connected v2 server's
-OpenAPI document for `/api/experimental/generate`. When available, Varro sends one
-prompt with the selected provider, model, and variant, and validates the returned
-JSON before applying it. This operation does not create a session.
+OpenAPI document for `/api/experimental/generate/text`, then
+`/api/experimental/generate`. When available, Varro sends one prompt with the
+selected provider, model, and variant, and validates the returned JSON before
+applying it. This operation does not create a session. The same
+`tryGenerateOneShot()` helper also serves follow-up suggestions, change
+walkthroughs, and background-process classification; those callers have no
+helper-session fallback.
 
-The existing helper-session path remains available on v1, when the operation is
-absent, and when the v2 base runner rejects the exact selected model as unavailable
-before contacting its provider. The isolated v2.0.15 fixture demonstrated this
+For title fallback and commit messages, the existing helper-session path remains
+available on v1, when the operation is absent, and when the v2 base runner rejects
+the exact selected model as unavailable (`400 Model unavailable`) or missing
+(`404 Model not found`) before contacting its provider.
+The isolated v2.0.15 fixture demonstrated this
 rejection for a configured custom provider, including one in global configuration.
 The fallback made exactly one provider request and cleaned up its helper session.
 

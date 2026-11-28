@@ -13,8 +13,7 @@ npm run test:vscode-sandbox
 
 The runner builds Varro, launches each scenario in a separate VS Code window with isolated user
 data, extensions, workspace settings, and global state, and removes the sandbox afterward. It uses
-a fake OpenCode CLI/server and does not modify or stop the user's installed OpenCode CLI. On macOS,
-the disposable instances launch hidden in the background so they do not steal keyboard focus.
+a fake OpenCode CLI/server and does not modify or stop the user's installed OpenCode CLI.
 
 Run one or more scenarios by name:
 
@@ -34,6 +33,7 @@ The Extension Host matrix covers:
 | Scenario | Simulated condition | Expected outcome |
 | --- | --- | --- |
 | `clean-install-missing-cli` | Empty profile, isolated home/PATH, and deterministic missing-CLI simulation | First reveal starts onboarding and reports install guidance |
+| `empty-window-missing-cli` | Same missing-CLI setup in a window with no folder open | Activates without a workspace folder and reports install guidance |
 | `invalid-cli-path` | `varro.server.command` points to a missing file | Reports the configured path instead of generic install guidance |
 | `auto-start-disabled` | No server and automatic startup disabled | Reports the manual `opencode serve` recovery path |
 | `version-command-failure` | `opencode --version` exits with an error | Continues startup and reports the diagnostic in About |
@@ -45,7 +45,12 @@ The Extension Host matrix covers:
 | `required-update-disabled` | CLI is below the supported floor and updates are disabled | Blocks startup with the update setting guidance |
 | `required-update-failure` | Required CLI update encounters a network failure | Reports install-aware update recovery |
 | `required-update-no-change` | Updater exits successfully but leaves the old CLI in place | Rejects the false success and explains that an older CLI may be shadowing the update |
+| `file-link-open` | Healthy server; file links name a directory outside the workspace whose matching file exists only in a nested subdirectory, and the workspace holds unrelated namesakes | Opens the unique nested file at the requested line and reports a missing file as unavailable |
 | `healthy-first-run` | Compatible CLI and server | Starts, passes health, and connects the event stream |
+
+`--list` also shows the optional `v2-first-run` scenario, which is not part of the default matrix.
+It requires `VARRO_SANDBOX_V2_COMMAND` pointing to a released v2 binary; see
+[OpenCode v2 Support](opencode-v2-support.md).
 
 The assertions use the `Varro: About` diagnostics from the real extension host. Webview DOM and
 action assertions remain in Playwright because VS Code's stable extension API does not expose a

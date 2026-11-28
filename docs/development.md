@@ -57,13 +57,13 @@ npm run typecheck
 npm run test
 ```
 
-`npm run typecheck` checks every TypeScript source, test, E2E harness, and root tooling configuration file using the repository's single TypeScript configuration.
+`npm run typecheck` runs `tsc -p tsconfig.json`, which checks every TypeScript source, test, E2E harness, and root tooling configuration file, then `tsc -p tsconfig.scripts.json`, which checks the `scripts/**/*.mjs` tooling scripts.
 
 While iterating, run the narrowest relevant command for the area you changed. Useful targeted commands include:
 
 - `npm run test -- src/webview/components/ChatInput.test.ts`
 - `npm run test -- src/shared/ralph-runner-core.test.ts`
-- `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
+- `npm run test -- src/webview/components/ChatInput.test.ts -t "runs a typed slash command with args on Enter"`
 - `npm run test:e2e -- e2e/tests/layout.spec.ts`
 
 Vitest runs most extension and shared tests in Node without loading jsdom. Webview tests, About-page
@@ -80,7 +80,7 @@ script tests, and `npm run test:coverage` runs the full unit suite with coverage
 `npm test` and `npm run test:scripts` share a four-file concurrency limit for Node script tests,
 whose fixtures spawn additional processes. This leaves startup headroom without relaxing test
 timeouts. On a busy machine, lower it with `npm run test:scripts -- --test-concurrency=2`.
-Linux CI runners are pinned to `ubuntu-24.04` to avoid automatic `ubuntu-latest` image migrations.
+Linux jobs in the main CI workflow are pinned to `ubuntu-24.04` to avoid automatic `ubuntu-latest` image migrations; the OpenCode compatibility workflow still uses `ubuntu-latest`.
 CI runs these suites fresh and caches only npm dependency downloads. E2E duration history is saved
 as an artifact, not as cached test results. Its pinned Playwright container
 already includes Chromium, so CI skips the browser install hook and runs E2E across four shards.
@@ -242,7 +242,7 @@ See [architecture.md](architecture.md) for a deeper component-by-component break
 `src/extension/server.ts` orchestrates the bridge to the local OpenCode HTTP server. Process, update, and port behavior lives in `open-code-process.ts`; REST and SSE transport lives in `open-code-transport.ts`; and `server-lifecycle.ts` coordinates lifecycle state.
 
 - Detects the API through v2 `/api/info` or `/api/status`, or v1 `/global/health`, before spawning anything
-- Starts `opencode serve --port <port>` only when Varro first needs the server and auto-start is enabled
+- Starts `opencode serve --service --port <port>` for v2, or `opencode serve --port <port>` for v1, only when Varro first needs the server and auto-start is enabled
 - Scopes workspace-sensitive requests and filters deliberately unscoped responses
 - Opens an SSE connection to v2 `/api/event` or v1 `/global/event` and normalizes events for workspace-scoped endpoints
 - Reconnects the event stream with backoff
@@ -253,7 +253,7 @@ Important behavior:
 - The extension-host adapters normalize v1 and v2 into Varro's shared contracts. V2 uses authenticated requests and location-scoped APIs; the directory query/header behavior below describes the v1 transport. See [OpenCode v1 and v2 support](opencode-v2-support.md).
 
 - Workspace-sensitive non-global requests carry both a `directory` query param and `x-opencode-directory` header. Global paths omit the `directory` query param; health and `/global/event` are explicitly unscoped, while generic global REST calls can still carry the directory header. Session status and most session-child routes are deliberately unscoped; Windows leaves additional session reads unscoped to avoid path casing and separator regressions. Aggregate session lists, statuses, permissions, and questions are filtered locally to the active workspace. Direct session-child routes remain ID-addressed and are normally reached through IDs from filtered session state.
-- If the spawned server reports that the configured port is already in use, Varro can retry on nearby ports.
+- If the spawned server reports that an automatically selected port is already in use, Varro retries a bounded number of times on another random port in the dynamic range (49152-65535). An explicit `varro.server.port` never changes after a collision.
 - If the SSE stream drops while REST is still available, Varro keeps the chat usable and reports the event stream as degraded.
 - A background maintenance loop checks the installed OpenCode CLI version, can suggest `opencode upgrade`, and can restart a Varro-managed server when the CLI is newer and no sessions are active.
 
@@ -283,7 +283,7 @@ It debounces editor and diagnostics updates before posting them to the webview.
 - Forwards workspace-scoped server events through `ServerEventBridge`
 - Tracks session attention through `SessionStateManager` for notifications and the status bar
 
-It also exposes the Varro extension-host API namespace, `/varro/*`:
+It also exposes the Varro extension-host API namespace, `/varro/*`. `VARRO_API_ENDPOINTS` and `VarroSessionEndpointAction` in `src/shared/protocol.ts` are the canonical inventory; representative routes include:
 
 - `GET /varro/provider-limit`
 - `POST /varro/plan/open`
@@ -297,11 +297,14 @@ It also exposes the Varro extension-host API namespace, `/varro/*`:
 - `GET /varro/session/:sessionID/diff-summary`
 - `POST /varro/session/:sessionID/pin`
 - `POST /varro/session/:sessionID/rename-if-untitled`
+- `POST /varro/session/:sessionID/activate`
 - `DELETE /varro/session/:sessionID/delete`
 - `GET /varro/session-trash`
 - `POST /varro/session-trash/:rootID/restore`
 - `DELETE /varro/session-trash/:rootID/delete`
 - `DELETE /varro/session-trash`
+
+Other endpoint groups cover images, prompt completion, model pricing, startup diagnostics, OpenCode config permissions and provider disabling, MCP config, permission allow scopes, decision providers, citations, workspace problems, and session transfers. See [architecture.md](architecture.md#srcextensionsidebar-providerts) for the full grouping.
 
 Those paths share the same `api/request` bridge as OpenCode REST calls, but the extension host resolves them locally instead of forwarding them to OpenCode.
 
@@ -317,13 +320,17 @@ Drag and drop also has a fallback path for environments that do not expose local
 
 - Focus the Varro view and composer
 - Handle status-bar navigation to sessions that need attention
-- Start a new session
-- Search, move to the previous session, or move to the next session
+- Start a new session, a chat editor, a compact chat window, or a terminal editor
+- Search, move to the previous session, or move to the next session, and step back or forward through session history
 - Abort the active session
 - Restart the OpenCode server
-- Open About details, output, Source Control, or global/project `AGENTS.md`
-- Generate a commit message from staged changes
-- Add Explorer files, editor selections, or terminal selections to context
+- Open Varro settings, skill and MCP settings, or the global OpenCode config, and show or hide file diffs
+- Open usage stats or export all-time usage to CSV
+- Delete old OpenCode sessions or compact the OpenCode database
+- Open About details, GitHub, output, Source Control, or global/project `AGENTS.md`
+- Generate or cancel a commit message from staged changes, or walk through changes
+- Add Explorer files, editor selections, terminal selections, or problems to context
+- Copy link text, links, or file paths from webview context menus
 
 The selection-oriented `varro.chat.explainSelection`, `varro.chat.reviewSelection`, and `varro.chat.improveSelection` handlers are registered for programmatic use but are not contributed to the Command Palette or editor menus.
 
@@ -377,11 +384,13 @@ Explicit context files are represented by `DroppedFile` in `src/shared/protocol.
 When sending a prompt, the webview builds message parts in roughly this order:
 
 1. User text
-2. `[Working directory: ...]`
-3. Active file or active selection reference, when current-document context is enabled for the session
-4. Terminal selection block
-5. Explicitly attached diagnostics
-6. Explicit files and folders, clipboard images, and native PDFs in their attachment order, subject to model capabilities. Unsupported or unknown PDF input blocks sending without a file-reference fallback; V2 verifies the native model catalog before admission. See [PDF compatibility](pdf-compatibility.md).
+2. Skill references named in the text
+3. Host-extension contexts
+4. Database context, unsaved editor text, or the active file or active selection reference, when current-document context is enabled for the session and no host-extension context replaces the document
+5. Automatic editor problems, when problems context is enabled
+6. Terminal selection block
+7. Explicitly attached diagnostics and inline problem references, when problems context is enabled
+8. Explicit files and folders, clipboard images, and native PDFs in their attachment order, subject to model capabilities. Unsupported or unknown PDF input blocks sending without a file-reference fallback; V2 verifies the native model catalog before admission. See [PDF compatibility](pdf-compatibility.md).
 
 ## Session Behavior
 
@@ -442,7 +451,7 @@ The chat UI runs inside a VS Code webview.
 2. Run **Developer: Open Webview Developer Tools**.
 3. Use DevTools to inspect the UI, view console logs, and debug the webview code.
 
-The browser preview serves source through Vite, but the built webview has `sourcemap: false` and does not emit `dist/webview/webview.js.map`. Extension-host watch builds emit a source map; non-watch extension builds do not.
+The browser preview serves source through Vite, but the built webview has `sourcemap: false` and does not emit `dist/webview/webview.mjs.map`. Extension-host watch builds emit a source map; non-watch extension builds do not.
 
 ## Connect To An Existing OpenCode Server
 
@@ -460,7 +469,7 @@ Then configure these VS Code settings as needed:
 - `varro.server.autoStart`
 - `varro.server.command`
 
-Varro checks `http://127.0.0.1:<port>/global/health` to verify the server.
+Varro checks v2 `/api/info` or `/api/status`, or v1 `/global/health`, at `http://127.0.0.1:<port>` to verify the server.
 
 Automatic launches use random ports in the dynamic range with bounded collision retries. An explicit port never changes after a collision. The existing default lease remains the coordination key for automatic mode so legacy windows and rollback can discover its recorded actual port. See [server ownership](server-ownership.md) for migration and admission checks.
 
@@ -506,15 +515,24 @@ docs/
 | `npm run lint` | Run oxlint with `--fix` across the repository |
 | `npm run lint:check` | Run oxlint without fixing across the repository |
 | `npm run fmt` | Format `src/` with oxfmt |
-| `npm run test` | Run the Vitest suite |
+| `npm run fmt:check` | Check `src/` formatting with oxfmt without writing |
+| `npm run test` | Run the Vitest suite and Node script tests through `scripts/run-tests.mjs` |
+| `npm run test:scripts` | Run only the Node script tests under `scripts/` |
+| `npm run test:scripts:browser` | Run the browser script tests in `scripts/browser/` |
 | `npm run test:e2e` | Run the Playwright webview E2E suite |
 | `npm run test:e2e:diagnostics` | Run opt-in browser diagnostics and save their evidence |
 | `npm run test:e2e:raster` | Run strict application and static native wheel raster checks |
 | `npm run test:vscode-sandbox` | Run onboarding scenarios in disposable VS Code Extension Hosts |
 | `npm run test:coverage` | Run tests with coverage output |
 | `npm run test:compatibility` | Test the declared OpenCode compatibility range with Docker |
+| `npm run test:compatibility:adapters` | Install the declared v1 and v2 floor and tested CLI versions and run the adapter integration tests against them |
+| `npm run test:compatibility:ui` | Build, then run the real-editor v2 chat check against `VARRO_OPENCODE_TEST_BINARY` |
 | `npm run compatibility:discover` | Probe selected published OpenCode versions with Docker |
-| `npm run typecheck` | Check all TypeScript source, test, E2E, and tooling code |
+| `npm run typecheck` | Check all TypeScript source, test, E2E, tooling, and `scripts/**/*.mjs` code |
+| `npm run typecheck:suggestions` | Fail on TypeScript editor suggestion diagnostics that `tsc` does not report |
+| `npm run artifacts:prune` | Report or remove old regenerable run output under `artifacts/` |
+| `npm run build:notifications:macos` | Rebuild the macOS notification helper archive and manifest on macOS |
+| `npm run test:notifications:macos` | Run the macOS notification helper native tests; they skip on other platforms |
 | `npm run package:vsix` | Create a VSIX from existing build output |
 | `npm run package` | Build and create a VSIX package |
 | `npm run vscode:install` | Package and install the VSIX into local VS Code |

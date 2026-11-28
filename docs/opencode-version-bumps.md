@@ -26,4 +26,4 @@ which npm 12 requires to replace the executable placeholder. Missing platform
 packages still block verification. Do not substitute an older binary under the
 target version or count another architecture as native-platform coverage.
 
-The optional real-editor startup check is `VARRO_SANDBOX_V2_COMMAND=/absolute/path/to/opencode node scripts/vscode-sandbox/run.mjs v2-first-run`. Update its expected version when changing the tested v2 release.
+The optional real-editor startup check is `VARRO_SANDBOX_V2_COMMAND=/absolute/path/to/opencode node scripts/vscode-sandbox/run.mjs v2-first-run`. It reads the expected version from the selected binary's `--version` output, so changing the tested v2 release needs no script update.

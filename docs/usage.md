@@ -51,7 +51,7 @@ a managed replacement with the separate registration. Ordinary terminal CLIs use
 OpenCode's global service, while CLIs invoked by Varro tools inherit Varro's service.
 Do not run the same session concurrently in independent servers.
 
-Only use manual server management if you have a specific requirement and understand the [unsupported and limited features](docker-server.md#feature-availability-in-attach-only-mode). Set `varro.server.port` to your exact port, disable `varro.server.autoStart`, and start OpenCode yourself. VS Code marks this switch as deprecated and debug-only, but it remains available for this advanced workflow:
+Only use manual server management if you have a specific requirement and understand the [unsupported and limited features](docker-server.md#feature-availability-in-attach-only-mode). Set `varro.server.port` to your exact port, disable `varro.server.autoStart`, and start OpenCode yourself:
 
 ```sh
 opencode serve --port 4096
@@ -200,7 +200,7 @@ Varro can include more than the text in the composer.
 - Active file, when live current-document context is enabled
 - Current selection, including unsaved selected text, or a bounded window of a dirty editor buffer when there is no selection, when live current-document context is enabled
 - Selected terminal text
-- Diagnostics from the active file when you explicitly attach current Problems with `/diagnostics`
+- Diagnostics from the active file when you explicitly attach current Problems with `/diagnostics`, or workspace problems chosen with `/problems`; both require `varro.chat.autoAttachProblems`, which defaults to `false`
 - Explicitly attached files or folders
 - Explicit line ranges attached from the editor selection command
 - Pasted image attachments when the selected model supports vision, or path-backed images delegated through a configured `@vision` subagent
@@ -373,6 +373,8 @@ Queued messages belong to the session where they were created and dispatch from 
 Commands offered in slash-command completion include:
 
 - `/skills` browses skill commands loaded from OpenCode
+- `/problems` attaches all workspace problems or lets you choose individual problems, when `varro.chat.autoAttachProblems` is enabled
+- `/mcp` or `/mcps` selects MCP servers or signs in
 - `/connect` opens the provider connection dialog
 - `/settings` opens VS Code Settings filtered to Varro
 - `/export` opens a JSON export of the current session in the editor
@@ -380,7 +382,8 @@ Commands offered in slash-command completion include:
 - Usage reports include local V1 and V2 sessions. For migrated sessions, including Varro imports, only the session with the latest update time contributes usage. Equal update times prefer V2.
 - `/thinking` or `/reasoning` toggles thinking block visibility
 - `/compact` or `/summarize` compacts conversation context
-- `/fork` forks the current session
+- `/btw` asks a side question without interrupting the task, on v2 with a session open
+- `/pause` interrupts the current run and pauses queued messages, on v2 with a session open
 - `/init` analyzes the workspace and creates or improves `AGENTS.md`
 - `/review` asks the agent to review current workspace changes
 - `/ralph` starts a Ralph loop from a plan or spec document
@@ -421,7 +424,7 @@ the server host for larger histories. They do not read an unrelated local databa
 
 Some commands only appear when they apply. `/ralph` appears before a session exists, `/export` appears after one exists, and `/init` appears when the workspace can be initialized.
 
-`/diagnostics`, `/fork`, `/abort`, `/stop`, `/undo`, `/revert`, and `/redo` can be submitted directly when applicable but are intentionally hidden from slash-command completion. `/undo` or `/revert` undoes the last assistant response, and `/redo` reapplies it. These session-level actions are separate from composer undo and redo.
+`/diagnostics`, `/fork`, `/abort`, `/stop`, `/undo`, `/revert`, and `/redo` can be submitted directly when applicable but are intentionally hidden from slash-command completion. `/undo` or `/revert` undoes the last assistant response, and `/redo` reapplies it. These session-level actions are separate from composer undo and redo. `/diagnostics` requires `varro.chat.autoAttachProblems`; when it is off, Varro reports that Problems context is disabled.
 
 OpenCode only stages a rewind until the next message, whether `/undo` ran in Varro, the OpenCode TUI, or another client. Varro hides the rewound messages and shows a **Rewound** row above the composer. **Restore** brings the messages back, along with any file changes the rewind rolled back. On v2, **Apply** removes them immediately; otherwise, your next message removes them.
 
@@ -980,7 +983,7 @@ The model is selected in this order:
 
 When no explicit route is available, the helper request omits its model and OpenCode uses its default. Right-click a model in the Models view to update the VS Code user setting.
 
-All paths, up to the first 100,000 characters of the selected patch, and up to ten recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Untracked file content has separate per-file and total size limits. On native Windows, Varro includes each untracked path with a `content unavailable` marker but omits its contents because Windows does not provide the atomic no-follow file read used to prevent path replacement during generation. Tracked unstaged diffs are unaffected. Split larger changes into smaller commits for the most accurate result. Varro never logs the patch, stages files, or executes the commit. It also rechecks the selected changes and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
+All paths, up to 60,000 characters of the selected patch (larger patches are sampled across files), and a style profile inferred from the last 50 commits with up to eight example subjects are treated as untrusted input in a temporary tool-disabled session. Untracked file content has separate per-file and total size limits. On native Windows, Varro includes each untracked path with a `content unavailable` marker but omits its contents because Windows does not provide the atomic no-follow file read used to prevent path replacement during generation. Tracked unstaged diffs are unaffected. Split larger changes into smaller commits for the most accurate result. Varro never logs the patch, stages files, or executes the commit. It also rechecks the selected changes and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
 
 ## Walk Through Changes
 
@@ -1031,29 +1034,38 @@ Editable user messages expose an edit action. Sending the replacement removes th
 
 ## VS Code Commands And Keybindings
 
+- `Varro: Focus Chat`
 - `Varro: New Session`
 - `Varro: New Chat Editor`
+- `Varro: New Chat Window`
 - `Varro: New Terminal Editor`
 - `Varro: Search Sessions`
 - `Varro: Open Settings`
 - `Varro: Show File Diffs` or `Varro: Hide File Diffs`
 - `Varro: Usage Stats`
+- `Varro: Manage Skills`
+- `Varro: Manage MCPs`
+- `Varro: Open Global OpenCode Config`
 - `Varro: Export All-Time Usage to CSV`
+- `Varro: Delete Old OpenCode Sessions`
+- `Varro: Compact OpenCode Database`
 - `Varro: Abort Session`
 - `Varro: Previous Session`
 - `Varro: Next Session`
+- `Varro: Go Back in Session History` or `Varro: Go Forward in Session History`, or `Alt+Left` / `Alt+Right` (`Ctrl+-` / `Ctrl+Shift+-` on macOS) while the sidebar chat has focus
 - `Varro: Restart Server`
 - `Varro: About`
 - `Varro: Open GitHub`
 - `Varro: Show Output`
 - `Varro: Open Source Control`
 - `Varro: Generate Commit Message` generates from staged changes, or from the unstaged working tree when the index is empty, using the configured VS Code commit-message model, OpenCode `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, or the active chat model at low reasoning, in that order. It fills the selected Git repository's commit input without committing
+- `Varro: Cancel Commit Message Generation` stops a running commit-message generation
 - `Varro: Walk Through Changes` explains staged, unstaged, or all uncommitted changes of the selected Git repository in reading order and opens the result as a Markdown report
 - `Varro: Open Global AGENTS.md`
 - `Varro: Initialize Project AGENTS.md`
 - `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
 - `Varro: Add to Context` from the editor selection context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` with an editor selection. Without a selection the key keeps its VS Code default (`Delete Line`)
-- `Varro: Add to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused
+- `Varro: Add to Context` from the terminal context menu, or `Cmd+Shift+K` / `Ctrl+Shift+K` while the terminal is focused and has selected text
 
 VS Code's `focusedView` and `auxiliaryBarFocus` keys do not change while focus is inside a webview, so Varro sets its own context keys for keybinding `when` clauses:
 
@@ -1079,7 +1091,7 @@ For example, one key can focus the chat on the first press and maximize the seco
 
 ## Settings
 
-The Settings editor groups Varro's settings into these categories, in this order. Settings that send data for extra inference, spend tokens, or choose an executable are read from user settings only, so a repository's workspace settings cannot change them.
+The Settings editor groups Varro's settings into these categories, in this order. Settings that send data for extra inference, spend tokens, or choose an executable are read from user settings only, so a repository's workspace settings cannot change them. The exception is `varro.chat.fallbackTitle`, which workspace settings can also enable.
 
 Chat:
 
@@ -1093,7 +1105,8 @@ Chat:
 - `varro.chat.showTurnTimer` - show the elapsed duration of the active turn beside the chat input status controls; defaults to `true`
 - `varro.chat.sessionsPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - `varro.chat.fontSize` - chat text size from `6` through `100`; defaults to `null`, which uses VS Code's `chat.fontSize`. Tool and diff editor content follows `chat.editor.fontSize`
-- Use the scope picker inside the session search field to choose which OpenCode sessions appear. **Folder** shows exact working-directory matches, **Nested** includes folders beneath it in the same OpenCode project, and **Project** shows the entire containing Git project. Varro remembers the choice for each project; non-Git folders offer Folder and Nested independently.
+
+The session list scope is not a setting. Use the scope picker inside the session search field to choose which OpenCode sessions appear. **Folder** shows exact working-directory matches, **Nested** includes folders beneath it in the same OpenCode project, and **Project** shows the entire containing Git project. Varro remembers the choice for each project; non-Git folders offer Folder and Nested independently.
 
 Permissions:
 
@@ -1119,14 +1132,14 @@ Notifications:
 
 Usage and Limits:
 
-- `varro.providerLimits.statusBar` - show pinned provider limits one at a time (`rotating`) or all at once (`all`)
+- `varro.providerLimits.statusBar` - show pinned provider limits one at a time (`rotating`) or all at once (`all`); defaults to `rotating`
 - `varro.chat.cacheWarningTokens` - warn above the chat input when an idle session's prompt cache has likely expired and its context holds at least this many tokens; `0` turns the warning off; defaults to `300000`. See [prompt cache lifetimes](#prompt-cache-lifetimes)
 - `varro.usageReports.showCacheWrite` - show cache write tokens in a separate usage report column; defaults to `false`
 
 OpenCode CLI and Server:
 
 - `varro.server.command` - optional path to the OpenCode CLI executable. Empty prefers `opencode2`, then `opencode`; use your v1 executable's path to keep v1 selected. Read from user or remote settings only; workspace and folder values are ignored
-- `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background: v2 on Windows, macOS, and Linux; v1 on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows v2 runs `update <latest-version>` through the resolved CLI and verifies the installed version without stopping the server first. Server restarts still wait for active work and require Varro ownership. Native Windows v1 uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a prompted Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
+- `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background: v2 on Windows, macOS, and Linux; v1 on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows v2 runs `update <latest-version>` through the resolved CLI and verifies the installed version without stopping the server first. Server restarts still wait for active work and require Varro ownership. Native Windows v1 uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a prompted Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance. Defaults to `true`
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true`
 - `varro.server.port` - leave empty to select and remember a local port automatically, or set an integer from 1 through 65535 for a fixed endpoint without fallback. An existing `"auto"` value still selects automatically. Reload the VS Code window after changing it
 

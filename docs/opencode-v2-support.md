@@ -10,7 +10,7 @@ V2 is recommended for new installations; v1 remains supported. See the [usage gu
 - `open-code-process.ts` retains credentials in the private ownership lease for window handoff and reads registered local service credentials. CLI update lookup and recovery commands select the matching package family.
 - `open-code-transport.ts` authenticates health, REST, and SSE requests and selects the adapter from validated server responses.
 - `opencode-v2-adapter.ts`, `opencode-v2-projection.ts`, and `opencode-v2-events.ts` translate requests, transcript records, catalogs, permissions, forms, and events into the existing Varro contracts.
-- `opencode-v2-session-state.ts` persists Varro-owned metadata and legacy timestamp overrides under the user's XDG state directory in `varro/opencode-v2/`. Native metadata updates are available from 2.0.15, but Varro still uses local metadata annotations. Archive changes use the native API when the server advertises its archive field; older servers retain local archive annotations.
+- `opencode-v2-session-state.ts` persists Varro-owned metadata and legacy timestamp overrides under `~/Library/Application Support/Varro/opencode-v2/` on macOS, `%LOCALAPPDATA%\Varro\opencode-v2\` on Windows, and `$XDG_STATE_HOME/varro/opencode-v2/` (default `~/.local/state`) on Linux. When a legacy `$XDG_STATE_HOME/varro/opencode-v2/` directory exists at a different path, Varro links the new path to it and keeps using the existing files. Native metadata updates are available from 2.0.15, but Varro still uses local metadata annotations. Archive changes use the native API when the server advertises its archive field; older servers retain local archive annotations.
 - Native v2 agent and permission configuration keys are preserved when Varro edits a file already using them. V1-format files retain their format.
 
 Session-info statistics try the local SQLite database before fetching API histories.
@@ -164,8 +164,9 @@ and preservation of Windows separators and casing.
 ### Auxiliary usage reporting
 
 Usage reports and CSV exports now include native `session.usage.recorded.1`
-records from the selected V2 session snapshot. `generate` covers both side questions
-and cache warming; title and compaction records are included separately. The event
+records from the selected V2 session snapshot. `generate` covers side questions
+and any cache warming from earlier Varro releases that remains in history; title
+and compaction records are included separately. The event
 timestamp controls date windows independently of the unchanged session update time.
 Only the owning session's events contribute, without counting step events twice.
 

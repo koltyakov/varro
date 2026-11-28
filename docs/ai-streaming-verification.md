@@ -98,13 +98,16 @@ Before requesting status, it resolves the source database's real path and uses `
 with that file selector to verify the listener owner has the database open. This checks OS file
 identity, not stored-session recency or an empty status response. The manifest records the PID,
 canonical database path, and association method. These checks do not read database contents.
+These `lsof` checks apply on macOS/Linux. On Windows, discovery reads `netstat.exe -ano` for
+`OPENCODE_PID` listeners and the shared native listener-only TCP-table helper for an explicit URL.
+Database ownership uses the read-only Restart Manager resource query.
 If discovery is unavailable or ambiguous, supply `--server-url http://127.0.0.1:<port>` or
 `--server-url 'http://[::1]:<port>'`. Explicit URLs require a numeric loopback address and exactly one
 listener owner, discovered by port and address; that PID must also hold the source database open.
 An authenticated source server returns HTTP 401 until `OPENCODE_SERVER_PASSWORD` (and
 `OPENCODE_SERVER_USERNAME` when it is not `opencode`) is exported for `prepare`. A Varro-managed server
 keeps these in its private `.credentials` companion ([server ownership](server-ownership.md)); ask the
-user before reading it, and otherwise use retained captures. There is no operator-assertion bypass. Missing `lsof`, inaccessible process metadata, an unheld
+user before reading it, and otherwise use retained captures. There is no operator-assertion bypass. Missing `lsof` on macOS/Linux, inaccessible process metadata, an unheld
 database, or ambiguous ownership blocks preparation before SQLite opens. Status failures also block preparation;
 no fallback treats completed stored history as proof of inactivity. Busy and retry sessions are
 excluded automatically, including a controller whose latest persisted response is already complete.
@@ -169,8 +172,8 @@ permissions and the control token do not prevent another local process from read
 ## Launch and watch
 
 Run one selected capture in a long-running terminal task. Build first; `run` does not build for you.
-The current runner requires macOS or Linux with `ps` for owned-process cleanup. Windows is rejected
-before launch and must be reported as blocked.
+Owned-process cleanup verifies host birth time and argv before signaling: macOS/Linux use `ps`, and
+Windows reads PowerShell `Win32_Process` creation time and command line.
 
 ```sh
 node scripts/ai-streaming.mjs run \

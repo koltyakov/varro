@@ -27,6 +27,8 @@ Server startup is deferred: activation only constructs `OpenCodeServer`; `Sideba
 - Registers the webview view provider and VS Code commands
 - Sets the `varro:activated` context key
 - Does not start the OpenCode server directly; startup is deferred until the webview first needs it
+- Moves released user-level values of renamed settings to their current keys through `migrateRenamedSettings()` in `renamed-settings.ts` before any setting is read; remote windows skip the move, and workspace values are read through fallbacks
+- Registers a webview panel serializer for the `varro.editor` view type so editor-tab chats are restored after reload
 
 #### `src/extension/commands.ts`
 
@@ -35,33 +37,42 @@ Registers the VS Code command surface that surrounds the chat UI.
 - `varro.chat.focusInput` focuses the composer after revealing its saved location; VS Code owns the generated `varro.chat.focus` view command
 - `SidebarProvider` mirrors webview focus into the `varro:chatFocused` and `varro:focusedChatSurface` context keys for keybindings
 - `varro.chat.statusBarClick`
-- `varro.chat.newSession`
+- `varro.chat.newSession`, `varro.chat.newEditor`, `varro.chat.newWindow`, and `varro.chat.newTerminalEditor`
 - `varro.chat.searchSessions`
 - `varro.chat.abort`
 - `varro.chat.previousSession`
 - `varro.chat.nextSession`
 - `varro.chat.navigateBack` and `varro.chat.navigateForward` step through the sidebar's browser-style history of opened sessions
+- `varro.chat.openSettings`, `varro.chat.openSkillSettings`, `varro.chat.openMcpSettings`, and `varro.chat.openOpenCodeConfig`
+- `varro.chat.showFileDiffs` and `varro.chat.hideFileDiffs`
+- `varro.chat.openStats` and `varro.chat.exportUsageCsv`
+- `varro.chat.deleteOldSessions` and `varro.database.compact`
 - `varro.server.restart`
-- `varro.about`
+- `varro.about` and `varro.openGitHub`
 - `varro.showOutput`
 - `varro.openSourceControl`
-- `varro.generateCommitMessage`
+- `varro.generateCommitMessage`, `varro.cancelCommitMessage`, and `varro.walkThroughChanges`
 - `varro.agents.openGlobal`
 - `varro.agents.initializeProject`
 - `varro.chat.addToContext`
 - `varro.chat.addSelectionToContext`
 - `varro.chat.addTerminalSelectionToContext`
+- `varro.chat.addProblemsToContext`, also offered as a quick fix when problems context is enabled
+- `varro.chat.copyLinkText`, `varro.chat.copyLink`, and `varro.chat.copyPath` for webview context menus
+- `varro.chat.explainSelection`, `varro.chat.reviewSelection`, and `varro.chat.improveSelection`, which are registered but not contributed to menus
 
-Chat and context commands route through `SidebarProvider` and `ContextProvider`; server, output, Source Control, About, and `AGENTS.md` actions use their corresponding extension-host services.
+Chat and context commands route through `SidebarProvider` and `ContextProvider`; server, output, Source Control, About, and `AGENTS.md` actions use their corresponding extension-host services. `extension.ts` also registers `varro.test.openPath`, only for the `file-link-open` sandbox scenario.
 
 #### `src/extension/server.ts`
 
 - Orchestrates OpenCode startup, compatibility policy, restart safety, and workspace selection
 - Checks health before auto-starting
-- Connects to the OpenCode event stream at `/global/event` and routes detailed events to directory owners while projecting safe session catalog events across open workspace roots
+- Connects to the OpenCode event stream at v2 `/api/event` or v1 `/global/event` and routes detailed events to directory owners while projecting safe session catalog events across open workspace roots
 - Emits `status` and `event` to the rest of the extension
 
 The implementation is split across focused components: `open-code-process.ts` owns CLI discovery, process, port, and update behavior; `open-code-transport.ts` owns REST and SSE transport; and `server-lifecycle.ts` coordinates lifecycle state.
+
+For v2 servers, the transport delegates to `OpenCodeV2Adapter` in `opencode-v2-adapter.ts`, which maps Varro's existing request paths onto v2 routes. `opencode-v2-events.ts` translates v2 events into Varro's event vocabulary, `opencode-v2-projection.ts` maps v2 sessions, permissions, agents, models, and messages into shared contracts, `opencode-v2-session-state.ts` keeps Varro metadata and fallback state for servers without native archive support, and `opencode-v2-background-work.ts` tracks background tools and jobs. `opencode-api-capabilities.ts` reads the server's OpenAPI document for optional features such as session archiving and saved-permission editing. See [OpenCode v1 and v2 support](opencode-v2-support.md).
 
 Important behavior:
 
@@ -70,7 +81,7 @@ Important behavior:
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
 - If the event stream drops but REST still works, Varro marks the event stream as degraded so the UI can show a reconnecting banner.
 - If the child process exits after startup, Varro attempts a limited restart sequence.
-- If the configured port is already in use by another process during Varro-managed startup, the server layer can retry on nearby ports.
+- If an automatically selected port is already in use by another process during Varro-managed startup, the server layer retries a bounded number of times on another random port in the dynamic range (49152-65535). An explicit `varro.server.port` never changes after a collision.
 - A maintenance loop compares installed CLI and server versions, suggests `opencode upgrade` when a newer CLI exists, and can restart a Varro-managed idle server onto the newer version.
 
 #### `src/extension/context-provider.ts`
@@ -103,10 +114,13 @@ Supporting host components define the main boundaries:
 - `src/extension/ralph-host.ts`: persisted Ralph execution independent of webview lifetime
 - `src/extension/commit-message-service.ts` and `usage-report-service.ts`: repository-aware commit generation and retained-history usage reports
 - `src/extension/queued-message-store.ts`: authoritative workspace-state persistence for queued prompts and attachment data
-- `src/extension/provider-file-refresh-controller.ts`: OpenCode config and auth file observation, provider invalidation, server revalidation, and immediate acknowledgement of completed embedded reauthentication
+- `src/extension/provider-file-refresh-controller.ts`: OpenCode config and auth file observation, provider invalidation, server revalidation, and acknowledgement of completed embedded authentication changes, which restarts a managed server after sustained idle
 - `src/extension/session-diff-document-provider.ts` and `tool-output-document-provider.ts`: read-only editor documents opened from the webview
+- `src/extension/session-transfer-catalog.ts`: persisted links to sessions that moved to another directory, so the origin workspace keeps listing them until the link is hidden
+- Permission review: `auto-approve-judge.ts` evaluates eligible automatic decisions behind `/varro/permission/judge`, using the chat-model judge, direct TypeSafe Jev (`jev-decisions.ts`), or an OpenCode-hosted v2 decision model (`native-decisions.ts`). `decision-providers.ts` owns the TypeSafe credential and the `varro.permissions.decisionModel` selection, `permission-review-policy.ts` holds the prior-decision wording every reviewer shares, `native-permission-rules.ts` evaluates native permission rules and appends non-redundant allow rules, and `server-memory-permission-store.ts` persists server-memory permission rules per server. See [Permission Lifecycle And Safety](permission-lifecycle.md).
+- Helper generation: `one-shot-generation.ts` provides v2 stateless generation for title fallback, commit messages, follow-up suggestions (`followup-service.ts`), change walkthroughs (`walkthrough-service.ts`), and background-process classification. Title fallback and commit messages fall back to helper sessions when it is unavailable; walkthroughs require it. `prompt-completion-service.ts` serves inline prompt suggestions without an agent run or utility session. See [Stateless helper generation](helper-generation.md).
 
-It also exposes the Varro extension-host API namespace, `/varro/*`.
+It also exposes the Varro extension-host API namespace, `/varro/*`. `VARRO_API_ENDPOINTS` and `VarroSessionEndpointAction` in `src/shared/protocol.ts` are the canonical inventory; representative routes include:
 
 - `GET /varro/provider-limit`
 - `POST /varro/plan/open`
@@ -127,6 +141,8 @@ It also exposes the Varro extension-host API namespace, `/varro/*`.
 - `DELETE /varro/session-trash/:rootID/delete`
 - `DELETE /varro/session-trash`
 
+Other endpoint groups cover local and remote images, prompt completion, model pricing, startup diagnostics, OpenCode config permissions, global permissions, and provider disabling, MCP defaults and config, permission allow scopes and server-memory rules, decision providers, citation paths and symbols, copied-selection matching, workspace problems, session-history scope, and hiding transferred sessions. Session actions also include location, reference, follow-up usage, permission mode, pin reordering, and todos.
+
 Those paths share the same `api/request` bridge as OpenCode REST calls, but the extension host resolves them locally instead of forwarding them to OpenCode.
 
 Commit-message generation is invoked by a VS Code command. Usage reports, opening a session in the OpenCode TUI, and read-only tool-output documents use dedicated webview messages rather than `/varro/*` routes.
@@ -135,6 +151,10 @@ Drag and drop has two paths here.
 
 - Path-based drops are normalized and attached directly.
 - Content-only drops are written into a temporary `varro-drops` directory before being attached.
+
+Besides the sidebar view, `SidebarProvider` hosts chats in editor tabs (`varro.chat.newEditor`) and in compact auxiliary windows (`varro.chat.newWindow`, which moves a new editor chat into its own window). Each editor panel gets its own `WebviewSession` endpoint.
+
+Host extension context providers, the syntax highlighting worker, and the thumbnail runtime are covered in [Host extensions](host-extensions.md), [Syntax highlighting worker](highlight-worker.md), and [Thumbnail runtime and distribution](thumbnail-distribution.md).
 
 #### `src/extension/session-state-manager.ts`
 
@@ -174,7 +194,7 @@ Handles attachment semantics.
 
 #### Boot
 
-`WebviewSession` builds `InitialWebviewState`, and `SidebarProviderBridge` passes it to `webview-html.ts` for safe inline serialization. The document installs a minimal pre-bundle failure fallback before loading `dist/webview/webview.js` and `webview.css` as separate webview resources.
+`WebviewSession` builds `InitialWebviewState`, and `SidebarProviderBridge` passes it to `webview-html.ts` for safe inline serialization. The document installs a minimal pre-bundle failure fallback before loading `dist/webview/webview.mjs` and `webview.css` as separate webview resources.
 
 That initial state includes:
 
@@ -297,7 +317,7 @@ The webview sends:
 - `session/export` and `session/open-in-opencode` to export or hand a session to the OpenCode TUI
 - `usage/report` to open recent or retained all-time usage accounting in a Markdown document
 - `terminal/run` to launch setup commands such as `opencode auth login`
-- `providers/watch`, `providers/refresh`, `providers/reauthenticated`, `config/update`, and `webview/focus` for provider, preference, and focus synchronization
+- `providers/watch`, `providers/refresh`, `providers/auth-changed`, `config/update`, and `webview/focus` for provider, preference, and focus synchronization
 - `ralph/*` for host-owned Ralph lifecycle and state synchronization
 
 ### Extension to webview
@@ -323,24 +343,26 @@ When the user sends a message, the send operations in `src/webview/hooks/session
 Typical part sequence:
 
 1. user text
-2. working directory marker
-3. active file or active selection marker, if current-document context is enabled for the session
-4. terminal selection block
-5. explicitly attached diagnostics
-6. explicit context files and folders, pasted images, and native PDFs in attachment order; images require vision support, while unsupported or unknown PDF input blocks sending without a path-reference fallback. V2 also checks the native model catalog before PDF admission. See [PDF compatibility](pdf-compatibility.md).
+2. skill references named in the text
+3. host-extension contexts; see [Host extensions](host-extensions.md)
+4. database context, unsaved editor text, or the active file or active selection marker, if current-document context is enabled for the session and no host-extension context replaces the document
+5. automatic editor problems, when problems context is enabled
+6. terminal selection block
+7. explicitly attached diagnostics and inline problem references, when problems context is enabled
+8. explicit context files and folders, pasted images, and native PDFs in attachment order; images require vision support, while unsupported or unknown PDF input blocks sending without a path-reference fallback. V2 also checks the native model catalog before PDF admission. See [PDF compatibility](pdf-compatibility.md).
 
 This is where Varro turns live VS Code context into OpenCode-compatible prompt parts.
 
 ### Varro API namespace
 
-`/varro/*` is a documented extension-host namespace on top of the shared webview `api/request` transport.
+`/varro/*` is a documented extension-host namespace on top of the shared webview `api/request` transport. The routes below are representative; `VARRO_API_ENDPOINTS` in `src/shared/protocol.ts` lists them all.
 
 - `/varro/provider-limit` returns best-effort provider quota metadata for the current provider and model.
 - `/varro/plan/open` normalizes a plan response, saves it into the local OpenCode plans directory, and opens the file in VS Code.
 - `/varro/opencode-config` and `/varro/opencode-config/model-routing` read and update Varro-managed OpenCode model routing.
 - `/varro/workspace-file`, `/varro/workspace-file/pick`, and `/varro/workspace-path/resolve` provide workspace-scoped file selection and path resolution.
 - `/varro/permission/judge` evaluates eligible automatic permission decisions in the extension host, while `/varro/permission/judge/model` reports the model Varro resolves for that judge.
-- `/varro/session/:sessionID/*` handles diff summaries, pinning, conditional renaming, and deletion.
+- `/varro/session/:sessionID/*` handles diff summaries, pinning, conditional renaming, activation, and deletion, among the other session actions in `VarroSessionEndpointAction`.
 - `/varro/session-trash` and its child paths expose the recycle-bin workflow managed by the extension host.
 
 ## Session And Attention Model
@@ -379,7 +401,7 @@ The webview adds more derived states on top of that data.
 ## Notable implementation details
 
 - The webview JavaScript and CSS are bundled as separate local webview resources; only initial state and the small host bridge bootstrap are inline under a CSP nonce.
-- File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
+- File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic. In Git workspaces it filters the results to paths reported by `git ls-files --cached --others --exclude-standard`, so ignored files stay out of search.
 - Session lists aggregate exact open workspace roots. Unrelated OpenCode history is rejected, and an optional webview filter narrows the catalog without changing execution scope.
 - Queued follow-up prompts are persisted in extension-host workspace state and auto-dispatched once their owning session is connected and idle, including background sessions. The browser-side mirror excludes image-bearing entries from synchronous local storage.
 - Message loads are windowed: opening a session fetches the newest 200 messages, reaching the top automatically prepends the next 200-message page while preserving the visible anchor, and the boundary banner becomes a `Retry` action only after a page request fails.
@@ -387,6 +409,6 @@ The webview adds more derived states on top of that data.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.
 - Provider connection management calls OpenCode's `/provider`, `/provider/auth`, provider OAuth, and `/auth/:providerID` endpoints through the existing request bridge. The extension host never receives API keys or authorization codes as dedicated protocol messages.
-- Authentication failures are projected into provider reconnect state. The failed assistant response and Models view can open a provider-locked reauthentication dialog; after success, `providers/reauthenticated` lets the extension host consume an authentication-only file change without an unnecessary server restart.
+- Authentication failures are projected into provider reconnect state. The failed assistant response and Models view can open a provider-locked reauthentication dialog; after success, `providers/auth-changed` lets `ProviderFileRefreshController` coalesce the auth-file event and restart a managed server after sustained idle, because some providers copy saved credentials into process environment state.
 - Ralph runs persist in the extension host's workspace Memento and reattach on activation, independent of webview lifetime; runs persisted by older builds in webview localStorage are migrated to the host through `ralph/sync`.
 - Server startup is lazy and workspace-scoped, which keeps activation lightweight and helps multi-project use against a shared OpenCode instance.

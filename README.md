@@ -67,7 +67,7 @@ The optional [companion app](native/macos-tray/README.md) shows active sessions,
 
 ## Chat and context
 
-The composer includes the active file and selection by default; use its context chip to disable this per session. Add context with `Varro: Add to Context`, `Cmd+Shift+K` / `Ctrl+Shift+K`, drag-and-drop, or pasted images. Type `@` for files and agents, or `&` for recent root sessions. Unsent drafts and explicit file or folder attachments survive reloads.
+The composer includes the active file and selection by default; use its context chip to disable this for the project. Add context with `Varro: Add to Context`, `Cmd+Shift+K` / `Ctrl+Shift+K`, drag-and-drop, or pasted images. Type `@` for files and agents, or `&` for recent root sessions. Unsent drafts and explicit file or folder attachments survive reloads.
 
 PDF attachments require advertised PDF input support and are limited to 20 MiB in total. Varro does not silently substitute file references or convert pages. Provider delivery is not universally verified; see [PDF compatibility and tested versions](https://github.com/koltyakov/varro/blob/main/docs/pdf-compatibility.md).
 
@@ -123,7 +123,7 @@ For image analysis with a text-only model, configure an image-capable `vision` a
 
 ## Usage and limits
 
-The composer shows context-window fill; its popup breaks down tokens and reported cost. Run `/stats` or `Varro: Usage Stats` for cross-project token and duration reports covering today, 7 days, and 30 days. Use `/stats all` for retained and archived usage history.
+The composer shows context-window fill; its popup breaks down tokens and reported cost. Run `/stats` or `Varro: Usage Stats` for cross-project token and duration reports covering today, yesterday, 7 days, and 30 days. Use `/stats all` for retained and archived usage history.
 
 The context popup estimates when an idle session's prompt cache expires, and a warning above the chat input says when a large context will be re-sent uncached. See [prompt cache lifetimes](https://github.com/koltyakov/varro/blob/main/docs/usage.md#prompt-cache-lifetimes).
 

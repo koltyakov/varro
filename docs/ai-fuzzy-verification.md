@@ -38,8 +38,8 @@ Varro has three relevant verification environments:
 | Playwright harness | Webview DOM, animation frames, fixtures, and measurable geometry | Extension Host lifecycle or the exact VS Code container |
 | VS Code sandbox or Extension Development Host | Real editor chrome, webview container, desktop mouse/wheel/keyboard event ordering, focus, reload, and live OpenCode streaming | Deterministic internal geometry unless separately instrumented |
 
-`npm run test:vscode-sandbox` currently covers disposable host startup and recovery. It does not
-inspect the webview DOM. Do not report it as a real-editor virtualization pass.
+`npm run test:vscode-sandbox` currently covers disposable host startup, recovery, and file-link
+opening. It does not inspect the webview DOM. Do not report it as a real-editor virtualization pass.
 
 Read [Message List Virtualization](message-list-virtualization.md) before running or interpreting
 message-list scenarios. Visible row position is the user-facing truth; a changed `scrollTop` alone is
@@ -200,10 +200,12 @@ database/configuration/state and a real VS Code development host. It does not se
 model prompts or access production sessions. Keep this distinct from AI-01 through
 AI-08 and the full action matrix.
 
-Set `VARRO_STARTUP_SEED`, `VARRO_OPENCODE_TEST_BINARY`, and
-`VARRO_VSCODE_EXECUTABLE`, or pass `VARRO_STARTUP_TOOLS` pointing to the JSON emitted
-by `scripts/ai-startup-fuzzy-bootstrap.mjs`. Bootstrap downloads checksum-verified,
-native test tools into the checkout's isolated artifacts directory, not user
+`VARRO_STARTUP_SEED` defaults to the fixed `919af3`; set a fresh seed for each run.
+`VARRO_OPENCODE_TEST_BINARY` defaults to `opencode2` on `PATH`, and
+`VARRO_VSCODE_EXECUTABLE` defaults to the standard installed VS Code path. Alternatively,
+pass `VARRO_STARTUP_TOOLS` pointing to the JSON emitted by
+`scripts/ai-startup-fuzzy-bootstrap.mjs`; it replaces both tool variables. Bootstrap
+downloads checksum-verified, native test tools into the checkout's isolated artifacts directory, not user
 configuration. It requires explicit approval before installing missing software.
 `VARRO_STARTUP_CASES` selects comma-separated case names from the runner's plan.
 Retain the plan, real-editor observations, native process/database ownership,
@@ -288,8 +290,7 @@ as copies or regenerated in isolated storage before use. Old production-backed m
    `npm run build && VARRO_AI_WORKSPACE="$PWD/tmp/opencode" node scripts/launch-ai-vscode.mjs` to build Varro and launch a persistent,
    isolated Extension Development Host. Use the printed profile and workspace paths in the ledger. This
    avoids reusing a normal VS Code singleton and uses a short temporary profile path that stays below
-   the macOS IPC socket-path limit. On macOS the host starts hidden in the background so launch and setup
-   do not steal focus; reveal it only when the real-editor interactions are ready to begin. A manually
+   the macOS IPC socket-path limit. The host is not launched hidden and may take focus when it opens. A manually
    launched **VS Code Extension Development** window is acceptable only when its editable workspace is
    the clean `tmp/opencode` fixture and the current environment can reliably control it. Opening Varro
    itself in the test host does not satisfy AI-07 or AI-08.

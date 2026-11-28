@@ -1,7 +1,7 @@
 # Large text pastes
 
 Varro turns plain-text pastes of at least 2,000 characters or 25 lines into inline
-text chips. Open the chip menu and choose **Expand to text** to edit the full paste.
+text chips. Open the chip menu and choose **Expand to Text** to edit the full paste.
 Copied editor selections, terminal selections,
 context references, and mixed image/PDF pastes keep their existing handling.
 

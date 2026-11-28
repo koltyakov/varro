@@ -14,8 +14,8 @@ proof that the command started, and hiding a prompt is not the same as resolving
 
 ## Mode Semantics
 
-The protocol values are `default`, `auto`, and `full`. The UI labels them `Default`, `Auto`, and
-`Full access`.
+The protocol values are `default`, `auto`, and `full`. The UI labels them `Default`, `Auto approve`,
+and `Full access`.
 
 | Mode | OpenCode session rules | Varro behavior for an ask |
 | --- | --- | --- |
@@ -245,10 +245,11 @@ summarize the eventual final response normally. For idle rejection-only historie
 be classified as user rejection.
 
 Varro-managed servers default `experimental.continue_loop_on_deny` to `true` in their temporary
-runtime config. OpenCode returns the denied tool result to the model and continues its existing loop;
-Varro must not approve the tool, abort/restart the turn, or submit a synthetic user message to resume
-it. OpenCode also rejects other pending permissions in the same owning session when one is
-rejected.
+runtime config. On V1, OpenCode returns the denied tool result to the model and continues its
+existing loop. V2 lists that key as an unsupported legacy setting and ignores it; rejection and
+continuation follow the V2 server's behavior. In either case, Varro must not approve the tool,
+abort/restart the turn, or submit a synthetic user message to resume it. OpenCode also rejects other
+pending permissions in the same owning session when one is rejected.
 
 Because the loop continues, session prompt guidance is the only thing that stops the model from
 working around a plain rejection on its own. By default it tells the agent never to retry the denied
@@ -274,7 +275,7 @@ Existing servers must reload runtime config before the default takes effect. Nev
 inside a permission-response transaction.
 
 Skipping a question similarly completes its tool with `QuestionRejectedError` and
-`The user dismissed this question`. The continuation setting also applies to skipped questions.
+`The user dismissed this question`. On V1, the continuation setting also applies to skipped questions.
 Label the question tool with a compact `Question skipped` summary instead of generic input/error
 JSON. Render the terminal turn summary with `Question skipped` only for idle skip-only histories;
 other question failures remain generic failures.
@@ -312,15 +313,15 @@ applying workspace guards. They may target another open root or an authorized ca
 without activating that workspace in the chat view. Both routes must verify the pending permission
 ID and owning session against the server before changing rules.
 
-- `Once` approves the specific request.
-- `Always allow for this session` adds the request's server-provided `always` patterns to that
+- `Allow once` (short form `Once`) approves the specific request.
+- `Allow always` > `For this session` adds the request's server-provided `always` patterns to that
   session's permission rules, then replies `once` to the pending request so the approval does not
   enter server-wide memory.
 - `Until server restart` is available only on V1 and sends OpenCode's `always` response. The resulting
   rules apply to matching requests across sessions in that server instance until OpenCode restarts.
   V2's `always` response instead creates durable project-scoped database approvals, so V2 must not
   offer this temporary scope.
-- `Always allow for this project` first persists the request's server-provided `always` patterns in
+- `For this project` first persists the request's server-provided `always` patterns in
   project OpenCode configuration, then replies `once` on V2. The config is the only standing grant;
   deleting it must not leave a database approval behind. V1 still sends `always` for the current
   runtime. The config write must not call OpenCode's config-update route, dispose an instance, or

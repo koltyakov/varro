@@ -117,22 +117,30 @@ before closing an older tab; reopening the session keeps its sent conversation.
 The October 4 maximize/restore reproduction exposed an interaction with viewport media queries.
 At a 486px root cap, the 1400px desktop breakpoint displayed a 420px session sidebar, leaving only
 66px for the transcript. Five native maximize/restore cycles produced 20 squeezed animation-frame
-samples. Crossing the 960px content or 1400px sidebar breakpoint now applies the root width immediately
-and cancels a queued expansion. The same isolated-editor retest recorded zero capped or squeezed
-samples across five cycles, with a maximum frame gap of 21.3ms and at most 22 mounted message rows.
+samples. The fix at the time applied the root width immediately when crossing the 960px content or
+1400px sidebar breakpoint and cancelled a queued expansion. Numeric root sizing has since been removed,
+so CSS applies each breakpoint from the current viewport. The same isolated-editor retest recorded zero
+capped or squeezed samples across five cycles, with a maximum frame gap of 21.3ms and at most 22
+mounted message rows.
 Evidence, including 274 compositor frames, is under `artifacts/fullscreen-resize-20261004/fixed/`.
 The host can still paint one stale clipped frame during the transition, as shown in `frame-001.png`.
 This change removes Varro's extra delay and intermediate squeezed layout; it does not fix that host
-paint defect. Unit and browser regressions cover both breakpoint transitions and restore.
+paint defect. The unit test "does not introduce a pixel width cap across %s layout breakpoints" in
+`src/webview/index.test.tsx` and the browser test "switches full-screen layouts without a capped or
+squeezed transcript frame" in `e2e/tests/layout.spec.ts` cover both breakpoint transitions and restore.
 
 The October 2 sidebar-switch reproduction found a separate host path: returning
 from Chat to Varro emits a 300 x 150 resize followed by the real viewport resize,
 without any `visibilitychange` event. Chromium uses 300 x 150 for an unsized iframe.
 Previously this replaced the width cap with 300 px and kept the restored sidebar
-narrow for four painted frames. Width tracking now ignores that temporary cap and
-applies the next host viewport immediately. A 300 px sidebar with its normal height
-still follows ordinary resize rules. Regression tests cover reattachment, a changed
-return width, initial unsized layout, and cancellation of a pending expansion.
+narrow for four painted frames. The fix at the time ignored that temporary cap and
+applied the next host viewport immediately. With numeric root sizing removed, there is
+no width cap for the unsized resize to replace, and a real 300 px sidebar is sized by
+CSS like any other width. Unit tests in `src/webview/index.test.tsx` cover this:
+"does not retain an unsized iframe width when reattached at %i without a visibility
+event" checks 420 and 486 px returns and a real 300 px sidebar, and "never pins
+expansion or initial attachment to the unsized iframe width" covers initial unsized
+layout and later expansion.
 The isolated native retest checked 10 returns at 486 and 420 px: zero narrow
 animation-frame samples, versus 20 narrow samples over five baseline returns.
 The runs retained 185 baseline and 397 fixed compositor frames. Evidence and the

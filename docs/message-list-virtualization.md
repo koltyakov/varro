@@ -32,7 +32,9 @@ the shared invariants below remain true.
 ### Virtual Range And Rendering
 
 - The current range constants are centralized: `VIRTUALIZE_THRESHOLD` is 50 rows,
-  `DEFAULT_ITEM_HEIGHT` is 160 px, and `OVERSCAN` is 9 rows. Changing one requires range-boundary,
+  `DEFAULT_ITEM_HEIGHT` is 160 px, and `OVERSCAN` is 9. Overscan is converted to pixels as
+  `OVERSCAN * DEFAULT_ITEM_HEIGHT`, so the message list extends its range 1,440 px beyond each
+  viewport edge rather than by a row count. Changing one requires range-boundary,
   viewport-coverage, mount-count, and performance verification.
 - Virtualization starts at the threshold with a bounded mounted range. Initial bottom-follow selects
   the tail directly and keeps it selected while measurements settle. Never mount the full initial
@@ -689,7 +691,7 @@ Direct input acquires ownership only when it can affect the transcript:
   reductions. A fractional tray reserves its exact height while its row also loses a whole-pixel
   correction; the October 2 v1 and v2 replays clamped bottom-pinned transcripts by 1 px on most
   tool groupings. `scroll-tool-grouping.spec.ts` amplifies the tray fraction and checks every frame.
-  Animated reasoning exits also reserve the source row's already-applied rounding correction before
+  Reasoning exits also reserve the source row's already-applied rounding correction before
   publishing exit membership. An explicit measurement can remove that correction before it becomes
   a pending observer reduction, including below the virtualization threshold.
   When the last non-exiting item leaves a tray, reserve the tray wrapper's own block padding once.
@@ -875,7 +877,8 @@ Direct input acquires ownership only when it can affect the transcript:
   Reserve their disappearing flow space before publishing removal, and
   admit the next queued tool in the same update. When one preview replaces another, reuse its tray
   and skip the replacement's entrance animation, including completed previews waiting to group.
-  Reasoning retains its animated exit lifecycle.
+  Reasoning still passes through `exiting`, but without a visual animation: the exiting item is
+  `display: none`, and exit completion moves it to `grouped` on the next microtask.
   Newly observed live tools share a 100 ms collection interval and a 1,200 ms preview deadline.
   Admit them one at a time, at least 120 ms after the preceding admission's painted-frame callback.
   At most one item occupies the active tray, including retained and exiting items. Queue the rest until
@@ -905,8 +908,8 @@ Direct input acquires ownership only when it can affect the transcript:
 - Exploring and Explored share the same painted top, including when idle arrives before the final
   reasoning snapshot and the tray groups directly. Summary entrance may fade but must not translate.
   `activity-summary-settle.spec.ts` samples both event orders frame by frame at the reported width.
-- Tool-state object replacement and tray splits must preserve the active item's DOM and animation
-  progress. A fading sibling must not restart its exit when a completed middle item splits the tray.
+- Tool-state object replacement and tray splits must preserve the active item's DOM. An exiting
+  sibling must keep its exit phase when a completed middle item splits the tray.
   Flush pending animation styles before moving a connected item with `moveBefore`; keep its source
   connected until the destination takes ownership.
 - A bottom reserve compensates only for space actively disappearing from flow. It is inert structural
@@ -937,19 +940,19 @@ Direct input acquires ownership only when it can affect the transcript:
   target and reserve its physical scroll-range shortfall, but must not add reserve for summary drift.
   Space below the summary cannot correct its position, and observing the resulting spacer mutations
   can starve frames and exit cleanup forever.
-- The matching CSS animation is authoritative for visual completion. Re-pin the active tray after
-  `assistant-active-activity-in` finishes. Keep an exiting reasoning item mounted until
-  `assistant-active-activity-out` finishes; the timer is an idempotent bounded fallback with a grace
-  interval, not an earlier competing completion path.
+- Active tray items have no entrance or exit animation. An exiting item is `display: none`, and
+  `afterExit` queues its completion as a microtask in the task that publishes `is-exiting`. The
+  `ACTIVITY_EXIT_MS` deadline plus grace interval is an idempotent bounded backstop, not a competing
+  visual completion path.
 - Cancelled or rejected animation promises, unmount, and session replacement must still clear timers,
   transition state, and reserves exactly once.
 - A running part outside the active trailing turn groups immediately rather than replaying tray
   transitions. A new running part contiguous with an expanded group joins that group directly without
   a one-frame duplicate tray.
 - The active tray is a bounded nested scroller. Limit visible items, follow the newest item after DOM
-  mutation and entrance completion, and show the focused expanded item. Its wheel movement must remain
-  local while the tray can scroll. Ease its following through one bounded frame loop, including height
-  growth during entrance. Disable native anchoring in that scroller and cancel its follow on direct
+  mutation and item resize, and show the focused expanded item. Its wheel movement must remain
+  local while the tray can scroll. Ease its following through one bounded frame loop, including item
+  height growth. Disable native anchoring in that scroller and cancel its follow on direct
   wheel or pointer input. Arrival must not snap the nested viewport to its new bottom.
 - Off-core activity stays semantically present but does not run height-affecting tray entrance or exit
   animation. Pause indefinite cosmetic activity animation outside the virtual core.
@@ -1076,7 +1079,9 @@ Direct input acquires ownership only when it can affect the transcript:
   regression in `markdown-streaming-append.spec.ts` covers both gaps reported in
   `ses_f6c4e6120ffehkoebwhpaN9ye6`.
 - Opening an active tool's details takes scroll ownership and keeps that tool visible until closed.
-  It releases the answer gate and does not run a retention timer indefinitely.
+  Exception: expanding a tool header in the active tray while bottom-follow owns the viewport keeps
+  following; see [Scroll Ownership](#scroll-ownership). It releases the answer gate and does not
+  run a retention timer indefinitely.
 - Opening an activity group applies expansion to every completed canonical member, including queued siblings.
   Closing it must not replay those siblings as new previews or move the group's painted summary.
 - Bottom growth uses the existing bottom-follow owner, which eases toward the measured destination
@@ -1085,8 +1090,9 @@ Direct input acquires ownership only when it can affect the transcript:
   immediate. The final easing step reaches the destination before the one-pixel settle threshold.
   The viewport follower uses critically damped motion with a 220 ms smoothing time and a
   1,100 px/s speed limit. While paced text is releasing, the follower targets at most 64 px of lag,
-  catching up continuously at up to 2,200 px/s. Upward frame-speed changes are limited to
-  6,000 px/s² across ordinary follow and catch-up, including repeated threshold crossings.
+  catching up continuously at up to 2,200 px/s. During paced following, upward frame-speed changes
+  are limited to 6,000 px/s² across both the spring and catch-up branches, including repeated
+  threshold crossings.
   A large burst may temporarily exceed the preferred lag while velocity builds; never enforce that
   lag by snapping or bypassing acceleration. The final <=2 px settlement remains immediate.
   Preserve velocity across incoming blocks, retain fractional progress between
@@ -1577,8 +1583,8 @@ Relevant browser regressions must cover:
 - semantic zero-height rows gaining message content, model-change chrome, or dialog summaries
 - running activity moving through retained and exiting states into a group owned by another message
 - detached anchors and bottom-pinned content across every activity-exit frame and reserve release
-- active-tray entrance completion keeping the newest item visible, and exit completion waiting for the
-  named CSS animation with bounded fallback
+- active-tray DOM mutation and item resize keeping the newest item visible, and exit completion on the
+  queued microtask with the bounded deadline fallback
 - pinned-gap placeholders retained during input, hydrated when visible, and never measured as content
 - width narrowing and widening as one transaction, including font reflow, bounded mounts, bottom
   follow, and direct user detachment
@@ -1619,9 +1625,10 @@ Relevant browser regressions must cover:
   explicit pre-mutation anchor?
 - Does a compact activity transition preserve part visibility and release any bottom reserve on every
   completion, cancellation, and user-ownership path?
-- Does visual activity completion follow the matching CSS animation with an idempotent fallback?
-- Does the bounded active tray keep the newest item visible after entrance completion without leaking
-  nested scroll ownership?
+- Does activity exit complete on its queued microtask, with the bounded deadline as an idempotent
+  fallback?
+- Does the bounded active tray keep the newest item visible after DOM mutation and item resize without
+  leaking nested scroll ownership?
 - Can native movement continue without another wheel or key event after ownership was assigned?
 - Are PageDown, Space, and Shift+Space excluded from transcript ownership inside editable controls?
 - Are post-message flow chrome and jump-to-latest excluded from row prefixes and row measurement?

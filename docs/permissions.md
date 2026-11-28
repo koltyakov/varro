@@ -21,9 +21,12 @@ Changing modes affects pending requests as well as later actions. Switching to `
 When OpenCode asks for permission, Varro places the request beside the action that needs it. A standalone prompt appears if that action is not currently visible.
 
 - `Once` approves only the current request.
-- `Always` approves the request and saves matching actions through OpenCode. V1 keeps these allowances
-  in server memory; v2 saves durable project-scoped approvals. Its menu also offers a session-only
-  rule or a persistent project-config rule.
+- `Always` opens a scope menu. `For this session` adds a session rule and approves the request once.
+  `For this project` saves an allow rule in the project OpenCode config. On v1, `Until server restart`
+  sends OpenCode's always reply, which the server keeps in memory; `For this project` also sends that
+  reply. On v2, `Global` saves the rule in the global OpenCode config, and each choice first opens a
+  review of the patterns to save. V2 choices then approve the request once, without a separate server
+  grant.
 - `Reject` denies the request. The message button beside it opens `Reject with instructions`: type
   what the agent should do instead, then press Enter or `Reject & send`. The agent receives your
   instructions as the rejection reason. `Cancel` or Escape returns to the buttons without replying.
@@ -70,8 +73,9 @@ precedence. Project rules write only to the workspace `opencode.json` or `openco
 Current-session rules write only to the selected OpenCode session. The screen hides generated mode
 rules and shows only the latest session override for each permission and pattern. Changing permission
 mode replaces that session list. Server memory lists allowances saved by the running OpenCode server
-and can retract them without changing project or session rules. Parent-project and global
-`opencode.json`, `opencode.jsonc`, and legacy `config.json` sources are shown as read-only cards. Older
+and can retract them without changing project or session rules. On v2, a `Global config rules`
+section edits the global OpenCode config. Parent-project and global `opencode.json`, `opencode.jsonc`,
+and legacy `config.json` sources are also shown as read-only cards of their current rules. Older
 OpenCode servers that do not expose saved permissions show that layer as unavailable.
 
 OpenCode supports `allow`, `ask`, and `deny` rules at global, project, and agent scopes. Rules can match tools, shell commands, paths, subagents, URLs, and external directories. OpenCode uses the last matching rule.

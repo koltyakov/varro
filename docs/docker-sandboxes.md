@@ -48,7 +48,7 @@ Complete the Docker sign-in in your browser. SSH setup is normally needed only o
 Run on the host:
 
 ```sh
-sbx create --name my-app-dev opencode /Users/john/projects/my-app
+sbx create --name my-app-dev opencode /Users/alex/projects/my-app
 ```
 
 This creates a named sandbox using Docker's OpenCode template and shares your project folder with it. Use a different name for each project environment.
@@ -75,7 +75,7 @@ It may show as stopped after creation. Connecting through SSH starts a stopped s
 For the macOS example, select:
 
 ```text
-/Users/john/projects/my-app
+/Users/alex/projects/my-app
 ```
 
 Docker documents that mounted workspaces appear at their original absolute paths inside the sandbox. On Windows, use the Linux-side project path shown by the remote folder picker rather than typing a Windows drive path into it.
@@ -112,8 +112,7 @@ Keep Varro's normal server settings. If you previously changed them, run **Prefe
 ```json
 {
   "varro.server.autoStart": true,
-  "varro.server.command": "",
-  "varro.server.port": 4096
+  "varro.server.command": ""
 }
 ```
 
@@ -183,8 +182,7 @@ The OpenCode version must start with `2.`. Run **Preferences: Open Remote Settin
 ```json
 {
   "varro.server.autoStart": true,
-  "varro.server.command": "/home/agent/.local/opencode-v2/bin/opencode",
-  "varro.server.port": 4096
+  "varro.server.command": "/home/agent/.local/opencode-v2/bin/opencode"
 }
 ```
 

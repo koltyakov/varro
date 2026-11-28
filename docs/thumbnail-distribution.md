@@ -2,7 +2,7 @@
 
 ## Runtime
 
-Thumbnails use `@imagemagick/magick-wasm` 0.0.44 in a lazy Node worker inside a shared helper process.
+Thumbnails use `@imagemagick/magick-wasm` 0.0.46 in a lazy Node worker inside a shared helper process.
 Windows for the same extension installation/build and OS account reuse that process, even when their
 extension hosts and sessions are separate. Remote hosts have their own helper on the remote machine.
 Extension hosts neither load WASM nor decode base64 originals for thumbnail requests.
@@ -77,14 +77,14 @@ Varro's MIT license does not replace those licenses. Every VSIX includes:
 The wrapper JavaScript is bundled and minified, and the upstream WASM is copied without modification.
 Source and build materials corresponding to this pinned release are publicly available without charge:
 
-- [magick-wasm 0.0.44 source](https://github.com/dlemstra/magick-wasm/tree/0.0.44),
-  [source archive](https://github.com/dlemstra/magick-wasm/archive/refs/tags/0.0.44.tar.gz).
-- [Magick.Native 2026.927.1314 source and build scripts](https://github.com/dlemstra/Magick.Native/tree/999720f7ebe03d5a0029536f1586a2cb82b500ae),
-  [source archive](https://github.com/dlemstra/Magick.Native/archive/999720f7ebe03d5a0029536f1586a2cb82b500ae.tar.gz).
-- [ImageMagick source at the commit pinned by Magick.Native](https://github.com/ImageMagick/ImageMagick/tree/ad98b244c995d2e3051757fa3b7855f45b550d24),
-  [source archive](https://github.com/ImageMagick/ImageMagick/archive/ad98b244c995d2e3051757fa3b7855f45b550d24.tar.gz).
-- [Dependency release 2026.09.26.1516](https://github.com/ImageMagick/Dependencies/releases/tag/2026.09.26.1516),
-  [dependency source checkout and build recipes](https://github.com/ImageMagick/Dependencies/tree/2026.09.26.1516).
+- [magick-wasm 0.0.46 source](https://github.com/dlemstra/magick-wasm/tree/0.0.46),
+  [source archive](https://github.com/dlemstra/magick-wasm/archive/refs/tags/0.0.46.tar.gz).
+- [Magick.Native 2026.1101.825 source and build scripts](https://github.com/dlemstra/Magick.Native/tree/ce236bfba506817317517c3d6113b5566ecd03cd),
+  [source archive](https://github.com/dlemstra/Magick.Native/archive/ce236bfba506817317517c3d6113b5566ecd03cd.tar.gz).
+- [ImageMagick source at the commit pinned by Magick.Native](https://github.com/ImageMagick/ImageMagick/tree/5d1bcc55f2c83bc2ff802118b7369756610f3ad4),
+  [source archive](https://github.com/ImageMagick/ImageMagick/archive/5d1bcc55f2c83bc2ff802118b7369756610f3ad4.tar.gz).
+- [Dependency release 2026.10.31.2057](https://github.com/ImageMagick/Dependencies/releases/tag/2026.10.31.2057),
+  [dependency source checkout and build recipes](https://github.com/ImageMagick/Dependencies/tree/2026.10.31.2057).
   Its checkout script obtains each delegate's source at the recorded revision. The source archives of
   the parent repositories alone do not contain all delegate sources.
 
@@ -92,7 +92,7 @@ For library changes, follow the pinned Magick.Native workflow's `wasm` job, usin
 Q8 and Emscripten 6.0.6. Build modified delegates using the dependency release's WASM recipes instead
 of downloading its prebuilt static archive, then build ImageMagick and Magick.Native against them.
 The upstream build instructions and workflow are included in the linked source tree. Keep the exported
-API compatible with magick-wasm 0.0.44, or rebuild the wrapper and Varro worker together.
+API compatible with magick-wasm 0.0.46, or rebuild the wrapper and Varro worker together.
 
 To use a compatible modified library, replace `dist/extension/thumbnail-codec.wasm` in an unpacked
 extension and reload the extension host. Varro does not impose signatures, checksums or account checks

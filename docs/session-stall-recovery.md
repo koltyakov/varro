@@ -63,11 +63,11 @@ Steering still waits for a safe provider-turn boundary. Cancellation neither
 consumes nor removes pending input and does not automatically resume it. Parked
 steering now exposes **Resume steering** when the session is idle and no approval
 blocks it. The host checks authoritative status/attention and normal prompt
-admission before waking the first existing steering message by its original ID.
-OpenCode 2.0.20 rejects an inbox PATCH to its already-current delivery, so this
-uses idempotent prompt admission with `resume: true`. The existing content and
-attachments are retained, no new user message is added, and queued prompts stay
-parked. Failed resumes leave the prompt available for retry.
+admission, then confirms the inbox still holds a pending steering message before
+calling the native steer-scoped `interrupt?resume=true` wake. It does not
+re-admit the prompt, because a prompt wake also drains queued input. The existing
+content and attachments are retained, no new user message is added, and queued
+prompts stay parked. Failed resumes leave the prompt available for retry.
 
 ## Regression verification
 

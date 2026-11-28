@@ -46,12 +46,12 @@ The archive is `opencode-stats.db` beside `opencode.db`. With a custom `OPENCODE
 The archive retains session identity and last-update time, provider/model routes, recorded model variants for reasoning-setting exports, assistant timestamps, parent-message identities for prompt counting, token breakdowns, and reported costs. Older archives without variants remain readable and export the reasoning setting as `unknown`. It does not retain prompts, responses, tool output bodies, or image bytes. Pending cleanup records also retain the project directory and owned artifact paths until cleanup succeeds.
 
 New archive writes also retain native V2 `session.usage.recorded` events in a
-separate `usage_auxiliary` table. This preserves side-question/cache-warming,
-title, and compaction timestamps, token counts, sources, and reported costs without
-inventing assistant messages or model identities. Reports read older archives
-without creating this table. When event history was not retained, new archives
-preserve the remainder of native session counters after message and known-event
-usage. That remainder has no inferred date or request count. Auxiliary usage
+separate `usage_auxiliary` table. This preserves side-question, earlier Varro
+cache-warming, title, and compaction timestamps, token counts, sources, and
+reported costs without inventing assistant messages or model identities. Reports
+read older archives without creating this table. When event history was not
+retained, new archives preserve the remainder of native session counters after
+message and known-event usage. That remainder has no inferred date or request count. Auxiliary usage
 deleted before its counters or events were archived cannot be reconstructed from
 old assistant-only archives.
 
