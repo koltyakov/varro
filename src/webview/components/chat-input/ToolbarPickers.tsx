@@ -1089,9 +1089,9 @@ export function FormattedModelName(props: {
               <span class="model-speed-label">{part === '⚡⚡⚡' ? 'Ultrafast' : 'Fast'}</span>
             </Show>
           </>
-        ) : (
-          part
-        )
+        ) : part ? (
+          <span class="model-name-part">{part}</span>
+        ) : null
       }
     </For>
   );

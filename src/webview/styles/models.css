@@ -1343,14 +1343,28 @@
   overflow: hidden;
 }
 
+/* Text segments truncate on their own so the ellipsis never runs under the speed icon. */
 .models-model-name {
+  display: flex;
+  align-items: center;
   min-width: 0;
   font-size: 12px;
   font-weight: 350;
   color: var(--models-row-foreground, var(--color-vscode-fg));
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.models-model-name > .model-name-part {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.models-model-name > .model-speed-icons,
+.models-model-name > .model-speed-label {
+  flex-shrink: 0;
 }
 
 .models-model-renamed-marker,
@@ -1563,6 +1577,35 @@
   letter-spacing: 0.02em;
   text-transform: uppercase;
   opacity: 0.8;
+}
+
+/* Rows whose model name would truncate (measured in fitModelRowLabels) collapse route
+   tags to their initial; the full label stays in the tooltip and aria-label. */
+.models-model-list.is-measuring-fit .models-model-name {
+  flex-shrink: 0;
+}
+
+.models-model-name-wrap[data-fit] .models-route-tag {
+  justify-content: center;
+  min-width: 16px;
+  padding: 0 3px;
+}
+
+.models-model-name-wrap[data-fit] .models-route-tag::before {
+  content: attr(data-short);
+}
+
+.models-model-name-wrap[data-fit] .models-route-tag-text,
+.models-model-name-wrap[data-fit] .models-route-tag-change {
+  display: none;
+}
+
+.models-model-name-wrap[data-fit] .models-model-routes {
+  gap: 3px;
+}
+
+.models-model-name-wrap[data-fit='tight'] .model-speed-label {
+  display: none;
 }
 
 .models-model-ctx {

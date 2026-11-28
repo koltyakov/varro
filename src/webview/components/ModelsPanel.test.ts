@@ -2483,6 +2483,51 @@ describe('ModelsPanel', () => {
     );
   });
 
+  it('collapses route tags only on rows whose model name would truncate', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    // Simulated layout: GPT-5 needs 260px with full tags, 220px with initials, and 180px
+    // without the speed label; every other row fits.
+    const wrapWidth = 200;
+    const wrapScrollWidth = (wrap: HTMLElement) => {
+      if (wrap.querySelector('.models-model-name')?.textContent !== 'GPT-5') return 120;
+      if (wrap.dataset.fit === 'compact') return 220;
+      if (wrap.dataset.fit === 'tight') return 180;
+      return 260;
+    };
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return this.classList.contains('models-model-name-wrap') ? wrapWidth : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return this.classList.contains('models-model-name-wrap') ? wrapScrollWidth(this) : 0;
+    });
+
+    renderPanel();
+    await Promise.resolve();
+    flushSolid();
+    for (const frame of frames.splice(0)) frame(0);
+
+    const wrapFor = (name: string) =>
+      Array.from(container?.querySelectorAll<HTMLElement>('.models-model-name-wrap') ?? []).find(
+        (wrap) => wrap.querySelector('.models-model-name')?.textContent === name
+      );
+    expect(wrapFor('GPT-5')?.dataset.fit).toBe('tight');
+    expect(wrapFor('GPT-5 mini')?.dataset.fit).toBeUndefined();
+    expect(container?.querySelector('.models-model-list.is-measuring-fit')).toBeNull();
+    const shortTags = Array.from(
+      wrapFor('GPT-5')?.querySelectorAll<HTMLElement>('.models-route-tag') ?? []
+    ).map((tag) => tag.dataset.short);
+    expect(shortTags.length).toBeGreaterThan(0);
+    expect(shortTags.every((short) => short?.length === 1)).toBe(true);
+  });
+
   it('accepts preview routing payloads without normalized agentModels', async () => {
     clientMocks.openCodeConfig.mockResolvedValue({
       small_model: 'openai/gpt-5-mini',

@@ -1732,6 +1732,33 @@ function ProviderSection(props: {
   );
   const [draggedModelID, setDraggedModelID] = createSignal<string | null>(null);
   const [dragOverModelID, setDragOverModelID] = createSignal<string | null>(null);
+  const [modelList, setModelList] = createSignal<HTMLDivElement>();
+  createEffect(
+    () => modelList(),
+    (list) => {
+      if (!list) return;
+      let frame = 0;
+      const schedule = () => {
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          fitModelRowLabels(list);
+        });
+      };
+      // Row content changes (tags, names, markers) do not resize the list, so watch the DOM too.
+      const mutationObserver = new MutationObserver(schedule);
+      mutationObserver.observe(list, { childList: true, subtree: true, characterData: true });
+      const resizeObserver =
+        globalThis.ResizeObserver === undefined ? null : new globalThis.ResizeObserver(schedule);
+      resizeObserver?.observe(list);
+      schedule();
+      return () => {
+        cancelAnimationFrame(frame);
+        mutationObserver.disconnect();
+        resizeObserver?.disconnect();
+      };
+    }
+  );
   createEffect(
     () => ({
       visible: isProviderVisible(props.provider.id),
@@ -1923,6 +1950,7 @@ function ProviderSection(props: {
           }
         >
           <div
+            ref={setModelList}
             class="models-model-list"
             style={{ '--models-capability-count': props.maxCapabilityCount }}
           >
@@ -2320,6 +2348,23 @@ function areModelRoutesEqual(
   return left.providerID === right.providerID && left.modelID === right.modelID;
 }
 
+/**
+ * Collapses row extras only where the model name would otherwise truncate: route tags
+ * shrink to initials first, then the speed label hides. Reads and writes are batched per
+ * pass so a resize costs at most three layouts for the whole list.
+ */
+function fitModelRowLabels(list: HTMLElement) {
+  const wraps = Array.from(list.querySelectorAll<HTMLElement>('.models-model-name-wrap'));
+  const overflows = (wrap: HTMLElement) => wrap.scrollWidth > wrap.clientWidth;
+  list.classList.add('is-measuring-fit');
+  for (const wrap of wraps) delete wrap.dataset.fit;
+  const crowded = wraps.filter(overflows);
+  for (const wrap of crowded) wrap.dataset.fit = 'compact';
+  const tight = crowded.filter(overflows);
+  for (const wrap of tight) wrap.dataset.fit = 'tight';
+  list.classList.remove('is-measuring-fit');
+}
+
 function ModelRouteBadge(props: { tag: ModelRouteTag }) {
   return (
     <Tooltip content={props.tag.label}>
@@ -2328,8 +2373,9 @@ function ModelRouteBadge(props: { tag: ModelRouteTag }) {
           props.tag.change ? ` models-route-tag-${props.tag.change}` : ''
         }`}
         aria-label={props.tag.label}
+        data-short={props.tag.text.charAt(0).toUpperCase()}
       >
-        {props.tag.text}
+        <span class="models-route-tag-text">{props.tag.text}</span>
         <Show
           when={
             props.tag.change !== 'removed' && props.tag.change !== 'overridden'
