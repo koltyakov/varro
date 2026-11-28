@@ -1414,7 +1414,7 @@ export class OpenCodeServer extends EventEmitter {
           failStartup(
             this.processManager.isAutomaticPort
               ? 'Automatic OpenCode port collision retries were exhausted. Retry startup or select an available integer port.'
-              : `Port ${occupiedPort} is already in use. Explicit ports never fall back. Set varro.server.port to auto or an available integer between 1 and 65535.`
+              : `Port ${occupiedPort} is already in use. Explicit ports never fall back. Clear varro.server.port to select a port automatically, or set an available integer between 1 and 65535.`
           );
           return;
         }

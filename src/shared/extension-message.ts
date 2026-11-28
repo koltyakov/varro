@@ -17,7 +17,6 @@ import {
   type EditorContext,
   type InlineProblemAttachment,
   type ExtensionMessage,
-  type PromptCacheWarmingSession,
   type ProviderLimitStatus,
   type RalphStatePayload,
   type RestartBlockedState,
@@ -85,7 +84,7 @@ const KNOWN_TYPES = new Set<string>([
   'command/navigate-history',
   'command/abort',
   'ralph/state',
-  'warming/state',
+  'promptCache/learned',
 ]);
 
 /**
@@ -386,8 +385,6 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
       if (isBoolean(payload.groupComposerBlocks))
         config.groupComposerBlocks = payload.groupComposerBlocks;
-      if (isBoolean(payload.showEmptyStateHistogram))
-        config.showEmptyStateHistogram = payload.showEmptyStateHistogram;
       if (
         payload.remoteImages === 'off' ||
         payload.remoteImages === 'ask' ||
@@ -809,38 +806,8 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       };
     }
 
-    case 'warming/state': {
-      const payload = asRecord(record.payload);
-      const sessionsRecord = asRecord(payload?.sessions);
-      if (
-        !payload ||
-        !sessionsRecord ||
-        !isBoolean(payload.available) ||
-        !isBoolean(payload.openCodeWarming) ||
-        (payload.mode !== 'off' && payload.mode !== 'chosen' && payload.mode !== 'all') ||
-        !isPositiveFinite(payload.durationMs)
-      ) {
-        return null;
-      }
-      const sessions: Record<string, PromptCacheWarmingSession> = {};
-      for (const [sessionId, entry] of Object.entries(sessionsRecord)) {
-        const session = asRecord(entry);
-        if (!session || !isSafePersistedSessionId(sessionId)) return null;
-        const { warmUntil, sentAt, ttlMs, stopped } = session;
-        if (
-          (warmUntil !== null && !isPositiveFinite(warmUntil)) ||
-          (sentAt !== null && !isPositiveFinite(sentAt)) ||
-          (ttlMs !== null && !isPositiveFinite(ttlMs)) ||
-          (stopped !== null &&
-            stopped !== 'expired' &&
-            stopped !== 'cache-miss' &&
-            stopped !== 'failed')
-        ) {
-          return null;
-        }
-        sessions[sessionId] = { warmUntil, sentAt, ttlMs, stopped };
-      }
-      const learnedRecord = asRecord(payload.learned);
+    case 'promptCache/learned': {
+      const learnedRecord = asRecord(asRecord(record.payload)?.learned);
       if (!learnedRecord) return null;
       const learned: Record<string, LearnedPromptCacheLifetime> = {};
       for (const [key, entry] of Object.entries(learnedRecord)) {
@@ -849,17 +816,7 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
           return null;
         learned[key] = { ms: lifetime.ms, bounded: lifetime.bounded };
       }
-      return {
-        type,
-        payload: {
-          available: payload.available,
-          mode: payload.mode,
-          durationMs: payload.durationMs,
-          openCodeWarming: payload.openCodeWarming,
-          sessions,
-          learned,
-        },
-      };
+      return { type, payload: { learned } };
     }
 
     default:

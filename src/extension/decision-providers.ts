@@ -1,18 +1,22 @@
 import * as vscode from 'vscode';
 import type { DecisionProviderRequest, DecisionProviderStatus } from '../shared/protocol';
 import {
+  directJevModelID,
   JEV_API_KEY_ENV,
   JEV_API_KEY_SECRET,
   JEV_DEFAULT_MODEL,
+  JEV_DIRECT_ROUTE,
   JevClient,
   type JevSettings,
 } from './jev-decisions';
+import { readAutoApproveDecisionModel } from './extension-config';
 import { logger } from './logger';
 import type { NativeDecisions } from './native-decisions';
 
-const JEV_SETTINGS_SECTION = 'varro.decisions.jev';
-
-/** Owns the TypeSafe credential and explicit native/legacy decision-model opt-ins. */
+/**
+ * Owns the TypeSafe credential and the one `varro.permissions.decisionModel` selection, which
+ * holds either a direct TypeSafe Jev route or an OpenCode-hosted decision model.
+ */
 export class DecisionProviders {
   constructor(
     private readonly secrets: vscode.SecretStorage | undefined,
@@ -29,13 +33,9 @@ export class DecisionProviders {
 
   readonly hasApiKey = async () => !!(await this.getApiKey());
 
-  readonly readSettings = (): JevSettings => {
-    const config = vscode.workspace.getConfiguration(JEV_SETTINGS_SECTION);
-    return {
-      autoApprove: config.get<boolean>('autoApprove', false),
-      model: JEV_DEFAULT_MODEL,
-    };
-  };
+  readonly readSettings = (): JevSettings => ({
+    model: directJevModelID(readAutoApproveDecisionModel()),
+  });
 
   async status(): Promise<DecisionProviderStatus> {
     const stored = (await this.secrets?.get(JEV_API_KEY_SECRET))?.trim();
@@ -52,14 +52,14 @@ export class DecisionProviders {
             ...native,
             visible: vscode.workspace
               .getConfiguration('varro')
-              .get<boolean>('debug.showNativeDecisionModels', false),
+              .get<boolean>('debug.showDecisionModels', false),
           }
         : undefined,
       jev: {
         connected: credentialSource !== null,
         credentialSource,
-        model: settings.model,
-        autoApprove: settings.autoApprove,
+        model: settings.model ?? JEV_DEFAULT_MODEL,
+        autoApprove: settings.model !== null,
       },
     };
   }
@@ -73,19 +73,34 @@ export class DecisionProviders {
           !status.models.some((model) => `${model.providerID}/${model.modelID}` === request.model)
         )
           throw new Error('Select an available OpenCode decision model');
+        await this.writeDecisionModel(request.model);
+      } else if (this.readSettings().model === null) {
+        // Turning the native reviewer off must not turn off a selected Jev route.
+        await this.writeDecisionModel(undefined);
       }
-      await vscode.workspace
-        .getConfiguration('varro')
-        .update('chat.autoApproveDecisionModel', request.model, vscode.ConfigurationTarget.Global);
     } else if (request.action === 'connect') await this.connect();
     else if (request.action === 'disconnect') await this.disconnect();
-    else {
-      const config = vscode.workspace.getConfiguration(JEV_SETTINGS_SECTION);
-      if (request.autoApprove !== undefined) {
-        await config.update('autoApprove', request.autoApprove, vscode.ConfigurationTarget.Global);
+    else if (request.autoApprove === true) {
+      // Keep a direct TypeSafe model the user chose; otherwise replace any native selection.
+      if (this.readSettings().model === null) {
+        await this.writeDecisionModel(JEV_DIRECT_ROUTE);
       }
-    }
+    } else if (request.autoApprove === false) await this.clearJevSelection();
     return this.status();
+  }
+
+  /** `varro.permissions.decisionModel` is a user setting; `undefined` removes the user value. */
+  private async writeDecisionModel(value: string | undefined): Promise<void> {
+    await vscode.workspace
+      .getConfiguration('varro')
+      .update('permissions.decisionModel', value, vscode.ConfigurationTarget.Global);
+  }
+
+  /** Clears a direct Jev selection, leaving an OpenCode decision model untouched. */
+  private async clearJevSelection(): Promise<void> {
+    if (this.readSettings().model !== null) {
+      await this.writeDecisionModel(undefined);
+    }
   }
 
   /** Prompts for a TypeSafe API key, verifies it with a minimal request, and stores it. */
@@ -107,7 +122,7 @@ export class DecisionProviders {
         { location: vscode.ProgressLocation.Notification, title: 'Verifying TypeSafe API key' },
         () =>
           this.createClient(apiKey).evaluate(
-            this.readSettings().model,
+            this.readSettings().model ?? JEV_DEFAULT_MODEL,
             'Connection check from Varro.',
             { ok: { type: 'noul', instructions: 'Is this a connection check?' } },
             10_000
@@ -121,15 +136,17 @@ export class DecisionProviders {
     }
 
     await this.secrets.store(JEV_API_KEY_SECRET, apiKey);
-    if (!this.readSettings().autoApprove) {
+    if (this.readSettings().model === null) {
       void vscode.window.showInformationMessage(
-        'TypeSafe Jev connected. Turn it on for auto-approve in the Varro Models view.'
+        'TypeSafe Jev connected. Turn on Auto-approve decisions for it in the Varro Models view.'
       );
     }
     return true;
   }
 
+  /** Removes the stored key and a direct Jev selection, so no dangling selection is left. */
   async disconnect(): Promise<void> {
     await this.secrets?.delete(JEV_API_KEY_SECRET);
+    await this.clearJevSelection();
   }
 }

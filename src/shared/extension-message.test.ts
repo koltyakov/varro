@@ -754,41 +754,20 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
-  it('parses warming/state and rejects malformed session entries', () => {
-    const payload = {
-      available: true,
-      mode: 'chosen',
-      durationMs: 1_800_000,
-      openCodeWarming: false,
-      sessions: {
-        'session-1': { warmUntil: 2_000, sentAt: 1_000, ttlMs: 300_000, stopped: null },
-        'session-2': { warmUntil: null, sentAt: null, ttlMs: null, stopped: null },
-      },
-      learned: { 'claude-agent/opus': { ms: 3_600_000, bounded: true } },
-    } as const;
-    expect(parseExtensionMessage({ type: 'warming/state', payload })).toEqual({
-      type: 'warming/state',
+  it('parses promptCache/learned and rejects malformed lifetimes', () => {
+    const payload = { learned: { 'claude-agent/opus': { ms: 3_600_000, bounded: true } } };
+    expect(parseExtensionMessage({ type: 'promptCache/learned', payload })).toEqual({
+      type: 'promptCache/learned',
       payload,
     });
-    for (const session of [
-      { warmUntil: 'soon', sentAt: null, ttlMs: null, stopped: null },
-      { warmUntil: null, sentAt: null, ttlMs: -1, stopped: null },
-    ])
-      expect(
-        parseExtensionMessage({
-          type: 'warming/state',
-          payload: { ...payload, sessions: { 'session-1': session } },
-        })
-      ).toBeNull();
-    expect(
-      parseExtensionMessage({ type: 'warming/state', payload: { ...payload, mode: 'sometimes' } })
-    ).toBeNull();
     expect(
       parseExtensionMessage({
-        type: 'warming/state',
-        payload: { ...payload, learned: { 'openai/*': { ms: 0, bounded: true } } },
+        type: 'promptCache/learned',
+        payload: { learned: { 'openai/*': { ms: 0, bounded: true } } },
       })
     ).toBeNull();
+    expect(parseExtensionMessage({ type: 'promptCache/learned', payload: {} })).toBeNull();
+    expect(parseExtensionMessage({ type: 'warming/state', payload })).toBeNull();
   });
 
   it('parses server/event requiring a type', () => {
@@ -1191,30 +1170,6 @@ describe('parseExtensionMessage', () => {
     }
   );
 
-  it.each([true, false, 'true', undefined])(
-    'accepts only boolean histogram opt-in values: %s',
-    (showEmptyStateHistogram) => {
-      const parsed = parseExtensionMessage({
-        type: 'config/update',
-        payload: {
-          showEmptyStateHistogram,
-          desktopSessionPaneSide: 'left',
-          defaultPermissionMode: 'default',
-          chatFontSize: 13,
-          chatEditorFontSize: 12,
-          chatFontFamily: 'default',
-        },
-      });
-      expect(parsed).toMatchObject({ type: 'config/update' });
-      if (parsed?.type !== 'config/update') throw new Error('Expected a config update');
-      if (showEmptyStateHistogram === true || showEmptyStateHistogram === false) {
-        expect(parsed.payload.showEmptyStateHistogram).toBe(showEmptyStateHistogram);
-      } else {
-        expect(parsed.payload).not.toHaveProperty('showEmptyStateHistogram');
-      }
-    }
-  );
-
   it.each([
     [100_000, true],
     [0, true],
@@ -1248,7 +1203,6 @@ describe('parseExtensionMessage', () => {
           showChangedFiles: true,
           showTurnTimer: true,
           groupComposerBlocks: true,
-          showEmptyStateHistogram: true,
           remoteImages: 'ask',
           debugShowQuotaWarning: true,
           autoAttachProblems: false,
@@ -1268,7 +1222,6 @@ describe('parseExtensionMessage', () => {
         showChangedFiles: true,
         showTurnTimer: true,
         groupComposerBlocks: true,
-        showEmptyStateHistogram: true,
         remoteImages: 'ask',
         debugShowQuotaWarning: true,
         autoAttachProblems: false,

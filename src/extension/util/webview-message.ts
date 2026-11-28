@@ -192,9 +192,8 @@ export const WEBVIEW_MESSAGE_TYPES = {
   'ralph/resume': true,
   'ralph/update-model': true,
   'ralph/sync': true,
-  'warming/sync': true,
-  'warming/set': true,
-  'warming/samples': true,
+  'promptCache/sync': true,
+  'promptCache/samples': true,
   log: true,
   'server/restart': true,
   'server/restart/check': true,
@@ -234,7 +233,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'vscode/show-output':
     case 'chat/new-editor':
     case 'chat/new-window':
-    case 'warming/sync':
+    case 'promptCache/sync':
       return { type };
 
     case 'vscode/open-folder': {
@@ -512,15 +511,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       };
     }
 
-    case 'warming/set': {
-      const payload = asRecord(message?.payload);
-      const sessionId = getBoundedString(payload?.sessionId, 512);
-      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
-      if (typeof payload?.enabled !== 'boolean') return null;
-      return { type, payload: { sessionId, enabled: payload.enabled } };
-    }
-
-    case 'warming/samples': {
+    case 'promptCache/samples': {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
       if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;

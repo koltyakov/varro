@@ -1,10 +1,10 @@
 # Auxiliary inference prompt tracing
 
-Set `varro.chat.promptTrace` to `true` in VS Code user settings to include tracing metadata in Varro's auxiliary inference prompts. The default is `false`; workspace settings cannot enable it. This replaces the experimental `varro.chat.followupTrace` setting. The old setting does not enable the broader feature automatically.
+Set `varro.promptTracing.enabled` to `true` in VS Code user settings to include tracing metadata in Varro's auxiliary inference prompts. The default is `false`; workspace settings cannot enable it. This replaces the experimental `varro.chat.followupTrace` setting. The old setting does not enable the broader feature automatically.
 
 ```json
 {
-  "varro.chat.promptTrace": true
+  "varro.promptTracing.enabled": true
 }
 ```
 
@@ -28,7 +28,7 @@ The following describes the routes in the current Varro implementation, based on
 
 Ordinary chat sends, commands, tools, subagents, compaction, and OpenCode-owned title generation are unchanged. Their session identity belongs to OpenCode's request hooks.
 
-The legacy direct TypeSafe/Jev integration is also unchanged. It sends structured `state` and questions to a fixed TypeSafe endpoint, not a text prompt through the configured OpenCode provider. Adding a prompt marker there would change its state contract without solving this proxy-attribution problem. Native decision models selected through OpenCode are covered separately above.
+The direct TypeSafe Jev reviewer (a `typesafe/<model>` value in `varro.permissions.decisionModel`) is also unchanged. It sends structured `state` and questions to a fixed TypeSafe endpoint, not a text prompt through the configured OpenCode provider. Adding a prompt marker there would change its state contract without solving this proxy-attribution problem. Native decision models selected through OpenCode are covered separately above.
 
 ## Wire format
 

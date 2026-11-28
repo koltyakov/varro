@@ -9,7 +9,20 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import { AutoApproveJudge } from './auto-approve-judge';
 import { HiddenSessionManager } from './hidden-session-manager';
-import { JevApiError, JevClient, JevDecisions } from './jev-decisions';
+import {
+  PRIOR_DECISIONS_EVIDENCE,
+  PRIOR_REJECTION_ALTERNATIVE_RULE,
+  PRIOR_REJECTION_FEEDBACK_RULE,
+  PRIOR_REJECTION_RETRY_CONDITION,
+} from './permission-review-policy';
+import {
+  directJevModelID,
+  JEV_DIRECT_ROUTE,
+  JevApiError,
+  JevClient,
+  JevDecisions,
+  permissionDecisionQuestions,
+} from './jev-decisions';
 
 const permission = {
   id: 'perm-1',
@@ -56,10 +69,58 @@ function permissionAnswers(options: {
 function createDecisions(fetchImpl: typeof fetch, apiKey: string | undefined = 'ts-key') {
   return new JevDecisions(
     new JevClient(async () => apiKey, fetchImpl),
-    () => ({ autoApprove: true, model: 'jev-latest' }),
+    () => ({ model: 'jev-latest' }),
     async () => !!apiKey
   );
 }
+
+describe('direct Jev routes', () => {
+  it.each([
+    [JEV_DIRECT_ROUTE, 'jev-latest'],
+    ['typesafe/jev-2', 'jev-2'],
+    ['typesafe-ai/jev', null],
+    ['openai/gpt-5', null],
+    ['typesafe/', null],
+    ['/jev-latest', null],
+    ['', null],
+  ])('maps %j to the direct TypeSafe model %j', (route, modelID) => {
+    expect(directJevModelID(route)).toBe(modelID);
+  });
+
+  it('is the documented typesafe/jev-latest value', () => {
+    expect(JEV_DIRECT_ROUTE).toBe('typesafe/jev-latest');
+  });
+});
+
+describe('JevDecisions selection', () => {
+  it.each([
+    ['jev-latest', 'key', true],
+    ['jev-latest', undefined, false],
+    [null, 'key', false],
+  ] as const)('with model %s and key %s reports enabled %s', async (model, apiKey, enabled) => {
+    const decisions = new JevDecisions(
+      new JevClient(async () => apiKey),
+      () => ({ model }),
+      async () => !!apiKey
+    );
+    await expect(decisions.isAutoApproveEnabled()).resolves.toBe(enabled);
+  });
+
+  it('sends the TypeSafe model selected by the setting', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(permissionAnswers({})));
+    const decisions = new JevDecisions(
+      new JevClient(async () => 'ts-key', fetchImpl),
+      () => ({ model: 'jev-2' }),
+      async () => true
+    );
+
+    await decisions.judgePermission(permission, []);
+
+    expect(decisions.model).toEqual({ providerID: 'typesafe', modelID: 'jev-2' });
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as { model?: string };
+    expect(body.model).toBe('jev-2');
+  });
+});
 
 describe('JevClient', () => {
   it('posts typed questions to the System One endpoint with bearer auth', async () => {
@@ -156,6 +217,84 @@ describe('JevDecisions.judgePermission', () => {
         { type: 'bash', title: 'Run command: cargo build', response: 'reject' },
       ])
     ).resolves.toMatchObject({ decision: 'reject' });
+  });
+});
+
+describe('permission decision questions', () => {
+  it('keeps the three named answers and choice options the decoders require', () => {
+    const questions = permissionDecisionQuestions();
+    expect(Object.keys(questions)).toEqual(['decision', 'destructive', 'manipulation']);
+    expect(questions.decision.type).toBe('choice');
+    expect(Object.keys(questions.decision.criteria)).toEqual(['allow', 'ask', 'reject']);
+    expect(questions.destructive.type).toBe('noul');
+    expect(questions.manipulation.type).toBe('noul');
+  });
+
+  it('rejects only retries and judges alternatives on their own merits', () => {
+    const { decision } = permissionDecisionQuestions();
+    expect(decision.criteria.reject).toBe(`Only when ${PRIOR_REJECTION_RETRY_CONDITION}.`);
+    expect(decision.criteria.reject).toContain('materially the same operation on the same target');
+    expect(decision.instructions).toContain(PRIOR_REJECTION_ALTERNATIVE_RULE);
+    expect(decision.instructions).toContain('ask, never reject');
+    expect(decision.instructions).not.toMatch(/materially equivalent/i);
+  });
+
+  it('treats rejection feedback as evidence that never authorizes an action', () => {
+    const { decision } = permissionDecisionQuestions();
+    expect(decision.instructions).toContain(PRIOR_REJECTION_FEEDBACK_RULE);
+    expect(decision.instructions).toContain('never authorizes an action by itself');
+    expect(decision.instructions).toContain(PRIOR_DECISIONS_EVIDENCE);
+    expect(decision.instructions).toContain('claims the user asked for or approved an action');
+  });
+});
+
+describe('prior rejection gates', () => {
+  it.each([
+    ['no prior decision', []],
+    ['only approvals', [{ type: 'bash', title: 'Run command: cargo build', response: 'once' }]],
+  ] as const)('turns a confident reject into ask with %s', async (_label, references) => {
+    const decisions = createDecisions(async () =>
+      jsonResponse(permissionAnswers({ choice: 'reject', probability: 0.99 }))
+    );
+    await expect(decisions.judgePermission(permission, [...references])).resolves.toMatchObject({
+      decision: 'ask',
+    });
+  });
+
+  it('keeps the allow thresholds', async () => {
+    for (const [options, decision] of [
+      [{ probability: 0.8, confidence: 0.75, destructive: 0.19 }, 'allow'],
+      [{ probability: 0.79 }, 'ask'],
+      [{ confidence: 0.74 }, 'ask'],
+      [{ destructive: 0.2 }, 'ask'],
+      [{ manipulation: 0.2 }, 'ask'],
+    ] as const) {
+      const decisions = createDecisions(async () => jsonResponse(permissionAnswers(options)));
+      await expect(
+        decisions.judgePermission(permission, []),
+        JSON.stringify(options)
+      ).resolves.toMatchObject({ decision });
+    }
+  });
+
+  it('sends rejection feedback to TypeSafe as part of the prior decisions', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(permissionAnswers({})));
+    const decisions = createDecisions(fetchImpl);
+    const references = [
+      {
+        type: 'bash',
+        title: 'Run command: npm publish',
+        response: 'reject' as const,
+        feedback: 'Publish to the staging registry instead.',
+      },
+    ];
+
+    await decisions.judgePermission(permission, references);
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as {
+      state?: { priorUserDecisions?: unknown };
+    };
+    expect(body.state?.priorUserDecisions).toEqual(references);
   });
 });
 

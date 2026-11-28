@@ -320,34 +320,6 @@
   color: var(--color-vscode-muted);
 }
 
-.context-popup-prompt-cache-warming {
-  flex-wrap: wrap;
-}
-
-/* The 16px checkbox would otherwise sit on the label's text baseline, above the row's center. */
-.context-popup-prompt-cache-warming .context-popup-row-label {
-  display: inline-flex;
-  align-items: center;
-}
-
-.context-popup-warming-toggle {
-  height: auto;
-  color: inherit;
-  font-size: inherit;
-  white-space: nowrap;
-}
-
-.context-popup-warming-status {
-  font-family: var(--font-sans);
-  white-space: nowrap;
-}
-
-.context-popup-warming-detail {
-  flex-basis: 100%;
-  color: var(--color-vscode-muted);
-  font-size: 10.5px;
-}
-
 .context-popup-row-total {
   margin-top: 2px;
   padding-top: 4px;

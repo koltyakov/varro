@@ -5444,9 +5444,9 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
     showFileDiffs: state.showFileDiffs,
+    // Problems context is off by default, as in VS Code; specs that need it pass `problems=1`.
+    autoAttachProblems: new URLSearchParams(window.location.search).get('problems') === '1',
     followupModel: state.followups ? 'test/small' : undefined,
-    showEmptyStateHistogram:
-      new URLSearchParams(window.location.search).get('showEmptyStateHistogram') === 'true',
     defaultPermissionMode: 'default',
     chatEditorFontSize: 12,
     chatFontSize: 13,

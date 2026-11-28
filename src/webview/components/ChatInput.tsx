@@ -278,7 +278,7 @@ import type { CompressedImage, ImageCompressionAnalysis } from '../lib/image-com
 import { loadImage } from '../lib/image-loading';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import type { ToolbarSharedProps } from './chat-input/ChatInputToolbar';
-import type { PromptCacheActivity, PromptCacheWarmingView } from './chat-input/ContextPopup';
+import type { PromptCacheActivity } from './chat-input/ContextPopup';
 import { dismissComposerOverlays } from './chat-input/composer-overlay-dismiss';
 import {
   RichComposerArea,
@@ -6379,37 +6379,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return getSessionCost(messagesBySession().get(rootId) || [], sessionsById().get(rootId));
   });
 
-  // Root-session prompt cache only: subagents run their own requests and caches.
-  const promptCacheWarmingView = createMemo((): PromptCacheWarmingView | null => {
-    const warming = state.promptCacheWarming;
-    const sessionId = composerSessionId();
-    if (!warming?.available || !sessionId || warming.mode === 'off') return null;
-    if (warming.openCodeWarming || warming.mode === 'all') return { kind: 'opencode' };
-    const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    const session = warming.sessions[rootId] ?? null;
-    // Before the extension resolves the lifetime, estimate it for the model the next reply uses.
-    const current = currentModel();
-    return {
-      kind: 'chosen',
-      enabled: session !== null,
-      session,
-      ttlMs:
-        session?.ttlMs ??
-        promptCacheLifetimeFor(
-          state.providers,
-          { providerID: current.providerID ?? '', modelID: current.modelID ?? '' },
-          warming.learned
-        ).ttlMs,
-      durationMs: warming.durationMs,
-    };
-  });
-
   // Each session's history teaches the extension how long this user's caches last. It is sent once
   // per webview; the extension also ignores samples it has already counted.
   createEffect(
     () => {
       const sessionId = composerSessionId();
-      if (!sessionId || !state.promptCacheWarming) return null;
+      if (!sessionId || !state.promptCacheLearned) return null;
       const rootId = getSessionTreeRootId(sessionId) || sessionId;
       if (sentPromptCacheHistory.has(rootId)) return null;
       const messages = messagesBySession().get(rootId);
@@ -6420,16 +6395,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       sentPromptCacheHistory.add(history.rootId);
       const samples = promptCacheHistorySamples(history.messages, state.providers);
       if (samples.length > 0)
-        postMessage({ type: 'warming/samples', payload: { sessionId: history.rootId, samples } });
+        postMessage({
+          type: 'promptCache/samples',
+          payload: { sessionId: history.rootId, samples },
+        });
     }
   );
-
-  function togglePromptCacheWarming(enabled: boolean) {
-    const sessionId = composerSessionId();
-    if (!sessionId) return;
-    const rootId = getSessionTreeRootId(sessionId) || sessionId;
-    postMessage({ type: 'warming/set', payload: { sessionId: rootId, enabled } });
-  }
 
   const promptCacheActivity = createMemo(
     (): PromptCacheActivity | null => {
@@ -6437,12 +6408,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (!sessionId) return null;
       const rootId = getSessionTreeRootId(sessionId) || sessionId;
       const messages = messagesBySession().get(rootId) || [];
-      // A keep-alive re-sends the context without adding a message, so it renews the cache too.
-      const warming = promptCacheWarmingView();
-      const pingedAt =
-        warming?.kind === 'chosen' && warming.session?.stopped !== 'cache-miss'
-          ? (warming.session?.sentAt ?? 0)
-          : 0;
       for (let index = messages.length - 1; index >= 0; index -= 1) {
         const entry = messages[index]!;
         const info = entry.info;
@@ -6452,7 +6417,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         const lifetime = promptCacheLifetimeFor(
           state.providers,
           { providerID: info.providerID, modelID: info.modelID },
-          state.promptCacheWarming?.learned
+          state.promptCacheLearned ?? undefined
         );
         let steps = 0;
         for (const part of entry.parts) if (part.type === 'step-finish') steps += 1;
@@ -6462,7 +6427,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           lifetime
         );
         return {
-          lastUsedAt: Math.max(usedAt, pingedAt),
+          lastUsedAt: usedAt,
           inUse: isComposerBusy(),
           ttlMs: lifetime.ttlMs,
           likelyMs: lifetime.likelyMs ?? lifetime.ttlMs,
@@ -7898,8 +7863,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             subagentCount={sessionTokenBreakdown().subagentCount}
             sessionModels={sessionModels()}
             promptCache={promptCacheActivity()}
-            promptCacheWarming={promptCacheWarmingView()}
-            onTogglePromptCacheWarming={togglePromptCacheWarming}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
             showAttachmentsControl={isToolbarControlVisible('attachments')}
             showStopButton={showStopButton()}
@@ -8000,8 +7963,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           subagentCount={sessionTokenBreakdown().subagentCount}
           sessionModels={sessionModels()}
           promptCache={promptCacheActivity()}
-          promptCacheWarming={promptCacheWarmingView()}
-          onTogglePromptCacheWarming={togglePromptCacheWarming}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           showStopButton={showStopButton()}

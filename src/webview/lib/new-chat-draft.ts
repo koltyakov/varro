@@ -1,5 +1,4 @@
 import { storePath } from '@solidjs/signals';
-import { createSignal } from 'solid-js';
 import { getDefaultPrimaryAgentName } from '../hooks/routing-state';
 import {
   clearMessages,
@@ -25,8 +24,6 @@ import { resetMessageEditState } from './message-edit-state';
 import { resetToolCallExpansionState } from './tool-call-expansion-state';
 
 let newChatDraftGeneration = 0;
-const [newChatDraftKey, setNewChatDraftKey] = createSignal(0);
-export { newChatDraftKey };
 
 export function getNewChatDraftGeneration() {
   return newChatDraftGeneration;
@@ -65,7 +62,6 @@ export function startNewChatDraft() {
   const deferTranscriptClear = !blankSessionId && state.messages.length > 0;
   const craftedText = readLatestDraftText();
   const sourceKey = currentDraftKey();
-  setNewChatDraftKey(draftGeneration);
   resetMessageEditState();
   resetToolCallExpansionState();
   // Detach first so a live virtualized transcript can unmount before its

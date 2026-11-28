@@ -107,7 +107,7 @@ export function App() {
     const cleanups: Array<() => void> = [];
 
     ralphRunner.reattachAll();
-    postMessage({ type: 'warming/sync' });
+    postMessage({ type: 'promptCache/sync' });
     const stopObservingSurfaceContrast = observeSurfaceContrast();
     cleanups.push(stopObservingSurfaceContrast);
 

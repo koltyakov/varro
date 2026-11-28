@@ -18,21 +18,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('empty-state histogram configuration', () => {
-  it('defaults to disabled', () => {
-    expect(createAppState().showEmptyStateHistogram()).toBe(false);
-  });
-
-  it.each([true, false])('restores the host opt-in value %s', (showEmptyStateHistogram) => {
-    // SAFETY: The fixture provides the host-owned initial webview state.
-    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
-      showEmptyStateHistogram,
-    };
-
-    expect(createAppState().showEmptyStateHistogram()).toBe(showEmptyStateHistogram);
-  });
-});
-
 describe('composer draft persistence', () => {
   it('keeps a migrated legacy draft visible when opening history and the session picker', () => {
     window.localStorage.setItem(STORAGE_KEYS.inputDraft, JSON.stringify('unassigned draft'));

@@ -331,7 +331,7 @@ export function buildSessionSendBody(
   );
   const inlineProblems = normalized.references;
   const problemText =
-    composerState.autoAttachProblems === false
+    composerState.autoAttachProblems !== true
       ? inlineProblems.reduce(
           (value, reference) => value.replaceAll(problemReferenceMarker(reference), ''),
           normalized.text
@@ -342,7 +342,7 @@ export function buildSessionSendBody(
       ? null
       : composerState.issuesAttachment;
   const includeProblemReference =
-    composerState.autoAttachProblems !== false &&
+    composerState.autoAttachProblems === true &&
     (!!attachedProblems ||
       (!!capturedProblems && (capturedProblems.inline || composerState.issuesEnabled !== false)));
   const promptText = getPromptTextForClipboardImages(
@@ -442,7 +442,7 @@ export function buildSessionSendBody(
 
   const terminalSelection = composerState.terminalSelection;
   if (
-    composerState.autoAttachProblems !== false &&
+    composerState.autoAttachProblems === true &&
     (capturedProblems?.inline || composerState.issuesEnabled !== false) &&
     !attachedProblems &&
     !(
@@ -463,7 +463,7 @@ export function buildSessionSendBody(
     });
   }
 
-  if (composerState.autoAttachProblems !== false && attachedProblems) {
+  if (composerState.autoAttachProblems === true && attachedProblems) {
     const attached = attachedProblems;
     parts.push({
       type: 'text',
@@ -471,7 +471,7 @@ export function buildSessionSendBody(
     });
   }
 
-  if (composerState.autoAttachProblems !== false) {
+  if (composerState.autoAttachProblems === true) {
     for (const reference of inlineProblems)
       parts.push({ type: 'text', text: formatInlineProblem(reference) });
   }

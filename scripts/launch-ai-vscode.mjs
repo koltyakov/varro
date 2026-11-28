@@ -79,14 +79,15 @@ if (managedServer) {
         : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Code'));
   await copyHostModelPreferences(hostUserData, userData);
 }
-await writeFile(
-  path.join(userData, 'User/settings.json'),
-  JSON.stringify({
-    'varro.server.port': Number(new URL(testServerUrl).port),
-    'varro.server.autoStart': false,
-    'varro.server.autoUpdate': false,
-  })
-);
+// Varro reads its executable path from user settings only, so a caller's CLI goes in this profile.
+const userSettings = {
+  'varro.server.port': Number(new URL(testServerUrl).port),
+  'varro.server.autoStart': false,
+  'varro.server.autoUpdate': false,
+};
+const serverCommand = process.env.VARRO_AI_SERVER_COMMAND?.trim();
+if (serverCommand) userSettings['varro.server.command'] = serverCommand;
+await writeFile(path.join(userData, 'User/settings.json'), JSON.stringify(userSettings));
 const remoteDebuggingPort = await reserveLoopbackPort();
 const configuredSidebarWidth = Number(process.env.VARRO_AI_SIDEBAR_WIDTH ?? 486);
 if (!Number.isFinite(configuredSidebarWidth) || configuredSidebarWidth < 300) {

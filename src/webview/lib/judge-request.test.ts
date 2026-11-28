@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createStore } from 'solid-js';
 import type { Permission } from '../types';
 import type { SelectedModel } from './app-state-types';
+import { AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH } from '../../shared/protocol';
 import { toApprovedPermissionReference, toPlainJudgeModel } from './judge-request';
 
 function createStoreState() {
@@ -67,6 +68,26 @@ describe('judge-request', () => {
     expect(toApprovedPermissionReference(state.permissions[0]!, 'reject')).toEqual(
       expect.objectContaining({ response: 'reject' })
     );
+  });
+
+  it('carries trimmed, bounded rejection feedback only on rejected references', () => {
+    const state = createStoreState();
+    const permission = state.permissions[0]!;
+
+    expect(
+      toApprovedPermissionReference(permission, 'reject', '  Use the staging bucket.  ')
+    ).toEqual(expect.objectContaining({ response: 'reject', feedback: 'Use the staging bucket.' }));
+    expect(
+      toApprovedPermissionReference(permission, 'reject', 'x'.repeat(2_000)).feedback
+    ).toHaveLength(AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH);
+    expect(toApprovedPermissionReference(permission, 'reject', '   ')).not.toHaveProperty(
+      'feedback'
+    );
+    for (const response of ['once', 'always'] as const) {
+      expect(toApprovedPermissionReference(permission, response, 'Go ahead')).not.toHaveProperty(
+        'feedback'
+      );
+    }
   });
 
   it('builds judge models that survive structured clone', () => {

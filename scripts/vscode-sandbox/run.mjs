@@ -258,9 +258,9 @@ async function runScenario(scenario, vscodeExecutable) {
   const emptyWindow = scenario === 'empty-window-missing-cli';
   const workspace = emptyWindow ? undefined : path.join(root, 'w');
   const userData = path.join(root, 'u');
-  const settingsDirectory = emptyWindow
-    ? path.join(userData, 'User')
-    : path.join(root, 'w', '.vscode');
+  // Varro reads its executable path from user settings only, so every scenario configures the
+  // sandbox profile rather than the workspace.
+  const settingsDirectory = path.join(userData, 'User');
   const extensions = path.join(root, 'e');
   const launchFile = path.join(root, 'launches.log');
   const pidFile = path.join(root, 'fake.pid');
@@ -268,7 +268,7 @@ async function runScenario(scenario, vscodeExecutable) {
 
   try {
     await mkdir(settingsDirectory, { recursive: true });
-    await mkdir(userData, { recursive: true });
+    if (workspace) await mkdir(workspace, { recursive: true });
     await mkdir(extensions);
     await mkdir(path.join(root, 'home'));
     let fileLinkRoot = '';

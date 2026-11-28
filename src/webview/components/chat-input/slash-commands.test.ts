@@ -74,6 +74,9 @@ describe('getSlashCommands', () => {
   );
 
   it('includes init but hides session actions in new chats', () => {
+    // /problems is offered only while Problems context is on, which is off by default.
+    setState(storePath('autoAttachProblems', true));
+    flushSolid();
     const onGenerateStats = vi.fn();
     const commands = getSlashCommands({
       hasCurrentSession: false,

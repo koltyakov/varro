@@ -456,7 +456,7 @@ opencode serve --port 4096
 
 Then configure these VS Code settings as needed:
 
-- `varro.server.port` (set an integer from 1 through 65535 for a manually managed endpoint; the default is `"auto"`)
+- `varro.server.port` (set an integer from 1 through 65535 for a manually managed endpoint; leave it empty to select a port automatically)
 - `varro.server.autoStart`
 - `varro.server.command`
 

@@ -143,6 +143,7 @@ import {
   appendBoundedCliOutput,
   getOpenCodeConfigPaths,
   OpenCodeProcess,
+  readServerPortSetting,
   sweepStaleInjectedConfigDirectories,
   type UpgradeFailureReport,
 } from './open-code-process';
@@ -746,6 +747,25 @@ async function setAdoptedOwnership(
   manager.managedProcess = true;
   return lease;
 }
+
+describe('varro.server.port setting', () => {
+  it.each([null, undefined, 'auto'])('treats %s as an automatic port', (value) => {
+    expect(readServerPortSetting(value)).toBe('auto');
+  });
+
+  it.each([1, 4096, 65_535])('accepts the explicit port %s', (value) => {
+    expect(readServerPortSetting(value)).toBe(value);
+  });
+
+  it.each([0, 65_536, 1.5, -1, '4096', 'automatic', '', true, {}])(
+    'rejects %s with guidance to set a valid port or clear the setting',
+    (value) => {
+      expect(() => readServerPortSetting(value)).toThrow(
+        'Set varro.server.port to an integer between 1 and 65535, or clear it to select a port automatically.'
+      );
+    }
+  );
+});
 
 describe('OpenCodeProcess port validation', () => {
   it.each([0, -1, 1.5, 65_536, Number.NaN, Number.POSITIVE_INFINITY])(
@@ -3270,7 +3290,9 @@ describe('OpenCodeProcess server ownership leases', () => {
     try {
       const manager = new OpenCodeProcess(4096, true, '', false, path, join(root, 'proc'));
       expect(manager.port).toBe(4096);
-      await expect(manager.refreshStartupRegistration()).rejects.toThrow('Select auto');
+      await expect(manager.refreshStartupRegistration()).rejects.toThrow(
+        'Clear varro.server.port to reuse it'
+      );
       expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(lease);
     } finally {
       await rm(root, { recursive: true, force: true });

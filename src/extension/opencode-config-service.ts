@@ -20,7 +20,11 @@ import type { McpConfigScope } from '../shared/mcp-config';
 import { VARRO_VISION_AGENT_DESCRIPTION, VARRO_VISION_AGENT_PROMPT } from '../shared/vision-agent';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
-import { readFollowupModel } from './extension-config';
+import {
+  readAutoApproveModel,
+  readFollowupModel,
+  readPromptCompletionModel,
+} from './extension-config';
 import { v1Action, v2Action } from './opencode-v2-projection';
 import { editNativePermissionConfig } from './opencode-permission-config';
 import { appendNativePermissionAllows } from './native-permission-rules';
@@ -28,6 +32,7 @@ import { getOpenCodeApiCapabilities } from './opencode-api-capabilities';
 import type { OpenCodeServer } from './server';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
 import { getOpenCodeConfigPaths } from './open-code-process';
+import { writeRenamedSetting } from './renamed-settings';
 import type { RestProxyCallbacks } from './rest-proxy';
 
 const openCodeConfigUpdateLocks = new Map<string, Promise<void>>();
@@ -159,9 +164,9 @@ export class OpenCodeConfigService {
       smallModel,
       agentModels,
       commitMessageModel: parseModelRoute(extensionConfig.get('commitMessage.model')),
-      reviewModel: parseModelRoute(extensionConfig.get('review.model')),
-      autoApproveModel: parseModelRoute(extensionConfig.get('chat.autoApproveModel')),
-      promptCompletionModel: parseModelRoute(extensionConfig.get('chat.promptCompletionModel')),
+      reviewModel: parseModelRoute(extensionConfig.get('walkthrough.model')),
+      autoApproveModel: parseModelRoute(readAutoApproveModel(extensionConfig)),
+      promptCompletionModel: parseModelRoute(readPromptCompletionModel(extensionConfig)),
     };
     const followupModel = parseModelRoute(readFollowupModel(extensionConfig));
     if (followupModel) routing.followupModel = followupModel;
@@ -549,23 +554,21 @@ export class OpenCodeConfigService {
       request.target === 'prompt_completion' ||
       request.target === 'followups'
     ) {
-      const key =
-        request.target === 'commit_message'
-          ? 'commitMessage.model'
-          : request.target === 'review'
-            ? 'review.model'
-            : request.target === 'prompt_completion'
-              ? 'chat.promptCompletionModel'
-              : request.target === 'followups'
-                ? 'chat.followupModel'
-                : 'chat.autoApproveModel';
-      await vscode.workspace
-        .getConfiguration('varro')
-        .update(
-          key,
-          request.unset ? undefined : `${request.providerID}/${request.modelID}`,
-          vscode.ConfigurationTarget.Global
-        );
+      const config = vscode.workspace.getConfiguration('varro');
+      const value = request.unset ? undefined : `${request.providerID}/${request.modelID}`;
+      if (request.target === 'auto_approve') {
+        await writeRenamedSetting('permissions.approveModel', value, config);
+      } else {
+        const key =
+          request.target === 'commit_message'
+            ? 'commitMessage.model'
+            : request.target === 'review'
+              ? 'walkthrough.model'
+              : request.target === 'prompt_completion'
+                ? 'promptCompletion.model'
+                : 'followups.model';
+        await config.update(key, value, vscode.ConfigurationTarget.Global);
+      }
       return this.readOpenCodeModelRouting();
     }
     return this.updateOpenCodeModelRouting(request);
@@ -1512,77 +1515,6 @@ export class OpenCodeConfigService {
         return route?.providerID === request.providerID && route.modelID === request.modelID;
       }) ?? null
     );
-  }
-
-  /**
-   * Sets or removes OpenCode's global `warming` setting, which keeps every root session's prompt
-   * cache alive. `null` removes it from every global config file so no copy keeps it on.
-   */
-  async updateGlobalWarming(value: true | { duration: string } | null): Promise<void> {
-    if (this.callbacks.server.isAttachOnly) {
-      throw new Error(
-        'Keeping all sessions warm edits the global OpenCode config, which is unavailable in attach-only mode.'
-      );
-    }
-    const globalPaths = getOpenCodeConfigPaths();
-    const readGlobalFiles = async () => {
-      const files: OpenCodeConfigFile[] = [];
-      for (const path of globalPaths) {
-        const uri = vscode.Uri.file(path);
-        if (!(await readConfigStat(uri))) continue;
-        const raw = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-        files.push({ path, uri, raw, config: parseOpenCodeConfig(raw, path) });
-      }
-      return files;
-    };
-    const files = await readGlobalFiles();
-    const configured = files.filter((file) => Object.hasOwn(file.config, 'warming'));
-    const defaultPath = globalPaths.find(
-      (candidate) => getOpenCodePathApi(candidate).basename(candidate) === 'opencode.json'
-    );
-    if (!defaultPath) throw new Error('Could not resolve global OpenCode config');
-    const targets =
-      value === null
-        ? configured.map((file) => file.path)
-        : [configured.at(-1)?.path ?? files.at(-1)?.path ?? defaultPath];
-    let changed = false;
-    for (const path of targets) {
-      const wrote = await withOpenCodeConfigUpdateLock(
-        getCanonicalOpenCodeConfigPath(path),
-        async () => {
-          const uri = vscode.Uri.file(path);
-          if (
-            vscode.workspace.textDocuments.some(
-              (document) => document.isDirty && isSameWorkspacePath(document.uri.fsPath, path)
-            )
-          ) {
-            throw new Error(`${path} has unsaved changes; save before changing session warming`);
-          }
-          const initialStat = await readConfigStat(uri);
-          const raw = initialStat
-            ? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri))
-            : '{\n  "$schema": "https://opencode.ai/config.json"\n}\n';
-          const current = parseOpenCodeConfig(raw, path);
-          if (isDeepStrictEqual(current.warming, value ?? undefined)) return false;
-          if (value === null && !Object.hasOwn(current, 'warming')) return false;
-          const next = applyJsoncChange(raw, ['warming'], value ?? undefined);
-          if (!this.areConfigStatsEqual(initialStat, await readConfigStat(uri))) {
-            throw new Error(`${path} changed while updating session warming; please retry`);
-          }
-          if (!initialStat)
-            await vscode.workspace.fs.createDirectory(
-              vscode.Uri.file(getOpenCodePathApi(path).dirname(path))
-            );
-          await vscode.workspace.fs.writeFile(
-            uri,
-            new TextEncoder().encode(next.endsWith('\n') ? next : `${next}\n`)
-          );
-          return true;
-        }
-      );
-      changed = wrote || changed;
-    }
-    if (changed) await this.callbacks.refreshOpenCodeGlobalConfig?.();
   }
 
   private areConfigStatsEqual(left: vscode.FileStat | null, right: vscode.FileStat | null) {

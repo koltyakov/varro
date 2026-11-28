@@ -9,7 +9,12 @@ import { disposeProcessInspection, prepareProcessInspection } from './process-in
 import { diagnosticTimeline } from './diagnostics';
 import { measureStartupPhase } from '../shared/startup';
 import { prepareVarroScratchDirectory } from './varro-state-paths';
-import { readPromptTrace } from './extension-config';
+import {
+  hasIgnoredWorkspaceServerCommand,
+  readPromptTrace,
+  readServerCommand,
+} from './extension-config';
+import { migrateRenamedSettings } from './renamed-settings';
 import { configurePromptTrace } from './prompt-trace';
 
 const CONTEXT_RESCOPE_RETRY_MS = 50;
@@ -206,6 +211,13 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 }
 
+function warnAboutIgnoredWorkspaceServerCommand(config: vscode.WorkspaceConfiguration) {
+  if (!hasIgnoredWorkspaceServerCommand(config)) return;
+  logger.warn(
+    'Ignoring varro.server.command from workspace settings. Set the OpenCode executable path in user or remote settings.'
+  );
+}
+
 async function activateExtension(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
   configurePromptTrace(readPromptTrace);
@@ -216,11 +228,15 @@ async function activateExtension(context: vscode.ExtensionContext) {
     );
   });
   if (!vscode.workspace.workspaceFolders?.length) await prepareVarroScratchDirectory();
+  // Before any setting is read or a configuration listener exists, so the moves cannot trigger
+  // restarts, reload prompts, or warming changes. Without released user values it writes nothing.
+  await migrateRenamedSettings((message) => logger.warn(message));
 
   const config = vscode.workspace.getConfiguration('varro');
-  const port = readServerPortSetting(config.get<unknown>('server.port', 'auto'));
+  const port = readServerPortSetting(config.get<unknown>('server.port'));
   const autoStart = config.get<boolean>('server.autoStart', true);
-  const command = config.get<string>('server.command', '');
+  const command = readServerCommand(config);
+  warnAboutIgnoredWorkspaceServerCommand(config);
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
   const simulateNoProviders = config.get<boolean>('debug.simulateNoProviders', false);
   let legacyDefaultEndpoint = false;
@@ -349,9 +365,10 @@ async function activateExtension(context: vscode.ExtensionContext) {
         syncShowFileDiffsContext(nextConfig);
       }
       if (launchSettingsChanged) {
+        warnAboutIgnoredWorkspaceServerCommand(nextConfig);
         server?.updateLaunchSettings({
           autoStart: nextConfig.get<boolean>('server.autoStart', true),
-          command: nextConfig.get<string>('server.command', ''),
+          command: readServerCommand(nextConfig),
         });
       }
     })

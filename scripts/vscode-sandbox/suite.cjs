@@ -55,7 +55,7 @@ const EXPECTATIONS = {
   'explicit-port-conflict': [
     '  - **Version:** `1.18.15`',
     'Explicit ports never fall back.',
-    'Set varro.server.port to auto or an available integer between 1 and 65535.',
+    'Clear varro.server.port to select a port automatically, or set an available integer between 1 and 65535.',
     '  - **Health:** unhealthy',
   ],
   'required-update-disabled': [

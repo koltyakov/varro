@@ -323,7 +323,10 @@ test.describe('auto-scroll', () => {
       page,
     }) => {
       await page.setViewportSize({ width: 504, height: 900 });
-      await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+      // Problems context is off by default; the attachment case attaches Problems.
+      await page.goto(
+        `/e2e/harness/index.html?scenario=large-transcript${growth === 'attachment' ? '&problems=1' : ''}`
+      );
       const composer = page.getByRole('textbox', { name: 'Message composer' });
       await expect(composer).toBeVisible();
       await expect.poll(() => getListDistanceFromBottom(page)).toBeLessThan(1);

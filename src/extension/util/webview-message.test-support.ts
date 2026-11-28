@@ -218,10 +218,9 @@ export const VALID_WEBVIEW_MESSAGES = {
     payload: { managerSessionId: 'session-1', model: null },
   },
   'ralph/sync': { type: 'ralph/sync', payload: {} },
-  'warming/sync': { type: 'warming/sync' },
-  'warming/set': { type: 'warming/set', payload: { sessionId: 'session-1', enabled: true } },
-  'warming/samples': {
-    type: 'warming/samples',
+  'promptCache/sync': { type: 'promptCache/sync' },
+  'promptCache/samples': {
+    type: 'promptCache/samples',
     payload: {
       sessionId: 'session-1',
       samples: [

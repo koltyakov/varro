@@ -43,7 +43,6 @@ import {
   showModelPicker,
   showThinking,
   showFileDiffs,
-  showEmptyStateHistogram,
   getChildRunsByParentId,
 } from '../lib/state';
 import {
@@ -95,7 +94,6 @@ import {
 } from './message/UserMessageContent';
 import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
-import { newChatDraftKey } from '../lib/new-chat-draft';
 import {
   getPrefetchedSessionHistory,
   getSessionHistoryCursor,
@@ -147,7 +145,6 @@ import {
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
 import { StarterLogo } from './message-list/StarterLogo';
-import { StarterHistogram } from './message-list/StarterHistogram';
 import { SessionSearch } from './message-list/SessionSearch';
 import {
   getSubagentSessionIds,
@@ -11894,16 +11891,6 @@ export function MessageList() {
           if (searchNavigationTargetId()) cancelStickyNavigation();
         }}
       />
-      <Show
-        when={
-          showEmptyStateHistogram() && !state.messagesLoading && shouldShowStarterLogo()
-            ? newChatDraftKey() + 1
-            : undefined
-        }
-        keyed
-      >
-        {(_draftKey) => <StarterHistogram onClick={requestComposerFocus} />}
-      </Show>
       <Show when={hydratingSession()}>
         <div class="chat-messages-loading" role="status" aria-label="Loading messages">
           <span class="chat-messages-loading-dot" />

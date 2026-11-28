@@ -2130,7 +2130,7 @@ describe('parseWebviewMessage protocol coverage', () => {
     'chat/new-window',
     'vscode/open-settings',
     'server/restart',
-    'warming/sync',
+    'promptCache/sync',
   ]);
   const GARBAGE_PAYLOAD_TYPES = new Set<WebviewMessage['type']>(
     [...OPTIONAL_PAYLOAD_TYPES].filter((type) => type !== 'vscode/open-folder')
@@ -2413,9 +2413,9 @@ describe('parseWebviewMessage rejection paths', () => {
 it('accepts bounded prompt cache history samples and rejects malformed ones', () => {
   const sample = { providerID: 'openai', modelID: 'gpt-6.2-sol', at: 1, gapMs: 600_000, hit: true };
   const parse = (samples: unknown[], sessionId = 'ses_1') =>
-    parseWebviewMessage({ type: 'warming/samples', payload: { sessionId, samples } });
+    parseWebviewMessage({ type: 'promptCache/samples', payload: { sessionId, samples } });
   expect(parse([sample])).toEqual({
-    type: 'warming/samples',
+    type: 'promptCache/samples',
     payload: { sessionId: 'ses_1', samples: [sample] },
   });
   expect(parse([{ ...sample, gapMs: 0 }])).toBeNull();

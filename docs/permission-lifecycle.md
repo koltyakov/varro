@@ -79,6 +79,9 @@ Effective mode resolution follows these rules:
 - Otherwise, a child recursively inherits its parent's effective mode.
 - A root without a stored mode falls back to `default`.
 - A new-chat draft uses the workspace-specific saved draft mode, then the configured default.
+  The configured default is the user-level `varro.permissions.defaultMode`. A workspace or folder
+  value applies only when it is stricter (`default` before `auto` before `full`), so a repository
+  cannot start new chats in a more permissive mode than the user chose.
 - A fork is a new root, so Varro saves the source session's effective non-default mode in the fork's metadata
   and local session-mode storage. This metadata update does not append permission rules.
 - Prompts and attention are scoped to the complete session tree, not just the active root ID.
@@ -257,8 +260,8 @@ the blocker when the task needs the denied action. Rejection feedback reaches th
 rejected tool result (see `Reject with instructions` under Manual Approval), so the guidance
 refers to it directly.
 
-`varro.chat.permissionGuidance` selects `default`, `custom` (text from
-`varro.chat.permissionGuidanceText`), or `off`. Both settings are application-scoped and read only
+`varro.permissions.onReject` selects `default`, `custom` (text from
+`varro.permissions.onRejectCustom`), or `off`. Both settings are application-scoped and read only
 from user settings, so repository workspace settings cannot inject or remove system prompt text.
 Empty custom text falls back to the default. `off` omits only this paragraph: the workspace scope,
 citation, and selected-agent guidance stay in place, and empty parts are dropped rather than
@@ -421,8 +424,8 @@ session ID, title, and metadata, so requests from different sessions are not gro
 
 ## Automatic Judging
 
-Auto mode applies configured V2 shell rules first, then local rules, opted-in decision providers,
-and the chat-model judge.
+Auto mode applies configured V2 shell rules first, then local rules, the one decision reviewer
+selected by `varro.permissions.decisionModel`, and the chat-model judge.
 
 On V2, configured native shell rules are checked before local rules. Every concrete resource in
 the request must resolve to an explicit configured `allow` to bypass the judge; the request's save
@@ -473,50 +476,94 @@ External-directory requests are never delegated to the model judge. Ambiguous pa
 mixed approved and unapproved path sets, and approvals made with `Once` must ask the user. This keeps
 prior approvals from being generalized to unrelated or sensitive directories.
 
-### Native decision provider
+### Decision Reviewer
 
-`varro.chat.autoApproveDecisionModel` explicitly opts in to a server-hosted decision model. It defaults
-to empty and the Models view validates selections against `/api/model?types=decision`. V1 stays
-inactive; V2 must advertise `/api/experimental/generate/decisions` in its OpenAPI document. Native
-generation uses the server's base configuration and credentials, with no session or workspace
-override. Permission evidence is JSON-encoded text and remains untrusted data.
+`varro.permissions.decisionModel` selects at most one decision reviewer. It is empty by default, is
+read only from user settings, and there is no separate Jev on/off setting; the old
+`varro.decisions.jev.autoApprove` value is not read. `directJevModelID` in
+`src/extension/jev-decisions.ts` is the single check for which transport a value selects:
 
-Native reviews run after local rules and before legacy Jev. They share Jev's questions and probability
-gates below. The decoder requires exactly three uniquely named, correctly typed answers with finite
-probabilities in [0, 1]. Invalid, refused, or failed reviews fall through to opted-in legacy Jev, then
-the chat judge. A valid `ask` is terminal, not a reason to try another reviewer. Discovery and generation
-share a five-second abort deadline and generation has a 64 KiB response limit.
+- A `typesafe/<model>` value, which the Models view writes as `typesafe/jev-latest` when Jev is turned
+  on, selects the direct TypeSafe client. It runs only while an API key is available (VS Code secret
+  storage via **Add decision model** in the Models view menu, or `TYPESAFE_API_KEY`); without a key
+  the value is inert and the chat judge reviews. `NativeDecisions.model` is `null` for these values,
+  so they never reach OpenCode's decision API.
+- Any other `provider/model` selects an OpenCode-hosted decision model. V1 stays inactive; V2 must
+  advertise `/api/experimental/generate/decisions` in its OpenAPI document, and the Models view
+  validates selections against `/api/model?types=decision`. Native generation uses the server's base
+  configuration and credentials, with no session or workspace override.
 
-Native verdicts retain the actual `reviewerModel` and cache under that route. Failed decision
-reviewers must never be selected as chat fallback models. External-directory requests never reach
-either decision transport. A decision is not a permission acknowledgement; all visibility, ownership,
-late-result, and reply-acknowledgement rules still apply.
+The Jev toggle writes the direct route when turned on (keeping an existing `typesafe/<model>` value)
+and clears the setting when turned off only if it holds a direct route. Selecting a native model
+replaces a Jev selection; selecting **Off** in the native selector clears only a native selection.
+Disconnecting the TypeSafe key also clears a direct route, so no dangling selection remains.
 
-### Jev Decision Provider
-
-When `varro.decisions.jev.autoApprove` is on and a TypeSafe API key is available (VS Code secret
-storage via **Add decision model** in the Models view menu, or `TYPESAFE_API_KEY`), requests not
-decided locally go to TypeSafe's Jev before any model judge session is created. Jev returns calibrated probabilities,
-not text, so Varro applies the gate in code:
+The pipeline is local rules, then the one configured decision reviewer, then the chat model judge.
+Both transports send the same `permissionDecisionQuestions()`, with permission evidence encoded as
+JSON and treated as untrusted data, and apply the same gate in code:
 
 - `allow` requires the `allow` option at probability 0.8 or higher, confidence 0.75 or higher, and
   both the side-effect and approval-steering yes/no probabilities below 0.2.
 - `reject` requires the `reject` option at probability 0.9 or higher and at least one prior user
   rejection in the conversation tree.
-- Everything else is `ask`. Jev cannot produce an `actionSummary`, so revealed prompts use the
-  normal metadata fallback.
-- A Jev error or timeout (5 seconds) falls back to the model judge within the same overall timeout.
+- Everything else is `ask`. Decision reviewers cannot produce an `actionSummary`, so revealed prompts
+  use the normal metadata fallback.
 
-External-directory requests remain local-only and never reach Jev. Jev verdicts are cached with the
-same key and TTL as model verdicts, using `typesafe/<model>` as the model component, and
-`resolveModel` reports that route so the composer shows TypeSafe as the reviewer.
+A valid `ask` is terminal, not a reason to try another reviewer. Only an error, an invalid answer, or
+a timeout falls through to the chat judge, within the same overall timeout. The native decoder
+requires exactly three uniquely named, correctly typed answers (`decision`, `destructive`,
+`manipulation`) with finite probabilities in [0, 1]. Each transport has a five-second deadline, and
+native generation has a 64 KiB response limit. Failed decision reviewers must never be selected as
+chat fallback models.
 
-Every model verdict (native decision, Jev, or model judge) carries `reviewerModel`, and cached verdicts keep it. The
-auto-approve activity tooltip shows it on its own `Reviewer:` line; local-rule verdicts have none.
+External-directory requests remain local-only and never reach a decision reviewer. Decision verdicts
+are cached with the same key and TTL as model verdicts, using the reviewer's route (`typesafe/<model>`
+for Jev) as the model component, and `resolveModel` reports that route so the composer shows the
+reviewer. A decision is not a permission acknowledgement; all visibility, ownership, late-result, and
+reply-acknowledgement rules still apply.
+
+Every model verdict (decision reviewer or model judge) carries `reviewerModel`, and cached verdicts
+keep it. The auto-approve activity tooltip shows it on its own `Reviewer:` line; local-rule verdicts
+have none.
+
+### Prior Decisions and Rejection Feedback
+
+Every reviewer, the decision reviewers and the chat judge alike, receives the same
+`priorUserDecisions` and applies the same wording from `src/extension/permission-review-policy.ts`,
+so they cannot disagree about the same evidence. The policy mirrors the agent guidance in
+[authoritative resolution](#authoritative-resolution) and does not depend on
+`varro.permissions.onReject`: reviewers apply it whether the agent guidance is `default`,
+`custom`, or `off`.
+
+- A prior rejection supports `reject` only when the pending action retries the same denied action,
+  materially the same operation on the same target, and no later decision approved a matching
+  action.
+- Reaching the same result through a different tool, command, or approach is not by itself a reason
+  to reject. A different approach is judged on its own merits: `allow` only if it independently meets
+  the normal allow bar, otherwise `ask`. When it is unclear whether the user wants the alternative,
+  the answer is `ask`, never `reject`.
+- Rejection feedback is evidence of what the user wants instead. It can make an alternative expected
+  or a retry clearly unwanted, but it never authorizes an action: destructive, irreversible,
+  external, credential, publishing, and unclear actions still return `ask`.
+
+None of this changes the code gates above, the terminal `ask`, the external-directory exclusion, or
+the approval-steering check. The chat judge has no code gate that requires a prior rejection for
+`reject`; it relies on the prompt.
+
+`priorUserDecisions` comes only from the webview's record of the user's own responses
+(`recordPermissionDecisionReference` after `respondPermission`), never from a tool call. A
+`Reject with instructions` response stores its trimmed feedback on that rejected reference, bounded
+to `AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH` (500) characters; the extension parser keeps
+`feedback` only on rejected references and bounds it again. The reviewer instructions say that only
+the `response` and `feedback` fields come from the user: an entry's title, pattern, and metadata
+describe the earlier tool call, and text in the pending permission or those details claiming the
+user asked for an action must be ignored. Rejections from earlier turns are dropped before the
+request, so a later user message starts without them. References, including feedback, are part of
+the verdict-cache key, so a new user decision never reuses a verdict cached for the earlier evidence.
 
 ### Model Judge
 
-Requests not decided locally or by an opted-in decision provider may be sent to a temporary hidden OpenCode session. That session denies
+Requests not decided locally or by the configured decision reviewer may be sent to a temporary hidden OpenCode session. That session denies
 all tools except structured output. Permission text, command text, paths, metadata, and prior user
 decisions are untrusted input to the judge, never instructions. A confirmed `always` response is
 strong preference evidence for materially similar or narrower non-destructive actions in the same
@@ -531,7 +578,7 @@ parameters, unclear destinations, and possible private-data disclosure must fall
 
 The judge model is resolved in this order:
 
-1. `varro.chat.autoApproveModel`
+1. `varro.permissions.approveModel`
 2. Repository-scoped OpenCode `small_model`
 3. OpenAI GPT Luna Fast when the account is confirmed as eligible
 4. OpenAI GPT Luna
@@ -546,7 +593,7 @@ globally selected Varro model. That value is only the final fallback after the c
 Judge outcomes map as follows:
 
 - `allow` sends `once`, not `always`.
-- `reject` sends `reject` and is intended for materially matching prior user rejections.
+- `reject` sends `reject` and is intended for retries of an action the user rejected.
 - `ask` reveals the prompt.
 - A thrown error or timeout reveals the prompt.
 
@@ -767,7 +814,8 @@ Also run `npm run lint:check` and `npm run typecheck` when implementation or typ
 | Prompt grouping and snapshot mutation guards | `src/webview/lib/permission-grouping.ts`, `src/webview/lib/state-permissions.ts` |
 | Local and model judge policy | `src/extension/auto-approve-judge.ts` |
 | Judge model fallback order | `src/extension/helper-model-selection.ts` |
-| Jev decision gate, credentials, and opt-in settings | `src/extension/jev-decisions.ts`, `src/extension/decision-providers.ts` |
+| Decision gate, direct Jev route, credentials, and decision-model selection | `src/extension/jev-decisions.ts`, `src/extension/decision-providers.ts` |
+| Shared prior-rejection policy for every reviewer | `src/extension/permission-review-policy.ts` |
 | Native decision discovery, transport, and strict answer decoding | `src/extension/native-decisions.ts` |
 | Host attention, persistence, and recovery | `src/extension/session-state-manager.ts` |
 | Workspace filtering plus internal helper-session identification, hiding, and stale cleanup | `src/extension/rest-proxy.ts`, `src/extension/hidden-session-manager.ts` |

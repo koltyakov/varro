@@ -1108,6 +1108,46 @@ describe('ModelsPanel', () => {
     flushSolid();
   });
 
+  it('clears the native reviewer selection when turning on Jev replaces it', async () => {
+    const jev = {
+      connected: true,
+      credentialSource: 'secret',
+      model: 'jev-latest',
+      autoApprove: false,
+    };
+    const nativeModel = { providerID: 'typesafe-ai', modelID: 'jev', name: 'Jev' };
+    clientMocks.decisionProviderStatus.mockResolvedValue({
+      native: {
+        visible: true,
+        supported: true,
+        model: { providerID: 'typesafe-ai', modelID: 'jev' },
+        models: [nativeModel],
+      },
+      jev,
+    });
+    clientMocks.updateDecisionProvider.mockResolvedValueOnce({
+      native: { visible: true, supported: true, model: null, models: [nativeModel] },
+      jev: { ...jev, autoApprove: true },
+    });
+    renderPanel();
+    const select = await vi.waitFor(() => {
+      const element = container?.querySelector<HTMLSelectElement>(
+        'select[aria-label="Native permission reviewer"]'
+      );
+      expect(element?.value).toBe('typesafe-ai/jev');
+      return element!;
+    });
+    flushSolid();
+
+    container!.querySelector<HTMLInputElement>('.decision-provider-checkbox')!.click();
+    flushSolid();
+
+    await vi.waitFor(() => expect(select.value).toBe(''));
+    expect(container!.querySelector<HTMLInputElement>('.decision-provider-checkbox')?.checked).toBe(
+      true
+    );
+  });
+
   it.each(['Jev', 'native'])(
     'marks the chat judge as fallback while %s handles auto-approve',
     async (reviewer) => {

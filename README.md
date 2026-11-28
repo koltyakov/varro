@@ -95,7 +95,7 @@ Answer requests with `Reject`, `Once`, or `Always`. Choose a permission mode per
 - `Auto` uses local rules and an optional model, leaving undecided requests for manual approval.
 - `Full access` allows the session to act without confirmation.
 
-Varro starts in `Auto` unless overridden by `varro.chat.defaultPermissionMode` or a saved selection. Child sessions inherit the nearest selected mode; their manual requests appear in the parent chat. See the [permissions guide](https://github.com/koltyakov/varro/blob/main/docs/permissions.md) for rules and automatic review.
+Varro starts in `Auto` unless overridden by `varro.permissions.defaultMode` or a saved selection. Child sessions inherit the nearest selected mode; their manual requests appear in the parent chat. See the [permissions guide](https://github.com/koltyakov/varro/blob/main/docs/permissions.md) for rules and automatic review.
 
 ![Per-session permission modes in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/permissions.png)
 
@@ -111,11 +111,11 @@ Use **Manage Skills** in the view's `...` menu to see the skills OpenCode discov
 
 The MCP picker keeps its own session selection without changing defaults. On-demand servers stay visible and connect when selected. Connections are shared, so a server needed by a running session or child task remains connected until that work finishes. Selection is not per-session tool isolation.
 
-Follow-ups are enabled by default using the session's model and reasoning. Override with **Use for follow-ups** in a model's context menu or `varro.chat.followupModel`; opt out with `varro.chat.followupsEnabled: false`. Requires OpenCode V2; sends the current request and answer for extra inference that may consume tokens or subscription quota. Hover to preview prompts; click to send, preserving your agent, permissions, draft, and attachments. When two or more suggestions are compatible, an **All** button (also **Send all follow-ups** in an action's context menu) sends them as one combined request. No history backfill or helper chats.
+Follow-ups are enabled by default using the session's model and reasoning. Override with **Use for follow-ups** in a model's context menu or `varro.followups.model`; opt out with `varro.followups.enabled: false`. Requires OpenCode V2; sends the current request and answer for extra inference that may consume tokens or subscription quota. Hover to preview prompts; click to send, preserving your agent, permissions, draft, and attachments. When two or more suggestions are compatible, an **All** button (also **Send all follow-ups** in an action's context menu) sends them as one combined request. No history backfill or helper chats.
 
-For proxy accounting, opt in to `varro.chat.promptTrace` in user settings to add purpose and source attribution to auxiliary inference prompts. A compatible proxy hook must extract and strip the marker. See [prompt tracing and gateway integration](docs/prompt-tracing.md) for covered routes, metadata, and limitations.
+For proxy accounting, opt in to `varro.promptTracing.enabled` in user settings to add purpose and source attribution to auxiliary inference prompts. A compatible proxy hook must extract and strip the marker. See [prompt tracing and gateway integration](docs/prompt-tracing.md) for covered routes, metadata, and limitations.
 
-Inline prompt completion is off by default and requires v2 with a supported direct API-key connection. Right-click an eligible model and choose **Use for prompt completion**, or set `varro.chat.promptCompletionModel`. After a typing pause, Varro sends the draft, up to ten recent user prompts, and the latest agent reply from that chat directly to the model. Credentials stay in the extension host. Tab accepts a suggestion; Escape dismisses it; Enter sends only typed or accepted text. Choose **Don't use for prompt completion** to disable it. **Test prompt completion** makes a sample API call that may consume usage but sends no conversation history.
+Inline prompt completion is off by default and requires v2 with a supported direct API-key connection. Right-click an eligible model and choose **Use for prompt completion**, or set `varro.promptCompletion.model`. After a typing pause, Varro sends the draft, up to ten recent user prompts, and the latest agent reply from that chat directly to the model. Credentials stay in the extension host. Tab accepts a suggestion; Escape dismisses it; Enter sends only typed or accepted text. Choose **Don't use for prompt completion** to disable it. **Test prompt completion** makes a sample API call that may consume usage but sends no conversation history.
 
 For image analysis with a text-only model, configure an image-capable `vision` agent and mention `@vision`. For read-only investigation, configure an `ask` agent with read and search permissions. See [vision setup](https://github.com/koltyakov/varro/blob/main/docs/usage.md#add-vision-to-a-text-only-model) and [primary agents](https://github.com/koltyakov/varro/blob/main/docs/usage.md#configure-primary-agents).
 
@@ -125,7 +125,7 @@ For image analysis with a text-only model, configure an image-capable `vision` a
 
 The composer shows context-window fill; its popup breaks down tokens and reported cost. Run `/stats` or `Varro: Usage Stats` for cross-project token and duration reports covering today, 7 days, and 30 days. Use `/stats all` for retained and archived usage history.
 
-Varro can keep an idle session's prompt cache alive after each reply so the next message is cheaper; it is off by default because each keep-alive costs tokens. See [keeping the prompt cache warm](https://github.com/koltyakov/varro/blob/main/docs/usage.md#keep-the-prompt-cache-warm).
+The context popup estimates when an idle session's prompt cache expires, and a warning above the chat input says when a large context will be re-sent uncached. See [prompt cache lifetimes](https://github.com/koltyakov/varro/blob/main/docs/usage.md#prompt-cache-lifetimes).
 
 Run `Varro: Export All-Time Usage to CSV` to save daily usage by provider, model, and recorded reasoning setting, with separate input, output, reasoning, and cache token columns. It includes the usage archive without double counting live copies. Dates are UTC; unavailable reasoning settings are marked `unknown`.
 
@@ -145,7 +145,7 @@ Select the Source Control list icon or run `Varro: Walk Through Changes` to get 
 
 ## Server and updates
 
-Varro remembers a local port with `varro.server.port: "auto"` and reuses verified servers across reloads and updates. New managed servers require credentials. Set a fixed port to use a specific endpoint; explicit ports never silently fall back. For manual management, also disable `varro.server.autoStart` and run `opencode serve --port 4096` with the matching port.
+Varro remembers a local port while `varro.server.port` is empty and reuses verified servers across reloads and updates. New managed servers require credentials. Set a fixed port to use a specific endpoint; explicit ports never silently fall back. For manual management, also disable `varro.server.autoStart` and run `opencode serve --port 4096` with the matching port.
 
 Unknown server ownership or a different OS user requires confirmation before loading sessions. This prevents accidental attachment, not unauthorized access to an unauthenticated server. See [server ownership](docs/server-ownership.md).
 

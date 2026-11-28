@@ -21,7 +21,7 @@ export function PromptCacheWarning(props: {
   sessionId: string | null;
   activity: PromptCacheActivity | null;
   contextTokens: number;
-  /** `varro.chat.promptCacheWarningTokens`; `0` turns the warning off. */
+  /** `varro.chat.cacheWarningTokens`; `0` turns the warning off. */
   thresholdTokens: number;
 }) {
   const [expired, setExpired] = createSignal(false);

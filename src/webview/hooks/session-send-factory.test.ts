@@ -206,6 +206,7 @@ describe('SessionSendOperations', () => {
     flushSolid();
     appStore.setState(storePath('attachedDiagnostics', { diagnostics: [diagnostic], total: 1 }));
     flushSolid();
+    appStore.setState(storePath('autoAttachProblems', true));
     appStore.setState(storePath('inlineProblems', [{ id: 'draft-problem', diagnostic }]));
     flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});
@@ -283,6 +284,7 @@ describe('SessionSendOperations', () => {
           message: 'Captured problem',
         },
       };
+      appStore.setState(storePath('autoAttachProblems', true));
       appStore.setState(storePath('inlineProblems', [reference]));
       flushSolid();
       const sendAsync = vi.fn<SendAsync>(async () => {
@@ -323,6 +325,7 @@ describe('SessionSendOperations', () => {
         message: 'Live problem',
       },
     };
+    appStore.setState(storePath('autoAttachProblems', true));
     appStore.setState(storePath('inlineProblems', [live]));
     flushSolid();
     const sendAsync = vi.fn<SendAsync>(async () => {});

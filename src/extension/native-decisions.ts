@@ -7,7 +7,11 @@ import type {
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import type { OpenCodeServer } from './server';
 import { parseModelRoute } from './sidebar-provider-utils';
-import { gatePermissionDecision, permissionDecisionQuestions } from './jev-decisions';
+import {
+  directJevModelID,
+  gatePermissionDecision,
+  permissionDecisionQuestions,
+} from './jev-decisions';
 import { tracePrompt } from './prompt-trace';
 
 const DECISION_PATH = '/api/experimental/generate/decisions';
@@ -19,8 +23,12 @@ export class NativeDecisions {
     private readonly getConfiguredModel: () => string
   ) {}
 
+  /** The configured OpenCode decision model; a direct TypeSafe route never reaches this API. */
   get model() {
-    return this.server.apiVersion === 2 ? parseModelRoute(this.getConfiguredModel()) : null;
+    const configured = this.getConfiguredModel();
+    return this.server.apiVersion === 2 && directJevModelID(configured) === null
+      ? parseModelRoute(configured)
+      : null;
   }
 
   async status(): Promise<NonNullable<DecisionProviderStatus['native']>> {

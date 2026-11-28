@@ -47,17 +47,19 @@ Read the command, path, URL, or tool details before responding. `Always` can cov
 
 `Auto approve` first checks narrow local rules. These rules cover known read-only operations, safe workspace edits, some read-only shell commands, and exact external-directory scopes you previously approved with `Always`.
 
-If local rules cannot decide, Varro may create a temporary hidden OpenCode session to review the request. The reviewer receives the action details and relevant prior permission decisions. It cannot use tools other than structured output. Its result has three possible effects:
+If local rules cannot decide, a decision model reviews the request when `varro.permissions.decisionModel` selects one: TypeSafe's Jev (turned on with its toggle in the Models view, which sets `typesafe/jev-latest`) or an OpenCode-hosted decision model. There is no separate Jev setting. When no decision model is set, or it fails or times out, Varro creates a temporary hidden OpenCode session with the chat model judge. Every reviewer receives the action details and relevant prior permission decisions, including the instructions you gave when you rejected an earlier request. The chat judge cannot use tools other than structured output. The result has three possible effects:
 
 - Approve this request once
-- Reject a request that materially matches a prior rejection
+- Reject a request that retries an action you rejected
 - Ask you to decide
 
-An error or timeout also falls back to a manual prompt. Automatic approval never creates an `Always` rule.
+A rejection blocks retrying the same action, not a different approach. If you reject an action and ask for another way, that alternative is reviewed on its own merits: it is approved only if it would be approved anyway, and when it is unclear whether you want it you are asked instead of it being rejected. Your rejection instructions can show what you want, but they never approve an action by themselves, so destructive, external, credential, or publishing actions still ask you. Reviewers apply this rule whatever `varro.permissions.onReject` is set to.
 
-You can choose the reviewer model with `varro.chat.autoApproveModel` or from the Models view. If you do not choose one, Varro follows its model fallback order, starting with the project's OpenCode `small_model` when configured and then compatible helper or session models.
+An error or timeout of the chat judge falls back to a manual prompt. Automatic approval never creates an `Always` rule.
 
-Commands, paths, URLs, tool metadata, and prior decisions may be sent to the selected reviewer model. Choose a provider that is appropriate for your code and data.
+You can choose the chat reviewer model with `varro.permissions.approveModel` or from the Models view. If you do not choose one, Varro follows its model fallback order, starting with the project's OpenCode `small_model` when configured and then compatible helper or session models.
+
+Commands, paths, URLs, tool metadata, and prior decisions, including rejection instructions, may be sent to the selected reviewer model or to TypeSafe. Choose a provider that is appropriate for your code and data.
 
 ## Default mode and OpenCode rules
 
@@ -78,7 +80,7 @@ See [v2 permissions](https://opencode.ai/v2/docs/permissions/) for the recommend
 
 ## Session behavior
 
-- New chats use the saved workspace selection, then `varro.chat.defaultPermissionMode`.
+- New chats use the saved workspace selection, then `varro.permissions.defaultMode`. A workspace setting can select a stricter default than your user setting, never a more permissive one.
 - Existing sessions keep their selected mode.
 - Child sessions inherit the nearest selected mode in their session tree.
 - Forked sessions copy the source session's non-default mode.

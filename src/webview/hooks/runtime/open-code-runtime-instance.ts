@@ -3667,8 +3667,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   ) {
     const permission = appStore.state.permissions.find((item) => item.id === permissionId);
     const groupMembers = permission ? permissionsStore.getPermissionGroupMembers(permission) : [];
+    // Feedback comes only from the user's own response, never from the tool call.
     const decisionReference = permission
-      ? toApprovedPermissionReference(permission, response)
+      ? toApprovedPermissionReference(permission, response, options?.message)
       : null;
     const decisionTurnMessageId = getPermissionDecisionTurnMessageId(sessionId);
     const releaseRemovalIntent = registerPermissionRemovalIntent(

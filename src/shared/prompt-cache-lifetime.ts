@@ -51,11 +51,6 @@ export function parsePromptCacheTtl(value: string | undefined): number | undefin
   return ms > 0 ? ms : undefined;
 }
 
-/** Re-send this long after the last request: a minute early for short lifetimes, 10% early for long ones. */
-export function promptCacheKeepAliveIntervalMs(ttlMs: number): number {
-  return Math.max(ttlMs / 2, Math.min(ttlMs * 0.9, ttlMs - MINUTE));
-}
-
 function formatTtl(ms: number) {
   return ms >= HOUR && ms % HOUR === 0 ? `${ms / HOUR} h` : `${Math.round(ms / MINUTE)} min`;
 }
@@ -173,7 +168,7 @@ function hostFor(providerID: string, id: string) {
 
 /**
  * Documented or measured lifetimes for other popular providers. Most cache automatically without
- * promising a lifetime, so `ttlMs` stays at what keep-alives can count on and `likelyMs` follows
+ * promising a lifetime, so `ttlMs` stays at what can be counted on and `likelyMs` follows
  * what the provider describes or independent measurements found.
  */
 function otherProviderLifetime(
@@ -388,7 +383,7 @@ export function promptCacheProviderKey(providerID: string): string {
 /**
  * Applies how long this user's caches have actually lasted. Accounts differ, by plan, data
  * retention or extra usage, so evidence replaces the usual-lifetime guess. It only shortens the
- * lifetime keep-alives follow: one that arrives late pays to rebuild the cache.
+ * guaranteed lifetime, so the estimate never promises a cache that has already expired.
  */
 export function withLearnedPromptCacheLifetime(
   lifetime: PromptCacheLifetime,

@@ -5,7 +5,7 @@ import { postWebviewMessage } from './helpers';
 test('Problems picker hides added entries and restores them when their attachment is removed', async ({
   page,
 }) => {
-  await page.goto('/e2e/harness/index.html?scenario=file-search');
+  await page.goto('/e2e/harness/index.html?scenario=file-search&problems=1');
   const composer = page.getByRole('textbox', { name: 'Message composer' });
   await composer.fill('Review ');
   await postWebviewMessage(page, {
@@ -79,7 +79,7 @@ test('Problems picker hides added entries and restores them when their attachmen
 test('Problems search filters locally across words and selects the first match on Enter', async ({
   page,
 }) => {
-  await page.goto('/e2e/harness/index.html?scenario=file-search');
+  await page.goto('/e2e/harness/index.html?scenario=file-search&problems=1');
   const composer = page.getByRole('textbox', { name: 'Message composer' });
   await composer.fill('/problems ');
   const choices = page.locator('.completion-problems');
@@ -119,7 +119,7 @@ test('Problems search filters locally across words and selects the first match o
 test('VS Code Add to Context accumulates attachments without changing the draft text', async ({
   page,
 }) => {
-  await page.goto('/e2e/harness/index.html?scenario=file-search');
+  await page.goto('/e2e/harness/index.html?scenario=file-search&problems=1');
   const composer = page.getByRole('textbox', { name: 'Message composer' });
   await expect(composer).toBeVisible();
   await composer.fill('Explain this');
@@ -178,7 +178,7 @@ test('VS Code Add to Context accumulates attachments without changing the draft 
 
 for (const selection of ['All', 'Unused workspace variable']) {
   test(`/problems attaches ${selection} from the workspace picker`, async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=file-search');
+    await page.goto('/e2e/harness/index.html?scenario=file-search&problems=1');
     const composer = page.getByRole('textbox', { name: 'Message composer' });
     await expect(composer).toBeVisible();
     await composer.fill('/problems');
@@ -298,7 +298,7 @@ for (const enabled of [true, false]) {
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 474, height: 650 });
-    await page.goto('/e2e/harness/index.html?scenario=file-search');
+    await page.goto('/e2e/harness/index.html?scenario=file-search&problems=1');
     const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
     await expect(composer).toBeVisible();
     await postWebviewMessage(page, {

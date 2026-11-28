@@ -186,7 +186,6 @@ function createSession(options?: {
       showFileDiffs: true,
       showChangedFiles: true,
       showTurnTimer: true,
-      showEmptyStateHistogram: true,
       debugShowQuotaWarning: true,
       desktopSessionPaneSide: 'left' as const,
       defaultPermissionMode: 'default' as const,
@@ -720,11 +719,7 @@ describe('WebviewSession', () => {
     await flushMicrotasks();
 
     expect(bridge.renderHtml).toHaveBeenCalledWith(
-      expect.objectContaining({
-        showTurnTimer: true,
-        showEmptyStateHistogram: true,
-        debugShowQuotaWarning: true,
-      })
+      expect.objectContaining({ showTurnTimer: true, debugShowQuotaWarning: true })
     );
   });
 

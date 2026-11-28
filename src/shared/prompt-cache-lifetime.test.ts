@@ -9,7 +9,6 @@ import {
   promptCacheSample,
   withLearnedPromptCacheLifetime,
   parsePromptCacheTtl,
-  promptCacheKeepAliveIntervalMs,
   promptCacheLifetimeFor,
   promptCacheUsedAt,
   resolvePromptCacheLifetime,
@@ -374,12 +373,5 @@ describe('prompt cache lifetime', () => {
       expect(isPromptCacheHistogram([[1, 2]])).toBe(false);
       expect(isPromptCacheHistogram(emptyPromptCacheHistogram().map(() => [-1, 0]))).toBe(false);
     });
-  });
-
-  it('pings a minute early for short lifetimes and 10% early for long ones', () => {
-    expect(promptCacheKeepAliveIntervalMs(5 * MINUTE)).toBe(4 * MINUTE);
-    expect(promptCacheKeepAliveIntervalMs(30 * MINUTE)).toBe(27 * MINUTE);
-    expect(promptCacheKeepAliveIntervalMs(HOUR)).toBe(54 * MINUTE);
-    expect(promptCacheKeepAliveIntervalMs(90_000)).toBe(45_000);
   });
 });

@@ -192,7 +192,8 @@ preparation before rejecting an attach-only connection.
 
 ## Automatic ports and upgrade compatibility
 
-`varro.server.port` defaults to `"auto"`. New managed launches choose a random
+`varro.server.port` is empty by default, which selects a port automatically; the
+previously documented `"auto"` value still does. New managed launches choose a random
 loopback port in 49152-65535 and retry collisions a bounded number of times.
 The actual port is persisted in the existing lease. An explicit integer setting
 never selects another port or redirects to a differently registered v2 service.

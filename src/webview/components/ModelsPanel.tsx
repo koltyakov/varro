@@ -930,7 +930,7 @@ export function ModelsPanel() {
               (!normalizedQuery() || /typesafe|jev|decision/.test(normalizedQuery()))
             }
           >
-            <DecisionProviderSection status={jevStatus()!} onStatusChange={setJevStatus} />
+            <DecisionProviderSection status={jevStatus()!} onStatusChange={updateDecisionStatus} />
           </Show>
           <Show
             when={state.providers.length > 0}
@@ -1117,7 +1117,7 @@ export function ModelsPanel() {
                   (!isModelRoute(routing().followupModel, menu.providerID, menu.modelID) &&
                     (state.serverStatus.state !== 'running' || state.serverStatus.apiVersion !== 2))
                 }
-                title="Suggest optional next actions using an additional model request. Leave unset to use the session model and reasoning. Disable with varro.chat.followupsEnabled. Requires OpenCode V2."
+                title="Suggest optional next actions using an additional model request. Leave unset to use the session model and reasoning. Disable with varro.followups.enabled. Requires OpenCode V2."
                 onClick={() =>
                   void saveRouting({
                     target: 'followups',

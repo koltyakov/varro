@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.37.4",
+  "version": "0.38.0",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -537,356 +537,422 @@
         "when": "varro:focusedChatSurface == sidebar && varro:canNavigateForward"
       }
     ],
-    "configuration": {
-      "title": "Varro",
-      "properties": {
-        "varro.notifications.sound": {
-          "type": "object",
-          "scope": "application",
-          "additionalProperties": false,
-          "properties": {
-            "permission": {
-              "type": "boolean",
-              "description": "Permission requests, including requests from subagents.",
-              "default": false
-            },
-            "question": {
-              "type": "boolean",
-              "description": "Questions that need your answer.",
-              "default": false
-            },
-            "completed": {
-              "type": "boolean",
-              "description": "Completed replies in non-plan conversations.",
-              "default": false
-            },
-            "planReady": {
-              "type": "boolean",
-              "description": "Plans ready for review.",
-              "default": false
-            }
+    "configuration": [
+      {
+        "id": "varro.chat",
+        "order": 1,
+        "title": "Chat",
+        "properties": {
+          "varro.chat.autoAttachActiveFile": {
+            "order": 1,
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically attach the active file or editor selection to chat. Disable to hide the automatic file chip and exclude this context from prompts, including queued messages. Manually attached files are unaffected."
           },
-          "default": {
-            "permission": false,
-            "question": false,
-            "completed": false,
-            "planReady": false
+          "varro.chat.autoAttachProblems": {
+            "order": 2,
+            "type": "boolean",
+            "default": false,
+            "description": "Enable VS Code Problems context in chat. Disable to hide the Problems attachment chip and exclude diagnostics from prompts, including queued messages."
           },
-          "markdownDescription": "Choose which events play the water-plop sound when the originating VS Code window is not focused, including while another VS Code window is active or visible side by side. Leave all events unchecked to disable sound. Requires a local desktop extension host. On Linux, install `paplay`, `aplay`, or `canberra-gtk-play`."
-        },
-        "varro.notifications.native": {
-          "type": "boolean",
-          "scope": "application",
-          "default": false,
-          "markdownDescription": "Show operating-system notifications for completed replies, plans ready for review, permission requests, and questions when the originating VS Code window is not focused, including while another VS Code window is active or visible side by side. Sound is controlled separately by `varro.notifications.sound`. Requires a local desktop extension host and OS notification permissions. On Linux, install `notify-send`."
-        },
-        "varro.server.port": {
-          "oneOf": [
-            {
-              "type": "string",
-              "enum": [
-                "auto"
-              ]
+          "varro.chat.showFileDiffs": {
+            "order": 3,
+            "type": "boolean",
+            "default": false,
+            "description": "Show line-by-line edits directly in file-change tool cards."
+          },
+          "varro.chat.expandThinking": {
+            "order": 4,
+            "type": "boolean",
+            "default": false,
+            "description": "Expand thinking details after two seconds while reasoning is active, collapse finished thinking into rows, and return it to Explored when the turn finishes."
+          },
+          "varro.chat.remoteImages": {
+            "order": 5,
+            "type": "string",
+            "scope": "application",
+            "enum": [
+              "off",
+              "ask",
+              "on"
+            ],
+            "enumDescriptions": [
+              "Show image alt text without fetching remote images.",
+              "Show placeholders with Load image and Load all controls.",
+              "Automatically load remote image previews near the viewport."
+            ],
+            "default": "ask",
+            "markdownDescription": "Show HTTPS Markdown image previews manually by default, automatically with `on`, or as alt text with `off`. Load all loads the images in the current response. Downloads run on the extension host, without cookies or authorization headers, and only accept bounded public-network raster images. Loading exposes the extension host's IP address and requested URL to the image server. Repository workspace settings cannot enable automatic loading."
+          },
+          "varro.chat.showChangedFiles": {
+            "order": 6,
+            "type": "boolean",
+            "default": false,
+            "description": "Show the changed-files panel above the chat input."
+          },
+          "varro.chat.tabbedPanels": {
+            "order": 7,
+            "type": "boolean",
+            "default": true,
+            "description": "Show the queue, goal, todos, background services and changed-files panels above the chat input as tabs, one at a time. Tabs appear only when at least three panels are shown; turn off to always stack them."
+          },
+          "varro.chat.showTurnTimer": {
+            "order": 8,
+            "type": "boolean",
+            "default": true,
+            "description": "Show the elapsed duration of the active turn beside the chat input status controls."
+          },
+          "varro.chat.sessionsPaneSide": {
+            "order": 9,
+            "type": "string",
+            "enum": [
+              "left",
+              "right"
+            ],
+            "default": "right",
+            "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
+          },
+          "varro.chat.fontSize": {
+            "order": 10,
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 6,
+            "maximum": 100,
+            "default": null,
+            "markdownDescription": "Font size for text in Varro chat. Set to `null` to use the VS Code `chat.fontSize` setting, or use `13.5` for text slightly larger than the default."
+          }
+        }
+      },
+      {
+        "id": "varro.permissions",
+        "order": 2,
+        "title": "Permissions",
+        "properties": {
+          "varro.permissions.defaultMode": {
+            "order": 1,
+            "type": "string",
+            "enum": [
+              "default",
+              "auto",
+              "full"
+            ],
+            "default": "auto",
+            "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` follows OpenCode permission settings and shows requests OpenCode asks about, `auto` judges eligible requests automatically, and `full` grants unrestricted access. Workspace settings can select a stricter mode than your user setting, never a more permissive one."
+          },
+          "varro.permissions.approveModel": {
+            "order": 2,
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+            "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+            "markdownDescription": "Chat model that reviews permission requests in Auto mode, as `provider/model`. When `#varro.permissions.decisionModel#` is set, it reviews only the requests the decision model fails to answer. Leave empty to let Varro select a suitable model automatically, or choose one in Varro's Models view."
+          },
+          "varro.permissions.decisionModel": {
+            "order": 3,
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+            "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+            "markdownDescription": "Decision model that reviews permission requests in Auto mode before the chat model in `#varro.permissions.approveModel#`, as `provider/model`. It approves only when it is confident. When it is unsure, Varro asks you; when it fails or times out, the chat model reviews the request instead. Set `typesafe/jev-latest` to use TypeSafe's Jev directly: connect it with **Add decision model** in the Varro Models view menu, or set `TYPESAFE_API_KEY`. Any other value selects an OpenCode-hosted decision model, which requires OpenCode 2.2.0 decision generation and uses the server's own configuration and credentials. Permission details are sent to the selected model. Leave empty to turn decision review off."
+          },
+          "varro.permissions.onReject": {
+            "order": 4,
+            "type": "string",
+            "scope": "application",
+            "enum": [
+              "default",
+              "custom",
+              "off"
+            ],
+            "markdownEnumDescriptions": [
+              "Use Varro's built-in guidance: never work around a rejection on its own, but follow an alternative the user asks for.",
+              "Use the text from `#varro.permissions.onRejectCustom#`.",
+              "Add no rejected-permission guidance to the system prompt."
+            ],
+            "default": "default",
+            "markdownDescription": "Guidance Varro adds to the session system prompt about rejected tool permissions. OpenCode still enforces permissions in every mode. Varro-managed servers keep the agent loop running after a rejection, so with `off` the model may try another way to reach the same result; every attempt still needs its own permission. You can write your own policy in `AGENTS.md` instead. Changing this setting changes the system prompt and invalidates cached prompt prefixes once. Repository workspace settings cannot change it."
+          },
+          "varro.permissions.onRejectCustom": {
+            "order": 5,
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Custom rejected-permission guidance used when `#varro.permissions.onReject#` is `custom`. If this is empty, Varro uses its built-in guidance."
+          },
+          "varro.chat.autoApproveModel": {
+            "order": 6,
+            "type": "string",
+            "scope": "application",
+            "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+            "default": "",
+            "markdownDeprecationMessage": "Renamed to `#varro.permissions.approveModel#`. Varro moves a user setting to the new name when it starts, and reads this one only while the new setting is unset."
+          }
+        }
+      },
+      {
+        "id": "varro.utilities",
+        "order": 3,
+        "title": "Utilities",
+        "properties": {
+          "varro.followups.enabled": {
+            "order": 1,
+            "type": "boolean",
+            "scope": "application",
+            "default": true,
+            "markdownDescription": "Suggest optional next actions after completed Build responses. Requires OpenCode V2 stateless generation. Sends the current request and final answer for additional inference, which may consume paid tokens or subscription quota. Disable to opt out."
+          },
+          "varro.followups.model": {
+            "order": 2,
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+            "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+            "markdownDescription": "Optional provider/model override for follow-ups. Leave empty to use the current session's model and reasoning, or choose Use for follow-ups in Varro's Models view. Disable `#varro.followups.enabled#` to opt out. Hover an action to preview its prompt; click to send immediately with unchanged permissions, draft, and attachments."
+          },
+          "varro.promptCompletion.model": {
+            "order": 3,
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+            "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+            "markdownDescription": "Optional provider/model for inline prompt suggestions. Requires OpenCode V2 and a supported direct completion API with API-key authentication. Subscription/OAuth connections and unsupported APIs cannot be used, and no utility chats are created. Leave empty to disable. Suggestions send your draft and recent prompts from the current conversation to this model. Choose an eligible fast model in Varro's Models view. Tab accepts a suggestion; Escape dismisses it. Enter sends typed or accepted text.",
+            "tags": [
+              "advanced"
+            ]
+          },
+          "varro.commitMessage.model": {
+            "order": 4,
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+            "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+            "markdownDescription": "Provider/model used to generate commit messages. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
+          },
+          "varro.commitMessage.rules": {
+            "order": 5,
+            "type": "string",
+            "scope": "resource",
+            "default": "",
+            "markdownDescription": "Style and format instructions for generated commit messages. User settings provide a default; workspace and folder settings override it for the selected Git repository. For example: `Use Conventional Commits with a scope.` Rules cannot override grounding in the supplied changes or enable tools and commits."
+          },
+          "varro.walkthrough.model": {
+            "order": 6,
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+            "patternErrorMessage": "Use provider/model or provider/model#variant, or leave the setting empty.",
+            "markdownDescription": "Provider/model used for changes walkthroughs, optionally with a reasoning variant as `provider/model#variant`. Leave empty to use the active chat's selected model and reasoning. Select a configured model from Varro's Models view with **Use for reviews**."
+          },
+          "varro.promptTracing.enabled": {
+            "order": 7,
+            "type": "boolean",
+            "scope": "application",
+            "default": false,
+            "markdownDescription": "Include a VARRO_TRACE_V1 attribution line in auxiliary inference prompts for compatible proxy hooks: follow-ups, permission judging, commit messages, titles, side questions, background-process judging, walkthroughs, and prompt completion. Sends purpose, known session/root IDs, and available request/helper IDs; requests without a source session use a hashed workspace ID when available. Requires a proxy hook to apply accounting metadata and strip the line before inference; otherwise the model receives it. Does not change conversation history, permissions, or enable inference features."
+          },
+          "varro.chat.fallbackTitle": {
+            "order": 8,
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Generate a title in Varro when OpenCode leaves a session untitled. Leave off to rely on OpenCode's own session naming.",
+            "tags": [
+              "advanced"
+            ]
+          }
+        }
+      },
+      {
+        "id": "varro.notifications",
+        "order": 4,
+        "title": "Notifications",
+        "properties": {
+          "varro.notifications.native": {
+            "order": 1,
+            "type": "boolean",
+            "scope": "application",
+            "default": false,
+            "markdownDescription": "Show operating-system notifications for completed replies, plans ready for review, permission requests, and questions when the originating VS Code window is not focused, including while another VS Code window is active or visible side by side. Sound is controlled separately by `#varro.notifications.sound#`. Requires a local desktop extension host and OS notification permissions. On Linux, install `notify-send`."
+          },
+          "varro.notifications.sound": {
+            "order": 2,
+            "type": "object",
+            "scope": "application",
+            "additionalProperties": false,
+            "properties": {
+              "permission": {
+                "type": "boolean",
+                "description": "Permission requests, including requests from subagents.",
+                "default": false
+              },
+              "question": {
+                "type": "boolean",
+                "description": "Questions that need your answer.",
+                "default": false
+              },
+              "completed": {
+                "type": "boolean",
+                "description": "Completed replies in non-plan conversations.",
+                "default": false
+              },
+              "planReady": {
+                "type": "boolean",
+                "description": "Plans ready for review.",
+                "default": false
+              }
             },
-            {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 65535
-            }
-          ],
-          "default": "auto",
-          "markdownDescription": "Automatically select and remember a local server port, or set an exact port from 1 through 65535. Existing verified servers are reused without restarting. Explicit ports never fall back to another port. Reload the VS Code window after changing this setting."
-        },
-        "varro.server.command": {
-          "type": "string",
-          "default": "",
-          "description": "Optional path to the OpenCode CLI executable used for startup and CLI actions. OpenCode v2 is recommended; v1 remains supported. When empty, Varro searches for opencode2 first, then opencode. Both current CLI families use opencode. Set an explicit v1 executable path to keep using v1."
-        },
-        "varro.server.autoUpdate": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically install updates within the installed OpenCode CLI family: @opencode/cli for v2 on Windows, macOS, and Linux; opencode-ai for v1 on macOS and Linux. Does not migrate v1 to v2. Native Windows v1 uses an update prompt."
-        },
-        "varro.providerLimits.statusBarDisplay": {
-          "type": "string",
-          "enum": [
-            "rotating",
-            "all"
-          ],
-          "enumDescriptions": [
-            "Show one pinned provider at a time, rotating every 15 seconds.",
-            "Show all pinned providers at once."
-          ],
-          "default": "rotating",
-          "description": "Choose how pinned provider limits appear in the status bar. Providers selected in visible chats in this window are excluded. The tooltip shows available limits for the remaining pinned providers."
-        },
-        "varro.usageReports.showCacheWrite": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show cache write tokens in a separate column in usage reports. When disabled, cache write tokens are included in the Input column."
-        },
-        "varro.chat.showFileDiffs": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show line-by-line edits directly in file-change tool cards."
-        },
-        "varro.chat.expandThinking": {
-          "type": "boolean",
-          "default": false,
-          "description": "Expand thinking details after two seconds while reasoning is active, collapse finished thinking into rows, and return it to Explored when the turn finishes."
-        },
-        "varro.chat.fontSize": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 6,
-          "maximum": 100,
-          "default": null,
-          "markdownDescription": "Font size for text in Varro chat. Set to `null` to use the VS Code `chat.fontSize` setting, or use `13.5` for text slightly larger than the default."
-        },
-        "varro.chat.showChangedFiles": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show the changed-files panel above the chat input."
-        },
-        "varro.chat.showEmptyStateHistogram": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show the interactive tiled histogram at the top of empty chats. Animates while hovered."
-        },
-        "varro.chat.autoAttachActiveFile": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically attach the active file or editor selection to chat. Disable to hide the automatic file chip and exclude this context from prompts, including queued messages. Manually attached files are unaffected."
-        },
-        "varro.chat.autoAttachProblems": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable VS Code Problems context in chat. Disable to hide the Problems attachment chip and exclude diagnostics from prompts, including queued messages."
-        },
-        "varro.chat.promptCacheWarningTokens": {
-          "type": "number",
-          "minimum": 0,
-          "default": 300000,
-          "markdownDescription": "Warn above the composer when an idle session's prompt cache has likely expired and its context holds at least this many tokens. The next message then re-sends the whole context at the uncached rate. Set to `0` to turn the warning off."
-        },
-        "varro.chat.promptCacheWarming": {
-          "type": "string",
-          "scope": "application",
-          "enum": [
-            "off",
-            "chosen",
-            "all"
-          ],
-          "enumDescriptions": [
-            "Never send keep-alive requests.",
-            "Keep warm only the sessions you turn on with Keep warm in the context popup. Varro sends the keep-alives while VS Code runs.",
-            "Turn on OpenCode's own `warming` setting in the global OpenCode config, which keeps every root session warm, also in the TUI."
-          ],
-          "default": "off",
-          "markdownDescription": "Keep an idle session's provider prompt cache alive after each reply, so the next message is cheaper and faster. Each keep-alive sends a short prompt with the whole session context and costs money or subscription quota; with typical cache pricing, about twelve keep-alives cost as much as re-sending the context once uncached. Requires OpenCode v2. `all` writes `warming` to the global OpenCode config and removes it when you switch away. Only user settings can turn this on."
-        },
-        "varro.chat.promptCacheWarmingMinutes": {
-          "type": "number",
-          "enum": [
-            30,
-            60,
-            120,
-            180
-          ],
-          "default": 30,
-          "markdownDescription": "How long a session stays warm after each reply when `#varro.chat.promptCacheWarming#` is on."
-        },
-        "varro.chat.groupComposerBlocks": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the queue, goal, todos, background services and changed files above the chat input one at a time, with a tab menu to switch between them. The menu appears only when at least three of these are shown; disable to always stack them."
-        },
-        "varro.chat.showTurnTimer": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the elapsed duration of the active turn beside the chat input status controls."
-        },
-        "varro.chat.remoteImages": {
-          "type": "string",
-          "scope": "application",
-          "enum": [
-            "off",
-            "ask",
-            "on"
-          ],
-          "enumDescriptions": [
-            "Show image alt text without fetching remote images.",
-            "Show placeholders with Load image and Load all controls.",
-            "Automatically load remote image previews near the viewport."
-          ],
-          "default": "ask",
-          "markdownDescription": "Show HTTPS Markdown image previews manually by default, automatically with `on`, or as alt text with `off`. Load all loads the images in the current response. Downloads run on the extension host, without cookies or authorization headers, and only accept bounded public-network raster images. Loading exposes the extension host's IP address and requested URL to the image server. Repository workspace settings cannot enable automatic loading."
-        },
-        "varro.chat.desktopSessionPaneSide": {
-          "type": "string",
-          "enum": [
-            "left",
-            "right"
-          ],
-          "default": "right",
-          "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
-        },
-        "varro.chat.defaultPermissionMode": {
-          "type": "string",
-          "enum": [
-            "default",
-            "auto",
-            "full"
-          ],
-          "default": "auto",
-          "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` follows OpenCode permission settings and shows requests OpenCode asks about, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
-        },
-        "varro.chat.permissionGuidance": {
-          "type": "string",
-          "scope": "application",
-          "enum": [
-            "default",
-            "custom",
-            "off"
-          ],
-          "enumDescriptions": [
-            "Use Varro's built-in guidance: never work around a rejection on its own, but follow an alternative the user asks for.",
-            "Use the text from `#varro.chat.permissionGuidanceText#`.",
-            "Add no rejected-permission guidance to the system prompt."
-          ],
-          "default": "default",
-          "markdownDescription": "Guidance Varro adds to the session system prompt about rejected tool permissions. OpenCode still enforces permissions in every mode. Varro-managed servers keep the agent loop running after a rejection, so with `off` the model may try another way to reach the same result; every attempt still needs its own permission. You can write your own policy in `AGENTS.md` instead. Changing this setting changes the system prompt and invalidates cached prompt prefixes once. Repository workspace settings cannot change it."
-        },
-        "varro.chat.permissionGuidanceText": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Custom rejected-permission guidance used when `#varro.chat.permissionGuidance#` is `custom`. If this is empty, Varro uses its built-in guidance."
-        },
-        "varro.chat.autoApproveModel": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
-          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
-          "markdownDescription": "Provider/model used by the auto-approve judge. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
-        },
-        "varro.chat.autoApproveDecisionModel": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
-          "markdownDescription": "Optional server-hosted decision model in provider/model form. Requires OpenCode 2.2.0 decision generation. Uses the server's base configuration and credentials, including for remote servers. Permission details are sent to this model in Auto mode. Varro applies probability gates; errors fall back to the configured legacy Jev or chat judge. Leave empty to disable. Select a native decision model in the Models view."
-        },
-        "varro.chat.promptCompletionModel": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
-          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
-          "markdownDescription": "Optional provider/model for inline prompt suggestions. Requires OpenCode V2 and a supported direct completion API with API-key authentication. Subscription/OAuth connections and unsupported APIs cannot be used, and no utility chats are created. Leave empty to disable. Suggestions send your draft and recent prompts from the current conversation to this model. Choose an eligible fast model in Varro's Models view. Tab accepts a suggestion; Escape dismisses it. Enter sends typed or accepted text."
-        },
-        "varro.chat.followupsEnabled": {
-          "type": "boolean",
-          "scope": "application",
-          "default": true,
-          "markdownDescription": "Suggest optional next actions after completed Build responses. Requires OpenCode V2 stateless generation. Sends the current request and final answer for additional inference, which may consume paid tokens or subscription quota. Disable to opt out."
-        },
-        "varro.chat.promptTrace": {
-          "type": "boolean",
-          "scope": "application",
-          "default": false,
-          "markdownDescription": "Include a VARRO_TRACE_V1 attribution line in auxiliary inference prompts for compatible proxy hooks: follow-ups, permission judging, commit messages, titles, side questions, background-process judging, walkthroughs, and prompt completion. Sends purpose, known session/root IDs, and available request/helper IDs; requests without a source session use a hashed workspace ID when available. Requires a proxy hook to apply accounting metadata and strip the line before inference; otherwise the model receives it. Does not change conversation history, permissions, or enable inference features."
-        },
-        "varro.chat.followupModel": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
-          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
-          "markdownDescription": "Optional provider/model override for follow-ups. Leave empty to use the current session's model and reasoning, or choose Use for follow-ups in Varro's Models view. Disable varro.chat.followupsEnabled to opt out. Hover an action to preview its prompt; click to send immediately with unchanged permissions, draft, and attachments."
-        },
-        "varro.chat.autoRenameUntitledSessions": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Let Varro generate a fallback title when OpenCode leaves a session untitled. Disable this to rely only on OpenCode's native session naming."
-        },
-        "varro.review.model": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
-          "patternErrorMessage": "Use provider/model or provider/model#variant, or leave the setting empty.",
-          "markdownDescription": "Provider/model used for changes walkthroughs, optionally with a reasoning variant as `provider/model#variant`. Leave empty to use the active chat's selected model and reasoning. Select a configured model from Varro's Models view with **Use for reviews**."
-        },
-        "varro.commitMessage.model": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
-          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
-          "markdownDescription": "Provider/model used to generate commit messages. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
-        },
-        "varro.commitMessage.rules": {
-          "type": "string",
-          "scope": "resource",
-          "default": "",
-          "markdownDescription": "Style and format instructions for generated commit messages. User settings provide a default; workspace and folder settings override it for the selected Git repository. For example: `Use Conventional Commits with a scope.` Rules cannot override grounding in the supplied changes or enable tools and commits."
-        },
-        "varro.decisions.jev.autoApprove": {
-          "type": "boolean",
-          "scope": "application",
-          "default": false,
-          "markdownDescription": "Use TypeSafe's Jev to judge permission requests in Auto mode before the model judge. Only confident answers approve; anything else asks you. Connect it with **Add decision model** in the Varro Models view menu, or set `TYPESAFE_API_KEY`. Permission details are sent to TypeSafe."
-        },
-        "varro.debug.simulateMissingCli": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "boolean",
-          "default": false,
-          "description": "Debug only: make Varro behave as if the OpenCode CLI is not installed"
-        },
-        "varro.debug.simulateNoProviders": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "boolean",
-          "default": false,
-          "description": "Debug only: make Varro behave as if no providers are configured"
-        },
-        "varro.debug.showQuotaWarning": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "boolean",
-          "default": false,
-          "description": "Debug only: show the quota warning for available provider quotas regardless of remaining allowance or saved dismissals. Closing this preview does not save a dismissal."
-        },
-        "varro.debug.showNativeDecisionModels": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "boolean",
-          "scope": "application",
-          "default": false,
-          "description": "Debug only: show the experimental OpenCode decision-model section in the Models view. Hiding the section does not disable an explicitly configured decision reviewer."
-        },
-        "varro.debug.resetWarningDays": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "number",
-          "minimum": 5,
-          "default": 5,
-          "description": "Debug only: days before a usage reset expires to show its warning. Increase this to preview resets expiring later. Saved dismissals still apply unless debug.showQuotaWarning is enabled."
-        },
-        "varro.debug.simulateUpgradeFailure": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "string",
-          "default": "",
-          "description": "Debug only: make OpenCode CLI updates fail with this error text, to exercise the update recovery guidance (for example \"EPERM: operation not permitted\")"
-        },
-        "varro.server.autoStart": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically start the OpenCode server when Varro first needs it. Disable for attach-only connections to a manually managed, Docker, or tunneled server; local CLI and file-based server configuration actions are unavailable in this mode."
+            "default": {
+              "permission": false,
+              "question": false,
+              "completed": false,
+              "planReady": false
+            },
+            "markdownDescription": "Choose which events play the water-plop sound when the originating VS Code window is not focused, including while another VS Code window is active or visible side by side. Leave all events unchecked to disable sound. Requires a local desktop extension host. On Linux, install `paplay`, `aplay`, or `canberra-gtk-play`."
+          }
+        }
+      },
+      {
+        "id": "varro.usage",
+        "order": 5,
+        "title": "Usage and Limits",
+        "properties": {
+          "varro.providerLimits.statusBar": {
+            "order": 1,
+            "type": "string",
+            "enum": [
+              "rotating",
+              "all"
+            ],
+            "enumDescriptions": [
+              "Show one pinned provider at a time, rotating every 15 seconds.",
+              "Show all pinned providers at once."
+            ],
+            "default": "rotating",
+            "description": "Choose how pinned provider limits appear in the status bar. Providers selected in visible chats in this window are excluded. The tooltip shows available limits for the remaining pinned providers."
+          },
+          "varro.chat.cacheWarningTokens": {
+            "order": 2,
+            "type": "integer",
+            "minimum": 0,
+            "default": 300000,
+            "markdownDescription": "Warn above the chat input when an idle session's prompt cache has likely expired and its context holds at least this many tokens. The next message then re-sends the whole context at the uncached rate. Set to `0` to turn the warning off."
+          },
+          "varro.usageReports.showCacheWrite": {
+            "order": 3,
+            "type": "boolean",
+            "default": false,
+            "description": "Show cache write tokens in a separate column in usage reports. When disabled, cache write tokens are included in the Input column."
+          }
+        }
+      },
+      {
+        "id": "varro.server",
+        "order": 6,
+        "title": "OpenCode CLI and Server",
+        "properties": {
+          "varro.server.command": {
+            "order": 1,
+            "type": "string",
+            "default": "",
+            "description": "Optional path to the OpenCode CLI executable used for startup and CLI actions. OpenCode v2 is recommended; v1 remains supported. When empty, Varro searches for opencode2 first, then opencode. Both current CLI families use opencode. Set an explicit v1 executable path to keep using v1. Workspace and folder settings are ignored; set this in user or remote settings."
+          },
+          "varro.server.autoUpdate": {
+            "order": 2,
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically install updates within the installed OpenCode CLI family: @opencode/cli for v2 on Windows, macOS, and Linux; opencode-ai for v1 on macOS and Linux. Does not migrate v1 to v2. Native Windows v1 uses an update prompt."
+          },
+          "varro.server.autoStart": {
+            "order": 3,
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically start the OpenCode server when Varro first needs it. Disable for attach-only connections to a manually managed, Docker, or tunneled server; local CLI and file-based server configuration actions are unavailable in this mode."
+          },
+          "varro.server.port": {
+            "order": 4,
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 65535,
+            "default": null,
+            "markdownDescription": "Leave empty to let Varro select and remember a local server port automatically, or set an exact port from 1 through 65535. Existing verified servers are reused without restarting. An explicit port never falls back to another port. Reload the VS Code window after changing this setting."
+          }
+        }
+      },
+      {
+        "id": "varro.debug",
+        "order": 7,
+        "title": "Debug",
+        "properties": {
+          "varro.debug.simulateMissingCli": {
+            "order": 1,
+            "type": "boolean",
+            "default": false,
+            "tags": [
+              "advanced"
+            ],
+            "description": "Debug only: make Varro behave as if the OpenCode CLI is not installed"
+          },
+          "varro.debug.simulateNoProviders": {
+            "order": 2,
+            "type": "boolean",
+            "default": false,
+            "tags": [
+              "advanced"
+            ],
+            "description": "Debug only: make Varro behave as if no providers are configured"
+          },
+          "varro.debug.simulateUpgradeFailure": {
+            "order": 3,
+            "type": "string",
+            "default": "",
+            "tags": [
+              "advanced"
+            ],
+            "description": "Debug only: make OpenCode CLI updates fail with this error text, to exercise the update recovery guidance (for example \"EPERM: operation not permitted\")"
+          },
+          "varro.debug.showQuotaWarning": {
+            "order": 4,
+            "type": "boolean",
+            "default": false,
+            "tags": [
+              "advanced"
+            ],
+            "description": "Debug only: show the quota warning for available provider quotas regardless of remaining allowance or saved dismissals. Closing this preview does not save a dismissal."
+          },
+          "varro.debug.resetWarningDays": {
+            "order": 5,
+            "type": "integer",
+            "minimum": 5,
+            "default": 5,
+            "tags": [
+              "advanced"
+            ],
+            "markdownDescription": "Debug only: days before a usage reset expires to show its warning. Increase this to preview resets expiring later. Saved dismissals still apply unless `#varro.debug.showQuotaWarning#` is enabled."
+          },
+          "varro.debug.showDecisionModels": {
+            "order": 6,
+            "type": "boolean",
+            "scope": "application",
+            "default": false,
+            "tags": [
+              "advanced"
+            ],
+            "description": "Debug only: show the experimental OpenCode decision-model section in the Models view. Hiding the section does not disable an explicitly configured decision reviewer."
+          }
         }
       }
-    }
+    ]
   },
   "activationEvents": [
     "onCommand:varro.chat.focus",

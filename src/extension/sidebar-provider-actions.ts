@@ -91,7 +91,7 @@ export interface SidebarProviderActionDeps {
   openNewWindow(): void | Promise<void>;
   editorRouteChanged(route: WebviewRoute): void;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
-  handleWarmingMessage: MessageRouterCallbacks['handleWarmingMessage'];
+  handlePromptCacheMessage: MessageRouterCallbacks['handlePromptCacheMessage'];
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
   claimQueuedMessage: MessageRouterCallbacks['claimQueuedMessage'];
   releaseQueuedMessage: MessageRouterCallbacks['releaseQueuedMessage'];
@@ -242,7 +242,7 @@ export function createSidebarProviderActions(
     openNewWindow: () => deps.openNewWindow(),
     editorRouteChanged: (route) => deps.editorRouteChanged(route),
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
-    handleWarmingMessage: (msg) => deps.handleWarmingMessage(msg),
+    handlePromptCacheMessage: (msg) => deps.handlePromptCacheMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
     claimQueuedMessage: (payload) => deps.claimQueuedMessage(payload),
     releaseQueuedMessage: (payload) => deps.releaseQueuedMessage(payload),
@@ -418,14 +418,14 @@ export function createSidebarProviderActions(
       await vscode.workspace
         .getConfiguration('varro')
         .update(
-          'chat.desktopSessionPaneSide',
+          'chat.sessionsPaneSide',
           payload.desktopSessionPaneSide as 'left' | 'right',
           vscode.ConfigurationTarget.Global
         );
       await vscode.workspace
         .getConfiguration('varro')
         .update(
-          'chat.defaultPermissionMode',
+          'permissions.defaultMode',
           payload.defaultPermissionMode,
           vscode.ConfigurationTarget.Global
         );

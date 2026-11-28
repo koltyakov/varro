@@ -39,7 +39,7 @@ opencode auth login
 
 From inside Varro, `/connect` opens the provider connection dialog. The no-provider recovery screen offers terminal setup. Use `opencode auth login` when a provider does not expose a supported embedded method. If you selected a custom executable such as `opencode2`, use that executable in terminal commands too.
 
-Varro selects and remembers a loopback port by default with `varro.server.port: "auto"`. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it. An update reuses verified running servers and their credentials without a migration restart. Fresh installations do not probe the old default port 4096. See [ownership and migration](server-ownership.md).
+Varro selects and remembers a loopback port by default, while `varro.server.port` is empty. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it. An update reuses verified running servers and their credentials without a migration restart. Fresh installations do not probe the old default port 4096. See [ownership and migration](server-ownership.md).
 
 For normal use, leave `varro.server.autoStart` enabled and let Varro manage OpenCode alongside the VS Code extension host. Docker and separately managed remote servers are not recommended for general use: they disable local integrations and require you to manage networking, authentication, workspace paths, and server maintenance yourself.
 
@@ -497,7 +497,7 @@ The session list uses the same status colors. Hover over any indicator to see it
 
 Opening a session fetches the newest 200 messages. Scrolling to the top automatically prepends the next 200-message page while preserving the visible position. If an earlier page fails to load, the history boundary changes into a `Retry` action.
 
-On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
+On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.sessionsPaneSide` to choose whether that pane appears on the left or right.
 
 If the sidebar is hidden, Varro can show VS Code notifications when a plan is ready, a top-level session fails, or the agent is blocked on a permission or question. The Varro view icon shows a badge with the number of permissions and questions waiting outside the visible chat. It also exposes a status bar item that summarizes waiting or completed top-level sessions, including ordinary completed sessions that do not produce a notification, and alerts in sibling workspaces. Clicking that item opens pending-attention sessions first, otherwise it focuses Varro.
 
@@ -713,7 +713,7 @@ The composer can show model and session metadata:
 - Available OpenAI/Codex and Z.ai usage-limit resets and their expiration times. Varro displays these resets and links to the provider's usage page, but does not redeem them.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 - Reported session cost in the context popup, when OpenCode supplies cost data.
-- A prompt-cache estimate in the context popup, when the latest completed response read or wrote the provider's prompt cache. It counts down that model's cache lifetime from when the response's request was sent, since providers count from the request, not from the end of a long response, and then shows **Likely expired**. It is an estimate, not a provider timer. See [Prompt cache lifetimes](#prompt-cache-lifetimes). In sessions whose context reaches `varro.chat.promptCacheWarningTokens` (250,000 by default; `0` turns it off), a closable warning above the composer also appears once the estimate runs out while the session is idle, showing how many tokens the next message will re-send uncached. Closing it hides it until a later response uses the cache again. See [Keep the prompt cache warm](#keep-the-prompt-cache-warm) to avoid the expiry.
+- A prompt-cache estimate in the context popup, when the latest completed response read or wrote the provider's prompt cache. It counts down that model's cache lifetime from when the response's request was sent, since providers count from the request, not from the end of a long response, and then shows **Likely expired**. It is an estimate, not a provider timer. See [Prompt cache lifetimes](#prompt-cache-lifetimes). In sessions whose context reaches `varro.chat.cacheWarningTokens` (300,000 by default; `0` turns it off), a closable warning above the composer also appears once the estimate runs out while the session is idle, showing how many tokens the next message will re-send uncached. Closing it hides it until a later response uses the cache again. Varro does not send keep-alive requests to keep a cache warm.
 
 When an applicable provider quota has 25% or less remaining, a warning above the composer shows the percentage left in each low window and its reset time. The warning becomes critical at 10% remaining. A low weekly or monthly allowance appears even when the 5-hour allowance is healthy. **View usage** opens the provider's usage page in your browser and is hidden when its URL is unknown.
 
@@ -728,28 +728,19 @@ If a provider or model hits a usage limit, Varro shows a usage-limit banner abov
 - Picking another model from **Switch model…** stops a retrying turn and continues it on the new model.
 - Throttling and provider overload use the warning color; an exhausted quota uses the error color. Varro never switches models on its own.
 
-### Keep the prompt cache warm
+### Prompt cache lifetimes
 
-Providers drop an idle session's prompt cache after a few minutes, so the next message re-sends the whole context at the uncached rate. On OpenCode v2, `varro.chat.promptCacheWarming` sends short keep-alive requests after each reply instead. Each keep-alive re-reads the whole context from the cache, which costs money or subscription quota: with typical cache pricing, about twelve keep-alives cost as much as re-sending the context once. Warming is off by default, and only user settings can turn it on.
-
-- `chosen` - turn **Keep warm** on per root session in the context popup's Prompt cache section. Varro sends OpenCode's transient `/generate` keep-alive shortly before the model's cache would expire (a minute early for 5-minute caches, 10% early for longer ones) while VS Code runs, for `varro.chat.promptCacheWarmingMinutes` (30 by default) after each reply. When the cache already lasts the whole window, such as GPT-5.6 and later with the default 30-minute window, it sends none. It skips running sessions, never warms subagent or helper sessions, and stops early when the last response outlasted the cache, when a keep-alive would arrive after the cache expired (for example after the computer slept), when a keep-alive finds the cache already gone, or when one fails. The popup shows the time left and why warming stopped. Choices are kept per workspace.
-- `all` - writes `warming` to the global OpenCode config, so OpenCode keeps every root session warm, including sessions from the TUI. Switching away from `all` removes the key from every global config file. This needs file-based configuration and is unavailable in attach-only mode.
-
-When OpenCode's own `warming` setting is already on, Varro sends no keep-alives of its own and the popup shows **Kept warm by OpenCode**.
-
-#### Prompt cache lifetimes
-
-The estimate and the keep-alive schedule follow each provider's documented behavior for the model that last used the cache. A request that reads the cache renews it, and the lifetime counts from when that request was sent. The model's effective `cache.ttl` setting (model settings over provider settings) applies where the provider accepts it.
+The estimate follows each provider's documented behavior for the model that last used the cache. A request that reads the cache renews it, and the lifetime counts from when that request was sent. The model's effective `cache.ttl` setting (model settings over provider settings) applies where the provider accepts it.
 
 - Claude on any host (Anthropic, Bedrock, Vertex, OpenRouter, OpenCode Zen): 5 minutes, or 1 hour with `cache.ttl: "1h"`. Older Bedrock releases that only cache for 5 minutes stay at 5.
 - Claude Agent (Claude Code): 1 hour on a Claude subscription and 5 minutes on API billing, told apart by whether Claude Agent prices the model. Claude Code ignores `cache.ttl` and drops to 5 minutes while a subscription runs on extra usage. The lifetime counts from the end of each response, because one OpenCode step runs Claude Code's own request loop.
-- OpenAI GPT-5.6 and later (OpenAI, Azure, Bedrock, OpenRouter, OpenCode Zen): at least 30 minutes, or 12 hours with `cache.ttl: "12h"` (Bedrock accepts only 30 minutes). Entries often last longer, so after 30 minutes the popup shows **May be warm**, and it only reports **Likely expired** and shows the warning after about 3 hours. Keep-alives still follow the 30-minute minimum.
+- OpenAI GPT-5.6 and later (OpenAI, Azure, Bedrock, OpenRouter, OpenCode Zen): at least 30 minutes, or 12 hours with `cache.ttl: "12h"` (Bedrock accepts only 30 minutes). Entries often last longer, so after 30 minutes the popup shows **May be warm**, and it only reports **Likely expired** and shows the warning after about 3 hours.
 - OpenAI GPT-5.5 and earlier models with 24-hour retention, such as GPT-5.1 and GPT-4.1: about 30 minutes. Organizations with Zero Data Retention keep the in-memory default of about 5 to 10 minutes on the earlier models.
 - Other OpenAI models: 5 minutes, maybe warm up to 10 (in-memory retention).
 
-For providers that cache automatically without promising a lifetime, keep-alives follow the shortest lifetime they can count on, and the popup shows **May be warm** until the lifetime the provider describes or independent measurements found:
+For providers that cache automatically without promising a lifetime, the countdown follows the shortest lifetime they can count on, and the popup shows **May be warm** until the lifetime the provider describes or independent measurements found:
 
-| Provider | Keep-alives follow | Likely expired after |
+| Provider | Counted on for | Likely expired after |
 | --- | --- | --- |
 | Gemini (Google, Vertex, OpenRouter `google/`) | 5 min | 15 min (no fixed lifetime; at most 24 h) |
 | DeepSeek | 1 h | 6 h (a disk cache, cleared hours to days after its last use) |
@@ -770,10 +761,10 @@ Accounts differ by plan, data retention, and extra usage, so Varro also learns h
 
 - The likely lifetime becomes the longest idle gap that still found the cache at least half the time, before the gaps where most requests missed.
 - Gaps the cache survived with no misses beyond them only lengthen the estimate.
-- Misses can also shorten the lifetime keep-alives follow. Survived gaps never lengthen it, because a late keep-alive pays to rebuild the cache.
+- Misses can also shorten the lifetime the countdown counts on. Survived gaps never lengthen it, so the countdown never promises a cache that has already expired.
 - Recent evidence outweighs old, so a plan change is picked up.
 - Gaps after a compaction or a model switch are skipped.
-- Learning pauses while OpenCode's own `warming` is on. Sessions chosen for **Keep warm** don't contribute history, since their keep-alives leave no messages.
+- Learning pauses while OpenCode's own `warming` setting is on, because its keep-alives leave no messages Varro could see.
 
 The popup tooltip says when an estimate comes from your sessions.
 
@@ -918,26 +909,35 @@ subagent remain subject to the inherited permission mode. Ambiguous or out-of-wo
 command composition or options that may mutate state also require further review.
 
 Requests not decided by local rules may be sent, with their command, path, metadata, and recent user
-permission decisions, to the configured model in a temporary hidden judge session. The judge may
-allow the exact request once, reject it when materially equivalent to a prior rejection, or show the
-normal manual prompt. Allow and reject verdicts are cached briefly for identical permission context.
+permission decisions, including the instructions you gave with a rejection, to the configured model
+in a temporary hidden judge session. The judge may allow the exact request once, reject it when it
+retries the same action you rejected, or show the normal manual prompt. A different approach that
+reaches the same result is reviewed on its own merits: it is allowed only if it would be allowed
+anyway, and when it is unclear whether you want it you are asked, never silently rejected. Your
+rejection instructions can show what you want instead, but they never approve anything by
+themselves. Every reviewer applies this rule whatever `varro.permissions.onReject` is set
+to. Allow and reject verdicts are cached briefly for identical permission context and decisions.
 Switching away from `Auto` prevents an unfinished judge request from granting permission.
 
 When automatic review falls back to manual approval, the prompt shows a concise action summary when
 available, the full request metadata with copy actions, and the judge's reason under `AI check`.
 
-The chat judge uses `varro.chat.autoApproveModel` first, then OpenCode's `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, and the selected Varro session model. Right-click a model in the Models view to set the VS Code user setting.
+The chat judge uses `varro.permissions.approveModel` first, then OpenCode's `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, and the selected Varro session model. Right-click a model in the Models view to set the VS Code user setting.
 
-The experimental **OpenCode decision model** selector is temporarily hidden. Enable
-`varro.debug.showNativeDecisionModels` to show it on OpenCode 2.2.0+. Native review is off by
-default. Selecting a model sets `varro.chat.autoApproveDecisionModel` and sends unresolved Auto-mode
-permission details to the server's native decisions API before the chat judge. This API uses the
-server's base configuration and credentials, not arbitrary workspace configuration. Allow requires
-probability at least 0.8, confidence at least 0.75, and destructive-action and approval-steering
-probabilities below 0.2. Reject requires probability at least 0.9 and a prior user rejection.
-Other valid answers show the manual prompt. Errors fall back to explicitly enabled legacy TypeSafe
-Jev, then the chat judge. External-directory requests remain local-only. Select **Off** to disable
-native reviews without changing legacy Jev settings.
+`varro.permissions.decisionModel` selects one decision reviewer that runs before the chat judge.
+Turn on TypeSafe's Jev with its toggle in the Models view after **Add decision model**, or set the
+value to `typesafe/jev-latest`; Varro then sends unresolved Auto-mode permission details to
+TypeSafe with your API key. There is no separate Jev setting, and the old
+`varro.decisions.jev.autoApprove` value is not read. Any other value selects an OpenCode-hosted
+decision model through the server's native decisions API (OpenCode 2.2.0+), which uses the
+server's base configuration and credentials, not arbitrary workspace configuration. The
+**OpenCode decision model** selector in the Models view is hidden unless
+`varro.debug.showDecisionModels` is on. Selecting a native model replaces Jev, and turning
+Jev on replaces a native model. Allow requires probability at least 0.8, confidence at least 0.75,
+and destructive-action and approval-steering probabilities below 0.2. Reject requires probability
+at least 0.9 and a prior user rejection. Other valid answers show the manual prompt. Errors and
+timeouts fall back to the chat judge. External-directory requests remain local-only. Turning Jev
+off, disconnecting it, or selecting **Off** in the native selector clears only its own selection.
 
 `Full access` updates the session permission rules and auto-approves pending permission prompts for that session. Select it only when the session can operate without confirmation.
 
@@ -992,7 +992,7 @@ The result opens as a Markdown report in the preview, like `/stats`. Each stop s
 
 Walkthroughs require OpenCode v2. They need a capable model, so they never use OpenCode's `small_model` or the commit-message model chain:
 
-1. The review model from `varro.review.model`, set with **Use for reviews** in a model's context menu in the Models view, where it shows a **review** tag. Add `#variant` to the setting, such as `openai/gpt-6-sol#high`, to pick its reasoning.
+1. The review model from `varro.walkthrough.model`, set with **Use for reviews** in a model's context menu in the Models view, where it shows a **review** tag. Add `#variant` to the setting, such as `openai/gpt-6-sol#high`, to pick its reasoning.
 2. Otherwise the active chat's selected model and reasoning.
 
 The diff is treated as untrusted input. How much diff a walkthrough sends depends on the model: up to half its context window, at most about 200k tokens, or about 50k when OpenCode does not report the window. The progress notification shows the estimated size. A larger diff first leaves out tests, then docs; the report header says so and lists those files under **Also changed**. If the rest still does not fit, Varro refuses rather than truncating and suggests staging a subset or picking a model with a larger context window.
@@ -1079,41 +1079,77 @@ For example, one key can focus the chat on the first press and maximize the seco
 
 ## Settings
 
-Server:
+The Settings editor groups Varro's settings into these categories, in this order. Settings that send data for extra inference, spend tokens, or choose an executable are read from user settings only, so a repository's workspace settings cannot change them.
 
-- `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true` and is marked deprecated/debug-only in VS Code
-- `varro.server.port` - `"auto"` selects and remembers a local port; an integer from 1 through 65535 selects a fixed endpoint without fallback. Reload the VS Code window after changing it
-- `varro.server.command` - optional path to the OpenCode CLI executable. Empty prefers `opencode2`, then `opencode`; use your v1 executable's path to keep v1 selected
-- `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background: v2 on Windows, macOS, and Linux; v1 on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows v2 runs `update <latest-version>` through the resolved CLI and verifies the installed version without stopping the server first. Server restarts still wait for active work and require Varro ownership. Native Windows v1 uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a prompted Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
+Chat:
 
-Chat view:
-
-- `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `auto`
-- `varro.chat.permissionGuidance` - rejected-permission guidance added to the session system prompt: `default`, `custom` (uses `varro.chat.permissionGuidanceText`), or `off`. User settings only; defaults to `default`. See [authoritative resolution](permission-lifecycle.md#authoritative-resolution)
-- `varro.chat.autoApproveModel` - provider/model used by the auto-approve judge; stored in VS Code user settings and selected from Varro's Models view
-- `varro.chat.autoApproveDecisionModel` - optional native OpenCode decision reviewer in provider/model form; off by default and selected in the Models view
+- `varro.chat.autoAttachActiveFile` - attach the active file or editor selection to chat automatically; defaults to `true`
+- `varro.chat.autoAttachProblems` - include VS Code Problems context in chat; defaults to `false`
 - `varro.chat.showFileDiffs` - show line-by-line edits in file-change tool cards; defaults to `false`
 - `varro.chat.expandThinking` - expand thinking details after two seconds while reasoning is active, collapse finished thinking into rows, and return it to `Explored` when the turn finishes; defaults to `false`
+- `varro.chat.remoteImages` - `off`, `ask`, or `on` for HTTPS Markdown image previews; user settings only; defaults to `ask`
+- `varro.chat.showChangedFiles` - show the changed-files panel above the chat input; defaults to `false`
+- `varro.chat.tabbedPanels` - show the queue, goal, todos, background services, and changed-files panels above the chat input as tabs, one at a time; tabs appear only when at least three panels are shown; defaults to `true`
+- `varro.chat.showTurnTimer` - show the elapsed duration of the active turn beside the chat input status controls; defaults to `true`
+- `varro.chat.sessionsPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - `varro.chat.fontSize` - chat text size from `6` through `100`; defaults to `null`, which uses VS Code's `chat.fontSize`. Tool and diff editor content follows `chat.editor.fontSize`
-- `varro.chat.showChangedFiles` - show the changed-files panel above the composer; defaults to `false`
-- `varro.chat.showTurnTimer` - show the elapsed duration of the active turn beside the composer status controls; defaults to `true`
-- `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - Use the scope picker inside the session search field to choose which OpenCode sessions appear. **Folder** shows exact working-directory matches, **Nested** includes folders beneath it in the same OpenCode project, and **Project** shows the entire containing Git project. Varro remembers the choice for each project; non-Git folders offer Folder and Nested independently.
-- `varro.chat.autoRenameUntitledSessions` - generate a fallback title when OpenCode leaves a session untitled; defaults to `false`
-- `varro.chat.promptCacheWarming` - `off`, `chosen`, or `all`; keeps idle sessions' prompt caches alive after each reply on OpenCode v2. User settings only; defaults to `off`. See [Keep the prompt cache warm](#keep-the-prompt-cache-warm)
-- `varro.chat.promptCacheWarmingMinutes` - how long a session stays warm after each reply: `30`, `60`, `120`, or `180`; defaults to `30`
 
-Commit messages:
+Permissions:
 
+- `varro.permissions.defaultMode` - initial permission mode when no saved project or global selection exists; defaults to `auto`. Workspace settings can select a stricter mode than your user setting, never a more permissive one
+- `varro.permissions.approveModel` - chat model that reviews Auto-mode permission requests, as `provider/model`. When a decision model is set, it reviews only the requests the decision model fails to answer. Empty selects a suitable model automatically. User settings only; selected from Varro's Models view
+- `varro.permissions.decisionModel` - decision model that reviews Auto-mode permission requests before the chat model. `typesafe/jev-latest` uses TypeSafe's Jev directly once it is connected with **Add decision model** or `TYPESAFE_API_KEY`; the Jev toggle in the Models view writes this value. Any other `provider/model` selects an OpenCode-hosted decision model (OpenCode 2.2.0 decision generation). There is no separate Jev setting. User settings only; empty by default
+- `varro.permissions.onReject` - rejected-permission guidance added to the session system prompt: `default`, `custom` (uses `varro.permissions.onRejectCustom`), or `off`. User settings only; defaults to `default`. See [authoritative resolution](permission-lifecycle.md#authoritative-resolution). The auto-approve reviewers always apply the same rule whatever this is set to: a rejection blocks retrying the denied action, while a different approach gets its own review
+- `varro.permissions.onRejectCustom` - custom guidance used when `varro.permissions.onReject` is `custom`; user settings only
+
+Utilities:
+
+- `varro.followups.enabled` - suggest optional next actions after completed Build responses on OpenCode V2; user settings only; defaults to `true`
+- `varro.followups.model` - optional provider/model override for follow-ups; empty uses the session's model and reasoning; user settings only
 - `varro.commitMessage.model` - provider/model used to generate commit messages; stored in VS Code user settings and selected from Varro's Models view
-- `varro.review.model` - provider/model, optionally `#variant`, used for changes walkthroughs; empty uses the active chat's selected model and reasoning. Stored in VS Code user settings and selected with **Use for reviews** in Varro's Models view
 - `varro.commitMessage.rules` - style and format instructions, resolved from user, workspace, and folder settings for the selected Git repository
+- `varro.walkthrough.model` - provider/model, optionally `#variant`, used for changes walkthroughs; empty uses the active chat's selected model and reasoning. Stored in VS Code user settings and selected with **Use for reviews** in Varro's Models view
+- `varro.promptTracing.enabled` - add a `VARRO_TRACE_V1` attribution line to auxiliary inference prompts for compatible proxy hooks; user settings only; defaults to `false`. See [prompt tracing](prompt-tracing.md)
 
-There are also deprecated debug-only settings used for development and recovery testing:
+Notifications:
 
-- `varro.debug.simulateMissingCli`
-- `varro.debug.simulateNoProviders`
-- `varro.debug.simulateUpgradeFailure`
+- `varro.notifications.native` - show operating-system notifications for completed replies, plans, permission requests, and questions when the originating window is not focused; defaults to `false`
+- `varro.notifications.sound` - choose which of those events play a sound; all off by default
+
+Usage and Limits:
+
+- `varro.providerLimits.statusBar` - show pinned provider limits one at a time (`rotating`) or all at once (`all`)
+- `varro.chat.cacheWarningTokens` - warn above the chat input when an idle session's prompt cache has likely expired and its context holds at least this many tokens; `0` turns the warning off; defaults to `300000`. See [prompt cache lifetimes](#prompt-cache-lifetimes)
+- `varro.usageReports.showCacheWrite` - show cache write tokens in a separate usage report column; defaults to `false`
+
+OpenCode CLI and Server:
+
+- `varro.server.command` - optional path to the OpenCode CLI executable. Empty prefers `opencode2`, then `opencode`; use your v1 executable's path to keep v1 selected. Read from user or remote settings only; workspace and folder values are ignored
+- `varro.server.autoUpdate` - automatically install updates within the installed CLI family in the background: v2 on Windows, macOS, and Linux; v1 on macOS and Linux. V1 stays on v1; v2 stays on v2. Native Windows v2 runs `update <latest-version>` through the resolved CLI and verifies the installed version without stopping the server first. Server restarts still wait for active work and require Varro ownership. Native Windows v1 uses an upgrade prompt instead because a running server can lock `opencode.exe`. Before opening a prompted Windows update command, Varro waits for active work and stops its managed server; stop a manually launched server yourself. Failed automatic updates show tailored recovery guidance.
+- `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it; defaults to `true`
+- `varro.server.port` - leave empty to select and remember a local port automatically, or set an integer from 1 through 65535 for a fixed endpoint without fallback. An existing `"auto"` value still selects automatically. Reload the VS Code window after changing it
+
+### Advanced and debug settings
+
+These settings are tagged as advanced, so the Settings editor hides them unless you search for the exact setting ID or turn on **Advanced** in the Settings filter:
+
+- `varro.promptCompletion.model` (Utilities) - optional provider/model for inline prompt suggestions; empty turns them off. Choose an eligible model with **Use for prompt completion** in Varro's Models view
+- `varro.chat.fallbackTitle` (Utilities) - generate a title in Varro when OpenCode leaves a session untitled; defaults to `false`, which relies on OpenCode's own session naming
+- `varro.debug.simulateMissingCli`, `varro.debug.simulateNoProviders`, `varro.debug.simulateUpgradeFailure`, `varro.debug.showQuotaWarning`, `varro.debug.resetWarningDays`, and `varro.debug.showDecisionModels` (Debug) - development and recovery testing only
+
+### Renamed settings
+
+When a local VS Code window starts, Varro moves a value saved under this old key in your user settings to the new key and removes the old one; if both are set, the new key wins and the old value is removed. In remote windows Varro does not move anything and keeps reading the old key while the new key is unset. VS Code marks the old key as deprecated. If Settings Sync shares your settings with an older Varro version on another machine, that version no longer sees a moved value.
+
+| Old key | New key |
+| --- | --- |
+| `varro.chat.autoApproveModel` | `varro.permissions.approveModel` |
+
+Other settings were renamed or removed without backward compatibility. Varro no longer reads these keys, so set the new key again if you used one:
+
+- Renamed: `varro.chat.groupComposerBlocks` (now `varro.chat.tabbedPanels`), `varro.chat.autoRenameUntitledSessions` (now `varro.chat.fallbackTitle`), `varro.chat.desktopSessionPaneSide` (now `varro.chat.sessionsPaneSide`), `varro.chat.promptCacheWarningTokens` (now `varro.chat.cacheWarningTokens`), `varro.chat.defaultPermissionMode` (now `varro.permissions.defaultMode`), `varro.chat.permissionGuidance` and `varro.chat.permissionGuidanceText` (now `varro.permissions.onReject` and `varro.permissions.onRejectCustom`), `varro.chat.autoApproveDecisionModel` (now `varro.permissions.decisionModel`), `varro.chat.followupsEnabled` and `varro.chat.followupModel` (now `varro.followups.enabled` and `varro.followups.model`), `varro.chat.promptCompletionModel` (now `varro.promptCompletion.model`), `varro.chat.promptTrace` (now `varro.promptTracing.enabled`), `varro.providerLimits.statusBarDisplay` (now `varro.providerLimits.statusBar`), `varro.review.model` (now `varro.walkthrough.model`), and `varro.debug.showNativeDecisionModels` (now `varro.debug.showDecisionModels`).
+- Removed: `varro.chat.showEmptyStateHistogram`; `varro.decisions.jev.autoApprove` (turn Jev on again with the Models view toggle or by setting `varro.permissions.decisionModel` to `typesafe/jev-latest`); and `varro.chat.promptCacheWarming` and `varro.chat.promptCacheWarmingMinutes`, because Varro no longer keeps prompt caches warm.
 
 ## Troubleshooting
 

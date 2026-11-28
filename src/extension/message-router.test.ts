@@ -73,7 +73,7 @@ function createCallbacks(): MessageRouterCallbacks {
     handleApiRequest: vi.fn(() => Promise.resolve()),
     cancelApiRequest: vi.fn(),
     handleRalphMessage: vi.fn(),
-    handleWarmingMessage: vi.fn(),
+    handlePromptCacheMessage: vi.fn(),
     updateQueuedMessages: vi.fn(() => Promise.resolve()),
     claimQueuedMessage: vi.fn(),
     releaseQueuedMessage: vi.fn(),
@@ -708,14 +708,11 @@ const DISPATCH_EXPECTATIONS = {
     { callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/update-model']] },
   ],
   'ralph/sync': [{ callback: 'handleRalphMessage', args: [VALID_WEBVIEW_MESSAGES['ralph/sync']] }],
-  'warming/sync': [
-    { callback: 'handleWarmingMessage', args: [VALID_WEBVIEW_MESSAGES['warming/sync']] },
+  'promptCache/sync': [
+    { callback: 'handlePromptCacheMessage', args: [VALID_WEBVIEW_MESSAGES['promptCache/sync']] },
   ],
-  'warming/set': [
-    { callback: 'handleWarmingMessage', args: [VALID_WEBVIEW_MESSAGES['warming/set']] },
-  ],
-  'warming/samples': [
-    { callback: 'handleWarmingMessage', args: [VALID_WEBVIEW_MESSAGES['warming/samples']] },
+  'promptCache/samples': [
+    { callback: 'handlePromptCacheMessage', args: [VALID_WEBVIEW_MESSAGES['promptCache/samples']] },
   ],
   log: [{ callback: 'log', args: [{ msg: 'hello', level: 'warn' }] }],
 } as const satisfies Record<WebviewMessage['type'], readonly DispatchExpectation[]>;

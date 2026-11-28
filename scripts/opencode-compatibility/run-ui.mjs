@@ -29,10 +29,9 @@ const workspace = join(root, 'workspace');
 const database = join(root, 'data', 'opencode.db');
 for (const path of [
   workspace,
-  join(workspace, '.vscode'),
   join(root, 'data'),
   join(root, 'home'),
-  join(profile, 'user'),
+  join(profile, 'user', 'User'),
   join(profile, 'extensions'),
 ])
   await mkdir(path, { recursive: true });
@@ -138,8 +137,9 @@ await writeFile(
     },
   })
 );
+// Varro reads its executable path from user settings only, so the isolated profile carries it.
 await writeFile(
-  join(workspace, '.vscode/settings.json'),
+  join(profile, 'user', 'User', 'settings.json'),
   JSON.stringify({
     'varro.server.command': resolve(binary),
     'varro.server.port': port,

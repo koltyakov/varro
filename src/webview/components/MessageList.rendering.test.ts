@@ -11,7 +11,6 @@ import {
   setExpandThinking,
   setSessions,
   setShowFileDiffs,
-  setShowEmptyStateHistogram,
   setShowThinkingPreference,
   setState,
   state,
@@ -38,7 +37,6 @@ import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { markSessionHistoryLoadFailed, setSessionHistoryCursor } from '../lib/message-window';
 import { fixture } from '../test-fixtures';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
-import { startNewChatDraft } from '../lib/new-chat-draft';
 import {
   assistantMessage,
   filePart,
@@ -3806,7 +3804,6 @@ describe('MessageList empty state', () => {
     expect(logo?.width).toBe(256);
     expect(logo?.height).toBe(256);
     expect(logo?.getAttribute('decoding')).toBe('sync');
-    expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
     const hints = container?.querySelectorAll('.chat-empty-hint');
     expect(hints).toHaveLength(6);
     expect([...hints!].map((hint) => hint.textContent)).toEqual([
@@ -3859,8 +3856,6 @@ describe('MessageList empty state', () => {
   });
 
   it('omits the logo image when no logo URI is available but keeps the hints', () => {
-    setShowEmptyStateHistogram(true);
-    flushSolid();
     setState(storePath('emptyStateLogoUri', ''));
     flushSolid();
     setState(
@@ -3877,12 +3872,9 @@ describe('MessageList empty state', () => {
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
     expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(6);
-    expect(container?.querySelector('.chat-empty-histogram')).not.toBeNull();
   });
 
   it('does not show the starter logo while switching to an existing chat with no loaded messages yet', () => {
-    setShowEmptyStateHistogram(true);
-    flushSolid();
     setState(storePath('emptyStateLogoUri', 'https://example.test/logo.svg'));
     flushSolid();
     setState(
@@ -3898,69 +3890,7 @@ describe('MessageList empty state', () => {
 
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
-    expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
   });
-
-  it('mounts the starter histogram only while opted in', () => {
-    mountList();
-    expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
-
-    setShowEmptyStateHistogram(true);
-    flushSolid();
-    const histogram = container?.querySelector('.chat-empty-histogram');
-    expect(histogram).not.toBeNull();
-
-    setShowEmptyStateHistogram(false);
-    flushSolid();
-    expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
-    expect(histogram?.isConnected).toBe(false);
-    expect(container?.querySelector('.chat-empty-state')).not.toBeNull();
-  });
-
-  it('removes the starter histogram when the first message arrives', () => {
-    setShowEmptyStateHistogram(true);
-    flushSolid();
-    setSessions([session('session-1', { time: { created: 100, updated: 100 } })]);
-    flushSolid();
-    setState(storePath('activeSessionId', 'session-1'));
-    flushSolid();
-    mountList();
-    expect(container?.querySelector('.chat-empty-histogram')).not.toBeNull();
-
-    replaceMessages([
-      { info: userMessage('first-message'), parts: [textPart('first-text', 'Hello')] },
-    ]);
-    flushSolid();
-
-    expect(container?.querySelector('.chat-empty-histogram')).toBeNull();
-  });
-
-  it.each([false, true])(
-    'rebuilds the histogram on New chat while already blank, existing session: %s',
-    (existing) => {
-      setShowEmptyStateHistogram(true);
-      flushSolid();
-      if (existing) {
-        setSessions([session('session-1', { time: { created: 100, updated: 100 } })]);
-        flushSolid();
-        setState(storePath('activeSessionId', 'session-1'));
-        flushSolid();
-      }
-      flushSolid();
-      mountList();
-      const first = container?.querySelector('.chat-empty-histogram');
-      expect(first).not.toBeNull();
-      startNewChatDraft();
-      flushSolid();
-      const second = container?.querySelector('.chat-empty-histogram');
-      expect(second).not.toBeNull();
-      expect(second).not.toBe(first);
-      startNewChatDraft();
-      flushSolid();
-      expect(container?.querySelector('.chat-empty-histogram')).not.toBe(second);
-      expect(state.activeSessionId).toBe(existing ? 'session-1' : null);
-    }
-  );
 
   it('shows the parent starter state when only a hidden child message is retained', () => {
     setState(storePath('emptyStateLogoUri', 'https://example.test/logo.svg'));

@@ -11,6 +11,7 @@ import type {
 import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import {
+  AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH,
   createSessionWorkspaceMetadata,
   getSessionWorkspaceScopeFromMetadata,
   isSessionHistoryScope,
@@ -65,6 +66,7 @@ import {
   readFollowupModel,
   readFollowupsEnabled,
   readPermissionGuidance,
+  readPromptCompletionModel,
 } from './extension-config';
 import { parseSelectedModel } from '../shared/model-preferences';
 import { ModelPricingCatalog } from './model-pricing';
@@ -555,8 +557,8 @@ export class RestProxy {
     this.localImages = new LocalImages(callbacks.contextProvider);
     this.remoteImageConfigSubscription = vscode.workspace.onDidChangeConfiguration?.((event) => {
       if (
-        event.affectsConfiguration('varro.chat.followupModel') ||
-        event.affectsConfiguration('varro.chat.followupsEnabled')
+        event.affectsConfiguration('varro.followups.model') ||
+        event.affectsConfiguration('varro.followups.enabled')
       )
         FollowupService.forServer(
           callbacks.server,
@@ -578,10 +580,6 @@ export class RestProxy {
       callbacks.workspaceSessionStatusCoordinator ?? new WorkspaceSessionStatusCoordinator();
     this.internalHelperCleanupCoordinator =
       callbacks.internalHelperCleanupCoordinator ?? new InternalHelperCleanupCoordinator();
-  }
-
-  updateGlobalWarming(value: true | { duration: string } | null): Promise<void> {
-    return this.openCodeConfig.updateGlobalWarming(value);
   }
 
   cancelRequest(payload: ApiCancelPayload) {
@@ -1938,9 +1936,7 @@ export class RestProxy {
         return;
       }
       if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.promptCompletion) {
-        const model = parseModelRoute(
-          vscode.workspace.getConfiguration('varro').get('chat.promptCompletionModel')
-        );
+        const model = parseModelRoute(readPromptCompletionModel());
         const data = model
           ? await this.promptCompletion.complete(
               parsePromptCompletionRequest(payload.body),
@@ -5990,6 +5986,11 @@ function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeRefe
     };
     if (pattern !== undefined) reference.pattern = pattern;
     if (metadata) reference.metadata = metadata;
+    // Only the user's own rejection carries feedback; it is bounded before it reaches a reviewer.
+    const feedback =
+      response === 'reject' && typeof record.feedback === 'string' ? record.feedback.trim() : '';
+    if (feedback)
+      reference.feedback = feedback.slice(0, AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH);
     references.push(reference);
   }
   return references.slice(-20);

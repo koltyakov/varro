@@ -957,7 +957,7 @@ describe('SidebarProvider local config routing', () => {
       });
     }
   );
-  it.each(['varro.chat.autoApproveDecisionModel', 'varro.debug.showNativeDecisionModels'])(
+  it.each(['varro.permissions.decisionModel', 'varro.debug.showDecisionModels'])(
     'notifies the Models view when %s changes externally',
     async (setting) => {
       const { provider } = await createSidebarProviderInstance();
@@ -997,38 +997,44 @@ describe('SidebarProvider local config routing', () => {
     }
   );
 
-  it.each([false, true])('broadcasts the histogram opt-in value %s', async (enabled) => {
+  it.each(['varro.providerLimits.statusBar'])(
+    'updates the pinned limit display when %s changes',
+    async (setting) => {
+      await createSidebarProviderInstance();
+      const { ProviderLimitStatusBar } = await import('./provider-limit-status-bar');
+      const changed = vi.spyOn(ProviderLimitStatusBar.prototype, 'configurationChanged');
+      const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
+      expect(listener).toBeTypeOf('function');
+      await vscodeMock.workspace
+        .getConfiguration('varro')
+        .update(setting.replace('varro.', ''), 'all');
+      listener?.({ affectsConfiguration: (key: string) => key === setting });
+      expect(changed).toHaveBeenCalledOnce();
+      changed.mockRestore();
+    }
+  );
+
+  it.each([
+    ['chat.expandThinking', true, { expandThinking: true }],
+    ['chat.sessionsPaneSide', 'left', { desktopSessionPaneSide: 'left' }],
+    ['promptCompletion.model', 'openai/fast', { promptCompletionModel: 'openai/fast' }],
+    ['chat.cacheWarningTokens', 1234, { promptCacheWarningTokens: 1234 }],
+    ['chat.tabbedPanels', false, { groupComposerBlocks: false }],
+    ['permissions.defaultMode', 'full', { defaultPermissionMode: 'full' }],
+    ['followups.enabled', false, { followupsEnabled: false }],
+    ['followups.model', 'openai/fast', { followupModel: 'openai/fast' }],
+  ] as const)('broadcasts %s changes', async (key, value, expected) => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);
     const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
 
-    await vscodeMock.workspace
-      .getConfiguration('varro')
-      .update('chat.showEmptyStateHistogram', enabled);
-    listener?.({
-      affectsConfiguration: (key: string) => key === 'varro.chat.showEmptyStateHistogram',
-    });
+    await vscodeMock.workspace.getConfiguration('varro').update(key, value);
+    listener?.({ affectsConfiguration: (section: string) => section === `varro.${key}` });
 
     expect(posted).toContainEqual({
       type: 'config/update',
-      payload: expect.objectContaining({ showEmptyStateHistogram: enabled }),
+      payload: expect.objectContaining(expected),
     });
-  });
-
-  it('updates the pinned limit display when its setting changes', async () => {
-    await createSidebarProviderInstance();
-    const { ProviderLimitStatusBar } = await import('./provider-limit-status-bar');
-    const changed = vi.spyOn(ProviderLimitStatusBar.prototype, 'configurationChanged');
-    const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
-    expect(listener).toBeTypeOf('function');
-    await vscodeMock.workspace
-      .getConfiguration('varro')
-      .update('providerLimits.statusBarDisplay', 'all');
-    listener?.({
-      affectsConfiguration: (key: string) => key === 'varro.providerLimits.statusBarDisplay',
-    });
-    expect(changed).toHaveBeenCalledOnce();
-    changed.mockRestore();
   });
 
   it('broadcasts turn-timer configuration changes', async () => {
@@ -1269,9 +1275,10 @@ describe('SidebarProvider local config routing', () => {
 
   it.each([
     ['commit_message', 'commitMessage.model', 'commitMessageModel'],
-    ['auto_approve', 'chat.autoApproveModel', 'autoApproveModel'],
-    ['prompt_completion', 'chat.promptCompletionModel', 'promptCompletionModel'],
-    ['followups', 'chat.followupModel', 'followupModel'],
+    ['auto_approve', 'permissions.approveModel', 'autoApproveModel'],
+    ['prompt_completion', 'promptCompletion.model', 'promptCompletionModel'],
+    ['followups', 'followups.model', 'followupModel'],
+    ['review', 'walkthrough.model', 'reviewModel'],
   ] as const)('writes %s routing to VS Code user settings', async (target, key, responseKey) => {
     vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });
     const server = createServer({ apiVersion: 2 });
@@ -1322,8 +1329,9 @@ describe('SidebarProvider local config routing', () => {
 
   it.each([
     ['commit_message', 'commitMessage.model', 'commitMessageModel'],
-    ['auto_approve', 'chat.autoApproveModel', 'autoApproveModel'],
-    ['prompt_completion', 'chat.promptCompletionModel', 'promptCompletionModel'],
+    ['auto_approve', 'permissions.approveModel', 'autoApproveModel'],
+    ['prompt_completion', 'promptCompletion.model', 'promptCompletionModel'],
+    ['review', 'walkthrough.model', 'reviewModel'],
   ] as const)('clears %s routing from VS Code user settings', async (target, key, responseKey) => {
     const config = vscodeMock.workspace.getConfiguration('varro');
     await config.update(key, 'openai/gpt-5-mini', vscodeMock.ConfigurationTarget.Global);
@@ -1350,6 +1358,49 @@ describe('SidebarProvider local config routing', () => {
       },
     });
   });
+
+  it.each([
+    ['auto_approve', 'permissions.approveModel', 'chat.autoApproveModel', 'autoApproveModel'],
+  ] as const)(
+    'reads and clears a %s model saved under the released setting key',
+    async (target, key, legacyKey, responseKey) => {
+      const config = vscodeMock.workspace.getConfiguration('varro');
+      await config.update(legacyKey, 'openai/gpt-5-mini', vscodeMock.ConfigurationTarget.Global);
+      vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });
+      const { provider } = await createSidebarProviderInstance();
+      const { posted } = attachTestView(provider);
+
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: { id: 23, method: 'GET', path: '/varro/opencode-config' },
+      });
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: {
+          id: 23,
+          data: expect.objectContaining({
+            [responseKey]: { providerID: 'openai', modelID: 'gpt-5-mini' },
+          }),
+        },
+      });
+
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 24,
+          method: 'POST',
+          path: '/varro/opencode-config/model-routing',
+          body: { target, providerID: 'openai', modelID: 'gpt-5-mini', unset: true },
+        },
+      });
+      expect(getConfigurationValue(legacyKey)).toBeUndefined();
+      expect(getConfigurationValue(key)).toBeUndefined();
+      expect(posted).toContainEqual({
+        type: 'api/response',
+        payload: { id: 24, data: expect.objectContaining({ [responseKey]: null }) },
+      });
+    }
+  );
 
   it('writes agent model routing while preserving existing config keys', async () => {
     vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>

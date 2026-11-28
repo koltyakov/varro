@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise command import boundaries with malformed VS Code and process results. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runInNewContext } from 'node:vm';
 import { CodeActionTriggerKind, DiagnosticSeverity } from 'vscode';
 import type * as VSCode from 'vscode';
@@ -234,6 +234,24 @@ function register(
 }
 
 describe('Problems Add to Context action', () => {
+  // Problems context is off by default; these cases turn it on, as a user would.
+  beforeEach(() => {
+    vscodeMock.workspace.getConfiguration.mockImplementation(() => ({
+      get: vi.fn((key: string, fallback: unknown) =>
+        key === 'chat.autoAttachProblems' ? true : fallback
+      ),
+      inspect: configInspectMock,
+      update: configUpdateMock,
+    }));
+  });
+  afterEach(() => {
+    vscodeMock.workspace.getConfiguration.mockImplementation(() => ({
+      get: vi.fn((_key: string, fallback: unknown) => fallback),
+      inspect: configInspectMock,
+      update: configUpdateMock,
+    }));
+  });
+
   it('contributes a quick fix and routes its captured details to the original chat target', async () => {
     const { sidebar } = register();
     sidebar.captureContextTarget.mockReturnValue('editor-one');

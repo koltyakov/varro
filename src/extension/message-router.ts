@@ -132,8 +132,8 @@ export interface MessageRouterCallbacks {
   handleApiRequest(payload: ApiRequestPayload): Promise<void>;
   cancelApiRequest(payload: ApiCancelPayload): void;
   handleRalphMessage(msg: RalphMessage): void;
-  handleWarmingMessage(
-    msg: Extract<WebviewMessage, { type: 'warming/sync' | 'warming/set' | 'warming/samples' }>
+  handlePromptCacheMessage(
+    msg: Extract<WebviewMessage, { type: 'promptCache/sync' | 'promptCache/samples' }>
   ): void;
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
   claimQueuedMessage(
@@ -403,10 +403,9 @@ export class MessageRouter {
         case 'ralph/sync':
           this.callbacks.handleRalphMessage(msg);
           break;
-        case 'warming/sync':
-        case 'warming/set':
-        case 'warming/samples':
-          this.callbacks.handleWarmingMessage(msg);
+        case 'promptCache/sync':
+        case 'promptCache/samples':
+          this.callbacks.handlePromptCacheMessage(msg);
           break;
         case 'log':
           this.handleLogMessage(msg);

@@ -10,7 +10,8 @@ export type JevStatus = DecisionProviderStatus['jev'];
 /** A connected TypeSafe Jev decision model; connecting starts from the Models actions menu. */
 export function DecisionProviderSection(props: {
   status: JevStatus;
-  onStatusChange: (status: JevStatus) => void;
+  /** Receives every decision provider, since turning Jev on replaces a native selection. */
+  onStatusChange: (status: DecisionProviderStatus) => void;
 }) {
   const status = () => props.status;
   const [expanded, setExpanded] = createSignal(true);
@@ -25,7 +26,7 @@ export function DecisionProviderSection(props: {
     setBusy(true);
     setError('');
     try {
-      props.onStatusChange((await client.varro.decisionProviders.update(request)).jev);
+      props.onStatusChange(await client.varro.decisionProviders.update(request));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -88,7 +89,8 @@ export function DecisionProviderSection(props: {
             <span class="decision-provider-option-text">
               <span class="decision-provider-option-name">Auto-approve decisions</span>
               <span class="decision-provider-option-hint">
-                Judge permission requests in Auto mode before the model judge runs
+                Judge permission requests in Auto mode before the model judge runs, instead of an
+                OpenCode decision model
               </span>
             </span>
           </label>

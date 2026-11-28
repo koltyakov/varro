@@ -49,7 +49,7 @@ This guide includes OpenCode v1 and v2 samples, with VS Code running on a macOS 
 
 ## Connection requirements
 
-- Varro supports a configurable port, but no custom server hostname, URL, or HTTPS setting. Set `varro.server.port` explicitly to Docker's published host port; the normal default is `"auto"`.
+- Varro supports a configurable port, but no custom server hostname, URL, or HTTPS setting. Set `varro.server.port` explicitly to Docker's published host port; when it is empty, Varro selects a port automatically.
 - The address is relative to the **VS Code extension host**. With Remote SSH, WSL, or Dev Containers, this can be a different machine or container from the desktop running VS Code.
 - OpenCode must listen on `0.0.0.0` inside the container for Docker port forwarding to reach it.
 - The workspace must be available at the same absolute path in VS Code and the OpenCode container. Varro sends the workspace path to the API and has no host-to-container path mapping setting.
@@ -162,7 +162,7 @@ Add these settings to VS Code:
 }
 ```
 
-VS Code marks `varro.server.autoStart` as deprecated and debug-only, but the setting remains available for manual server management. With auto-start disabled and no Varro-managed process, Varro uses attach-only mode and does not assume the server shares its CLI, database, or global configuration. Changing the port requires a window reload. `varro.server.command` selects a local executable; it does not set an API address or Docker command.
+With auto-start disabled and no Varro-managed process, Varro uses attach-only mode and does not assume the server shares its CLI, database, or global configuration. Changing the port requires a window reload. `varro.server.command` selects a local executable; it does not set an API address or Docker command.
 
 Varro reads server authentication from `OPENCODE_SERVER_PASSWORD` and optional `OPENCODE_SERVER_USERNAME` in the extension host's environment. These must match the container. They are separate from model-provider API keys.
 

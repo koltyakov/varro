@@ -38,8 +38,9 @@ export function NativeDecisionProviderSection(props: {
       <div class="decision-provider-body">
         <p class="decision-provider-description">
           Review Auto-mode permissions using the server's decision API and credentials. Only
-          confident, low-risk answers approve actions. Errors use your legacy Jev or chat-model
-          fallback. Models must be available in the server's base configuration.
+          confident, low-risk answers approve actions. Errors fall back to the chat model judge.
+          Selecting a model here replaces TypeSafe Jev. Models must be available in the server's
+          base configuration.
         </p>
         <label class="decision-provider-option">
           <span>Permission reviewer</span>

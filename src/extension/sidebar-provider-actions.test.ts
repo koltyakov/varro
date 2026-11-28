@@ -180,7 +180,7 @@ function createActionFixture() {
     openNewWindow: vi.fn(),
     editorRouteChanged: vi.fn(),
     handleRalphMessage: vi.fn<SidebarProviderActionDeps['handleRalphMessage']>(),
-    handleWarmingMessage: vi.fn<SidebarProviderActionDeps['handleWarmingMessage']>(),
+    handlePromptCacheMessage: vi.fn<SidebarProviderActionDeps['handlePromptCacheMessage']>(),
     updateQueuedMessages: vi.fn<SidebarProviderActionDeps['updateQueuedMessages']>(() =>
       Promise.resolve()
     ),
@@ -903,18 +903,10 @@ describe('createSidebarProviderActions', () => {
 
     expect(mocks.vscode.workspace.getConfiguration).toHaveBeenCalledTimes(2);
     expect(mocks.vscode.workspace.getConfiguration).toHaveBeenNthCalledWith(1, 'varro');
-    expect(mocks.config.update).toHaveBeenNthCalledWith(
-      1,
-      'chat.desktopSessionPaneSide',
-      'right',
-      'global'
-    );
-    expect(mocks.config.update).toHaveBeenNthCalledWith(
-      2,
-      'chat.defaultPermissionMode',
-      'full',
-      'global'
-    );
+    expect(mocks.config.update.mock.calls).toEqual([
+      ['chat.sessionsPaneSide', 'right', 'global'],
+      ['permissions.defaultMode', 'full', 'global'],
+    ]);
     expect(deps.postConfigState).toHaveBeenCalledOnce();
   });
 

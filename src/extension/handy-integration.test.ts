@@ -407,9 +407,9 @@ describe('HandyIntegration', () => {
 
   it('does not expose dictation configuration settings', () => {
     expect(
-      Object.keys(packageJson.contributes.configuration.properties).filter((key) =>
-        key.startsWith('varro.dictation.')
-      )
+      packageJson.contributes.configuration
+        .flatMap((group) => Object.keys(group.properties))
+        .filter((key) => key.startsWith('varro.dictation.'))
     ).toEqual([]);
   });
 });

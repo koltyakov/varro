@@ -25,7 +25,6 @@ const {
   setShowChangedFiles,
   setShowTurnTimer,
   setGroupComposerBlocks,
-  setShowEmptyStateHistogram,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
   setWorkspaceStatusSummary,
@@ -51,7 +50,6 @@ const {
   setShowChangedFiles: vi.fn(),
   setShowTurnTimer: vi.fn(),
   setGroupComposerBlocks: vi.fn(),
-  setShowEmptyStateHistogram: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
   setWorkspaceStatusSummary: vi.fn(),
@@ -84,7 +82,6 @@ vi.mock(import('../lib/state'), async (importOriginal) => {
     setShowChangedFiles,
     setShowTurnTimer,
     setGroupComposerBlocks,
-    setShowEmptyStateHistogram,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
     applyModelPreferencesSnapshot,
@@ -760,7 +757,6 @@ describe('mount bridge helpers', () => {
         showChangedFiles: true,
         showTurnTimer: true,
         groupComposerBlocks: true,
-        showEmptyStateHistogram: true,
         followupsEnabled: false,
         remoteImages: 'ask',
         debugShowQuotaWarning: true,
@@ -790,7 +786,6 @@ describe('mount bridge helpers', () => {
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
     expect(setShowTurnTimer).toHaveBeenCalledWith(true);
     expect(setGroupComposerBlocks).toHaveBeenCalledWith(true);
-    expect(setShowEmptyStateHistogram).toHaveBeenCalledWith(true);
     expect(state.followupsEnabled).toBe(false);
     expect(state.debugShowQuotaWarning).toBe(true);
     expect(state.autoAttachProblems).toBe(false);
@@ -814,11 +809,9 @@ describe('mount bridge helpers', () => {
       },
     });
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe('');
-    expect(setShowEmptyStateHistogram).toHaveBeenCalledTimes(1);
     operations.handleExtensionMessage({
       type: 'config/update',
       payload: {
-        showEmptyStateHistogram: false,
         followupsEnabled: true,
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
@@ -827,7 +820,6 @@ describe('mount bridge helpers', () => {
         chatFontFamily: 'default',
       },
     });
-    expect(setShowEmptyStateHistogram).toHaveBeenLastCalledWith(false);
     flushSolid();
     expect(state.followupsEnabled).toBe(true);
     document.documentElement.style.removeProperty('--varro-chat-font-size');

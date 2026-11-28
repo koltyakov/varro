@@ -10,12 +10,7 @@ import {
   readSessionModelMetadata,
 } from '../shared/session-selection-metadata';
 import type { SessionSelectionMetadata } from '../shared/session-selection-metadata';
-import type {
-  OpenCodeModelRouting,
-  PermissionRule,
-  Provider,
-  Session,
-} from '../shared/opencode-types';
+import type { OpenCodeModelRouting, PermissionRule, Session } from '../shared/opencode-types';
 import {
   getSafeDefaultPermissionRules,
   getSessionPermissionRulesForMode,
@@ -28,7 +23,6 @@ import type {
   ExtensionMessage,
   QueuedMessageSnapshot,
   PermissionMode,
-  PromptCacheWarmingMode,
   ServerEvent,
   WebviewInstanceContext,
   WebviewMessage,
@@ -41,6 +35,8 @@ import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 
+/** Sessions an older Varro kept warm; removed once now that Varro no longer warms caches. */
+const LEGACY_WARM_SESSIONS_KEY = 'varro.promptCacheWarming.sessions';
 const CHAT_FOCUSED_CONTEXT = 'varro:chatFocused';
 const FOCUSED_CHAT_SURFACE_CONTEXT = 'varro:focusedChatSurface';
 const WORKSPACE_CATALOG_EVENT_TYPES = new Set<ServerEvent['type']>([
@@ -111,9 +107,9 @@ import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
 import {
+  readAutoApproveDecisionModel,
+  readAutoApproveModel,
   readExtensionConfigState,
-  readPromptCacheWarmingDurationMs,
-  readPromptCacheWarmingMode,
 } from './extension-config';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import { runWindowsCliUpdate } from './util/windows-cli-update';
@@ -142,7 +138,7 @@ import { PinnedSessionManager } from './pinned-session-manager';
 import { TodoSessionManager } from './todo-session-manager';
 import { QueuedMessageStore } from './queued-message-store';
 import { PromptCacheLearner } from './prompt-cache-learning';
-import { PromptCacheWarming } from './prompt-cache-warming';
+import { PromptCacheObserver } from './prompt-cache-observer';
 import { WalkthroughService } from './walkthrough-service';
 import { RalphHost } from './ralph-host';
 import { InternalHelperCleanupCoordinator, RestProxy } from './rest-proxy';
@@ -292,10 +288,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly walkthroughService: WalkthroughService;
   private readonly sessionTitleFallback: SessionTitleFallback;
   private readonly ralphHost: RalphHost;
-  private readonly promptCacheWarming: PromptCacheWarming;
-  private promptCacheWarmingMode: PromptCacheWarmingMode;
+  private readonly promptCacheObserver: PromptCacheObserver;
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Raw server events are parsed by parseServerEvent.
-  private readonly promptCacheWarmingEvents: (event: unknown) => void;
+  private readonly promptCacheEvents: (event: unknown) => void;
   private readonly messageRouter: MessageRouter;
   private readonly restProxy: RestProxy;
   public readonly sessionExportService: SessionExportService;
@@ -453,9 +448,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionReadState = new SessionReadStateStore(globalPersistence);
     this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
-    const nativeDecisions = new NativeDecisions(server, () =>
-      vscode.workspace.getConfiguration('varro').get<string>('chat.autoApproveDecisionModel', '')
-    );
+    const nativeDecisions = new NativeDecisions(server, () => readAutoApproveDecisionModel());
     this.decisionProviders = new DecisionProviders(secrets, undefined, nativeDecisions);
     this.jevDecisions = new JevDecisions(
       new JevClient(this.decisionProviders.getApiKey),
@@ -466,15 +459,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       server,
       this.hiddenSessions,
       isOpenAIPro,
-      () => vscode.workspace.getConfiguration('varro').get<string>('chat.autoApproveModel', ''),
+      () => readAutoApproveModel(),
       undefined,
       this.jevDecisions,
       nativeDecisions
     );
     this.sessionTitleFallback = new SessionTitleFallback(server, this.hiddenSessions, () =>
-      vscode.workspace
-        .getConfiguration('varro')
-        .get<boolean>('chat.autoRenameUntitledSessions', true)
+      vscode.workspace.getConfiguration('varro').get<boolean>('chat.fallbackTitle', false)
     );
     this.generatedDependencyTreeGuard = new GeneratedDependencyTreeGuard();
     this.sessionState = new SessionStateManager(
@@ -659,7 +650,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       () => this.runtime.ensureServerStarted(),
       () => this.contextProvider.context.workspacePath || undefined,
       () => this.activeChatModel,
-      () => vscode.workspace.getConfiguration('varro').get<string>('review.model', ''),
+      () => vscode.workspace.getConfiguration('varro').get<string>('walkthrough.model', ''),
       async (content, title) => {
         const uri = await this.openMarkdownDocument(content, title, false);
         if (!uri) throw new Error('Could not open the generated walkthrough.');
@@ -727,54 +718,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.restProxy = sidebarEndpoint.restProxy;
     this.messageRouter = sidebarEndpoint.messageRouter;
 
-    this.promptCacheWarmingMode = readPromptCacheWarmingMode();
-    this.promptCacheWarming = new PromptCacheWarming({
-      readMode: () => readPromptCacheWarmingMode(),
-      readDurationMs: () => readPromptCacheWarmingDurationMs(),
+    // Varro no longer keeps sessions warm; drop the sessions an older version kept warm here.
+    if (persistence.get<unknown>(LEGACY_WARM_SESSIONS_KEY) !== undefined) {
+      void Promise.resolve(persistence.remove(LEGACY_WARM_SESSIONS_KEY)).catch(() => undefined);
+    }
+    this.promptCacheObserver = new PromptCacheObserver({
       isAvailable: () => this.server.apiVersion === 2 && this.server.status.state === 'running',
-      isWarmable: (sessionID) =>
-        this.sessionState.rootSessionIdFor(sessionID) === sessionID &&
-        !this.hiddenSessions.isHidden(sessionID) &&
-        !this.sessionTrash.isHidden(sessionID),
-      isBusy: (sessionID) => this.sessionState.busy.has(sessionID),
-      directoryFor: (sessionID) => this.sessionState.directoryFor(sessionID),
-      generate: async (sessionID, directory, prompt, signal) => {
-        const response = await this.server.request(
-          'POST',
-          `/api/session/${encodeURIComponent(sessionID)}/generate`,
-          { prompt },
-          { directory, signal }
-        );
-        const tokens = asRecord(asRecord(asRecord(response)?.data)?.tokens);
-        const cache = asRecord(tokens?.cache);
-        return {
-          cacheRead: typeof cache?.read === 'number' ? cache.read : 0,
-          cacheWrite: typeof cache?.write === 'number' ? cache.write : 0,
-        };
-      },
-      readProviders: async (directory) => {
-        const catalog = asRecord(
-          await this.server.request('GET', '/config/providers', undefined, { directory })
-        );
-        if (!Array.isArray(catalog?.providers))
-          throw new Error('Invalid OpenCode provider catalog');
-        // SAFETY: The warming service reads only optional settings and IDs, each checked before use.
-        return catalog.providers as Provider[];
-      },
       readOpenCodeWarming: async () => {
         const config = asRecord(await this.server.request('GET', '/config'));
         const warming = config?.warming;
         return warming === true || asRecord(warming) !== null;
       },
-      writeOpenCodeWarming: (value) => this.restProxy.updateGlobalWarming(value),
-      persistence,
       learner: new PromptCacheLearner(globalPersistence),
-      post: (payload) => this.post({ type: 'warming/state', payload }),
-      logWarning: (message) => logger.warn(message),
+      post: (payload) => this.post({ type: 'promptCache/learned', payload }),
     });
-    this.promptCacheWarmingEvents = (event) => {
+    this.promptCacheEvents = (event) => {
       const parsed = parseServerEvent(event);
-      if (parsed) this.promptCacheWarming.handleServerEvent(parsed);
+      if (parsed) this.promptCacheObserver.handleServerEvent(parsed);
     };
 
     this.windowStateDisposable = vscode.window.onDidChangeWindowState(() => {
@@ -783,7 +743,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('varro.notifications')) this.attentionNotifications.update();
-      if (event.affectsConfiguration('varro.providerLimits.statusBarDisplay')) {
+      if (event.affectsConfiguration('varro.providerLimits.statusBar')) {
         this.providerLimitStatusBar.configurationChanged();
       }
       // VS Code can announce the theme kind before it updates the configured theme name.
@@ -799,21 +759,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       if (event.affectsConfiguration('varro.server.autoUpdate')) {
         this.updateStatusBarItem();
-      }
-      if (
-        event.affectsConfiguration('varro.chat.promptCacheWarming') ||
-        event.affectsConfiguration('varro.chat.promptCacheWarmingMinutes')
-      ) {
-        const previousMode = this.promptCacheWarmingMode;
-        this.promptCacheWarmingMode = readPromptCacheWarmingMode();
-        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection boundary.
-        void this.promptCacheWarming.applySettings(previousMode).catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.warn(`Could not apply prompt cache warming settings: ${message}`);
-          void vscode.window.showWarningMessage(
-            `Could not update OpenCode's warming setting: ${message}`
-          );
-        });
       }
       if (event.affectsConfiguration('varro.server.autoStart')) {
         // Activation's configuration listener applies launch settings after this listener.
@@ -832,21 +777,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.fontSize') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
-        event.affectsConfiguration('varro.chat.groupComposerBlocks') ||
-        event.affectsConfiguration('varro.chat.promptCacheWarningTokens') ||
-        event.affectsConfiguration('varro.chat.showEmptyStateHistogram') ||
+        event.affectsConfiguration('varro.chat.tabbedPanels') ||
+        event.affectsConfiguration('varro.chat.cacheWarningTokens') ||
         event.affectsConfiguration('varro.chat.remoteImages') ||
-        event.affectsConfiguration('varro.chat.promptCompletionModel') ||
-        event.affectsConfiguration('varro.chat.autoApproveDecisionModel') ||
-        event.affectsConfiguration('varro.chat.followupsEnabled') ||
-        event.affectsConfiguration('varro.chat.followupModel') ||
+        event.affectsConfiguration('varro.promptCompletion.model') ||
+        event.affectsConfiguration('varro.permissions.decisionModel') ||
+        event.affectsConfiguration('varro.followups.enabled') ||
+        event.affectsConfiguration('varro.followups.model') ||
         event.affectsConfiguration('varro.debug.showQuotaWarning') ||
-        event.affectsConfiguration('varro.debug.showNativeDecisionModels') ||
+        event.affectsConfiguration('varro.debug.showDecisionModels') ||
         event.affectsConfiguration('varro.debug.resetWarningDays') ||
         event.affectsConfiguration('varro.chat.autoAttachProblems') ||
         event.affectsConfiguration('varro.chat.autoAttachActiveFile') ||
-        event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
-        event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
+        event.affectsConfiguration('varro.chat.sessionsPaneSide') ||
+        event.affectsConfiguration('varro.permissions.defaultMode') ||
         event.affectsConfiguration('chat.fontSize') ||
         event.affectsConfiguration('chat.editor.fontSize') ||
         event.affectsConfiguration('chat.fontFamily')
@@ -856,8 +800,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
 
     this.serverEventBridge.attach();
-    // After the bridge, so session state already reflects an event when warming reads it.
-    server.on('event', this.promptCacheWarmingEvents);
+    server.on('event', this.promptCacheEvents);
   }
 
   private createEndpoint(
@@ -1438,12 +1381,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         openNewWindow: () => this.openNewWindow(),
         editorRouteChanged: (route) => this.editorRouteChanged(webviewContext.viewId, route),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
-        handleWarmingMessage: (msg) => {
-          if (msg.type === 'warming/set') {
-            this.promptCacheWarming.setSessionWarm(msg.payload.sessionId, msg.payload.enabled);
-          } else if (msg.type === 'warming/samples') {
-            this.promptCacheWarming.recordHistory(msg.payload.sessionId, msg.payload.samples);
-          } else this.promptCacheWarming.sync();
+        handlePromptCacheMessage: (msg) => {
+          if (msg.type === 'promptCache/samples') {
+            this.promptCacheObserver.recordHistory(msg.payload.sessionId, msg.payload.samples);
+          } else this.promptCacheObserver.sync();
         },
         updateQueuedMessages: ({ messages, mutationId }) =>
           this.updateQueuedMessages(webviewContext.viewId, messages, mutationId),
@@ -3812,8 +3753,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     await this.webviewSession.dispose();
     await this.ralphHost.dispose();
-    this.server.off('event', this.promptCacheWarmingEvents);
-    this.promptCacheWarming.dispose();
+    this.server.off('event', this.promptCacheEvents);
+    this.promptCacheObserver.dispose();
     await this.serverEventBridge.dispose();
     await this.queuedMessages.dispose();
     await this.draftImages.dispose();

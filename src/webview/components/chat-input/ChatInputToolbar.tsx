@@ -20,11 +20,7 @@ import { AttachButton } from './AttachButton';
 import { DictationButton } from './DictationButton';
 import { BusySendMenu } from './BusySendMenu';
 import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
-import type {
-  ContextPopupModel,
-  PromptCacheActivity,
-  PromptCacheWarmingView,
-} from './ContextPopup';
+import type { ContextPopupModel, PromptCacheActivity } from './ContextPopup';
 import { ProviderLimitPopup } from './ProviderLimitPopup';
 import { SendControls } from './SendControls';
 import { StopButton } from './StopButton';
@@ -127,8 +123,6 @@ export type ToolbarSharedProps = {
   subagentCount: number;
   sessionModels: ContextPopupModel[];
   promptCache?: PromptCacheActivity | null;
-  promptCacheWarming?: PromptCacheWarmingView | null;
-  onTogglePromptCacheWarming?: (enabled: boolean) => void;
   contextCompactDisabled: boolean;
   onToggleContextPopup: () => void;
   onCloseContextPopup: () => void;
@@ -585,8 +579,6 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                     model={props.currentModel}
                     models={props.sessionModels}
                     promptCache={props.promptCache}
-                    warming={props.promptCacheWarming}
-                    onToggleWarming={props.onTogglePromptCacheWarming}
                     compactDisabled={props.contextCompactDisabled}
                     onClose={props.onCloseContextPopup}
                     onCompact={props.onCompactSession}

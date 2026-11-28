@@ -28,7 +28,9 @@ function mount() {
   document.body.append(container);
   cleanup = render(() => {
     const [status, setStatus] = createSignal(connected);
-    return <DecisionProviderSection status={status()} onStatusChange={setStatus} />;
+    return (
+      <DecisionProviderSection status={status()} onStatusChange={(next) => setStatus(next.jev)} />
+    );
   }, container);
   flushSolid();
   const checkbox = container.querySelector<HTMLInputElement>('.decision-provider-checkbox');

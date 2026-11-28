@@ -1073,13 +1073,14 @@ accounts. Projection keeps Go allowances separate from Console-wide budgets and 
 model's spend for per-model budgets, including zero when the server omits that counter.
 A location-specific 404 is an error, not a reason to read local credentials.
 
-Native decision models are an explicit opt-in through `varro.chat.autoApproveDecisionModel` or the
-Models view. The experimental section is temporarily hidden unless
-`varro.debug.showNativeDecisionModels` is enabled. Hiding it does not disable a configured reviewer.
+Native decision models are an explicit opt-in through `varro.permissions.decisionModel` or the
+Models view. The same setting selects TypeSafe's Jev with a `typesafe/<model>` value, which never
+reaches the native API, so at most one decision reviewer runs. The native section is hidden unless
+`varro.debug.showDecisionModels` is enabled. Hiding it does not disable a configured reviewer.
 Varro discovers the experimental endpoint and decision catalog, submits evidence using
-the server's base configuration and credentials, and reuses the legacy Jev questions and probability
-gates. Native errors fall back to opted-in legacy Jev, then the chat judge; `ask` remains terminal.
-No legacy credentials/settings are migrated. V1 and older-V2 fallbacks and support floors remain
+the server's base configuration and credentials, and reuses the shared decision questions and
+probability gates. Native errors fall back to the chat judge; `ask` remains terminal. TypeSafe
+credentials are not migrated. V1 and older-V2 fallbacks and support floors remain
 unchanged. Media references, SSE filtering, file watching, and desktop GUI plugins remain deferred.
 
 The first catch-up matrix found two adapter regressions: skipping configuration model fallback also

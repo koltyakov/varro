@@ -1962,27 +1962,6 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   line-height: 14px;
 }
 
-.chat-empty-histogram {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 112px;
-  max-height: 25%;
-  overflow: hidden;
-  user-select: none;
-}
-
-.chat-empty-histogram-waves {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
 .chat-empty-logo-shell {
   position: fixed;
   top: 50%;
@@ -1996,16 +1975,12 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   position: absolute;
 }
 
-.chat-empty-logo-waves,
-.chat-empty-histogram-waves {
-  color: rgb(232 137 54);
-}
-
 .chat-empty-logo-waves {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  color: rgb(232 137 54);
   mask-size: 100% 100%;
   mask-repeat: no-repeat;
   pointer-events: none;
@@ -2023,8 +1998,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   pointer-events: auto;
 }
 
-body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo-waves,
-body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-histogram-waves {
+body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo-waves {
   color: rgb(255 255 255);
 }
 

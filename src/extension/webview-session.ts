@@ -590,7 +590,6 @@ export class WebviewSession {
       showChangedFiles: config.showChangedFiles,
       showTurnTimer: config.showTurnTimer,
       groupComposerBlocks: config.groupComposerBlocks,
-      showEmptyStateHistogram: config.showEmptyStateHistogram,
       remoteImages: config.remoteImages,
       promptCompletionModel: config.promptCompletionModel,
       followupsEnabled: config.followupsEnabled,

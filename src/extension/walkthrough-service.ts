@@ -56,7 +56,7 @@ export class WalkthroughService {
     private readonly ensureServerStarted: () => Promise<unknown>,
     private readonly getWorkspacePath: () => string | undefined,
     private readonly getActiveChatModel: () => ChatModelSelection | null,
-    /** `varro.review.model`, as `provider/model` or `provider/model#variant`. */
+    /** `varro.walkthrough.model`, as `provider/model` or `provider/model#variant`. */
     private readonly readReviewModel: () => string,
     private readonly openReport: (content: string, title: string) => Promise<vscode.Uri>
   ) {}

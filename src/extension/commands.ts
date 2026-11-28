@@ -75,7 +75,7 @@ export function registerCommands(
             actionContext.diagnostics.length === 0 ||
             !vscode.workspace
               .getConfiguration('varro')
-              .get<boolean>('chat.autoAttachProblems', true)
+              .get<boolean>('chat.autoAttachProblems', false)
           )
             return [];
           // The Problems view includes contributed quick fixes in its context menu.
@@ -105,7 +105,7 @@ export function registerCommands(
       const targetViewId = sidebar.captureContextTarget();
       try {
         if (
-          !vscode.workspace.getConfiguration('varro').get<boolean>('chat.autoAttachProblems', true)
+          !vscode.workspace.getConfiguration('varro').get<boolean>('chat.autoAttachProblems', false)
         ) {
           throw new Error('Problems context is disabled in settings');
         }

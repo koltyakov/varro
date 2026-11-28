@@ -43,7 +43,6 @@ import type {
   McpDefaults,
   McpStatus,
   PermissionMode,
-  PromptCacheWarmingState,
   ProviderLimitStatus,
   RecycleBinEntry,
   RestartBlockedState,
@@ -54,6 +53,7 @@ import type {
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import type { LearnedPromptCacheLifetimes } from '../../shared/prompt-cache-lifetime';
 import { DEFAULT_PROMPT_CACHE_WARNING_TOKENS } from '../../shared/provider-limit-config';
 import { parseRemoteImageMode } from '../../shared/remote-images';
 import type { RemoteImageMode } from '../../shared/remote-images';
@@ -151,8 +151,8 @@ export interface AppState {
   debugShowQuotaWarning: boolean;
   debugResetWarningDays?: number;
   promptCacheWarningTokens: number;
-  /** Host-owned keep-alive state; `null` until the host first reports it. */
-  promptCacheWarming: PromptCacheWarmingState | null;
+  /** Prompt-cache lifetimes the host learned for this user; `null` until the host reports them. */
+  promptCacheLearned: LearnedPromptCacheLifetimes | null;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -271,8 +271,6 @@ export interface AppStateInstance {
   setShowTurnTimer: Setter<boolean>;
   groupComposerBlocks: Accessor<boolean>;
   setGroupComposerBlocks: Setter<boolean>;
-  showEmptyStateHistogram: Accessor<boolean>;
-  setShowEmptyStateHistogram: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
   inputText: Accessor<string>;
@@ -456,7 +454,7 @@ export function createAppState(): AppStateInstance {
       !discardQueuedEditDraft && Array.isArray(storedInlineProblems)
         ? storedInlineProblems.filter(isInlineProblem)
         : [],
-    autoAttachProblems: initialWebviewState.autoAttachProblems ?? true,
+    autoAttachProblems: initialWebviewState.autoAttachProblems ?? false,
     autoAttachActiveFile: initialWebviewState.autoAttachActiveFile ?? true,
     promptCompletionModel: initialWebviewState.promptCompletionModel ?? '',
     followupsEnabled: initialWebviewState.followupsEnabled ?? true,
@@ -466,7 +464,7 @@ export function createAppState(): AppStateInstance {
     debugResetWarningDays: initialWebviewState.debugResetWarningDays,
     promptCacheWarningTokens:
       initialWebviewState.promptCacheWarningTokens ?? DEFAULT_PROMPT_CACHE_WARNING_TOKENS,
-    promptCacheWarming: null,
+    promptCacheLearned: null,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)
@@ -610,9 +608,6 @@ export function createAppState(): AppStateInstance {
   );
   const [groupComposerBlocks, setGroupComposerBlocks] = createSignal(
     initialWebviewState.groupComposerBlocks ?? true
-  );
-  const [showEmptyStateHistogram, setShowEmptyStateHistogram] = createSignal(
-    initialWebviewState.showEmptyStateHistogram ?? false
   );
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
@@ -834,8 +829,6 @@ export function createAppState(): AppStateInstance {
     setShowTurnTimer,
     groupComposerBlocks,
     setGroupComposerBlocks,
-    showEmptyStateHistogram,
-    setShowEmptyStateHistogram,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
     inputText,
@@ -979,8 +972,6 @@ export const showTurnTimer = defaultAppState.showTurnTimer;
 export const setShowTurnTimer = defaultAppState.setShowTurnTimer;
 export const groupComposerBlocks = defaultAppState.groupComposerBlocks;
 export const setGroupComposerBlocks = defaultAppState.setGroupComposerBlocks;
-export const showEmptyStateHistogram = defaultAppState.showEmptyStateHistogram;
-export const setShowEmptyStateHistogram = defaultAppState.setShowEmptyStateHistogram;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
 export const inputText = defaultAppState.inputText;
@@ -1067,7 +1058,6 @@ export function resetDefaultAppState() {
   setShowChangedFiles(next.showChangedFiles());
   setShowTurnTimer(next.showTurnTimer());
   setGroupComposerBlocks(next.groupComposerBlocks());
-  setShowEmptyStateHistogram(next.showEmptyStateHistogram());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
   setNextPastedImageIndex(next.nextPastedImageIndex());
   setIsLoading(next.isLoading());

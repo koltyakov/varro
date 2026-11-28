@@ -1051,9 +1051,9 @@ export async function runCapture(options, { onMessagePage } = {}) {
         : `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(path.join(root, 'scripts/vscode-sandbox/fake-opencode.mjs'))} "$@"\n`,
       { mode: 0o700 }
     );
+    // The launcher writes the executable path to the profile's user settings; Varro ignores it here.
     await json(path.join(workspace, '.vscode/settings.json'), {
       'varro.server.port': proxy.port,
-      'varro.server.command': fakeCommand,
       'varro.server.autoUpdate': false,
       'varro.server.autoStart': false,
       'security.workspace.trust.enabled': false,
@@ -1121,6 +1121,7 @@ export async function runCapture(options, { onMessagePage } = {}) {
       env: {
         ...process.env,
         VARRO_AI_WORKSPACE: workspace,
+        VARRO_AI_SERVER_COMMAND: fakeCommand,
         VARRO_AI_REPLAY_URL: proxy.url,
         VARRO_AI_LAUNCH_INTENT: path.join(output, 'launch-intent.json'),
         VARRO_SANDBOX_FAKE_MODE: 'startup-exit',

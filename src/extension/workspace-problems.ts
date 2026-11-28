@@ -11,7 +11,7 @@ export function getWorkspaceProblems(workspacePath: string | undefined): Workspa
     )
   )
     throw new Error('Select an open workspace before attaching problems');
-  if (!vscode.workspace.getConfiguration('varro').get<boolean>('chat.autoAttachProblems', true)) {
+  if (!vscode.workspace.getConfiguration('varro').get<boolean>('chat.autoAttachProblems', false)) {
     throw new Error('Problems context is disabled in settings');
   }
   const diagnostics = vscode.languages

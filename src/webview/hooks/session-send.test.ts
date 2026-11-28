@@ -254,7 +254,11 @@ describe('session-send helpers', () => {
       diagnostics: [diagnostic],
       diagnosticCounts: { errors: 1, warnings: 0 },
     });
-    const source = createState({ editorContext, inlineProblems: [reference] });
+    const source = createState({
+      autoAttachProblems: true,
+      editorContext,
+      inlineProblems: [reference],
+    });
     const send = () =>
       buildSessionSendBody(
         source,
@@ -288,6 +292,7 @@ describe('session-send helpers', () => {
       },
     ];
     const state = createState({
+      autoAttachProblems: true,
       inlineProblems: references,
       issuesEnabled: false,
       attachedDiagnostics: {
@@ -319,7 +324,11 @@ describe('session-send helpers', () => {
         { path: '/repo/a.ts', line: 1, severity: 'error' as const, message: 'Captured error' },
       ],
     };
-    const composer = createState({ attachedDiagnostics, issuesEnabled: false });
+    const composer = createState({
+      autoAttachProblems: true,
+      attachedDiagnostics,
+      issuesEnabled: false,
+    });
     const send = (text: string) => buildSessionSendBody(composer, 'session-1', text, () => false);
     expect(send('Explain [Problems]')?.body.parts).toEqual([
       { type: 'text', text: 'Explain [Problems]' },
@@ -375,7 +384,7 @@ describe('session-send helpers', () => {
         },
       ],
     });
-    const state = createState({ editorContext });
+    const state = createState({ autoAttachProblems: true, editorContext });
     const send = (enabled: boolean) =>
       buildSessionSendBody(state, 'session-1', 'Explain this', () => enabled);
     const parts = send(true)!.body.parts;
@@ -390,7 +399,7 @@ describe('session-send helpers', () => {
     expect(send(false)!.body.parts.some((part) => part.text === problems)).toBe(true);
     expect(
       buildSessionSendBody(
-        createState({ editorContext, issuesEnabled: false }),
+        createState({ autoAttachProblems: true, editorContext, issuesEnabled: false }),
         'session-1',
         'Explain this',
         () => false
@@ -432,7 +441,12 @@ describe('session-send helpers', () => {
       activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
     });
     const send = () =>
-      buildSessionSendBody(createState({ editorContext }), 'session-1', 'Explain', () => true)!;
+      buildSessionSendBody(
+        createState({ autoAttachProblems: true, editorContext }),
+        'session-1',
+        'Explain',
+        () => true
+      )!;
     expect(send().body.parts.some((part) => part.text?.startsWith('[VS Code problems'))).toBe(
       false
     );
@@ -456,6 +470,7 @@ describe('session-send helpers', () => {
       text: '[VS Code problems for original.ts: 1 errors, 0 warnings]\nOriginal error',
     };
     const composer = createState({
+      autoAttachProblems: true,
       issuesAttachment: snapshot,
       editorContext: createEditorContext({
         activeFile: { path: '/repo/other.ts', relativePath: 'other.ts', language: 'typescript' },
@@ -691,6 +706,7 @@ describe('session-send helpers', () => {
   it('sends bounded unsaved editor text and explicitly attached diagnostics', () => {
     const result = buildSessionSendBody(
       createState({
+        autoAttachProblems: true,
         editorContext: createEditorContext({
           activeFile: {
             path: '/repo/src/app.ts',

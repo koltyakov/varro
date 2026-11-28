@@ -8,6 +8,22 @@ const scratchMock = vi.hoisted(() => ({
   folders: undefined as { uri: { fsPath: string } }[] | undefined,
 }));
 const promptTracePreference = vi.hoisted(() => ({ enabled: false }));
+type ServerCommandSetting = { globalValue?: string; workspaceValue?: string };
+/** The part of `vscode.env` activation reads; `remoteName` is set only for remote windows. */
+type ExtensionHostEnv = { appName: string; uriScheme: string; remoteName?: string };
+const serverCommandSetting = vi.hoisted<ServerCommandSetting>(() => ({}));
+/** User-level values of other settings, such as released keys the startup migration moves. */
+const otherSettings = vi.hoisted(() => new Map<string, string>());
+/** Records user-settings writes and applies them to the fixtures. */
+const configUpdateMock = vi.hoisted(() =>
+  vi.fn(async (key: string, value: string | undefined, _target: number) => {
+    if (key === 'server.command') {
+      if (value === undefined) delete serverCommandSetting.globalValue;
+      else serverCommandSetting.globalValue = value;
+    } else if (value === undefined) otherSettings.delete(key);
+    else otherSettings.set(key, value);
+  })
+);
 vi.mock('./varro-state-paths', async (importOriginal) => ({
   ...(await importOriginal()),
   prepareVarroScratchDirectory: scratchMock.prepare,
@@ -36,7 +52,7 @@ const {
   showInformationMessageMock,
   sweepStaleInjectedConfigDirectoriesMock,
 } = vi.hoisted(() => ({
-  envMock: { appName: 'Visual Studio Code', uriScheme: 'vscode' },
+  envMock: { appName: 'Visual Studio Code', uriScheme: 'vscode' } as ExtensionHostEnv,
   executeCommandMock: vi.fn((_command: string, ..._args: unknown[]) => Promise.resolve()),
   getCommandsMock: vi.fn(() => Promise.resolve([] as string[])),
   getMock: vi.fn((key: string, fallback?: unknown) => {
@@ -115,15 +131,23 @@ const {
 vi.mock('vscode', () => ({
   version: '1.110.0',
   env: envMock,
+  ConfigurationTarget: { Global: 1 },
   workspace: {
     get workspaceFolders() {
       return scratchMock.folders;
     },
     getConfiguration: vi.fn(() => ({
       get: getMock,
-      inspect: (key: string) => ({
-        globalValue: key === 'chat.promptTrace' ? promptTracePreference.enabled : undefined,
-      }),
+      update: configUpdateMock,
+      inspect: (key: string) =>
+        key === 'server.command'
+          ? { ...serverCommandSetting }
+          : {
+              globalValue:
+                key === 'promptTracing.enabled'
+                  ? promptTracePreference.enabled
+                  : otherSettings.get(key),
+            },
     })),
     onDidChangeConfiguration: onDidChangeConfigurationMock,
   },
@@ -193,6 +217,14 @@ vi.mock('./context-provider', () => ({
 }));
 vi.mock('./commands', () => ({ registerCommands: registerCommandsMock }));
 vi.mock('./logger', () => ({ logger: loggerMock }));
+
+/** Every contributed setting by full key, across the grouped configuration categories. */
+function configurationProperties(): Record<string, Record<string, unknown>> {
+  return Object.assign(
+    {},
+    ...packageJson.contributes.configuration.map((group) => group.properties)
+  );
+}
 
 function readDefaultConfig(key: string, fallback?: unknown) {
   switch (key) {
@@ -490,6 +522,20 @@ describe('extension activation', () => {
     expect(openCodeServerMock).not.toHaveBeenCalled();
   });
 
+  it.each([null, undefined, 'auto'])(
+    'starts in automatic port mode for the unset or legacy value %s',
+    async (configuredPort) => {
+      getMock.mockImplementation((key: string, fallback?: unknown) =>
+        key === 'server.port' ? configuredPort : readDefaultConfig(key, fallback)
+      );
+      const { activate } = await import('./extension');
+
+      await activate(extensionContext());
+
+      expect(openCodeServerMock.mock.lastCall?.[0]).toBe('auto');
+    }
+  );
+
   it.each([false, true])(
     'remembers whether automatic mode is migrating an existing installation: %s',
     async (existing) => {
@@ -535,7 +581,7 @@ describe('extension activation', () => {
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:showFileDiffs', false);
   });
 
-  it('does not expose Varro compaction settings or react to legacy setting changes', async () => {
+  it('does not expose removed settings or react to their changes', async () => {
     const { activate } = await import('./extension');
 
     await activate(extensionContext());
@@ -544,8 +590,44 @@ describe('extension activation', () => {
     expect(listener).toBeTypeOf('function');
     getMock.mockClear();
 
-    for (const setting of ['varro.chat.autoCompact', 'varro.chat.autoCompactionReservedTokens']) {
-      expect(Object.keys(packageJson.contributes.configuration.properties)).not.toContain(setting);
+    for (const setting of [
+      'varro.chat.autoCompact',
+      'varro.chat.autoCompactionReservedTokens',
+      'varro.chat.showEmptyStateHistogram',
+      'varro.decisions.jev.autoApprove',
+      'varro.autoApprove.useJev',
+      'varro.autoApprove.jev.enabled',
+      'varro.chat.promptCacheWarming',
+      'varro.chat.promptCacheWarmingMinutes',
+      'varro.chat.defaultPermissionMode',
+      'varro.chat.autoApproveDecisionModel',
+      'varro.chat.followupsEnabled',
+      'varro.chat.followupModel',
+      'varro.chat.groupComposerBlocks',
+      'varro.debug.showNativeDecisionModels',
+      'varro.chat.desktopSessionPaneSide',
+      'varro.chat.autoRenameUntitledSessions',
+      'varro.chat.promptCacheWarningTokens',
+      'varro.chat.permissionGuidance',
+      'varro.chat.permissionGuidanceText',
+      'varro.chat.promptCompletionModel',
+      'varro.chat.promptTrace',
+      'varro.providerLimits.statusBarDisplay',
+      'varro.review.model',
+      // Names used only during development, never released.
+      'varro.chat.autoExpandThinking',
+      'varro.cli.path',
+      'varro.cli.autoUpdate',
+      'varro.promptCache.expiryWarningTokens',
+      'varro.promptCache.warningTokens',
+      'varro.promptCache.keepWarm',
+      'varro.promptCache.keepWarmMinutes',
+      'varro.autoApprove.model',
+      'varro.autoApprove.decisionModel',
+      'varro.permissions.rejectionGuidance',
+      'varro.permissions.rejectionGuidanceText',
+    ]) {
+      expect(Object.keys(configurationProperties())).not.toContain(setting);
       listener?.({ affectsConfiguration: (key: string) => key === setting });
     }
 
@@ -568,6 +650,92 @@ describe('extension activation', () => {
       autoStart: true,
       command: '',
     });
+  });
+
+  it('moves released user settings to their new keys before creating the server', async () => {
+    otherSettings.set('chat.autoApproveModel', 'openai/judge');
+    try {
+      const { activate } = await import('./extension');
+      openCodeServerMock.mockImplementationOnce(() => {
+        // The server is constructed only after the move has finished.
+        expect(configUpdateMock.mock.calls).toEqual([
+          ['permissions.approveModel', 'openai/judge', 1],
+          ['chat.autoApproveModel', undefined, 1],
+        ]);
+      });
+
+      await activate(extensionContext());
+
+      expect(openCodeServerMock).toHaveBeenCalledTimes(1);
+      expect(otherSettings.get('permissions.approveModel')).toBe('openai/judge');
+      expect(otherSettings.has('chat.autoApproveModel')).toBe(false);
+    } finally {
+      otherSettings.clear();
+    }
+  });
+
+  it('writes no settings on startup when no released user value is set', async () => {
+    const { activate } = await import('./extension');
+
+    await activate(extensionContext());
+
+    expect(openCodeServerMock).toHaveBeenCalledTimes(1);
+    expect(configUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it('does not move released user settings in a remote window', async () => {
+    otherSettings.set('chat.autoApproveModel', 'openai/judge');
+    envMock.remoteName = 'ssh-remote';
+    try {
+      const { activate } = await import('./extension');
+
+      await activate(extensionContext());
+
+      expect(configUpdateMock).not.toHaveBeenCalled();
+      expect(openCodeServerMock).toHaveBeenCalledTimes(1);
+    } finally {
+      otherSettings.clear();
+      delete envMock.remoteName;
+    }
+  });
+
+  it('launches the OpenCode executable configured in user settings', async () => {
+    serverCommandSetting.globalValue = '/opt/opencode/bin/opencode';
+    try {
+      const { activate } = await import('./extension');
+
+      await activate(extensionContext());
+
+      expect(openCodeServerMock.mock.lastCall?.[2]).toBe('/opt/opencode/bin/opencode');
+      expect(loggerMock.warn).not.toHaveBeenCalledWith(expect.stringContaining('Ignoring varro.'));
+    } finally {
+      delete serverCommandSetting.globalValue;
+    }
+  });
+
+  it('ignores an executable path from workspace settings and says so in the log', async () => {
+    serverCommandSetting.workspaceValue = './tools/opencode';
+    try {
+      const { activate } = await import('./extension');
+
+      await activate(extensionContext());
+
+      expect(openCodeServerMock.mock.lastCall?.[2]).toBe('');
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        'Ignoring varro.server.command from workspace settings. Set the OpenCode executable path in user or remote settings.'
+      );
+
+      const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
+      listener?.({
+        affectsConfiguration: (key: string) => key === 'varro.server.command',
+      });
+      expect(latestServerInstance.current?.updateLaunchSettings).toHaveBeenCalledWith({
+        autoStart: true,
+        command: '',
+      });
+    } finally {
+      delete serverCommandSetting.workspaceValue;
+    }
   });
 
   it('offers to reload the window when the configured server port changes', async () => {
@@ -1084,7 +1252,7 @@ describe('extension activation', () => {
     expect(executeCommandMock.mock.calls).toEqual([['varro.chat.focus']]);
   });
 
-  it.each([0, -1, 1.5, 65_536, Number.NaN, Number.POSITIVE_INFINITY])(
+  it.each([0, -1, 1.5, 65_536, Number.NaN, Number.POSITIVE_INFINITY, '4096', 'fixed'])(
     'rejects invalid configured server port %s before constructing the server',
     async (configuredPort) => {
       getMock.mockImplementation((key: string, fallback?: unknown) =>
@@ -1501,37 +1669,115 @@ describe('extension manifest', () => {
   });
 
   it('contributes repository-scoped commit-message rules', () => {
-    expect(
-      packageJson.contributes.configuration.properties['varro.commitMessage.rules']
-    ).toMatchObject({
+    expect(configurationProperties()['varro.commitMessage.rules']).toMatchObject({
       type: 'string',
       scope: 'resource',
       default: '',
     });
   });
 
-  it('constrains the server port setting to valid TCP ports', () => {
-    const properties = packageJson.contributes.configuration.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
+  it('keeps every contributed setting key to varro.<group>.<name>', () => {
+    for (const [key, property] of Object.entries(configurationProperties())) {
+      // Deprecated stubs keep their released names.
+      if ('markdownDeprecationMessage' in property) continue;
+      expect(key.split('.'), key).toHaveLength(3);
+      expect(key.split('.')[0], key).toBe('varro');
+    }
+  });
 
-    expect(properties['varro.server.port']).toMatchObject({
-      default: 'auto',
-      oneOf: [
-        { type: 'string', enum: ['auto'] },
-        { type: 'integer', minimum: 1, maximum: 65_535 },
+  it.each(['varro.chat', 'varro.permissions', 'varro.debug'])(
+    'keeps the %s category to its own key prefix, apart from released stubs',
+    (id) => {
+      const group = packageJson.contributes.configuration.find((item) => item.id === id);
+      const keys = Object.entries(group?.properties ?? {})
+        .filter(([, property]) => !('markdownDeprecationMessage' in property))
+        .map(([key]) => key);
+
+      expect(keys.length).toBeGreaterThan(0);
+      for (const key of keys) expect(key.startsWith(`${id}.`), key).toBe(true);
+    }
+  );
+
+  it('lists the settings of each category in order', () => {
+    expect(
+      Object.fromEntries(
+        packageJson.contributes.configuration.map((group) => [
+          group.title,
+          Object.entries(group.properties)
+            .filter(([, property]) => !('markdownDeprecationMessage' in property))
+            .map(([key]) => key),
+        ])
+      )
+    ).toEqual({
+      Chat: [
+        'varro.chat.autoAttachActiveFile',
+        'varro.chat.autoAttachProblems',
+        'varro.chat.showFileDiffs',
+        'varro.chat.expandThinking',
+        'varro.chat.remoteImages',
+        'varro.chat.showChangedFiles',
+        'varro.chat.tabbedPanels',
+        'varro.chat.showTurnTimer',
+        'varro.chat.sessionsPaneSide',
+        'varro.chat.fontSize',
+      ],
+      Permissions: [
+        'varro.permissions.defaultMode',
+        'varro.permissions.approveModel',
+        'varro.permissions.decisionModel',
+        'varro.permissions.onReject',
+        'varro.permissions.onRejectCustom',
+      ],
+      Utilities: [
+        'varro.followups.enabled',
+        'varro.followups.model',
+        'varro.promptCompletion.model',
+        'varro.commitMessage.model',
+        'varro.commitMessage.rules',
+        'varro.walkthrough.model',
+        'varro.promptTracing.enabled',
+        'varro.chat.fallbackTitle',
+      ],
+      Notifications: ['varro.notifications.native', 'varro.notifications.sound'],
+      'Usage and Limits': [
+        'varro.providerLimits.statusBar',
+        'varro.chat.cacheWarningTokens',
+        'varro.usageReports.showCacheWrite',
+      ],
+      'OpenCode CLI and Server': [
+        'varro.server.command',
+        'varro.server.autoUpdate',
+        'varro.server.autoStart',
+        'varro.server.port',
+      ],
+      Debug: [
+        'varro.debug.simulateMissingCli',
+        'varro.debug.simulateNoProviders',
+        'varro.debug.simulateUpgradeFailure',
+        'varro.debug.showQuotaWarning',
+        'varro.debug.resetWarningDays',
+        'varro.debug.showDecisionModels',
       ],
     });
   });
 
-  it('contributes user-scoped helper model settings', () => {
-    const properties = packageJson.contributes.configuration.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
+  it('constrains the server port setting to valid TCP ports', () => {
+    const properties = configurationProperties();
 
-    for (const key of ['varro.commitMessage.model', 'varro.chat.autoApproveModel']) {
+    // A nullable integer renders as a number box in the Settings editor; `oneOf` does not.
+    expect(properties['varro.server.port']).toMatchObject({
+      type: ['integer', 'null'],
+      minimum: 1,
+      maximum: 65_535,
+      default: null,
+    });
+    expect(properties['varro.server.port']).not.toHaveProperty('oneOf');
+  });
+
+  it('contributes user-scoped helper model settings', () => {
+    const properties = configurationProperties();
+
+    for (const key of ['varro.commitMessage.model', 'varro.permissions.approveModel']) {
       expect(properties[key]).toMatchObject({
         type: 'string',
         scope: 'application',
@@ -1542,10 +1788,7 @@ describe('extension manifest', () => {
   });
 
   it('contributes a nullable Varro chat font-size override', () => {
-    const properties = packageJson.contributes.configuration.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
+    const properties = configurationProperties();
 
     expect(properties['varro.chat.fontSize']).toMatchObject({
       type: ['number', 'null'],
@@ -1556,15 +1799,178 @@ describe('extension manifest', () => {
   });
 
   it('contributes the enabled-by-default active turn timer setting', () => {
-    const properties = packageJson.contributes.configuration.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
+    const properties = configurationProperties();
 
     expect(properties['varro.chat.showTurnTimer']).toMatchObject({
       type: 'boolean',
       default: true,
     });
+  });
+
+  it('groups settings into uniquely titled categories with an explicit order', () => {
+    const groups = packageJson.contributes.configuration;
+
+    expect(groups.map((group) => group.title)).toEqual([
+      'Chat',
+      'Permissions',
+      'Utilities',
+      'Notifications',
+      'Usage and Limits',
+      'OpenCode CLI and Server',
+      'Debug',
+    ]);
+    expect(groups.map((group) => group.order)).toEqual(groups.map((_, index) => index + 1));
+    expect(new Set(groups.map((group) => group.id)).size).toBe(groups.length);
+    const keys = groups.flatMap((group) => Object.keys(group.properties));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('orders every setting explicitly, with renamed settings last in their category', () => {
+    for (const group of packageJson.contributes.configuration) {
+      const properties: Record<string, unknown>[] = Object.values(group.properties);
+      // VS Code sorts settings without an order lexicographically, not in manifest order.
+      expect(properties.map((property) => property.order)).toEqual(
+        properties.map((_, index) => index + 1)
+      );
+      const firstDeprecated = properties.findIndex(
+        (property) => 'markdownDeprecationMessage' in property
+      );
+      if (firstDeprecated === -1) continue;
+      expect(
+        properties
+          .slice(firstDeprecated)
+          .every((property) => 'markdownDeprecationMessage' in property)
+      ).toBe(true);
+    }
+  });
+
+  it('hides only debug settings and the deliberate few as advanced', () => {
+    const advanced = Object.entries(configurationProperties())
+      .filter(([key, property]) => !key.startsWith('varro.debug.') && property.tags !== undefined)
+      .map(([key, property]) => [key, property.tags]);
+    expect(advanced).toEqual([
+      ['varro.promptCompletion.model', ['advanced']],
+      ['varro.chat.fallbackTitle', ['advanced']],
+    ]);
+    // Decision review, including TypeSafe's Jev, is a supported setting, not an experiment.
+    expect(configurationProperties()['varro.permissions.decisionModel']).not.toHaveProperty('tags');
+  });
+
+  it('hides debug settings as advanced instead of marking them deprecated', () => {
+    const debug = Object.entries(configurationProperties()).filter(([key]) =>
+      key.startsWith('varro.debug.')
+    );
+
+    expect(debug).toHaveLength(6);
+    for (const [, property] of debug) {
+      expect(property.tags).toEqual(['advanced']);
+      expect(property).not.toHaveProperty('deprecationMessage');
+      expect(property).not.toHaveProperty('markdownDeprecationMessage');
+    }
+  });
+
+  it('declares scopes that keep user-only settings out of workspace settings', () => {
+    const properties = configurationProperties();
+
+    for (const key of [
+      'varro.permissions.approveModel',
+      'varro.permissions.decisionModel',
+      'varro.permissions.onReject',
+      'varro.permissions.onRejectCustom',
+      'varro.followups.enabled',
+      'varro.followups.model',
+      'varro.promptTracing.enabled',
+      'varro.chat.remoteImages',
+    ]) {
+      expect(properties[key]?.scope, key).toBe('application');
+    }
+    // Machine scope would drop a local user value in remote windows; Varro reads only user
+    // and remote settings itself and ignores workspace values.
+    expect(properties['varro.server.command']).not.toHaveProperty('scope');
+  });
+
+  it('gives every provider/model setting a pattern error message', () => {
+    for (const [key, property] of Object.entries(configurationProperties())) {
+      if (!('pattern' in property) || 'markdownDeprecationMessage' in property) continue;
+      expect(property.patternErrorMessage, key).toEqual(expect.any(String));
+    }
+  });
+
+  it('links other settings only from Markdown descriptions and only to contributed settings', () => {
+    const properties = configurationProperties();
+
+    for (const [key, property] of Object.entries(properties)) {
+      for (const field of ['description', 'enumDescriptions'] as const) {
+        expect(JSON.stringify(property[field] ?? ''), `${key}.${field}`).not.toMatch(/#varro\./);
+      }
+      const markdown = JSON.stringify([
+        property.markdownDescription,
+        property.markdownEnumDescriptions,
+        property.markdownDeprecationMessage,
+      ]);
+      for (const match of markdown.matchAll(/`#(varro\.[\w.]+)#`/g)) {
+        const linked = match[1] ?? '';
+        expect(properties[linked], `${key} links ${linked}`).toBeDefined();
+        expect(properties[linked], `${key} links deprecated ${linked}`).not.toHaveProperty(
+          'markdownDeprecationMessage'
+        );
+      }
+    }
+  });
+
+  it.each([['varro.permissions.approveModel', 'varro.chat.autoApproveModel']])(
+    'contributes %s and keeps %s as a deprecated stub',
+    (key, legacyKey) => {
+      const properties = configurationProperties();
+      const current = properties[key];
+      const stub = properties[legacyKey];
+
+      expect(current).toBeDefined();
+      expect(current).not.toHaveProperty('markdownDeprecationMessage');
+      expect(stub?.markdownDeprecationMessage).toBe(
+        `Renamed to \`#${key}#\`. Varro moves a user setting to the new name when it starts, and reads this one only while the new setting is unset.`
+      );
+      // The stub keeps the same scope, or VS Code would accept values Varro ignores.
+      expect(stub?.scope).toBe(current?.scope);
+      expect(stub?.default).toEqual(current?.default);
+      expect(stub?.enum).toEqual(current?.enum);
+      expect(stub?.pattern).toEqual(current?.pattern);
+      expect(stub).not.toHaveProperty('description');
+      expect(stub).not.toHaveProperty('markdownDescription');
+      // The stub sits in the same category as its replacement.
+      const group = packageJson.contributes.configuration.find((item) => key in item.properties);
+      expect(group?.properties).toHaveProperty([legacyKey]);
+    }
+  );
+
+  it('describes settings without the "composer" jargon', () => {
+    expect(JSON.stringify(packageJson.contributes.configuration)).not.toMatch(/composer/i);
+  });
+
+  it('keeps a deprecated stub for exactly the released renames', () => {
+    const stubs = Object.entries(configurationProperties())
+      .filter(([, property]) => 'markdownDeprecationMessage' in property)
+      .map(([key]) => key)
+      .toSorted();
+    expect(stubs).toEqual(['varro.chat.autoApproveModel']);
+  });
+
+  it('contributes no Jev on/off setting under any name', () => {
+    for (const key of [
+      'varro.autoApprove.jev.enabled',
+      'varro.autoApprove.useJev',
+      'varro.decisions.jev.autoApprove',
+    ]) {
+      expect(configurationProperties()).not.toHaveProperty([key]);
+    }
+  });
+
+  it('uses integer types for whole-number settings', () => {
+    const properties = configurationProperties();
+
+    expect(properties['varro.chat.cacheWarningTokens']?.type).toBe('integer');
+    expect(properties['varro.chat.cacheWarningTokens']?.default).toBe(300_000);
+    expect(properties['varro.debug.resetWarningDays']?.type).toBe('integer');
   });
 
   it('activates on Varro use instead of every VS Code startup', () => {
@@ -1596,17 +2002,5 @@ describe('extension manifest', () => {
     expect(packageJson.contributes.commands).not.toContainEqual(
       expect.objectContaining({ command: 'varro.chat.focus' })
     );
-  });
-
-  it('contributes a disabled-by-default empty-state histogram setting', () => {
-    const properties = packageJson.contributes.configuration.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
-
-    expect(properties['varro.chat.showEmptyStateHistogram']).toMatchObject({
-      type: 'boolean',
-      default: false,
-    });
   });
 });

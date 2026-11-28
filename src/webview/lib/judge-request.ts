@@ -1,4 +1,7 @@
-import type { AutoApproveJudgeReference } from '../../shared/protocol';
+import {
+  AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH,
+  type AutoApproveJudgeReference,
+} from '../../shared/protocol';
 import type { SelectedModel } from './app-state-types';
 import type { Permission } from '../types';
 
@@ -21,9 +24,10 @@ export function toPlainJudgeModel(model: SelectedModel | null): SelectedModel | 
 
 export function toApprovedPermissionReference(
   permission: Permission,
-  response: AutoApproveJudgeReference['response']
+  response: AutoApproveJudgeReference['response'],
+  rejectionFeedback?: string
 ): AutoApproveJudgeReference {
-  return {
+  const reference: AutoApproveJudgeReference = {
     type: permission.type,
     title: permission.title,
     response,
@@ -35,6 +39,18 @@ export function toApprovedPermissionReference(
         : undefined,
     metadata: permission.metadata ? deepPlainCopy(permission.metadata) : undefined,
   };
+  const feedback = boundRejectionFeedback(response, rejectionFeedback);
+  if (feedback) reference.feedback = feedback;
+  return reference;
+}
+
+/** The trimmed, length-bounded feedback a rejection may carry; other responses carry none. */
+export function boundRejectionFeedback(
+  response: AutoApproveJudgeReference['response'],
+  feedback: string | undefined
+): string | undefined {
+  const text = response === 'reject' ? feedback?.trim() : undefined;
+  return text ? text.slice(0, AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH) : undefined;
 }
 
 function deepPlainCopy<T>(value: T): T {

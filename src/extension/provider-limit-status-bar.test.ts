@@ -20,7 +20,11 @@ vi.mock('vscode', () => ({
   window: { createStatusBarItem: mocks.createStatusBarItem },
   StatusBarAlignment: { Right: 2 },
   workspace: {
-    getConfiguration: () => ({ get: () => mocks.configuration.displayMode }),
+    getConfiguration: () => ({
+      // Only the current key is read; the removed `providerLimits.statusBarDisplay` is not.
+      get: (key: string) =>
+        key === 'providerLimits.statusBar' ? mocks.configuration.displayMode : undefined,
+    }),
   },
 }));
 

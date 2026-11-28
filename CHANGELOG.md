@@ -2,6 +2,18 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.38.x - November 2026
+
+- Reorganized Varro's settings into ordered categories in the Settings editor: Chat, Permissions, Utilities, Notifications, Usage and Limits, OpenCode CLI and Server, and Debug. Every key now has the form `varro.<group>.<name>`. Prompt completion, fallback session titles, and debug settings are hidden as advanced.
+- Renamed several settings, for example `varro.chat.defaultPermissionMode` to `varro.permissions.defaultMode`, `varro.chat.groupComposerBlocks` to `varro.chat.tabbedPanels`, `varro.review.model` to `varro.walkthrough.model`, and `varro.chat.promptCacheWarningTokens` to `varro.chat.cacheWarningTokens`. Only `varro.chat.autoApproveModel` keeps working: Varro moves it to `varro.permissions.approveModel` when a local window starts. Other old keys are no longer read, so set their new keys again after updating. See the [renamed settings](docs/usage.md#renamed-settings) list. `varro.server.command`, `varro.server.autoUpdate`, and `varro.notifications.native` keep their names.
+- TypeSafe's Jev is now selected like any other decision model, through `varro.permissions.decisionModel` (`typesafe/jev-latest`, which the Models view toggle sets), so at most one decision reviewer runs before the chat model judge. The old `varro.decisions.jev.autoApprove` value is no longer read, so turn Jev on again after updating.
+- Removed prompt-cache warming: Varro no longer sends keep-alive requests, and the **Keep warm** toggle and the warming settings are gone. The context popup still estimates when a cache expires, and the warning about re-sending a large context uncached remains. If you used the `all` mode, OpenCode's own `warming` entry stays in your global OpenCode config; remove it there to stop OpenCode warming every session. Also removed the decorative empty-state histogram.
+- Problems context in chat (`varro.chat.autoAttachProblems`) is now off by default.
+- The Settings editor now shows a number box for `varro.server.port`. Leave it empty to select a port automatically, or set a fixed port; an existing `"auto"` value keeps working.
+- Auto-approve reviewers now follow the same rule as the agent after a rejection: they reject only a retry of the same denied action, review a different approach on its own merits, and ask you when it is unclear whether you want it. They also see the instructions you give with **Reject with instructions** as evidence of what you want, which never approves an action by itself.
+- Varro now reads `varro.server.command` only from user or remote settings, so a repository's workspace settings can no longer choose the executable Varro starts. Move a workspace value to user or remote settings.
+- Workspace settings can make `varro.permissions.defaultMode` stricter than your user setting but no longer more permissive. An invalid default permission mode now falls back to `auto`, the documented default.
+
 ## 0.37.x - November 2026
 
 - Agents now follow an alternative you ask for in rejection feedback or a later message, instead of refusing because it reaches the same result as the denied tool. Each alternative still needs its own permission. The new user-level `varro.chat.permissionGuidance` setting can replace this system prompt guidance with custom text from `varro.chat.permissionGuidanceText` or turn it off. Changing the guidance invalidates cached prompt prefixes once for active sessions.

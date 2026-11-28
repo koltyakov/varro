@@ -204,12 +204,18 @@ export function createSessionWorkspaceMetadata(scope: SessionWorkspaceScope) {
 export type AutoApproveJudgeDecision = 'allow' | 'reject' | 'ask';
 export const AUTO_APPROVE_JUDGE_TIMEOUT_MS = 20_000;
 
+/** Longest rejection feedback a permission reviewer receives with a rejected decision. */
+export const AUTO_APPROVE_REFERENCE_FEEDBACK_MAX_LENGTH = 500;
+
+/** A user's answer to an earlier permission request, recorded by Varro, never by a tool call. */
 export type AutoApproveJudgeReference = {
   type: string;
   title: string;
   response: 'once' | 'always' | 'reject';
   pattern?: string | string[];
   metadata?: UnknownRecord;
+  /** The user's instructions given with a rejection; only rejected references carry it. */
+  feedback?: string;
 };
 
 export type AutoApproveJudgeRequest = {
@@ -975,7 +981,6 @@ export type InitialWebviewState = {
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
   groupComposerBlocks?: boolean;
-  showEmptyStateHistogram?: boolean;
   remoteImages?: RemoteImageMode;
   promptCompletionModel?: string;
   followupsEnabled?: boolean;
@@ -1182,31 +1187,9 @@ export type ExtensionMessage =
   | { type: 'command/navigate-history'; payload: { direction: 'back' | 'forward' } }
   | { type: 'command/abort' }
   | { type: 'ralph/state'; payload: RalphStatePayload }
-  | { type: 'warming/state'; payload: PromptCacheWarmingState };
+  | { type: 'promptCache/learned'; payload: PromptCacheLearningState };
 
-/** `varro.chat.promptCacheWarming`: chosen sessions are warmed by Varro, all by OpenCode's config. */
-export type PromptCacheWarmingMode = 'off' | 'chosen' | 'all';
-
-export type PromptCacheWarmingSession = {
-  /** End of the current warming window, or `null` until the next reply finishes. */
-  warmUntil: number | null;
-  /** When the latest request or keep-alive sent the context; the cache lifetime counts from here. */
-  sentAt: number | null;
-  /** The model's expected cache lifetime, or `null` until it is resolved. */
-  ttlMs: number | null;
-  /** Why warming stopped before the next reply: the window ended, the cache was gone, or a ping failed. */
-  stopped: 'expired' | 'cache-miss' | 'failed' | null;
-};
-
-export type PromptCacheWarmingState = {
-  /** OpenCode v2 with a running server; v1 has no transient generate route. */
-  available: boolean;
-  mode: PromptCacheWarmingMode;
-  durationMs: number;
-  /** OpenCode's own `warming` config is on, so it warms every session itself. */
-  openCodeWarming: boolean;
-  /** Chosen sessions, keyed by session ID. */
-  sessions: Record<string, PromptCacheWarmingSession>;
+export type PromptCacheLearningState = {
   /** How long caches have actually lasted for this user, per model and per provider. */
   learned: LearnedPromptCacheLifetimes;
 };
@@ -1430,10 +1413,9 @@ export type WebviewMessage =
       type: 'ralph/sync';
       payload: { legacyRuns?: Record<string, RalphRun> };
     }
-  | { type: 'warming/sync' }
-  | { type: 'warming/set'; payload: { sessionId: string; enabled: boolean } }
+  | { type: 'promptCache/sync' }
   | {
-      type: 'warming/samples';
+      type: 'promptCache/samples';
       payload: { sessionId: string; samples: PromptCacheHistorySample[] };
     }
   | {

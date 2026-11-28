@@ -106,6 +106,38 @@ describe('native permission decisions', () => {
     }
   });
 
+  it('sends the shared retry-versus-alternative criteria and rejection feedback', async () => {
+    const { native, request } = fixture(answers({ choice: 'reject', probability: 0.99 }));
+    const references = [
+      {
+        type: 'bash',
+        title: 'Run command: cargo build --release',
+        response: 'reject' as const,
+        feedback: 'Use a debug build instead.',
+      },
+    ];
+
+    expect(await native.judgePermission(model, permission, references)).toMatchObject({
+      decision: 'reject',
+    });
+
+    const body = asRecord(request.mock.calls.find(([method]) => method === 'POST')?.[2]);
+    expect(JSON.stringify(body?.input)).toContain('Use a debug build instead.');
+    const questions = JSON.stringify(body?.questions);
+    expect(questions).toContain('materially the same operation on the same target');
+    expect(questions).toContain('ask, never reject');
+    expect(questions).toContain('never authorizes an action by itself');
+  });
+
+  it('turns a confident native reject into ask without a prior user rejection', async () => {
+    const { native } = fixture(answers({ choice: 'reject', probability: 0.99 }));
+    expect(
+      await native.judgePermission(model, permission, [
+        { type: 'bash', title: 'Run command: cargo build', response: 'always' },
+      ])
+    ).toMatchObject({ decision: 'ask' });
+  });
+
   it('discovers only decision models and submits evidence without creating sessions', async () => {
     const { native, request } = fixture();
     expect(await native.status()).toMatchObject({
@@ -206,10 +238,10 @@ describe('native permission decisions', () => {
       request.mock.calls.every(([method, route]) => method === 'GET' && route === '/openapi.json')
     ).toBe(true);
   });
-  it('keeps native ask verdicts terminal and falls back to opted-in Jev only on errors', async () => {
+  it('keeps native ask verdicts terminal and never runs Jev as a second reviewer', async () => {
     const { native, server, request } = fixture(answers({ confidence: 0.5 }));
     const jev = {
-      model: { providerID: 'typesafe', modelID: 'legacy' },
+      model: { providerID: 'typesafe', modelID: 'jev-latest' },
       isAutoApproveEnabled: async () => true,
       judgePermission: vi.fn(async () => ({ decision: 'allow' as const })),
     };
@@ -217,7 +249,7 @@ describe('native permission decisions', () => {
       server,
       new HiddenSessionManager(),
       undefined,
-      undefined,
+      () => 'chat/reviewer',
       undefined,
       jev,
       native
@@ -226,16 +258,37 @@ describe('native permission decisions', () => {
       decision: 'ask',
       reviewerModel: model,
     });
-    expect(jev.judgePermission).not.toHaveBeenCalled();
     request.mockImplementationOnce(async () => {
       throw new Error('Native provider unavailable');
     });
     expect(await judge.judge({ permission })).toMatchObject({
-      decision: 'allow',
-      reviewerModel: jev.model,
+      decision: 'ask',
+      reviewerModel: { providerID: 'chat', modelID: 'reviewer' },
     });
-    expect(jev.judgePermission).toHaveBeenCalledOnce();
+    expect(jev.judgePermission).not.toHaveBeenCalled();
   });
+  it.each(['typesafe/jev-latest', 'typesafe/jev-2', ''])(
+    'never sends the direct or empty route %j to the native decision API',
+    async (route) => {
+      const { server, request } = fixture();
+      const native = new NativeDecisions(server, () => route);
+      expect(native.model).toBeNull();
+      expect((await native.status()).model).toBeNull();
+      const judge = new AutoApproveJudge(
+        server,
+        new HiddenSessionManager(),
+        undefined,
+        () => 'chat/reviewer',
+        undefined,
+        undefined,
+        native
+      );
+      expect(await judge.judge({ permission })).toMatchObject({
+        reviewerModel: { providerID: 'chat', modelID: 'reviewer' },
+      });
+      expect(request).not.toHaveBeenCalledWith('POST', path, expect.anything(), expect.anything());
+    }
+  );
   it('uses a chat model, not the native decision route, when native generation fails', async () => {
     const { native, request, server } = fixture([]);
     const judge = new AutoApproveJudge(

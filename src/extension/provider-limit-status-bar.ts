@@ -209,8 +209,7 @@ export class ProviderLimitStatusBar {
           compareProviderOrder(a, b, preferences.providerOrder)
       );
     const rotating =
-      vscode.workspace.getConfiguration('varro').get<string>('providerLimits.statusBarDisplay') !==
-      'all';
+      vscode.workspace.getConfiguration('varro').get<string>('providerLimits.statusBar') !== 'all';
     this.rotationProviderIDs =
       this.running && rotating ? providers.map((provider) => provider.id) : [];
     const providerID = this.rotationProviderIDs.includes(this.rotationProviderID ?? '')

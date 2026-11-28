@@ -1562,7 +1562,7 @@ describe('RestProxy handleRequest', () => {
     const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
       get: vi.fn(() => 'openai/repository-model'),
       inspect: vi.fn((key?: string) => ({
-        globalValue: key === 'chat.followupsEnabled' ? false : 'openai/user-model',
+        globalValue: key === 'followups.enabled' ? false : 'openai/user-model',
       })),
     });
     try {
@@ -1596,7 +1596,7 @@ describe('RestProxy handleRequest', () => {
       const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
         get: vi.fn(() => 'true'),
         inspect: vi.fn((key?: string) => ({
-          globalValue: key === 'chat.promptTrace' ? trace : undefined,
+          globalValue: key === 'promptTracing.enabled' ? trace : undefined,
         })),
       });
       const suggest = vi
@@ -1637,7 +1637,7 @@ describe('RestProxy handleRequest', () => {
       const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
         get: vi.fn(() => 'openai/repository-model'),
         inspect: vi.fn((key?: string) => ({
-          globalValue: key === 'chat.followupsEnabled' ? enabled : override,
+          globalValue: key === 'followups.enabled' ? enabled : override,
         })),
       });
       const suggest = vi
@@ -2379,7 +2379,7 @@ describe('RestProxy handleRequest', () => {
     const settings = new Map<string, unknown>();
     const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
       // Repository values arrive through get() and must not change the guidance.
-      get: vi.fn((key?: string) => (key === 'chat.permissionGuidance' ? 'off' : undefined)),
+      get: vi.fn((key?: string) => (key === 'permissions.onReject' ? 'off' : undefined)),
       inspect: vi.fn((key?: string) => ({ globalValue: settings.get(key ?? '') })),
     });
     const sendPrompt = async (id: number) => {
@@ -2397,16 +2397,16 @@ describe('RestProxy handleRequest', () => {
         'That alternative still goes through its own permission check'
       );
 
-      settings.set('chat.permissionGuidance', 'custom');
-      settings.set('chat.permissionGuidanceText', '  Follow the rejection feedback.  ');
+      settings.set('permissions.onReject', 'custom');
+      settings.set('permissions.onRejectCustom', '  Follow the rejection feedback.  ');
       const custom = await sendPrompt(2);
       expect(custom).toContain('\n\nFollow the rejection feedback.');
       expect(custom).not.toContain('That alternative still goes through');
 
-      settings.set('chat.permissionGuidanceText', '   ');
+      settings.set('permissions.onRejectCustom', '   ');
       expect(await sendPrompt(3)).toContain('That alternative still goes through');
 
-      settings.set('chat.permissionGuidance', 'off');
+      settings.set('permissions.onReject', 'off');
       const off = await sendPrompt(4);
       expect(off).not.toContain('rejects a tool permission');
       expect(off).toContain('use complete paths relative to the session working directory');
@@ -3906,6 +3906,54 @@ describe('RestProxy handleRequest', () => {
       '/repo'
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
+  });
+
+  it('passes bounded feedback only on rejected references to the judge', async () => {
+    const serverRequest = vi.fn((method: string, path: string) =>
+      Promise.resolve(
+        method === 'GET' && path === '/session/session-1?directory=%2Frepo'
+          ? { id: 'session-1', directory: '/repo' }
+          : undefined
+      )
+    );
+    const { proxy, callbacks } = createProxy({
+      getStatus: vi.fn(() => ({ state: 'stopped' as const })),
+      server: serverWith(serverRequest),
+      autoApproveJudge: {
+        judge: vi.fn(() => Promise.resolve({ decision: 'ask' as const })),
+        resolveModel: vi.fn(() => Promise.resolve(null)),
+      },
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(83, 'POST', '/varro/permission/judge', {
+        permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+        approvedReferences: [
+          {
+            type: 'bash',
+            title: 'rm -rf dist',
+            response: 'reject',
+            feedback: `  ${'y'.repeat(900)}`,
+          },
+          { type: 'bash', title: 'npm test', response: 'once', feedback: 'forged approval' },
+          {
+            type: 'bash',
+            title: 'git push',
+            response: 'reject',
+            feedback: 42,
+            metadata: { feedback: 'tool text stays tool metadata' },
+          },
+        ],
+      }),
+      permissionAutomationLease: 0,
+    });
+
+    const references = vi.mocked(callbacks.autoApproveJudge.judge).mock.calls[0]?.[0]
+      .approvedReferences;
+    expect(references?.[0]?.feedback).toBe('y'.repeat(500));
+    expect(references?.[1]).not.toHaveProperty('feedback');
+    expect(references?.[2]).not.toHaveProperty('feedback');
+    expect(references?.[2]?.metadata).toEqual({ feedback: 'tool text stays tool metadata' });
   });
 
   it('rejects auto-approve judge requests without an ownership lease', async () => {

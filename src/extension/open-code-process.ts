@@ -356,7 +356,7 @@ export function validateServerPort(value: unknown): number {
     value > MAX_SERVER_PORT
   ) {
     throw new Error(
-      `Invalid varro.server.port value (${String(value)}). Set varro.server.port to an integer between 1 and ${MAX_SERVER_PORT}.`
+      `Invalid varro.server.port value (${String(value)}). Set varro.server.port to an integer between 1 and ${MAX_SERVER_PORT}, or clear it to select a port automatically.`
     );
   }
   return value;
@@ -364,8 +364,14 @@ export function validateServerPort(value: unknown): number {
 
 export type OpenCodePortSetting = number | 'auto';
 
+/**
+ * An unset (`null` or missing) port selects one automatically. The previously documented `"auto"`
+ * still does, so existing settings keep working. Anything else must be a valid TCP port.
+ */
 export function readServerPortSetting(value: unknown): OpenCodePortSetting {
-  return value === 'auto' ? value : validateServerPort(value);
+  return value === undefined || value === null || value === 'auto'
+    ? 'auto'
+    : validateServerPort(value);
 }
 
 function parseInjectedConfigOwner(value: unknown): InjectedConfigOwner | null {
@@ -681,7 +687,7 @@ export class OpenCodeProcess {
       if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port) return false;
       if (!this.isAutomaticPort && Number(url.port) !== this._port)
         throw new Error(
-          'A shared OpenCode service is already running on another port. Select auto to reuse it; the explicit port was not changed.'
+          'A shared OpenCode service is already running on another port. Clear varro.server.port to reuse it; the explicit port was not changed.'
         );
       this._port = validateServerPort(Number(url.port));
       this.serverPassword = endpoint.auth?.password;
@@ -990,7 +996,7 @@ export class OpenCodeProcess {
     }
     if (!this.isAutomaticPort && lease.portMode === 'auto' && lease.port !== this.originalPort)
       throw new Error(
-        'A managed automatic-port server is still running. Select auto to reuse it, or stop it explicitly before starting a fixed-port server.'
+        'A managed automatic-port server is still running. Clear varro.server.port to reuse it, or stop it explicitly before starting a fixed-port server.'
       );
     this.ownershipLeaseCandidate = lease;
     this.credentialRegistration = null;

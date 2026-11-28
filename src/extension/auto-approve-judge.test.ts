@@ -17,6 +17,12 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import { AutoApproveJudge } from './auto-approve-judge';
 import { HiddenSessionManager } from './hidden-session-manager';
+import {
+  PRIOR_DECISIONS_EVIDENCE,
+  PRIOR_REJECTION_ALTERNATIVE_RULE,
+  PRIOR_REJECTION_FEEDBACK_RULE,
+  PRIOR_REJECTION_RETRY_CONDITION,
+} from './permission-review-policy';
 
 const cargoBuildPermission = (id: string) => ({
   id,
@@ -1554,6 +1560,54 @@ describe('AutoApproveJudge', () => {
     );
     expect(judgeMessageBody?.system).toContain(
       'Unknown custom or MCP tools can have arbitrary side effects'
+    );
+  });
+
+  it('gives the chat judge the same prior-rejection policy and the rejection feedback', async () => {
+    let body: { system?: string; parts?: { text?: string }[] } | undefined;
+    const request = vi.fn(async (method: string, path: string, payload?: unknown) => {
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        body = payload as typeof body;
+        return { info: { structured_output: { decision: 'ask', reason: 'Needs review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge(
+      { request } as never,
+      new HiddenSessionManager(),
+      async () => false,
+      () => 'openai/gpt-5-mini'
+    );
+
+    await judge.judge({
+      permission: {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'Run command: npm version patch',
+        metadata: { command: 'npm version patch' },
+      },
+      approvedReferences: [
+        {
+          type: 'bash',
+          title: 'Run command: npm version major',
+          response: 'reject',
+          feedback: 'Bump the patch version instead.',
+        },
+      ],
+    });
+
+    expect(body?.system).toContain(`Return reject only when ${PRIOR_REJECTION_RETRY_CONDITION}.`);
+    expect(body?.system).toContain(PRIOR_REJECTION_ALTERNATIVE_RULE);
+    expect(body?.system).toContain(PRIOR_REJECTION_FEEDBACK_RULE);
+    expect(body?.system).toContain(PRIOR_DECISIONS_EVIDENCE);
+    expect(body?.system).not.toMatch(/materially equivalent/i);
+    expect(body?.parts?.[0]?.text).toContain('"feedback": "Bump the patch version instead."');
+    expect(body?.parts?.[0]?.text).toContain(
+      'Only the response and feedback fields of priorUserDecisions come from the user.'
     );
   });
 
