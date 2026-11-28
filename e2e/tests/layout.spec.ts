@@ -380,6 +380,9 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
     )
     .toBeLessThanOrEqual(1);
 
+  await trayItems.hover();
+  // Opening an active tool keeps bottom-follow engaged. Measure after it reaches the new bottom.
+  await expect.poll(() => getListDistanceFromBottom(page)).toBe(0);
   const initial = await page.evaluate(() => {
     const transcript = document.querySelector<HTMLElement>('.interactive-list')!;
     const tray = document.querySelector<HTMLElement>('.assistant-active-activity-items')!;
@@ -394,7 +397,6 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
   expect(initial.trayMax).toBeGreaterThan(0);
   expect(initial.trayTop).toBeGreaterThan(0);
 
-  await trayItems.hover();
   await page.mouse.wheel(0, -96);
   await expect
     .poll(() => trayItems.evaluate((element) => element.scrollTop))

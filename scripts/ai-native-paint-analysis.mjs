@@ -67,6 +67,89 @@ function oldHeldCrop(marker, before, after, host) {
   if (sameCropSize(crop, prior) && crop.x === prior.x && crop.y === prior.y) return crop;
 }
 
+/**
+ * Classifies native compositor frames captured during labelled wheel steps (`<setting>:<index>`).
+ * A frame counts only between two DOM samples of the same step. The body crop excludes sticky
+ * chrome, the scrollbar, and the jump-to-latest control, so a solid frame is a paint gap.
+ */
+export async function analyzeWheelPaint(
+  frames,
+  samples,
+  host,
+  readImage,
+  { decode = decodeNativeImage, maxDelta = 800 } = {}
+) {
+  const settings = new Map();
+  const setting = (name) => {
+    if (!settings.has(name))
+      settings.set(name, {
+        checkedFrames: 0,
+        baseline: false,
+        moved: false,
+        diffGate: false,
+        oversizedSteps: [],
+        failures: [],
+      });
+    return settings.get(name);
+  };
+  for (const sample of samples) {
+    if (!sample.label) continue;
+    const [name, , delta] = sample.label.split(':');
+    const entry = setting(name);
+    if (Math.abs(Number(delta)) > maxDelta && !entry.oversizedSteps.includes(sample.label))
+      entry.oversizedSteps.push(sample.label);
+    if (sample.diffLines > 0) entry.diffGate = true;
+  }
+  for (const [name, entry] of settings) {
+    const own = samples.filter((sample) => sample.label?.startsWith(`${name}:`));
+    entry.moved = own.some((sample) => Math.abs(sample.top - own[0].top) > 1);
+  }
+  for (const frame of frames) {
+    const epoch = frame.metadata.timestamp * 1000;
+    const before = samples.findLast((s) => s.epoch <= epoch);
+    const after = samples.find((s) => s.epoch >= epoch);
+    if (!before?.label || before.label !== after?.label) continue;
+    const image = await decode(await readImage(frame.file));
+    if (
+      image.width / frame.metadata.deviceWidth !== 1 ||
+      image.height !== frame.metadata.deviceHeight
+    )
+      throw new Error('Native paint oracle requires unscaled 1:1 compositor frames');
+    const viewport = before.viewport;
+    const body = {
+      x: Math.round(host.x + viewport.x + 14),
+      y: Math.round(host.y + viewport.y + 140),
+      width: Math.floor(viewport.width - 42),
+      height: Math.floor(viewport.height - 200),
+    };
+    const bright = brightPixels(image, body).length;
+    const entry = setting(before.label.split(':')[0]);
+    entry.checkedFrames++;
+    if (bright > 100 && bright < body.width * body.height * 0.6) entry.baseline = true;
+    if (bright < 10 || body.width * body.height - bright < 10)
+      // `uncovered` is diagnostic only: mounted rows missing from the viewport at the
+      // next DOM sample, as opposed to mounted content the compositor had not painted.
+      entry.failures.push({
+        file: frame.file,
+        epoch,
+        label: before.label,
+        bright,
+        uncovered: after.uncovered,
+      });
+  }
+  const result = {};
+  for (const [name, entry] of settings) {
+    const complete =
+      entry.baseline &&
+      entry.moved &&
+      entry.checkedFrames > 5 &&
+      entry.oversizedSteps.length === 0 &&
+      (name !== 'on' || entry.diffGate);
+    result[name] = { verdict: verdict(entry.failures, complete), ...entry };
+  }
+  return result;
+}
+
 export async function analyzeNativePaint(
   frames,
   samples,

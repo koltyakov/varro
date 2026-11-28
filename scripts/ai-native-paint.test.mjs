@@ -12,10 +12,10 @@ import {
   verdict,
   summarizeTrace,
 } from './ai-native-paint-oracles.mjs';
-import { nativePaintFixture } from './ai-native-paint-fixture.mjs';
+import { nativePaintFixture, nativeWheelFixture } from './ai-native-paint-fixture.mjs';
 import { createStreamingServer } from './ai-streaming-server.mjs';
 import { createBootstrapProxy } from './ai-streaming.mjs';
-import { analyzeNativePaint } from './ai-native-paint-analysis.mjs';
+import { analyzeNativePaint, analyzeWheelPaint } from './ai-native-paint-analysis.mjs';
 import { startPaintTrace, PAINT_TRACE_CATEGORIES } from './ai-native-paint-trace.mjs';
 
 function image() {
@@ -543,6 +543,113 @@ test('browser-level compositor trace drains and closes the protocol stream', asy
     await new Promise((resolve) => server.close(resolve));
   }
 });
+function wheelImage(painted) {
+  const data = new Uint8Array(100 * 260 * 3).fill(20);
+  if (painted)
+    for (let y = 140; y < 200; y++)
+      for (let x = 14; x < 72; x++)
+        if ((x + y) % 3 === 0) data.fill(200, (y * 100 + x) * 3, (y * 100 + x) * 3 + 3);
+  return { data, width: 100, height: 260 };
+}
+
+function wheelRun(steps, blank = new Set()) {
+  const viewport = { x: 0, y: 0, width: 100, height: 260 };
+  const samples = [];
+  const frames = [];
+  let epoch = 1_000;
+  for (const [index, { label, diffLines = 0 }] of steps.entries()) {
+    samples.push({ epoch, label, top: index * 50, viewport, diffLines });
+    for (let frame = 0; frame < 3; frame++) {
+      const file = `${label}-${frame}`;
+      frames.push({
+        file,
+        metadata: { timestamp: (epoch + 2 + frame) / 1000, deviceWidth: 100, deviceHeight: 260 },
+      });
+    }
+    samples.push({ epoch: epoch + 10, label, top: index * 50 + 25, viewport, diffLines });
+    // A frame between steps belongs to no wheel window and is never judged.
+    frames.push({
+      file: 'between',
+      metadata: { timestamp: (epoch + 15) / 1000, deviceWidth: 100, deviceHeight: 260 },
+    });
+    samples.push({ epoch: epoch + 20, label: '', top: index * 50 + 25, viewport });
+    epoch += 100;
+  }
+  return analyzeWheelPaint(frames, samples, { x: 0, y: 0 }, async (file) => file, {
+    decode: async (file) => wheelImage(file !== 'between' && !blank.has(file)),
+  });
+}
+
+test('wheel paint oracle requires painted frames in every step for both diff settings', async () => {
+  const steps = [
+    { label: 'on:0:-400', diffLines: 4 },
+    { label: 'on:1:-800', diffLines: 2 },
+    { label: 'on:2:800' },
+    { label: 'off:0:-400' },
+    { label: 'off:1:-800' },
+    { label: 'off:2:800' },
+  ];
+  const passing = await wheelRun(steps);
+  assert.equal(passing.on.verdict, 'PASS');
+  assert.equal(passing.off.verdict, 'PASS');
+  assert.equal(passing.on.checkedFrames, 9);
+
+  const failing = await wheelRun(steps, new Set(['on:1:-800-1']));
+  assert.equal(failing.on.verdict, 'FAIL');
+  assert.deepEqual(
+    failing.on.failures.map(({ label, bright }) => [label, bright]),
+    [['on:1:-800', 0]]
+  );
+  assert.equal(failing.off.verdict, 'PASS');
+});
+
+test('wheel paint oracle blocks missing diffs or deltas beyond the supported envelope', async () => {
+  const noDiffs = await wheelRun([
+    { label: 'on:0:-400' },
+    { label: 'on:1:-800' },
+    { label: 'on:2:800' },
+  ]);
+  assert.equal(noDiffs.on.verdict, 'BLOCKED');
+  const oversized = await wheelRun([
+    { label: 'off:0:-400' },
+    { label: 'off:1:-2200' },
+    { label: 'off:2:800' },
+  ]);
+  assert.equal(oversized.off.verdict, 'BLOCKED');
+  assert.deepEqual(oversized.off.oversizedSteps, ['off:1:-2200']);
+});
+
+test('generated wheel fixture pauses with a busy trailing turn of inline patches', async () => {
+  const { capture, checkpoint } = nativeWheelFixture();
+  assert.equal(capture.initialMessages.length, 140);
+  assert.equal(capture.finalMessages.length, 147);
+  const delivered = capture.events.slice(0, checkpoint).map(({ event }) => event);
+  assert.equal(delivered.filter((event) => event.type === 'session.status').length, 1);
+  assert.equal(
+    delivered.find((event) => event.type === 'session.status').properties.status.type,
+    'busy'
+  );
+  assert.equal(
+    delivered.filter((event) => event.properties.part?.tool === 'apply_patch').length,
+    6
+  );
+  assert.equal(capture.events.at(-1).event.properties.status.type, 'idle');
+  const server = await createStreamingServer({
+    capture,
+    timeline: [],
+    directory: '/generated-wheel',
+  });
+  try {
+    const response = await fetch(
+      `${server.url}/session/${server.getResult().sessionID}/message?limit=200`
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).length, 140);
+  } finally {
+    await server.close();
+  }
+});
+
 test('generated paginated multi-file fixture is accepted by the read-only server', async () => {
   const capture = nativePaintFixture();
   assert.equal(capture.initialMessages.length, 270);

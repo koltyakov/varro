@@ -244,9 +244,26 @@ be classified as user rejection.
 Varro-managed servers default `experimental.continue_loop_on_deny` to `true` in their temporary
 runtime config. OpenCode returns the denied tool result to the model and continues its existing loop;
 Varro must not approve the tool, abort/restart the turn, or submit a synthetic user message to resume
-it. Session prompt guidance tells the agent to continue independent permitted work, never retry or
-bypass the denied action, and explain the blocker when the task requires it. OpenCode also rejects
-other pending permissions in the same owning session when one is rejected.
+it. OpenCode also rejects other pending permissions in the same owning session when one is
+rejected.
+
+Because the loop continues, session prompt guidance is the only thing that stops the model from
+working around a plain rejection on its own. By default it tells the agent never to retry the denied
+action or reach the same result through another tool, command, or subagent on its own initiative.
+If the rejection feedback or a later user message asks for a different approach, the agent follows
+it as a new instruction, and that alternative still needs its own permission. The agent asks when it
+is unclear whether an alternative is allowed, keeps doing independent permitted work, and explains
+the blocker when the task needs the denied action. Rejection feedback reaches the model as the
+rejected tool result (see `Reject with instructions` under Manual Approval), so the guidance
+refers to it directly.
+
+`varro.chat.permissionGuidance` selects `default`, `custom` (text from
+`varro.chat.permissionGuidanceText`), or `off`. Both settings are application-scoped and read only
+from user settings, so repository workspace settings cannot inject or remove system prompt text.
+Empty custom text falls back to the default. `off` omits only this paragraph: the workspace scope,
+citation, and selected-agent guidance stay in place, and empty parts are dropped rather than
+leaving blank sections. OpenCode enforces permissions in every mode; with `off`, the model may
+try alternatives that each need approval.
 
 Project and inline OpenCode config can override this default. Caller-provided `OPENCODE_CONFIG`
 remains untouched and skips Varro's injection; externally managed servers require their own setting.

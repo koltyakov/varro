@@ -68,7 +68,7 @@ import { fixture as testFixture } from '../webview/test-fixtures';
 import type { OpenCodeServerMemoryPermission, Session } from '../shared/opencode-types';
 import type { Persistence } from '../shared/persistence';
 import type { RecycleBinEntry } from '../shared/protocol';
-import { asRecord } from '../shared/type-utils';
+import { asRecord, isString } from '../shared/type-utils';
 import { readLocalSessionSummary as readLocalSummary } from './local-session-summary';
 
 type SanitizedMessageResponse = {
@@ -2320,8 +2320,10 @@ describe('RestProxy handleRequest', () => {
     const folderBody = vi.mocked(callbacks.server.request).mock.calls[1]?.[2];
     for (const body of [workspaceBody, folderBody]) {
       for (const instruction of [
-        'do not retry the denied action or bypass the rejection through another tool, command, or subagent',
-        'Continue independent permitted work when possible',
+        'do not reach the same result through another tool, command, or subagent on your own',
+        'If the rejection feedback or a later user message asks for a different approach, follow it as a new instruction',
+        'That alternative still goes through its own permission check',
+        'continue any independent permitted work',
         'explain what is blocked and ask the user how to proceed',
         'use complete paths relative to the session working directory',
         'Do not use a basename unless the file is directly in that directory',
@@ -2354,6 +2356,67 @@ describe('RestProxy handleRequest', () => {
     expect(folderBody).toEqual(
       expect.objectContaining({ system: expect.stringContaining('/repo-b') })
     );
+  });
+
+  it('applies user permission guidance settings without leaving empty prompt sections', async () => {
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        context: {
+          workspacePath: '/repo-a',
+          workspaceDirectory: '/workspace',
+          workspaceFolders: [{ name: 'a', path: '/repo-a' }],
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        getOpenWorkspaceRoot: vi.fn((path: string) => path),
+        readFile: vi.fn(() => Promise.resolve(null)),
+        resolvePath: vi.fn(() => Promise.resolve(null)),
+        validateCitationPaths: vi.fn(() => Promise.resolve([])),
+        resolveCitationSymbols: vi.fn(() => Promise.resolve([])),
+      },
+    });
+    const settings = new Map<string, unknown>();
+    const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
+      // Repository values arrive through get() and must not change the guidance.
+      get: vi.fn((key?: string) => (key === 'chat.permissionGuidance' ? 'off' : undefined)),
+      inspect: vi.fn((key?: string) => ({ globalValue: settings.get(key ?? '') })),
+    });
+    const sendPrompt = async (id: number) => {
+      vi.mocked(callbacks.server.request).mockClear();
+      await proxy.handleRequest(
+        makePayload(id, 'POST', `/session/folder-session-${id}/prompt_async?directory=%2Frepo-a`, {
+          parts: [{ type: 'text', text: 'hello' }],
+        })
+      );
+      const body = asRecord(vi.mocked(callbacks.server.request).mock.calls[0]?.[2]);
+      return isString(body?.system) ? body.system : '';
+    };
+    try {
+      expect(await sendPrompt(1)).toContain(
+        'That alternative still goes through its own permission check'
+      );
+
+      settings.set('chat.permissionGuidance', 'custom');
+      settings.set('chat.permissionGuidanceText', '  Follow the rejection feedback.  ');
+      const custom = await sendPrompt(2);
+      expect(custom).toContain('\n\nFollow the rejection feedback.');
+      expect(custom).not.toContain('That alternative still goes through');
+
+      settings.set('chat.permissionGuidanceText', '   ');
+      expect(await sendPrompt(3)).toContain('That alternative still goes through');
+
+      settings.set('chat.permissionGuidance', 'off');
+      const off = await sendPrompt(4);
+      expect(off).not.toContain('rejects a tool permission');
+      expect(off).toContain('use complete paths relative to the session working directory');
+      expect(off).not.toMatch(/\n{3,}|\n\n$/);
+    } finally {
+      configuration.mockReturnValue({
+        get: vi.fn(() => undefined),
+        inspect: vi.fn(() => ({ globalValue: undefined })),
+      });
+    }
   });
 
   it('grounds each prompt in its captured agent after repeated mode switches', async () => {

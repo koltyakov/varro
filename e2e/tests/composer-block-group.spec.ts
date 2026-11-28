@@ -128,6 +128,35 @@ test('moves tabs that do not fit into a dropdown instead of wrapping', async ({ 
   await expect(more).toBeFocused();
 });
 
+test('keeps keyboard navigation on the selected tab when widening removes More panels', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 300, height: 720 });
+  await openComposerBlocks(page, ALL_BLOCKS);
+  const more = page.getByRole('button', { name: 'More panels' });
+  await more.press('Enter');
+  const items = page.getByRole('menu', { name: 'More panels' }).getByRole('menuitem');
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(items.last()).toBeFocused();
+
+  await page.setViewportSize({ width: 486, height: 720 });
+  await expect(more).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: /Queue/, selected: true })).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: /Goal/, selected: true })).toBeFocused();
+
+  await page.setViewportSize({ width: 300, height: 720 });
+  await more.press('Enter');
+  await expect(items.first()).toBeFocused();
+  const composer = page.getByRole('textbox', { name: 'Message composer' });
+  await composer.focus();
+  await expect(items).toHaveCount(0);
+  await page.setViewportSize({ width: 486, height: 720 });
+  await expect(more).toHaveCount(0);
+  await expect(composer).toBeFocused();
+});
+
 test('shows every tab without a dropdown when they fit', async ({ page }) => {
   await openComposerBlocks(page, ALL_BLOCKS);
   await expect(page.getByRole('tablist').getByRole('tab')).toHaveCount(5);

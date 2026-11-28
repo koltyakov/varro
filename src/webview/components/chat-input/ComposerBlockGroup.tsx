@@ -91,9 +91,13 @@ export function ComposerBlockGroup(props: { blocks: readonly ComposerBlock[] }) 
   );
 
   createEffect(
-    () => overflowTabs().length,
-    (count) => {
-      if (count === 0) setMenuOpen(false);
+    () => ({ close: menuOpen() && overflowTabs().length === 0, selectedTab: active() }),
+    ({ close, selectedTab }) => {
+      if (!close) return;
+      setMenuOpen(false);
+      // Outside focus already dismisses the menu. If it was still open, keep keyboard
+      // navigation on the selected tab when the trigger and its menu items disappear.
+      if (selectedTab) focusTab(selectedTab);
     }
   );
 

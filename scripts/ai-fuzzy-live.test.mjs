@@ -900,6 +900,38 @@ test('dispatches both native scrollbar destinations through the AI-08 executor',
   );
 });
 
+test('judges a held drag to bottom after release reveals output clipped during the hold', async () => {
+  const run = async (gaps) => {
+    const remaining = [...gaps];
+    const cdp = {
+      dragTranscriptScrollbar: async () => ({ dispatched: true, held: true }),
+      captureActionState: async () => {
+        const gap = remaining.length > 1 ? remaining.shift() : remaining[0];
+        return {
+          transcript: {
+            scrollTop: 23_776 - gap,
+            scrollHeight: 24_381,
+            clientHeight: 605,
+            visibleRows: [{ messageId: 'latest', top: 0 }],
+          },
+        };
+      },
+    };
+    const [result] = await executeActionPlan(
+      cdp,
+      [{ step: 19, action: 'held scrollbar to bottom' }],
+      'session',
+      0,
+      { isActive: async () => true }
+    );
+    return result;
+  };
+  // The stream grew 112 px under the held thumb; follow then eases to the new bottom.
+  assert.equal((await run([112, 80, 40, 20])).executed, true);
+  // A transcript that stays detached after release is still unverified.
+  assert.equal((await run([112])).executed, false);
+});
+
 test('stops the AI-08 action plan when the model stream settles', async () => {
   const results = await executeActionPlan(
     { wheel: async () => true },

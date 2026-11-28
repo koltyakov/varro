@@ -4,7 +4,7 @@ import type { MessageEntry, Session, ToolPart } from '../../src/webview/types';
 import { installPlaybackCapture } from './helpers';
 
 for (const expandable of [false, true]) {
-  test(`running command sweeps a wave left to right with ${expandable ? 'expandable' : 'non-expandable'} content`, async ({
+  test(`running tool sweeps a wave left to right with ${expandable ? 'expandable' : 'non-expandable'} content`, async ({
     page,
   }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -59,7 +59,9 @@ for (const expandable of [false, true]) {
     await expect(page.locator('.chat-turn-user')).toContainText('Clone the repository.');
     const state: ToolPart['state'] = {
       status: 'running',
-      input: { command: 'git clone https://github.com/example/repo.git tmp/repo' },
+      input: expandable
+        ? { command: 'git clone https://github.com/example/repo.git tmp/repo' }
+        : {},
       time: { start: created },
     };
     if (expandable) state.metadata = { output: 'Cloning into tmp/repo...' };
@@ -69,7 +71,7 @@ for (const expandable of [false, true]) {
       messageID: assistant.info.id,
       callID: 'animation-call',
       type: 'tool',
-      tool: 'bash',
+      tool: expandable ? 'bash' : 'list',
       state,
     };
     const events: ServerEvent[] = [

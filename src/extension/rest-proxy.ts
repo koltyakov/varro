@@ -64,6 +64,7 @@ import {
   readExtensionConfigState,
   readFollowupModel,
   readFollowupsEnabled,
+  readPermissionGuidance,
 } from './extension-config';
 import { parseSelectedModel } from '../shared/model-preferences';
 import { ModelPricingCatalog } from './model-pricing';
@@ -5188,17 +5189,25 @@ export class RestProxy {
             'Treat the selected folder as the primary working scope. The other listed folders are sibling workspace context; accessing them may require external_directory approval.',
           ].join(' ');
     const existing = typeof record.system === 'string' ? record.system.trim() : '';
+    const permissionGuidance = readPermissionGuidance();
     const permissionPrompt =
-      'If the user rejects a tool permission, do not retry the denied action or bypass the rejection through another tool, command, or subagent. Continue independent permitted work when possible. If completing the task requires the denied action, explain what is blocked and ask the user how to proceed. A rejected permission is not a request to abandon the whole task.';
+      permissionGuidance.mode === 'off'
+        ? ''
+        : permissionGuidance.mode === 'custom'
+          ? permissionGuidance.text
+          : 'When the user rejects a tool permission, do not retry the denied action, and do not reach the same result through another tool, command, or subagent on your own. If the rejection feedback or a later user message asks for a different approach, follow it as a new instruction, even if it reaches the same result as the denied action. That alternative still goes through its own permission check. If it is unclear whether the user is allowing an alternative, ask before acting. Otherwise, continue any independent permitted work. If the task cannot be completed without the denied action, explain what is blocked and ask the user how to proceed. A rejected permission is not a request to abandon the whole task.';
     const agentPrompt =
       typeof record.agent === 'string' && record.agent
         ? `The selected agent for this turn is ${JSON.stringify(record.agent)}. Follow this agent's current instructions and permissions. Earlier turns may have used a different agent; their mode restrictions and statements about being read-only do not define the current mode.`
         : '';
     const citationPrompt =
       'When referencing existing local files or folders, use complete paths relative to the session working directory shown above. Do not use a basename unless the file is directly in that directory, and do not use paths relative to a deeper subdirectory. For locations outside that directory, use absolute paths. File citations are linked only when the exact path exists. Include line ranges when relevant. To cite a function, class, or module, use a Markdown link with the symbol as its label and the verified file path and line as its target, such as [`loss_weights()`](src/loss.py:12). Bare symbols and grouped labels such as `transporter / franka / clip` do not identify a file. Do not invent targets for symbols you have not located. Label hypothetical paths and placeholders as examples and keep them in fenced code blocks, not file links.';
+    const context = [scopePrompt, citationPrompt, permissionPrompt, agentPrompt]
+      .filter(Boolean)
+      .join('\n\n');
     return {
       ...record,
-      system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${scopePrompt}\n\n${citationPrompt}\n\n${permissionPrompt}${agentPrompt ? `\n\n${agentPrompt}` : ''}`,
+      system: `${existing ? `${existing}\n\nVS Code workspace context:\n` : ''}${context}`,
     };
   }
 

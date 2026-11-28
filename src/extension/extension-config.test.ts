@@ -19,7 +19,11 @@ vi.mock('vscode', () => ({
   workspace: { getConfiguration: mocks.getConfiguration },
 }));
 
-import { readExtensionConfigState, readPromptTrace } from './extension-config';
+import {
+  readExtensionConfigState,
+  readPermissionGuidance,
+  readPromptTrace,
+} from './extension-config';
 
 describe('readExtensionConfigState', () => {
   beforeEach(() => {
@@ -124,6 +128,23 @@ describe('readExtensionConfigState', () => {
       inspect: vi.fn(() => ({ globalValue: undefined })),
     });
     expect(readPromptTrace()).toBe(false);
+  });
+
+  it('reads permission guidance only from user settings and falls back to the default', () => {
+    expect(readPermissionGuidance()).toEqual({ mode: 'default' });
+    mocks.values.set('varro.chat.permissionGuidance', 'off');
+    expect(readPermissionGuidance()).toEqual({ mode: 'off' });
+    mocks.values.set('varro.chat.permissionGuidance', 'custom');
+    expect(readPermissionGuidance()).toEqual({ mode: 'default' });
+    mocks.values.set('varro.chat.permissionGuidanceText', '  Ask first.  ');
+    expect(readPermissionGuidance()).toEqual({ mode: 'custom', text: 'Ask first.' });
+    mocks.values.set('varro.chat.permissionGuidance', 'unexpected');
+    expect(readPermissionGuidance()).toEqual({ mode: 'default' });
+    mocks.getConfiguration.mockReturnValueOnce({
+      get: vi.fn(() => 'off'),
+      inspect: vi.fn(() => ({ globalValue: undefined })),
+    });
+    expect(readPermissionGuidance()).toEqual({ mode: 'default' });
   });
 
   it('does not silently broaden an old follow-up-only tracing opt-in', () => {

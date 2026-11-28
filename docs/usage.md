@@ -1089,6 +1089,7 @@ Server:
 Chat view:
 
 - `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `auto`
+- `varro.chat.permissionGuidance` - rejected-permission guidance added to the session system prompt: `default`, `custom` (uses `varro.chat.permissionGuidanceText`), or `off`. User settings only; defaults to `default`. See [authoritative resolution](permission-lifecycle.md#authoritative-resolution)
 - `varro.chat.autoApproveModel` - provider/model used by the auto-approve judge; stored in VS Code user settings and selected from Varro's Models view
 - `varro.chat.autoApproveDecisionModel` - optional native OpenCode decision reviewer in provider/model form; off by default and selected in the Models view
 - `varro.chat.showFileDiffs` - show line-by-line edits in file-change tool cards; defaults to `false`

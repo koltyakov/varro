@@ -3287,42 +3287,46 @@ describe('v2 transcript and permission projection', () => {
     const parent = resolve('artifacts/ai-test-data');
     await mkdir(parent, { recursive: true });
     const directory = await mkdtemp(join(parent, 'annotations-'));
-    const session: SessionInfo = {
-      id: 'ses_local',
-      title: 'Original',
-      projectID: 'project',
-      location: { directory: '/repo' },
-      time: { created: 1, updated: 2 },
-      cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    };
-    const wire = vi.fn(async () => ({ data: session }));
-    const state = new OpenCodeV2SessionState(directory);
-    const adapter = new OpenCodeV2Adapter(wire, state);
-    expect(
-      normalizeRecycleBinSession(await adapter.request('GET', '/session/ses_local', undefined))
-    ).toMatchObject({
-      id: session.id,
-      directory: '/repo',
-      version: '2',
-    });
-    wire.mockClear();
-    const metadata = { varro: { permissionMode: 'auto' } };
-    await adapter.request('PATCH', '/session/ses_local', { metadata });
-    expect(wire.mock.calls).toHaveLength(1);
-    expect(
-      asRecord(
-        await new OpenCodeV2Adapter(wire, new OpenCodeV2SessionState(directory)).request(
-          'GET',
-          '/session/ses_local',
-          undefined
-        )
-      )?.metadata
-    ).toEqual(metadata);
-    expect(JSON.parse(await readFile(join(directory, 'ses_local.json'), 'utf8'))).toMatchObject({
-      metadata,
-    });
-    await expect(state.read('../escape')).rejects.toThrow('Invalid OpenCode session ID');
+    try {
+      const session: SessionInfo = {
+        id: 'ses_local',
+        title: 'Original',
+        projectID: 'project',
+        location: { directory: '/repo' },
+        time: { created: 1, updated: 2 },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      };
+      const wire = vi.fn(async () => ({ data: session }));
+      const state = new OpenCodeV2SessionState(directory);
+      const adapter = new OpenCodeV2Adapter(wire, state);
+      expect(
+        normalizeRecycleBinSession(await adapter.request('GET', '/session/ses_local', undefined))
+      ).toMatchObject({
+        id: session.id,
+        directory: '/repo',
+        version: '2',
+      });
+      wire.mockClear();
+      const metadata = { varro: { permissionMode: 'auto' } };
+      await adapter.request('PATCH', '/session/ses_local', { metadata });
+      expect(wire.mock.calls).toHaveLength(1);
+      expect(
+        asRecord(
+          await new OpenCodeV2Adapter(wire, new OpenCodeV2SessionState(directory)).request(
+            'GET',
+            '/session/ses_local',
+            undefined
+          )
+        )?.metadata
+      ).toEqual(metadata);
+      expect(JSON.parse(await readFile(join(directory, 'ses_local.json'), 'utf8'))).toMatchObject({
+        metadata,
+      });
+      await expect(state.read('../escape')).rejects.toThrow('Invalid OpenCode session ID');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

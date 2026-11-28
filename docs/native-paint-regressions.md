@@ -84,6 +84,31 @@ automatic coverage. Expanded diff previews have a separate recorded gate. A miss
 gate does not turn a text-only cold-scroll check into diff coverage. Review the images,
 especially any reported failures, before assigning a visual verdict.
 
+## Wheel jumps up to 800 px
+
+```sh
+npm run build && node scripts/ai-native-wheel-paint.mjs
+```
+
+The generated fixture (`nativeWheelFixture`) has 70 completed text turns followed by a
+still-busy turn of six `apply_patch` steps. Inline diffs render only for the working
+trailing turn, so replay pauses after the edits and before idle. The runner brings the
+test window to the front, because a hidden window presents no frames. It then runs the
+same native wheel sequence with file diffs shown and hidden: upward through the diffs into
+text history, then back down, with every delta at most 800 px.
+
+Each compositor frame between two DOM samples of one wheel step is judged on the
+transcript body, excluding sticky chrome, the scrollbar, and the jump-to-latest control.
+A solid body is a failure. `PASS` requires a painted baseline, actual movement, and more
+than five judged frames; the shown setting also requires painted diff lines. Failures
+record `uncovered`, the viewport height not covered by mounted rows at the next DOM sample.
+Zero means the rows were mounted and the compositor presented them unpainted.
+
+As of November 28, 2026 this check fails in VS Code 1.148 on macOS. Every run showed
+mounted-but-unpainted single frames: with diffs hidden, on the first downward 800 px step
+after the upward run; with diffs shown, on several steps in both directions. Larger single
+deltas beyond the 1,440 px overscan also land outside the mounted range.
+
 ## Compositor attribution
 
 `compositor-trace.json` is a browser-level Chrome trace spanning only the first drag and

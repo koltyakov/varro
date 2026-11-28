@@ -65,6 +65,24 @@ export function readPromptTrace(
   return config.inspect?.<boolean>('chat.promptTrace')?.globalValue === true;
 }
 
+export type PermissionGuidanceSetting =
+  | { mode: 'default' }
+  | { mode: 'off' }
+  | { mode: 'custom'; text: string };
+
+/** Guidance is injected into system prompts, so repository settings must never supply or remove it. */
+export function readPermissionGuidance(
+  config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
+): PermissionGuidanceSetting {
+  const mode = config.inspect?.<unknown>('chat.permissionGuidance')?.globalValue;
+  if (mode === 'off') return { mode: 'off' };
+  if (mode !== 'custom') return { mode: 'default' };
+  const text = config.inspect?.<unknown>('chat.permissionGuidanceText')?.globalValue;
+  return isString(text) && text.trim()
+    ? { mode: 'custom', text: text.trim() }
+    : { mode: 'default' };
+}
+
 /** Warming spends tokens on every ping, so only user settings can turn it on. */
 export function readPromptCacheWarmingMode(
   config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')

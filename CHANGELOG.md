@@ -2,6 +2,10 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.37.x - November 2026
+
+- Agents now follow an alternative you ask for in rejection feedback or a later message, instead of refusing because it reaches the same result as the denied tool. Each alternative still needs its own permission. The new user-level `varro.chat.permissionGuidance` setting can replace this system prompt guidance with custom text from `varro.chat.permissionGuidanceText` or turn it off. Changing the guidance invalidates cached prompt prefixes once for active sessions.
+
 ## 0.36.x - November 2026
 
 - Raised the OpenCode v2 minimum to 2.0.6, the first release that can reload global configuration without restarting. The v1 minimum is still 1.16.0.

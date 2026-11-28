@@ -2124,6 +2124,13 @@ function expectedTranscriptDirection(action) {
   return null;
 }
 
+function transcriptBottomGap(state) {
+  const transcript = state?.transcript;
+  return transcript
+    ? Math.abs(transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop)
+    : Infinity;
+}
+
 function transcriptAtBoundary(action, state) {
   const direction = expectedTranscriptDirection(action);
   const transcript = state?.transcript;
@@ -2164,7 +2171,7 @@ export function verifyActionEffect(action, before, after, details = {}) {
       transcript &&
       (action.action.endsWith('top')
         ? transcript.scrollTop <= 1.5
-        : transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 1.5);
+        : transcriptBottomGap(after) <= (details.streaming ? 64 : 1.5));
     return details.held && atDestination && transcript.visibleRows?.length > 0
       ? { verified: true }
       : {
@@ -2285,10 +2292,22 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
       );
       dispatched = true;
     } else if (action.action.startsWith('held scrollbar to ')) {
-      const drag = await cdp.dragTranscriptScrollbar(action.action.endsWith('top') ? 0 : 1);
+      const toBottom = action.action.endsWith('bottom');
+      const drag = await cdp.dragTranscriptScrollbar(toBottom ? 1 : 0);
       dispatched = drag.dispatched;
       details.held = drag.held;
       details.nativeDrag = drag;
+      if (toBottom && dispatched) {
+        // Output that streams while the thumb is held stays clipped below the held range.
+        // Release reveals it and follow eases there, so judge arrival like jump to latest.
+        details.streaming = options.isActive ? await options.isActive() : false;
+        const arrivalDeadline = Date.now() + 2_000;
+        do {
+          await new Promise((resolve) => setTimeout(resolve, 34));
+          details.after = await cdp.captureActionState(options.scope);
+          if (transcriptBottomGap(details.after) <= (details.streaming ? 64 : 1.5)) break;
+        } while (Date.now() < arrivalDeadline);
+      }
     } else if (action.action === 'switch session away and back') {
       const switched = await switchAwayAndBack(cdp, options.sessionId, currentTitle);
       dispatched = switched.dispatched;
@@ -2305,8 +2324,14 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
         action.key ?? action.action.split(' ')[0]
       );
     } else if (action.action === 'resize sidebar') {
-      await resizeVscodeSidebar(port, action.width ?? 430);
-      dispatched = true;
+      // Record a missed sash drag as this action's failure instead of discarding the
+      // verified results of every earlier action.
+      try {
+        await resizeVscodeSidebar(port, action.width ?? 430);
+        dispatched = true;
+      } catch (error) {
+        details.resizeError = error instanceof Error ? error.message : String(error);
+      }
     } else if (action.action === 'expand disclosure' || action.action === 'collapse disclosure') {
       const expected = action.action === 'expand disclosure';
       const tried = new Set();
@@ -2439,6 +2464,7 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
     if (details.nativeDrag) result.nativeDrag = details.nativeDrag;
     if (details.navigationStart) result.navigationStart = details.navigationStart;
     if (details.streaming !== undefined) result.streaming = details.streaming;
+    if (details.resizeError) result.resizeError = details.resizeError;
     if (effect.reason) result.reason = effect.reason;
     results.push(result);
     if (!effect.verified) break;

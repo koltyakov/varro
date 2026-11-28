@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.37.3",
+  "version": "0.37.4",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -125,7 +125,7 @@
     "typescript": "7.0.2",
     "vite": "8.4.0",
     "vitest": "5.1.2",
-    "ws": "8.23.0"
+    "ws": "8.23.1"
   },
   "overrides": {
     "@azure/identity": {
@@ -749,6 +749,29 @@
           ],
           "default": "auto",
           "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` follows OpenCode permission settings and shows requests OpenCode asks about, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
+        },
+        "varro.chat.permissionGuidance": {
+          "type": "string",
+          "scope": "application",
+          "enum": [
+            "default",
+            "custom",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Use Varro's built-in guidance: never work around a rejection on its own, but follow an alternative the user asks for.",
+            "Use the text from `#varro.chat.permissionGuidanceText#`.",
+            "Add no rejected-permission guidance to the system prompt."
+          ],
+          "default": "default",
+          "markdownDescription": "Guidance Varro adds to the session system prompt about rejected tool permissions. OpenCode still enforces permissions in every mode. Varro-managed servers keep the agent loop running after a rejection, so with `off` the model may try another way to reach the same result; every attempt still needs its own permission. You can write your own policy in `AGENTS.md` instead. Changing this setting changes the system prompt and invalidates cached prompt prefixes once. Repository workspace settings cannot change it."
+        },
+        "varro.chat.permissionGuidanceText": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Custom rejected-permission guidance used when `#varro.chat.permissionGuidance#` is `custom`. If this is empty, Varro uses its built-in guidance."
         },
         "varro.chat.autoApproveModel": {
           "type": "string",
