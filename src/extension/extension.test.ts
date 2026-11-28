@@ -1651,11 +1651,6 @@ describe('extension manifest', () => {
     });
     expect(packageJson.contributes.menus['scm/title']).toEqual([
       {
-        command: 'varro.walkThroughChanges',
-        when: 'scmProvider == git',
-        group: 'navigation@98',
-      },
-      {
         command: 'varro.generateCommitMessage',
         when: 'scmProvider == git && scmProviderRootUri not in varro:commitMessageGenerationRoots',
         group: 'navigation@99',

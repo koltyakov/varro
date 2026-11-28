@@ -989,7 +989,7 @@ All paths, up to 60,000 characters of the selected patch (larger patches are sam
 
 A walkthrough explains a diff briefly and in reading order. It covers only what matters, such as changed behavior, contracts, and risky logic, in a few stops that each build on the last, with one or two sentences per stop. Trivial edits like formatting, imports, renames, and comments stay out of the stops and get one compact summary at the end. Stops the change rests on are marked **Key change**; supporting ones are marked **Context**. A few stops carry a factual note, such as a design decision, a new dependency, or an untested promise. Walkthroughs never review or judge the code.
 
-Nothing runs automatically. Start a walkthrough with the list icon in the Source Control title bar, or run `Varro: Walk Through Changes`. It explains staged or unstaged changes, or asks which when both exist, including all uncommitted changes.
+Nothing runs automatically. To start a walkthrough, run `Varro: Walk Through Changes` from the Command Palette. It explains staged or unstaged changes, or asks which when both exist, including all uncommitted changes.
 
 The result opens as a Markdown report in the preview, like `/stats`. Each stop shows the exact diff hunks under one header per file, with the file and each hunk's start line linked so they open in the editor (in VS Code and VS Code Insiders; other forks show plain paths). **Also changed** holds the summary of trivial edits and one line listing the files no stop explains, including generated files such as lockfiles, which are never sent to the model, and binary or omitted content. The explanations are AI-written; regenerate after the code changes.
 
