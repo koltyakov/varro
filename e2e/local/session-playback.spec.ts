@@ -9,7 +9,7 @@ test('recorded session playback has no frame-level flicker', async ({ page }) =>
   const replayFile = process.env.VARRO_PLAYBACK_FILE;
   if (!Number.isInteger(playbackId) || playbackId < 1 || !replayFile) {
     throw new Error(
-      'Local playback requires a capture. Run npm run ai:playback -- replay --id <capture-id>'
+      'Local playback requires a capture. Run node scripts/ai-session-playback.mjs replay --id <capture-id>'
     );
   }
   let contents: string;
@@ -17,7 +17,7 @@ test('recorded session playback has no frame-level flicker', async ({ page }) =>
     contents = await readFile(path.resolve(replayFile), 'utf8');
   } catch (error) {
     throw new Error(
-      `Could not read playback ${String(playbackId)} from ${replayFile}. Run npm run ai:playback -- replay --id ${String(playbackId)} to regenerate it.`,
+      `Could not read playback ${String(playbackId)} from ${replayFile}. Run node scripts/ai-session-playback.mjs replay --id ${String(playbackId)} to regenerate it.`,
       { cause: error }
     );
   }

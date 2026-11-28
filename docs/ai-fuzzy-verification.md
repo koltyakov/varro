@@ -147,7 +147,7 @@ sibling checkout for source inspection; do not run edit scenarios against it.
    the Varro source tree:
 
    ```sh
-   VARRO_AI_WORKSPACE="$PWD/tmp/opencode" npm run ai:vscode
+   npm run build && VARRO_AI_WORKSPACE="$PWD/tmp/opencode" node scripts/launch-ai-vscode.mjs
    ```
 
    The printed launch metadata must show `tmp/opencode` as `workspace`. Opening Varro itself as the
@@ -224,7 +224,7 @@ production server. Verification uses `lsof` on macOS/Linux. On Windows it uses t
 IPv4/IPv6 listener-only TCP-table helper for explicit endpoint ownership and the read-only Restart
 Manager resource query for database ownership; it never invokes shutdown or restart APIs.
 
-`npm run ai:vscode` now starts a dedicated server automatically when `VARRO_AI_SERVER_URL` is
+`node scripts/launch-ai-vscode.mjs` now starts a dedicated server automatically when `VARRO_AI_SERVER_URL` is
 unset. It uses `VARRO_OPENCODE_TEST_BINARY`, or discovers `opencode2` then `opencode`, and copies
 the host's global provider/model configuration and provider credentials into a fresh directory under
 `artifacts/ai-test-data/`. V1 credentials come from `auth.json`; v2 credentials come from a read-only
@@ -261,7 +261,7 @@ provider in `/provider`'s `connected` list alone does not establish an authentic
 or the request fails, inspect the isolated setup and exact error before asking the user for a missing
 prerequisite. Preserve database isolation throughout.
 Use `VARRO_AI_SERVER_URL=http://127.0.0.1:49001` for both
-`ai:preconditions` and `ai:vscode`, or pass `--server` to preparation. The launcher pins the host's
+`scripts/ai-fuzzy-preconditions.mjs` and `scripts/launch-ai-vscode.mjs`, or pass `--server` to preparation. The launcher pins the host's
 transport to that verified origin, isolates CLI storage, and disables automatic server startup and
 updates. Record the dedicated server PID and stop it during cleanup along with the test editor.
 
@@ -285,7 +285,7 @@ identifying the intended production changes. Existing production golden historie
 as copies or regenerated in isolated storage before use. Old production-backed manifests are rejected.
 
 1. Prepare the clean `tmp/opencode` fixture under Repository Fixture Safety, then run
-   `VARRO_AI_WORKSPACE="$PWD/tmp/opencode" npm run ai:vscode` to build Varro and launch a persistent,
+   `npm run build && VARRO_AI_WORKSPACE="$PWD/tmp/opencode" node scripts/launch-ai-vscode.mjs` to build Varro and launch a persistent,
    isolated Extension Development Host. Use the printed profile and workspace paths in the ledger. This
    avoids reusing a normal VS Code singleton and uses a short temporary profile path that stays below
    the macOS IPC socket-path limit. On macOS the host starts hidden in the background so launch and setup
@@ -294,7 +294,7 @@ as copies or regenerated in isolated storage before use. Old production-backed m
    the clean `tmp/opencode` fixture and the current environment can reliably control it. Opening Varro
    itself in the test host does not satisfy AI-07 or AI-08.
    Reuse this host for the complete run. After rebuilding Varro, reload the same Extension Development
-   Host instead of running `npm run ai:vscode` again. Launch another isolated host only when a scenario
+   Host instead of running `node scripts/launch-ai-vscode.mjs` again. Launch another isolated host only when a scenario
    explicitly requires a fresh cold profile. Close the previous test host first unless simultaneous
    hosts are strictly required by the scenario.
 2. Use a dedicated Extension Development Host window. Do not use a production Varro window that has
@@ -337,7 +337,7 @@ is not the interactive geometry environment.
 Do not stop after noticing that no Extension Development Host is already running. Attempt recovery in
 this order:
 
-1. Run `VARRO_AI_WORKSPACE="$PWD/tmp/opencode" npm run ai:vscode` and verify that a window titled
+1. Run `npm run build && VARRO_AI_WORKSPACE="$PWD/tmp/opencode" node scripts/launch-ai-vscode.mjs` and verify that a window titled
    `[Extension Development Host]` appears.
 2. If launch fails, inspect the command output and running processes. On macOS, an IPC socket error such
    as `longer than 103 chars` means the user-data path is too long; use the launcher rather than a long
@@ -425,7 +425,7 @@ events still need inspection before replay; capture success is not a scenario pa
 To also retain a named entry in the local playback database, add a label:
 
 ```sh
-npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-07 \
+node scripts/ai-fuzzy-live.mjs run --manifest <manifest-path> --launch <launch.json> --scenario AI-07 \
   --playback-label "parallel tools completing around file edit"
 ```
 
@@ -439,7 +439,7 @@ Completed local sessions can also supply useful rendering cases even though thei
 is gone. Import one assistant turn with:
 
 ```sh
-npm run ai:playback -- import-history --session <session-id> --message <assistant-message-id> \
+node scripts/ai-session-playback.mjs import-history --session <session-id> --message <assistant-message-id> \
   --label "reason this turn is useful"
 ```
 
@@ -457,8 +457,8 @@ spacing matters.
 List and replay retained captures with:
 
 ```sh
-npm run ai:playback -- list
-npm run ai:playback -- replay --id <capture-id>
+node scripts/ai-session-playback.mjs list
+node scripts/ai-session-playback.mjs replay --id <capture-id>
 ```
 
 Normal E2E runs use deterministic mocked sessions and never load the local playback database or recorded
@@ -488,8 +488,8 @@ This variation replays the model/session event stream, not native wheel, keyboar
 actions. Keep those actions in the seeded real-editor run. A playback pass is useful regression evidence,
 but it cannot satisfy AI-07's real-editor precondition or change the overall AI test result.
 
-For reproduction in an actual VS Code host, pass the automatic capture JSON to `ai:streaming inspect`
-and `ai:streaming run`. Use checkpoints to position native actions at the same event boundary on each
+For reproduction in an actual VS Code host, pass the automatic capture JSON to `node scripts/ai-streaming.mjs inspect`
+and `node scripts/ai-streaming.mjs run`. Use checkpoints to position native actions at the same event boundary on each
 attempt. Keep continuous playback for cadence-sensitive evidence; report checkpointed replay separately
 from the live-model scenario.
 
@@ -555,8 +555,8 @@ Do not rely on one general prompt and then mark the scenario blocked. Use the bo
 after opening the run fork in the dedicated host:
 
 ```sh
-npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-07
-npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-08
+node scripts/ai-fuzzy-live.mjs run --manifest <manifest-path> --launch <launch.json> --scenario AI-07
+node scripts/ai-fuzzy-live.mjs run --manifest <manifest-path> --launch <launch.json> --scenario AI-08
 ```
 
 The controller allows three prompts by default and at most four when explicitly requested. Every prompt
@@ -597,7 +597,7 @@ pagination test.
 Use the precondition helper instead of regenerating long history for every run:
 
 ```sh
-npm run ai:preconditions -- prepare-run --seed <seed> --model openai/gpt-6-luna-fast
+node scripts/ai-fuzzy-preconditions.mjs prepare-run --seed <seed> --model openai/gpt-6-luna-fast
 ```
 
 The helper validates a workspace-scoped `VFZ GOLDEN` session, forks it without opening it in the
@@ -615,7 +615,7 @@ After launching or restarting the dedicated host, verify that the fork survived 
 instance before opening it in Varro:
 
 ```sh
-npm run ai:preconditions -- verify-run --manifest <manifest-path>
+node scripts/ai-fuzzy-preconditions.mjs verify-run --manifest <manifest-path>
 ```
 
 This check reads the fork through the workspace-scoped REST API, validates its title and complete
@@ -626,7 +626,7 @@ After deleting any additional run-created sessions, clean the recorded fork with
 path printed during preparation:
 
 ```sh
-npm run ai:preconditions -- cleanup --manifest <manifest-path>
+node scripts/ai-fuzzy-preconditions.mjs cleanup --manifest <manifest-path>
 ```
 
 Cleanup fetches each recorded session, verifies the exact run title prefix, deletes only those IDs,
@@ -934,7 +934,7 @@ message and Luna Fast or Sol selected.
 Run the frame-level duplicate oracle through the live controller:
 
 ```sh
-npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-17
+node scripts/ai-fuzzy-live.mjs run --manifest <manifest-path> --launch <launch.json> --scenario AI-17
 ```
 
 The controller reloads the Extension Development Host through the native command palette, reconnects
@@ -959,7 +959,7 @@ This extended scenario covers unpublished multi-webview editor functionality. Ru
 controller:
 
 ```sh
-npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-18 \
+node scripts/ai-fuzzy-live.mjs run --manifest <manifest-path> --launch <launch.json> --scenario AI-18 \
   --surface sidebar --view-id sidebar --model openai/gpt-6-luna-fast
 ```
 
@@ -1019,7 +1019,7 @@ Pass invariants:
 Run the focused lifecycle controller with Luna Fast or Sol:
 
 ```sh
-npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-19 \
+node scripts/ai-fuzzy-live.mjs run --manifest <manifest-path> --launch <launch.json> --scenario AI-19 \
   --surface sidebar --view-id sidebar --model openai/gpt-6-luna-fast
 ```
 

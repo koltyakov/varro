@@ -18,7 +18,7 @@ any saving described here.
 - Time a production-mode harness build (`vite build --mode e2e` with `e2e/harness/index.html` as input)
   and attribute CPU profiles with an unminified build. The dev server is not representative: it skips
   minification, including the CSS minifier.
-- In the real editor, launch `ai:streaming run --observer off`, pause at a checkpoint, and run
+- In the real editor, launch `node scripts/ai-streaming.mjs run --observer off`, pause at a checkpoint, and run
   `scripts/ai-performance.mjs`. It reports frame-target counters and per-process CPU.
 - Confirm findings in a realistic state. Deltas appended to a completed message in an idle session
   produced trailing-summary churn that a busy stream (`multi-agent-large-streaming`) never shows.

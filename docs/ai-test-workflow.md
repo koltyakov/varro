@@ -11,7 +11,7 @@ call, hidden control, missing capture, or incomplete previous scenario is work f
 To verify the runner itself in one command:
 
 ```sh
-npm run test:ai-runner
+npm run build && node scripts/ai-streaming-smoke.mjs
 ```
 
 This builds Varro, launches an isolated VS Code instance with generated input, verifies checkpointed
@@ -67,7 +67,7 @@ recreate a rendering boundary already available in a capture.
 1. Record the source revision and existing changes once. Run the required preflight once for that
    revision. Concurrent source changes do not force a restart of the entire suite; state which build
    the editor actually loaded and run focused checks for the later changes.
-2. Prepare inputs before starting timed scenarios. Inspect capture boundaries with `ai:streaming inspect`.
+2. Prepare inputs before starting timed scenarios. Inspect capture boundaries with `node scripts/ai-streaming.mjs inspect`.
    Verify the isolated server, fixture, host identity, and actual model request for live work. Check the
    backend version explicitly. The live and precondition clients detect v1/v2 and use the extension's
    v2 adapter for native v2 requests. Isolation records the exact backend version. V2 requires
@@ -116,8 +116,8 @@ the paint observer and evidence storage. Live fixture setup also uses the shared
 ### Replay checkpoints
 
 ```sh
-npm run ai:streaming -- inspect --capture <capture.json>
-npm run ai:streaming -- run --capture <capture.json> --output artifacts/ai-streaming/<new-run> --checkpoints 12,34
+node scripts/ai-streaming.mjs inspect --capture <capture.json>
+node scripts/ai-streaming.mjs run --capture <capture.json> --output artifacts/ai-streaming/<new-run> --checkpoints 12,34
 ```
 
 Use `afterEvents` values from inspection, not the example numbers. The host arms before delivery. The
@@ -126,10 +126,10 @@ as well as v1 part updates, without exposing their bodies. The
 controlling AI attaches to the target in `run.json`, starts playback, and manages the remaining commands:
 
 ```sh
-npm run ai:streaming -- start --control <run>/control.json
-npm run ai:streaming -- status --control <run>/control.json
-npm run ai:streaming -- snapshot --control <run>/control.json
-npm run ai:streaming -- resume --control <run>/control.json
+node scripts/ai-streaming.mjs start --control <run>/control.json
+node scripts/ai-streaming.mjs status --control <run>/control.json
+node scripts/ai-streaming.mjs snapshot --control <run>/control.json
+node scripts/ai-streaming.mjs resume --control <run>/control.json
 ```
 
 At a checkpoint, `playbackState` is `paused`. The editor remains interactive, and the server exposes only

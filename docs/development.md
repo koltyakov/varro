@@ -511,7 +511,6 @@ docs/
 | `npm run test:e2e:diagnostics` | Run opt-in browser diagnostics and save their evidence |
 | `npm run test:e2e:raster` | Run strict application and static native wheel raster checks |
 | `npm run test:vscode-sandbox` | Run onboarding scenarios in disposable VS Code Extension Hosts |
-| `npm run ai:vscode` | Build and launch the persistent Extension Development Host used by the [AI/fuzzy verification guide](ai-fuzzy-verification.md) |
 | `npm run test:coverage` | Run tests with coverage output |
 | `npm run test:compatibility` | Test the declared OpenCode compatibility range with Docker |
 | `npm run compatibility:discover` | Probe selected published OpenCode versions with Docker |
@@ -521,3 +520,5 @@ docs/
 | `npm run vscode:install` | Package and install the VSIX into local VS Code |
 
 The OpenCode compatibility commands require a running Docker daemon. See the [compatibility harness guide](../scripts/opencode-compatibility/README.md) for floor checks, release discovery, and report behavior.
+
+AI-driven verification runners, such as the AI/fuzzy, streaming, playback, and native paint controllers, have no npm aliases. Their guides ([AI test workflow](ai-test-workflow.md), [AI/fuzzy verification](ai-fuzzy-verification.md), [streaming verification](ai-streaming-verification.md), and [native paint regressions](native-paint-regressions.md)) invoke the `node scripts/...` commands directly.

@@ -72,13 +72,13 @@ Run the focused script command and the streaming unit/E2E suites for an unqualif
 any scope reduction. After code changes also run the repository lint and type-check requirements.
 Script tests use generated data; normal test discovery never reads the user's session database.
 
-When changing the editor controller, run `npm run test:ai-runner` as well. It checks the real VS Code
+When changing the editor controller, run `npm run build && node scripts/ai-streaming-smoke.mjs` as well. It checks the real VS Code
 launch, checkpoint delivery, snapshots, and cleanup using generated data without model calls.
 
 ## Select history
 
 ```sh
-npm run ai:streaming -- prepare \
+node scripts/ai-streaming.mjs prepare \
   --source "$HOME/.local/share/opencode/opencode.db" \
   --directory "$PWD" \
   --seed <seed> \
@@ -173,7 +173,7 @@ The current runner requires macOS or Linux with `ps` for owned-process cleanup. 
 before launch and must be reported as blocked.
 
 ```sh
-npm run ai:streaming -- run \
+node scripts/ai-streaming.mjs run \
   --capture artifacts/ai-streaming/<run>/selection/capture-1.json \
   --output artifacts/ai-streaming/<run>/str-01 \
   --short-gap-ms 250 --max-gap-ms 1500
@@ -201,8 +201,8 @@ the exact target and planned actions. Only one controller sends input. The CLI d
 or automatically award an AI verdict.
 
 ```sh
-npm run ai:streaming -- status --control artifacts/ai-streaming/<run>/str-01/control.json
-npm run ai:streaming -- start --control artifacts/ai-streaming/<run>/str-01/control.json
+node scripts/ai-streaming.mjs status --control artifacts/ai-streaming/<run>/str-01/control.json
+node scripts/ai-streaming.mjs start --control artifacts/ai-streaming/<run>/str-01/control.json
 ```
 
 Start/status/stop requests authenticate with a token in the owner-readable control file. Defaults are
@@ -213,7 +213,7 @@ misses a boundary, run a fresh copy rather than resetting state while the stream
 Stop only the owned run when needed:
 
 ```sh
-npm run ai:streaming -- stop --control artifacts/ai-streaming/<run>/str-01/control.json
+node scripts/ai-streaming.mjs stop --control artifacts/ai-streaming/<run>/str-01/control.json
 ```
 
 If editor automation is unavailable, attempt the real launcher and inspect diagnostics, then ask
@@ -226,7 +226,7 @@ indefinitely.
 Inspect a selected or automatically retained live capture before launching:
 
 ```sh
-npm run ai:streaming -- inspect --capture <capture.json>
+node scripts/ai-streaming.mjs inspect --capture <capture.json>
 ```
 
 The output lists part creation, tool-state transitions, status changes, and diff boundaries with exact
@@ -234,11 +234,11 @@ The output lists part creation, tool-state transitions, status changes, and diff
 to stop at repeatable states:
 
 ```sh
-npm run ai:streaming -- run --capture <capture.json> --output <new-output> --checkpoints 12,34
-npm run ai:streaming -- start --control <new-output>/control.json
-npm run ai:streaming -- status --control <new-output>/control.json
-npm run ai:streaming -- snapshot --control <new-output>/control.json
-npm run ai:streaming -- resume --control <new-output>/control.json
+node scripts/ai-streaming.mjs run --capture <capture.json> --output <new-output> --checkpoints 12,34
+node scripts/ai-streaming.mjs start --control <new-output>/control.json
+node scripts/ai-streaming.mjs status --control <new-output>/control.json
+node scripts/ai-streaming.mjs snapshot --control <new-output>/control.json
+node scripts/ai-streaming.mjs resume --control <new-output>/control.json
 ```
 
 Counts must be increasing, unique, and between zero and the capture's event count. Zero pauses before

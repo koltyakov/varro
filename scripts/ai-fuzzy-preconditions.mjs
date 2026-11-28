@@ -112,8 +112,8 @@ export function buildPreconditionReport(summary, requiredTurns = DEFAULT_TURNS) 
     staticReady: Object.values(checks).every((value) => value !== false),
     checks,
     notes: {
-      'AI-07': 'Run ai:live to prepare the active stream, sticky prompt, edit, and disclosure.',
-      'AI-08': 'Run ai:live to prepare the live gate and execute the recorded 50-action plan.',
+      'AI-07': 'Run scripts/ai-fuzzy-live.mjs to prepare the active stream, sticky prompt, edit, and disclosure.',
+      'AI-08': 'Run scripts/ai-fuzzy-live.mjs to prepare the live gate and execute the recorded 50-action plan.',
     },
   };
 }

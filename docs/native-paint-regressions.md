@@ -3,7 +3,7 @@
 Run these checks in an isolated VS Code host, with no model or production database:
 
 ```sh
-npm run test:native-paint
+npm run build && node scripts/ai-native-paint.mjs
 ```
 
 The default capture is generated, contains paginated history and multi-file edit metadata,

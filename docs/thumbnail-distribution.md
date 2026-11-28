@@ -43,7 +43,7 @@ repair and no unrelated processes are stopped. Different builds and isolated tes
 each other's service. The persistent credential is not an image cache. Missing or dead helpers restart
 on demand, with bounded startup, upload and conversion deadlines.
 
-`npm run test:ai-runner` includes historical PNG/JPEG base64 attachments and a streamed GIF attachment
+The AI runner smoke test (`scripts/ai-streaming-smoke.mjs`) includes historical PNG/JPEG base64 attachments and a streamed GIF attachment
 in its isolated editor replay. Snapshots verify actual decoded WebP thumbnails at 384×216, rather than
 counting placeholders or assuming that deferred tool screenshots were displayed. Cross-process tests
 also verify simultaneous startup, independent client cancellation, idle restart, and refusal to upload
